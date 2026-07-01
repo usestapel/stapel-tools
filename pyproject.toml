@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "stapel-tools"
+version = "0.1.0"
+description = "CLI scaffold and linting tools for Stapel/Django microservices"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+stapel-lint = "stapel_tools.lint:main"
+stapel-new-service = "stapel_tools.new_service:main"
+stapel-new-module = "stapel_tools.new_module:main"
+stapel-remove-service = "stapel_tools.remove_service:main"
+stapel-create-project = "stapel_tools.create_project:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["stapel_tools*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

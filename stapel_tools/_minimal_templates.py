@@ -1,0 +1,144 @@
+"""Templates for stapel-create-project --type minimal (no Docker, SQLite)."""
+
+MINIMAL_MANAGE = """\
+#!/usr/bin/env python
+import os
+import sys
+
+
+def main():
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
+    from django.core.management import execute_from_command_line
+    execute_from_command_line(sys.argv)
+
+
+if __name__ == "__main__":
+    main()
+"""
+
+MINIMAL_SETTINGS = """\
+\"\"\"Django settings for {{name}} (minimal / SQLite).\"\"\"
+import os
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-change-this-in-production")
+DEBUG = os.getenv("DEBUG", "true").lower() in ("true", "1", "yes")
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
+
+INSTALLED_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "drf_spectacular",
+    "apps.{{MODULE}}",
+]
+
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+ROOT_URLCONF = "core.urls"
+WSGI_APPLICATION = "core.wsgi.application"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
+    }
+}
+
+STATIC_URL = "/static/"
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+REST_FRAMEWORK = {
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "{{title}} API",
+    "DESCRIPTION": "{{title}} — built with Stapel",
+    "VERSION": "1.0.0",
+}
+"""
+
+MINIMAL_URLS = """\
+from django.contrib import admin
+from django.urls import path, include
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
+
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
+    path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
+    path("api/", include("apps.{{MODULE}}.urls")),
+]
+"""
+
+MINIMAL_REQUIREMENTS = """\
+django>=4.2,<5.0
+djangorestframework>=3.14
+drf-spectacular>=0.27
+# Stapel core (choose one):
+# Option A — pip from GitHub:
+# stapel_core @ git+https://github.com/usestapel/stapel-core.git
+# Option B — local submodule (add to sys.path in settings):
+# already on PYTHONPATH if submodule is at ./stapel_core
+"""
+
+MINIMAL_GITIGNORE = """\
+.env
+*.pyc
+__pycache__/
+.venv/
+venv/
+*.egg-info/
+db.sqlite3
+media/
+staticfiles/
+.DS_Store
+"""
+
+MINIMAL_README = """\
+# {{title}}
+
+Minimal Stapel/Django project — SQLite, no Docker.
+
+## Quick start
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python manage.py migrate
+python manage.py runserver
+```
+
+API docs: http://localhost:8000/api/docs/
+"""

@@ -1,0 +1,376 @@
+"""
+Stapel static linter.
+
+Checks project-specific coding rules that standard linters don't cover.
+Exit code: 0 = clean, 1 = violations found.
+
+Rules
+-----
+R001  return Response(…) — bare Response() in views; use StapelResponse or StapelErrorResponse
+R002  raise serializers.ValidationError — use StapelValidationError in client serializers
+R003  @action without @extend_schema / @extend_schema_view entry — document all actions
+R004  @dataclass in dto.py without docstring — OpenAPI docs are driven by the docstring
+R005  StapelErrorResponse(status, 'literal') — use an ERR_* constant, not a raw string
+R006  StapelResponse({…}) — passing a dict literal skips serializer; use StapelResponse(MySerializer(dto))
+
+Suppression
+-----------
+Add "# noqa: R001" (or the relevant rule ID) at the end of the offending line to silence it.
+Add "# noqa" to silence all rules on that line.
+"""
+
+import argparse
+import ast
+import os
+import sys
+from collections import Counter
+from dataclasses import dataclass
+from typing import Iterator
+
+
+SKIP_DIRS = {
+    "migrations",
+    "__pycache__",
+    ".git",
+    "node_modules",
+    "venv",
+    ".venv",
+    "htmlcov",
+    "build",
+    "dist",
+    ".claude",
+    "worktrees",
+}
+SKIP_SUFFIXES = {".pyc", ".pyo"}
+
+
+@dataclass
+class Violation:
+    path: str
+    line: int
+    rule: str
+    message: str
+
+    def __str__(self) -> str:
+        return f"{self.path}:{self.line}: [{self.rule}] {self.message}"
+
+
+def _decorator_names(decorator_list: list) -> list[str]:
+    names = []
+    for d in decorator_list:
+        if isinstance(d, ast.Name):
+            names.append(d.id)
+        elif isinstance(d, ast.Attribute):
+            names.append(d.attr)
+        elif isinstance(d, ast.Call):
+            if isinstance(d.func, ast.Name):
+                names.append(d.func.id)
+            elif isinstance(d.func, ast.Attribute):
+                names.append(d.func.attr)
+    return names
+
+
+def _extend_schema_view_keys(class_node: ast.ClassDef) -> set[str]:
+    keys: set[str] = set()
+    for d in class_node.decorator_list:
+        if not isinstance(d, ast.Call):
+            continue
+        func = d.func
+        name = (
+            func.id if isinstance(func, ast.Name)
+            else func.attr if isinstance(func, ast.Attribute)
+            else ""
+        )
+        if name != "extend_schema_view":
+            continue
+        for kw in d.keywords:
+            if kw.arg:
+                keys.add(kw.arg)
+    return keys
+
+
+def _noqa(lines: list[str], lineno: int, rule: str) -> bool:
+    if lineno < 1 or lineno > len(lines):
+        return False
+    comment = lines[lineno - 1]
+    if "# noqa" not in comment:
+        return False
+    if "# noqa:" not in comment:
+        return True
+    after = comment.split("# noqa:")[1]
+    listed = [r.strip() for r in after.split(",")]
+    return rule in listed
+
+
+# ---------------------------------------------------------------------------
+# Rule implementations
+# ---------------------------------------------------------------------------
+
+
+def check_r001(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Return):
+            continue
+        val = node.value
+        if not isinstance(val, ast.Call):
+            continue
+        func = val.func
+        if isinstance(func, ast.Name):
+            func_name = func.id
+        elif isinstance(func, ast.Attribute):
+            func_name = func.attr
+        else:
+            continue
+        if func_name != "Response":
+            continue
+        if not _noqa(lines, node.lineno, "R001"):
+            yield Violation(
+                path, node.lineno, "R001",
+                "return Response(…) — use StapelResponse for success or "
+                "StapelErrorResponse for errors; never bare Response",
+            )
+
+
+def check_r002(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Raise):
+            continue
+        exc = node.exc
+        if exc is None:
+            continue
+        call_or_attr = exc if isinstance(exc, (ast.Attribute, ast.Call)) else None
+        if call_or_attr is None:
+            continue
+        attr_node = exc.func if isinstance(exc, ast.Call) else exc
+        if not isinstance(attr_node, ast.Attribute):
+            continue
+        if attr_node.attr != "ValidationError":
+            continue
+        if not isinstance(attr_node.value, ast.Name):
+            continue
+        if attr_node.value.id != "serializers":
+            continue
+        if not _noqa(lines, node.lineno, "R002"):
+            yield Violation(
+                path, node.lineno, "R002",
+                "raise serializers.ValidationError — use StapelValidationError "
+                "with a registered ERR_* key in client-facing serializers",
+            )
+
+
+def check_r003(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        esv_keys = _extend_schema_view_keys(node)
+        for item in node.body:
+            if not isinstance(item, ast.FunctionDef):
+                continue
+            deco_names = _decorator_names(item.decorator_list)
+            if "action" not in deco_names:
+                continue
+            has_schema = "extend_schema" in deco_names or item.name in esv_keys
+            if not has_schema:
+                if not _noqa(lines, item.lineno, "R003"):
+                    yield Violation(
+                        path, item.lineno, "R003",
+                        f"{node.name}.{item.name}: @action without @extend_schema "
+                        f"or @extend_schema_view entry",
+                    )
+
+
+def check_r004(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        deco_names = _decorator_names(node.decorator_list)
+        if "dataclass" not in deco_names:
+            continue
+        first = node.body[0] if node.body else None
+        has_doc = (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        )
+        if not has_doc:
+            if not _noqa(lines, node.lineno, "R004"):
+                yield Violation(
+                    path, node.lineno, "R004",
+                    f"@dataclass {node.name} has no docstring "
+                    f"(docstring drives OpenAPI schema descriptions)",
+                )
+
+
+def check_r005(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = (
+            func.id if isinstance(func, ast.Name)
+            else func.attr if isinstance(func, ast.Attribute)
+            else ""
+        )
+        if name != "StapelErrorResponse":
+            continue
+        if len(node.args) < 2:
+            continue
+        second_arg = node.args[1]
+        if isinstance(second_arg, ast.Constant) and isinstance(second_arg.value, str):
+            if not _noqa(lines, node.lineno, "R005"):
+                yield Violation(
+                    path, node.lineno, "R005",
+                    f'StapelErrorResponse with hardcoded string "{second_arg.value}" '
+                    f"— define an ERR_* constant",
+                )
+
+
+def check_r006(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = (
+            func.id if isinstance(func, ast.Name)
+            else func.attr if isinstance(func, ast.Attribute)
+            else ""
+        )
+        if name != "StapelResponse":
+            continue
+        if not node.args:
+            continue
+        first_arg = node.args[0]
+        if isinstance(first_arg, ast.Dict):
+            if not _noqa(lines, node.lineno, "R006"):
+                yield Violation(
+                    path, node.lineno, "R006",
+                    "StapelResponse({…}) passes a raw dict — "
+                    "use StapelResponse(MySerializer(dto)) for documented schemas",
+                )
+
+
+# ---------------------------------------------------------------------------
+# File routing: which rules apply to which files
+# ---------------------------------------------------------------------------
+
+
+def rules_for_file(path: str):
+    basename = os.path.basename(path)
+    is_view = "views" in basename
+    is_serializer = "serializer" in basename
+    is_dto = basename == "dto.py"
+
+    checkers = []
+    if is_view:
+        checkers += [check_r001, check_r003, check_r005, check_r006]
+    if is_serializer and "admin" not in path:
+        checkers += [check_r002]
+    if is_dto:
+        checkers += [check_r004]
+    if not is_view:
+        checkers += [check_r005]
+    return checkers
+
+
+# ---------------------------------------------------------------------------
+# Scanner
+# ---------------------------------------------------------------------------
+
+
+def scan_file(path: str) -> list[Violation]:
+    try:
+        src = open(path, encoding="utf-8").read()
+    except (OSError, UnicodeDecodeError):
+        return []
+    try:
+        tree = ast.parse(src, filename=path)
+    except SyntaxError:
+        return []
+
+    lines = src.splitlines()
+    violations: list[Violation] = []
+    for checker in rules_for_file(path):
+        violations.extend(checker(tree, lines, path))
+    violations.sort(key=lambda v: v.line)
+    return violations
+
+
+def scan_paths(roots: list[str]) -> list[Violation]:
+    all_violations: list[Violation] = []
+    for root in roots:
+        if os.path.isfile(root):
+            if root.endswith(".py"):
+                all_violations.extend(scan_file(root))
+            continue
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [
+                d for d in dirnames
+                if d not in SKIP_DIRS and not d.endswith(".egg-info")
+            ]
+            for fname in filenames:
+                if not fname.endswith(".py"):
+                    continue
+                if fname.endswith(tuple(SKIP_SUFFIXES)):
+                    continue
+                if fname.startswith("test_") or fname == "tests.py":
+                    continue
+                all_violations.extend(scan_file(os.path.join(dirpath, fname)))
+    all_violations.sort(key=lambda v: (v.path, v.line))
+    return all_violations
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "paths", nargs="*", default=["."],
+        help="Files or directories to scan (default: current directory)",
+    )
+    parser.add_argument(
+        "--rules", metavar="R001,R002",
+        help="Comma-separated list of rules to enable (default: all)",
+    )
+    parser.add_argument(
+        "--ignore", metavar="R001,R002",
+        help="Comma-separated list of rules to skip",
+    )
+    parser.add_argument(
+        "--stats", action="store_true",
+        help="Print a summary count per rule at the end",
+    )
+    args = parser.parse_args()
+
+    enabled = set(args.rules.split(",")) if args.rules else None
+    ignored = set(args.ignore.split(",")) if args.ignore else set()
+
+    violations = scan_paths(args.paths)
+    if enabled:
+        violations = [v for v in violations if v.rule in enabled]
+    if ignored:
+        violations = [v for v in violations if v.rule not in ignored]
+
+    for v in violations:
+        print(v)
+
+    if args.stats and violations:
+        counts = Counter(v.rule for v in violations)
+        print()
+        for rule, count in sorted(counts.items()):
+            print(f"  {rule}: {count} violation{'s' if count > 1 else ''}")
+
+    if violations:
+        print(f"\n{len(violations)} violation{'s' if len(violations) > 1 else ''} found.")
+        sys.exit(1)
+    else:
+        print("No violations found.")
+        sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()
