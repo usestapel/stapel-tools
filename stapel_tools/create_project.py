@@ -6,7 +6,7 @@ an interactive wizard. All wizard steps can be bypassed via CLI flags.
 
 Project types:
   monolith      Single Django service, Docker Compose (recommended)
-  microservices Multiple services, shared Kafka bus, Docker Compose
+  microservices Multiple services, NATS (or Kafka) bus, Docker Compose
   minimal       Single service, no Docker, SQLite, pip install only
 
 Usage (interactive wizard):
@@ -96,9 +96,32 @@ STAPEL_LIBS = {
     },
 }
 
+
+# Broker per project type: minimal never gets one, microservices requires one
+# (services exchange events), monolith defaults to in-process + outbox — the
+# outbox table already gives at-least-once without extra infra; NATS is the
+# opt-in for worker isolation or a planned service split.
+BROKER_DEFAULTS = {"monolith": "none", "microservices": "nats", "minimal": "none"}
+BROKER_ALLOWED = {
+    "monolith": ("none", "nats"),
+    "microservices": ("nats", "kafka"),
+    "minimal": ("none",),
+}
+
+
+def _transports_for(broker: str) -> tuple[str, str]:
+    """(ACTION_TRANSPORT, FUNCTION_TRANSPORT) for a broker choice."""
+    if broker == "nats":
+        return "bus", "nats"
+    if broker == "kafka":
+        # Kafka carries events; sync Functions fall back to internal HTTP
+        # (configure FUNCTION_ROUTES) since there is no request-reply broker.
+        return "bus", "http"
+    return "inprocess", "inprocess"
+
 PROJECT_TYPES = {
     "monolith": "Docker Compose monolith — single service, full infra (recommended)",
-    "microservices": "Docker Compose microservices — multiple services, Kafka bus",
+    "microservices": "Docker Compose microservices — multiple services, NATS/Kafka bus",
     "minimal": "Minimal — no Docker, SQLite, pip install only",
 }
 
@@ -198,7 +221,7 @@ def _write_shared_infra(project_dir: Path):
     ensure_script.chmod(0o755)
 
 
-def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str]):
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str):
     from .new_service import scaffold_service
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
@@ -206,15 +229,18 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str]):
         MONOLITH_COMPOSE_DEV,
         MONOLITH_ENV_TEMPLATE,
         MONOLITH_GITIGNORE,
+        render_compose_base,
+        render_env,
     )
 
     slug = ctx["slug"]
+    action_transport, function_transport = _transports_for(broker)
 
     # docker-compose files
-    _write(project_dir / "docker-compose.base.yml", MONOLITH_COMPOSE_BASE)
+    _write(project_dir / "docker-compose.base.yml", render_compose_base(MONOLITH_COMPOSE_BASE, broker))
     _write(project_dir / "docker-compose.yml", MONOLITH_COMPOSE_LOCAL)
     _write(project_dir / "docker-compose.dev.yml", MONOLITH_COMPOSE_DEV)
-    _write(project_dir / ".env.example", MONOLITH_ENV_TEMPLATE.format(**ctx))
+    _write(project_dir / ".env.example", render_env(MONOLITH_ENV_TEMPLATE, broker, ctx))
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", f"{slug}\n")
     _write_shared_infra(project_dir)
@@ -228,6 +254,8 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str]):
         celery=False,
         dry_run=False,
         stapel_apps=stapel_apps,
+        action_transport=action_transport,
+        function_transport=function_transport,
     )
 
 
@@ -268,16 +296,18 @@ def _create_minimal(project_dir: Path, ctx: dict):
     _write(project_dir / "apps" / module / "urls.py", "urlpatterns = []\n")
 
 
-def _create_microservices(project_dir: Path, ctx: dict):
+def _create_microservices(project_dir: Path, ctx: dict, broker: str):
     from ._compose_templates import (
         MICRO_COMPOSE_BASE,
         MICRO_COMPOSE_LOCAL,
         MICRO_ENV_TEMPLATE,
         MONOLITH_GITIGNORE,
+        render_compose_base,
+        render_env,
     )
-    _write(project_dir / "docker-compose.base.yml", MICRO_COMPOSE_BASE)
+    _write(project_dir / "docker-compose.base.yml", render_compose_base(MICRO_COMPOSE_BASE, broker))
     _write(project_dir / "docker-compose.yml", MICRO_COMPOSE_LOCAL)
-    _write(project_dir / ".env.example", MICRO_ENV_TEMPLATE.format(**ctx))
+    _write(project_dir / ".env.example", render_env(MICRO_ENV_TEMPLATE, broker, ctx))
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", "")
     _write_shared_infra(project_dir)
@@ -363,9 +393,20 @@ def create_project(
     output_dir: Path,
     use_submodules: bool = True,
     init_git: bool = True,
+    broker: str | None = None,
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
+        sys.exit(1)
+
+    broker = broker or BROKER_DEFAULTS[project_type]
+    if broker not in BROKER_ALLOWED[project_type]:
+        allowed = ", ".join(BROKER_ALLOWED[project_type])
+        print(
+            f"Error: broker '{broker}' is not valid for {project_type} projects "
+            f"(allowed: {allowed})",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     slug = _slugify(name)
@@ -407,12 +448,12 @@ def create_project(
 
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx, stapel_apps=feature_apps)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker)
     elif project_type == "minimal":
         _create_minimal(project_dir, ctx)
         use_submodules = False  # minimal uses pip
     elif project_type == "microservices":
-        _create_microservices(project_dir, ctx)
+        _create_microservices(project_dir, ctx, broker=broker)
         if len(modules) > 1:
             print(
                 "  Note: feature modules are wired per-service. After "
@@ -471,6 +512,26 @@ def run_wizard() -> dict:
 
     title = _ask("Display name", default=" ".join(w.capitalize() for w in name.replace("-", " ").replace("_", " ").split()))
     project_type = _ask_choice("Project type", PROJECT_TYPES, default="monolith")
+
+    broker = BROKER_DEFAULTS[project_type]
+    if project_type == "microservices":
+        broker = _ask_choice(
+            "Event/RPC broker",
+            {
+                "nats": "NATS — JetStream events + request-reply RPC, one tiny binary",
+                "kafka": "Kafka — heavyweight; pick for hard retention/replay needs",
+            },
+            default="nats",
+        )
+    elif project_type == "monolith":
+        broker = _ask_choice(
+            "Communication transport",
+            {
+                "none": "In-process + outbox — no broker, same delivery guarantees",
+                "nats": "NATS — isolate event handlers in a worker / prepare a service split",
+            },
+            default="none",
+        )
     url = _ask("Site URL", default=f"https://{_slugify(name)}.com")
     company_name = _ask("Company / sender name for emails", default=title)
     company_email = _ask("Company email address", default=f"hello@{_slugify(name)}.com")
@@ -498,6 +559,7 @@ def run_wizard() -> dict:
         "company_name": company_name,
         "company_email": company_email,
         "modules": modules,
+        "broker": broker,
     }
 
 
@@ -514,6 +576,11 @@ def main():
         choices=list(STAPEL_LIBS), metavar="MODULE",
         help="Modules to include (besides core which is always included). "
              f"Available: {', '.join(k for k, v in STAPEL_LIBS.items() if not v['required'])}",
+    )
+    parser.add_argument(
+        "--broker", choices=["none", "nats", "kafka"],
+        help="Event/RPC broker: minimal=none; monolith=none (default) or nats; "
+             "microservices=nats (default) or kafka",
     )
     parser.add_argument("--output-dir", type=Path, default=Path.cwd(), help="Parent directory for the project")
     parser.add_argument("--no-submodules", action="store_true", help="Use pip install instead of git submodules")
@@ -540,6 +607,7 @@ def main():
             "company_name": args.company_name,
             "company_email": args.company_email,
             "modules": args.modules or [],
+            "broker": args.broker,
         }
     else:
         # Wizard — pre-fill known values, ask for the rest
@@ -560,6 +628,8 @@ def main():
                 params["company_email"] = args.company_email
             if args.modules:
                 params["modules"] = args.modules
+            if args.broker:
+                params["broker"] = args.broker
         except (KeyboardInterrupt, EOFError):
             print("\nAborted.")
             sys.exit(0)
@@ -575,6 +645,7 @@ def main():
         output_dir=args.output_dir,
         use_submodules=not args.no_submodules,
         init_git=not args.no_git,
+        broker=params.get("broker"),
     )
 
 

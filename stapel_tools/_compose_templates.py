@@ -50,6 +50,68 @@ server {
 }
 """
 
+
+# ─── Broker building blocks ─────────────────────────────────────────────────
+# Compose bases carry {{BROKER_SERVICES}} / {{BROKER_VOLUMES}} markers; the
+# generator splices the chosen broker in. Env templates carry {{BROKER_ENV}}.
+
+NATS_SERVICE_BLOCK = """\
+  # Events (JetStream) + RPC (request-reply) for stapel_core.comm
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    command: ["--jetstream", "--store_dir", "/data"]
+    volumes:
+      - nats-data:/data
+
+"""
+
+KAFKA_SERVICE_BLOCK = """\
+  kafka:
+    image: apache/kafka:3.9.0
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+
+"""
+
+NATS_ENV_BLOCK = """\
+# ─── NATS: events (JetStream) + RPC ─────────────────────────────────────────
+STAPEL_BUS_BACKEND=nats
+NATS_URL=nats://nats:4222
+"""
+
+KAFKA_ENV_BLOCK = """\
+# ─── Kafka: events ──────────────────────────────────────────────────────────
+STAPEL_BUS_BACKEND=kafka
+KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+"""
+
+_BROKER_SERVICES = {"nats": NATS_SERVICE_BLOCK, "kafka": KAFKA_SERVICE_BLOCK, "none": ""}
+_BROKER_VOLUMES = {"nats": "  nats-data:\n", "kafka": "  kafka-data:\n", "none": ""}
+_BROKER_ENV = {"nats": NATS_ENV_BLOCK, "kafka": KAFKA_ENV_BLOCK, "none": ""}
+
+
+def render_compose_base(template: str, broker: str) -> str:
+    """Splice the chosen broker (nats | kafka | none) into a compose base."""
+    return template.replace("{{BROKER_SERVICES}}", _BROKER_SERVICES[broker]).replace(
+        "{{BROKER_VOLUMES}}", _BROKER_VOLUMES[broker]
+    )
+
+
+def render_env(template: str, broker: str, ctx: dict) -> str:
+    return template.replace("{{BROKER_ENV}}", _BROKER_ENV[broker]).format(**ctx)
+
+
 MONOLITH_COMPOSE_BASE = """\
 # Shared infrastructure — included by all environments.
 # Do not put service-specific overrides here.
@@ -83,7 +145,7 @@ services:
     volumes:
       - redis-data:/data
 
-  nginx:
+{{BROKER_SERVICES}}  nginx:
     image: nginx:alpine
     restart: unless-stopped
     ports:
@@ -97,7 +159,7 @@ services:
 volumes:
   db-data:
   redis-data:
-  static-content:
+{{BROKER_VOLUMES}}  static-content:
   media-content:
 """
 
@@ -138,6 +200,7 @@ POSTGRES_PORT=5432
 # ─── Redis ─────────────────────────────────────────────────────────────────
 REDIS_URL=redis://redis:6379/0
 
+{{BROKER_ENV}}
 # ─── App ───────────────────────────────────────────────────────────────────
 SECRET_KEY=change_me_to_a_long_random_string
 JWT_SECRET_KEY=change_me_to_another_long_random_string
@@ -208,30 +271,7 @@ services:
     volumes:
       - redis-data:/data
 
-  # RPC between services (comm Functions, STAPEL_COMM FUNCTION_TRANSPORT=nats)
-  nats:
-    image: nats:2.10-alpine
-    restart: unless-stopped
-    command: ["--jetstream", "--store_dir", "/data"]
-    volumes:
-      - nats-data:/data
-
-  kafka:
-    image: apache/kafka:3.9.0
-    restart: unless-stopped
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-    volumes:
-      - kafka-data:/var/lib/kafka/data
-
-  nginx:
+{{BROKER_SERVICES}}  nginx:
     image: nginx:alpine
     restart: unless-stopped
     ports:
@@ -245,9 +285,7 @@ services:
 volumes:
   db-data:
   redis-data:
-  nats-data:
-  kafka-data:
-  static-content:
+{{BROKER_VOLUMES}}  static-content:
   media-content:
 """
 
@@ -270,12 +308,7 @@ POSTGRES_PORT=5432
 # ─── Redis ─────────────────────────────────────────────────────────────────
 REDIS_URL=redis://redis:6379/0
 
-# ─── Kafka ─────────────────────────────────────────────────────────────────
-KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-
-# ─── NATS (comm Function RPC) ──────────────────────────────────────────────
-NATS_URL=nats://nats:4222
-
+{{BROKER_ENV}}
 # ─── App ───────────────────────────────────────────────────────────────────
 SECRET_KEY=change_me_to_a_long_random_string
 JWT_SECRET_KEY=change_me_to_another_long_random_string

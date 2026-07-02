@@ -56,7 +56,14 @@ def render(template: str, ctx: dict) -> str:
     return result
 
 
-def make_context(slug: str, title: str, prefix: str, stapel_apps: list[str] | None = None) -> dict:
+def make_context(
+    slug: str,
+    title: str,
+    prefix: str,
+    stapel_apps: list[str] | None = None,
+    action_transport: str = "inprocess",
+    function_transport: str = "inprocess",
+) -> dict:
     module = slug.replace("-", "_")
     module_cap = "".join(p.capitalize() for p in module.split("_"))
     dir_name = f"{prefix}{slug}" if prefix else slug
@@ -77,7 +84,31 @@ def make_context(slug: str, title: str, prefix: str, stapel_apps: list[str] | No
         "URL_PREFIX": f"{slug}/",
         "STAPEL_APPS": stapel_apps_block,
         "STAPEL_URL_INCLUDES": url_includes,
+        "ACTION_TRANSPORT": action_transport,
+        "FUNCTION_TRANSPORT": function_transport,
     }
+
+
+
+
+def _detect_transports(root: Path) -> tuple[str, str]:
+    """Infer comm transports from the project's declared broker.
+
+    Reads STAPEL_BUS_BACKEND from .env / .env.example so that services added
+    later match the choice made at project creation.
+    """
+    for candidate in (".env", ".env.example"):
+        f = root / candidate
+        if not f.exists():
+            continue
+        for line in f.read_text().splitlines():
+            if line.strip().startswith("STAPEL_BUS_BACKEND="):
+                broker = line.split("=", 1)[1].strip()
+                if broker == "nats":
+                    return "bus", "nats"
+                if broker == "kafka":
+                    return "bus", "http"
+    return "inprocess", "inprocess"
 
 
 # ---------------------------------------------------------------------------
@@ -427,13 +458,25 @@ def scaffold_service(
     celery: bool = False,
     dry_run: bool = False,
     stapel_apps: Optional[list[str]] = None,
+    action_transport: Optional[str] = None,
+    function_transport: Optional[str] = None,
 ):
     """Scaffold a service. stapel_apps — Django app names of Stapel feature
     modules (e.g. ["stapel_auth"]) to wire into INSTALLED_APPS and urls;
-    their packages are expected inside the service dir (git submodule)."""
+    their packages are expected inside the service dir (git submodule).
+    Transports default to whatever broker the project's .env declares."""
     cwd = Path.cwd()
     root = project_root or find_project_root(cwd) or cwd
-    ctx = make_context(slug, title, prefix, stapel_apps=stapel_apps)
+    if action_transport is None or function_transport is None:
+        detected_action, detected_function = _detect_transports(root)
+        action_transport = action_transport or detected_action
+        function_transport = function_transport or detected_function
+    ctx = make_context(
+        slug, title, prefix,
+        stapel_apps=stapel_apps,
+        action_transport=action_transport,
+        function_transport=function_transport,
+    )
     dir_name = ctx["DIR"]
 
     if (root / dir_name).exists():

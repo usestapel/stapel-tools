@@ -167,6 +167,15 @@ AUTH_USER_MODEL = "users.User"
 FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024
 DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024
 
+# Inter-module communication (see docs: module-communication.md).
+# Action/Function transports follow the project's broker choice; env vars
+# override for per-deployment tuning.
+STAPEL_COMM = {
+    "ACTION_TRANSPORT": os.getenv("STAPEL_ACTION_TRANSPORT", "{{ACTION_TRANSPORT}}"),
+    "FUNCTION_TRANSPORT": os.getenv("STAPEL_FUNCTION_TRANSPORT", "{{FUNCTION_TRANSPORT}}"),
+    "NATS_URL": os.getenv("NATS_URL", "nats://nats:4222"),
+}
+
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", os.getenv("REDIS_URL", "redis://redis:6379/0"))
 CELERY_RESULT_BACKEND = CELERY_BROKER_URL
 CELERY_ACCEPT_CONTENT = ["json"]
@@ -320,6 +329,19 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+
+  # Uncomment when FUNCTION_TRANSPORT=nats: serves this service's comm
+  # Functions over NATS request-reply (see manage.py serve_functions).
+  # {{DIR}}-functions:
+  #   env_file: ".env"
+  #   image: ${IMAGE_TAG_{{SLUG_UPPER}}}
+  #   command: sh -c "python manage.py serve_functions"
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_DB: "{{DB_NAME}}"
+  #   depends_on:
+  #     - nats
+  #     - db
 """
 
 REQUIREMENTS_TXT = """\
