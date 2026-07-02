@@ -12,6 +12,7 @@ R003  @action without @extend_schema / @extend_schema_view entry — document al
 R004  @dataclass in dto.py without docstring — OpenAPI docs are driven by the docstring
 R005  StapelErrorResponse(status, 'literal') — use an ERR_* constant, not a raw string
 R006  StapelResponse({…}) — passing a dict literal skips serializer; use StapelResponse(MySerializer(dto))
+R007  @extend_schema view method without @flow_step — every endpoint must belong to a documented flow
 
 Suppression
 -----------
@@ -254,6 +255,41 @@ def check_r006(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violat
 # ---------------------------------------------------------------------------
 
 
+def check_r007(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    """Every documented endpoint participates in at least one flow.
+
+    A method counts as an endpoint when it is an http verb handler or an
+    @action, and is schema-documented (extend_schema on the method or an
+    extend_schema_view entry). The flow attachment may live on the method
+    or on the class (class-level @flow_step covers all its methods).
+    """
+    http_verbs = {"get", "post", "put", "patch", "delete"}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        class_has_flow = "flow_step" in _decorator_names(node.decorator_list)
+        esv_keys = _extend_schema_view_keys(node)
+        for item in node.body:
+            if not isinstance(item, ast.FunctionDef):
+                continue
+            deco_names = _decorator_names(item.decorator_list)
+            is_endpoint = item.name in http_verbs or "action" in deco_names
+            if not is_endpoint:
+                continue
+            documented = "extend_schema" in deco_names or item.name in esv_keys
+            if not documented:
+                continue  # R003 handles undocumented actions
+            has_flow = class_has_flow or "flow_step" in deco_names
+            if not has_flow:
+                if not _noqa(lines, item.lineno, "R007"):
+                    yield Violation(
+                        path, item.lineno, "R007",
+                        f"{node.name}.{item.name}: documented endpoint without "
+                        f"@flow_step — attach it to a flow "
+                        f"(see stapel_core.flows) or add '# noqa: R007'",
+                    )
+
+
 def rules_for_file(path: str):
     basename = os.path.basename(path)
     is_view = "views" in basename
@@ -262,7 +298,7 @@ def rules_for_file(path: str):
 
     checkers = []
     if is_view:
-        checkers += [check_r001, check_r003, check_r005, check_r006]
+        checkers += [check_r001, check_r003, check_r005, check_r006, check_r007]
     if is_serializer and "admin" not in path:
         checkers += [check_r002]
     if is_dto:
