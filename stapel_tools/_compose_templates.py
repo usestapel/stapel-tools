@@ -208,6 +208,14 @@ services:
     volumes:
       - redis-data:/data
 
+  # RPC between services (comm Functions, STAPEL_COMM FUNCTION_TRANSPORT=nats)
+  nats:
+    image: nats:2.10-alpine
+    restart: unless-stopped
+    command: ["--jetstream", "--store_dir", "/data"]
+    volumes:
+      - nats-data:/data
+
   kafka:
     image: apache/kafka:3.9.0
     restart: unless-stopped
@@ -237,6 +245,7 @@ services:
 volumes:
   db-data:
   redis-data:
+  nats-data:
   kafka-data:
   static-content:
   media-content:
@@ -263,6 +272,9 @@ REDIS_URL=redis://redis:6379/0
 
 # ─── Kafka ─────────────────────────────────────────────────────────────────
 KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+
+# ─── NATS (comm Function RPC) ──────────────────────────────────────────────
+NATS_URL=nats://nats:4222
 
 # ─── App ───────────────────────────────────────────────────────────────────
 SECRET_KEY=change_me_to_a_long_random_string
