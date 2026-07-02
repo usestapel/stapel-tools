@@ -49,9 +49,9 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client && rm -rf /var/lib/apt/lists/*
 COPY {{DIR}}/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# stapel_core is vendored as a git submodule at the project root
+COPY stapel_core ./stapel_core
 COPY {{DIR}} .
-# If using stapel_core as a submodule, uncomment:
-# COPY stapel_core ./stapel_core
 ENV DJANGO_SETTINGS_MODULE=core.settings.prod
 CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000"]
 """
@@ -89,7 +89,9 @@ admin.site.site_header = f"{service_name} Admin"
 admin.site.site_title = f"{service_name} Admin"
 admin.site.index_title = f"{service_name} Admin — v{settings.APP_VERSION_NUMBER}"
 
-setup_centralized_admin_login(admin.site, auth_service_prefix="auth")
+auth_prefix = getattr(settings, "AUTH_SERVICE_PREFIX", "")
+if auth_prefix:
+    setup_centralized_admin_login(admin.site, auth_service_prefix=auth_prefix)
 
 router = OptionalSlashRouter()
 
@@ -101,7 +103,7 @@ mcp_schema_view = build_mcp_schema_view(
 
 urlpatterns = [
     *get_health_urls(url_prefix),
-    get_admin_logout_urlpattern(url_prefix, "auth"),
+    *([get_admin_logout_urlpattern(url_prefix, auth_prefix)] if auth_prefix else []),{{STAPEL_URL_INCLUDES}}
     path(f"{url_prefix}api/", include(router.urls)),
     path(f"{url_prefix}admin/", admin.site.urls),
     *get_dev_urls(url_prefix, mcp_schema_view),
@@ -129,11 +131,16 @@ STATICFILES_DIRS = get_staticfiles_dirs(BASE_DIR)
 MEDIA_ROOT = f"/app/media/{{SLUG}}/"
 MEDIA_URL = f"/media/{{SLUG}}/"
 
-SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-{{SLUG}}-change-this")
+# Dev fallbacks live in dev.py; prod.py refuses to start without real values.
+SECRET_KEY = os.getenv("SECRET_KEY", "")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
 ALLOWED_HOSTS = ALLOWED_HOSTS + ["{{DIR}}"]  # type: ignore[name-defined]
 
-INSTALLED_APPS = COMMON_INSTALLED_APPS + [
+# Prefix of the dedicated auth service (e.g. "auth") when running in a
+# multi-service stack. Leave empty to use Django's own admin login.
+AUTH_SERVICE_PREFIX = os.getenv("AUTH_SERVICE_PREFIX", "")
+
+INSTALLED_APPS = COMMON_INSTALLED_APPS + [{{STAPEL_APPS}}
     "{{MODULE}}",
 ]
 
@@ -182,6 +189,10 @@ from .base import *  # noqa
 DEBUG = True
 ALLOWED_HOSTS += ["dev.{{SLUG}}.local"]
 
+if not SECRET_KEY:
+    SECRET_KEY = "django-insecure-{{SLUG}}-dev-only"
+    JWT_SECRET_KEY = JWT_SECRET_KEY or SECRET_KEY
+
 INSTALLED_APPS += ["debug_toolbar"]
 MIDDLEWARE = MIDDLEWARE + ["debug_toolbar.middleware.DebugToolbarMiddleware"]
 INTERNAL_IPS = ["127.0.0.1", "localhost"]
@@ -216,11 +227,18 @@ INTERNAL_IPS = ["127.0.0.1", "localhost"]
 """
 
 PROD_SETTINGS = """\
+from django.core.exceptions import ImproperlyConfigured
+
 from .base import *  # noqa
 
 DEBUG = False
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
+
+if not SECRET_KEY or SECRET_KEY.startswith("django-insecure-"):
+    raise ImproperlyConfigured("SECRET_KEY environment variable must be set in production")
+if not JWT_SECRET_KEY or JWT_SECRET_KEY.startswith("django-insecure-"):
+    raise ImproperlyConfigured("JWT_SECRET_KEY environment variable must be set in production")
 """
 
 APP_PY = """\
@@ -280,6 +298,7 @@ services:
   {{DIR}}:
     env_file: ".env"
     image: ${IMAGE_TAG_{{SLUG_UPPER}}}
+    restart: unless-stopped
     build:
       context: .
       dockerfile: {{DIR}}/Dockerfile
@@ -295,14 +314,39 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\\"http://localhost:8000/{{URL_PREFIX}}api/health/\\")'"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 """
 
 REQUIREMENTS_TXT = """\
-# Add service-specific dependencies here.
-# Core framework dependencies should be in the base image.
-# Example:
-# django-filter==23.5
-# celery==5.3.6
+# Runtime dependencies of a Stapel service.
+# stapel_core itself is vendored as a git submodule at the project root
+# and copied into the image by the Dockerfile; these are its dependencies
+# plus the service runtime.
+Django>=5.1
+djangorestframework>=3.14
+djangorestframework-dataclasses>=1.2
+drf-spectacular>=0.27
+django-cors-headers>=4.3
+django-redis>=5.4
+PyJWT>=2.8
+cryptography>=41.0
+requests>=2.31
+psycopg[binary]>=3.1
+gunicorn>=21.2
+celery>=5.3
+
+# Dev / test (used by core.settings.dev and pytest)
+django-debug-toolbar>=4.2
+debugpy>=1.8
+pytest>=7.4
+pytest-django>=4.7
+
+# Add service-specific dependencies below.
 """
 
 VERSION_TXT = "0.1.0\n"

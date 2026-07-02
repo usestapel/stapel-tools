@@ -24,14 +24,12 @@ Usage (non-interactive):
 """
 
 import argparse
-import os
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from textwrap import dedent
 from typing import Optional
+from urllib.parse import urlparse
 
 STAPEL_LIBS = {
     "core": {
@@ -189,7 +187,18 @@ def _slugify(name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _create_monolith(project_dir: Path, ctx: dict):
+def _write_shared_infra(project_dir: Path):
+    """Configs referenced by the compose templates: nginx vhost and the
+    postgres script that creates POSTGRES_MULTIPLE_DATABASES on startup."""
+    from ._compose_templates import NGINX_CONF, POSTGRES_ENSURE_DATABASES
+
+    _write(project_dir / "service-configs" / "nginx" / "nginx.conf", NGINX_CONF)
+    ensure_script = project_dir / "service-configs" / "postgres" / "ensure-databases.sh"
+    _write(ensure_script, POSTGRES_ENSURE_DATABASES)
+    ensure_script.chmod(0o755)
+
+
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str]):
     from .new_service import scaffold_service
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
@@ -200,7 +209,6 @@ def _create_monolith(project_dir: Path, ctx: dict):
     )
 
     slug = ctx["slug"]
-    dir_name = ctx["service_dir_name"]  # e.g. "svc-app" or just "app"
 
     # docker-compose files
     _write(project_dir / "docker-compose.base.yml", MONOLITH_COMPOSE_BASE)
@@ -209,8 +217,9 @@ def _create_monolith(project_dir: Path, ctx: dict):
     _write(project_dir / ".env.example", MONOLITH_ENV_TEMPLATE.format(**ctx))
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", f"{slug}\n")
+    _write_shared_infra(project_dir)
 
-    # Scaffold the main service
+    # Scaffold the main service with the selected feature modules wired in
     scaffold_service(
         slug=slug,
         title=ctx["title"],
@@ -218,6 +227,7 @@ def _create_monolith(project_dir: Path, ctx: dict):
         project_root=project_dir,
         celery=False,
         dry_run=False,
+        stapel_apps=stapel_apps,
     )
 
 
@@ -270,6 +280,7 @@ def _create_microservices(project_dir: Path, ctx: dict):
     _write(project_dir / ".env.example", MICRO_ENV_TEMPLATE.format(**ctx))
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", "")
+    _write_shared_infra(project_dir)
     print("  Created microservices base. Use 'stapel-new-service' to add services.")
 
 
@@ -278,13 +289,24 @@ def _create_microservices(project_dir: Path, ctx: dict):
 # ---------------------------------------------------------------------------
 
 
-def _setup_submodules(project_dir: Path, modules: list[str], is_git: bool):
+def _setup_submodules(project_dir: Path, modules: list[str], is_git: bool, service_dir: str = ""):
+    """Add module repos as submodules.
+
+    stapel_core always lands at the project root (shared by all services,
+    copied into images by each Dockerfile). Feature modules land INSIDE the
+    service directory that uses them — the service dir is then self-contained
+    and `COPY <service-dir> .` brings the apps into the image.
+    """
     if not is_git:
         return
     print("\nAdding submodules...")
     for key in modules:
         info = STAPEL_LIBS[key]
-        _add_submodule(project_dir, info["repo"], info["dir"])
+        if key == "core" or not service_dir:
+            target = info["dir"]
+        else:
+            target = f"{service_dir}/{info['dir']}"
+        _add_submodule(project_dir, info["repo"], target)
 
 
 def _setup_pip_deps(project_dir: Path, modules: list[str]):
@@ -306,8 +328,23 @@ def _write_env_from_ctx(project_dir: Path, ctx: dict):
         return
     env = project_dir / ".env"
     if not env.exists():
-        env.write_text(env_example.read_text())
-        print("  created .env from .env.example (fill in secrets before running)")
+        # .env.example keeps placeholders (it gets committed); the real .env
+        # gets freshly generated secrets.
+        text = env_example.read_text()
+        text = text.replace(
+            "SECRET_KEY=change_me_to_a_long_random_string",
+            f"SECRET_KEY={_random_secret()}",
+        )
+        text = text.replace(
+            "JWT_SECRET_KEY=change_me_to_another_long_random_string",
+            f"JWT_SECRET_KEY={_random_secret()}",
+        )
+        text = text.replace(
+            "POSTGRES_PASSWORD=change_me",
+            f"POSTGRES_PASSWORD={_random_secret(24)}",
+        )
+        env.write_text(text)
+        print("  created .env from .env.example with generated secrets")
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +364,10 @@ def create_project(
     use_submodules: bool = True,
     init_git: bool = True,
 ):
+    if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
+        print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
+        sys.exit(1)
+
     slug = _slugify(name)
     project_dir = output_dir / name
 
@@ -345,33 +386,45 @@ def create_project(
         if is_git:
             print("  git init")
 
+    clean_url = url.rstrip("/")
+    domain = urlparse(clean_url).netloc or clean_url
     ctx = {
         "name": name,
         "slug": slug,
         "title": title,
-        "url": url.rstrip("/"),
+        "url": clean_url,
+        "domain": domain,
         "company_name": company_name,
         "company_email": company_email,
         "service_dir_name": f"svc-{slug}",
-        "SECRET_KEY": _random_secret(),
     }
 
     # Ensure core is always first
     if "core" not in modules:
         modules = ["core"] + modules
 
+    feature_apps = [STAPEL_LIBS[key]["dir"] for key in modules if key != "core"]
+
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps)
     elif project_type == "minimal":
         _create_minimal(project_dir, ctx)
         use_submodules = False  # minimal uses pip
     elif project_type == "microservices":
         _create_microservices(project_dir, ctx)
+        if len(modules) > 1:
+            print(
+                "  Note: feature modules are wired per-service. After "
+                "'stapel-new-service <name> --stapel-apps stapel_<mod>', add the "
+                "module as a submodule inside the service dir."
+            )
+            modules = ["core"]  # only shared core lands at the project root
 
     # Wire in stapel libraries
     if use_submodules and is_git:
-        _setup_submodules(project_dir, modules, is_git)
+        service_dir = ctx["service_dir_name"] if project_type == "monolith" else ""
+        _setup_submodules(project_dir, modules, is_git, service_dir=service_dir)
     else:
         _setup_pip_deps(project_dir, modules)
 
@@ -397,10 +450,12 @@ def create_project(
         print("  docker compose up -d")
 
 
-def _random_secret(length: int = 50) -> str:
+def _random_secret(length: int = 64) -> str:
     import secrets
     import string
-    alphabet = string.ascii_letters + string.digits + "!@#$%^&*(-_=+)"
+    # Letters and digits only: values land in .env files, where '#', '$'
+    # and quotes are unsafe.
+    alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 

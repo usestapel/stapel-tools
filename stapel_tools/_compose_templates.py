@@ -1,5 +1,55 @@
 """Docker Compose templates for project scaffolding."""
 
+# Runs on EVERY postgres startup (via the db service's command wrapper),
+# creating any database listed in POSTGRES_MULTIPLE_DATABASES that does not
+# exist yet. Running at every startup — not just first initdb — means adding
+# a service later creates its database without wiping the data volume.
+POSTGRES_ENSURE_DATABASES = """\
+#!/bin/sh
+set -eu
+
+ensure_database_exists() {
+    database=$1
+    if psql -v ON_ERROR_STOP=1 -d postgres --username "$POSTGRES_USER" -lqt \\
+        | cut -d '|' -f 1 | grep -qw "$database"; then
+        echo "  database '$database' exists"
+    else
+        echo "  creating database '$database'"
+        psql -v ON_ERROR_STOP=1 -d postgres --username "$POSTGRES_USER" <<-EOSQL
+            CREATE DATABASE $database;
+            GRANT ALL PRIVILEGES ON DATABASE $database TO $POSTGRES_USER;
+EOSQL
+    fi
+}
+
+if [ -n "${POSTGRES_MULTIPLE_DATABASES:-}" ]; then
+    echo "Ensuring databases exist: $POSTGRES_MULTIPLE_DATABASES"
+    for db in $(echo "$POSTGRES_MULTIPLE_DATABASES" | tr ',' ' '); do
+        db=$(echo "$db" | xargs)
+        [ -n "$db" ] && ensure_database_exists "$db"
+    done
+fi
+"""
+
+# Mounted at /etc/nginx/conf.d/nginx.conf. stapel-new-service appends a
+# location block per service before the closing brace.
+NGINX_CONF = """\
+server {
+    listen 80;
+    server_name _;
+    client_max_body_size 50m;
+    resolver 127.0.0.11 valid=10s;
+
+    location /staticfiles/ {
+        alias /staticfiles/;
+    }
+
+    location /media/ {
+        alias /media/;
+    }
+}
+"""
+
 MONOLITH_COMPOSE_BASE = """\
 # Shared infrastructure — included by all environments.
 # Do not put service-specific overrides here.
@@ -13,6 +63,14 @@ services:
       POSTGRES_MULTIPLE_DATABASES: "stapel_main"
     volumes:
       - db-data:/var/lib/postgresql/data
+      - ./service-configs/postgres/ensure-databases.sh:/usr/local/bin/ensure-databases.sh:ro
+    command: >
+      bash -c "
+        docker-entrypoint.sh postgres &
+        until pg_isready -U $${POSTGRES_USER:-stapel}; do sleep 1; done
+        /usr/local/bin/ensure-databases.sh
+        wait
+      "
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-stapel}"]
       interval: 5s
@@ -83,7 +141,7 @@ REDIS_URL=redis://redis:6379/0
 # ─── App ───────────────────────────────────────────────────────────────────
 SECRET_KEY=change_me_to_a_long_random_string
 JWT_SECRET_KEY=change_me_to_another_long_random_string
-ALLOWED_HOSTS={url}
+ALLOWED_HOSTS={domain}
 SITE_URL={url}
 
 # ─── Email ─────────────────────────────────────────────────────────────────
@@ -130,6 +188,14 @@ services:
       POSTGRES_MULTIPLE_DATABASES: ""
     volumes:
       - db-data:/var/lib/postgresql/data
+      - ./service-configs/postgres/ensure-databases.sh:/usr/local/bin/ensure-databases.sh:ro
+    command: >
+      bash -c "
+        docker-entrypoint.sh postgres &
+        until pg_isready -U $${POSTGRES_USER:-stapel}; do sleep 1; done
+        /usr/local/bin/ensure-databases.sh
+        wait
+      "
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-stapel}"]
       interval: 5s
@@ -201,7 +267,7 @@ KAFKA_BOOTSTRAP_SERVERS=kafka:9092
 # ─── App ───────────────────────────────────────────────────────────────────
 SECRET_KEY=change_me_to_a_long_random_string
 JWT_SECRET_KEY=change_me_to_another_long_random_string
-ALLOWED_HOSTS={url}
+ALLOWED_HOSTS={domain}
 SITE_URL={url}
 
 # ─── Email ─────────────────────────────────────────────────────────────────

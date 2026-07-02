@@ -86,6 +86,9 @@ def _remove_from_services_conf(root: Path, slug: str):
 
 def _remove_from_stapel_services(root: Path, slug: str):
     for cfg in root.rglob("config.py"):
+        # Skip vendored library checkouts (stapel_* submodules)
+        if any(part.startswith("stapel_") for part in cfg.relative_to(root).parts[:-1]):
+            continue
         text = cfg.read_text()
         if "STAPEL_SERVICES" not in text or f"'{slug}'" not in text:
             continue
@@ -147,7 +150,9 @@ def _remove_from_prometheus(root: Path, dir_name: str):
     if not path.exists():
         return
     text = path.read_text()
-    pattern = rf"\s*- job_name: '{re.escape(dir_name)}'[^\[]*?(?=\s*- job_name:|\Z)"
+    # Job bodies contain '[' (targets lists), so match lazily up to the next
+    # job, a top-level comment marker, or end of file.
+    pattern = rf"\n?\s*- job_name: '{re.escape(dir_name)}'.*?(?=\n\s*- job_name:|\n\s*#|\Z)"
     new_text = re.sub(pattern, "", text, flags=re.DOTALL)
     if new_text != text:
         _log("updated prometheus.yml")
@@ -224,13 +229,23 @@ def remove_service(
     global DRY_RUN
     DRY_RUN = dry_run
 
+    if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", slug):
+        print("Error: name must be lowercase alphanumeric with optional dashes", file=sys.stderr)
+        sys.exit(1)
+    if prefix and not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*-", prefix):
+        print("Error: prefix must be lowercase alphanumeric ending with a dash, e.g. 'svc-'", file=sys.stderr)
+        sys.exit(1)
+
     cwd = Path.cwd()
-    root = project_root or find_project_root(cwd) or cwd
+    root = (project_root or find_project_root(cwd) or cwd).resolve()
     dir_name = f"{prefix}{slug}" if prefix else slug
     title = " ".join(p.capitalize() for p in slug.replace("-", " ").split())
 
-    service_dir = root / dir_name
-    service_yml = root / f"{dir_name}.yml"
+    service_dir = (root / dir_name).resolve()
+    service_yml = (root / f"{dir_name}.yml").resolve()
+    if service_dir == root or not service_dir.is_relative_to(root):
+        print(f"Error: refusing to remove {service_dir}: outside project root {root}", file=sys.stderr)
+        sys.exit(1)
 
     if not service_dir.exists() and not service_yml.exists():
         print(f"Error: neither {service_dir} nor {service_yml} found", file=sys.stderr)

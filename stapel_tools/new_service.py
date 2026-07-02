@@ -13,6 +13,7 @@ Usage:
 
 import argparse
 import json
+import keyword
 import re
 import sys
 from pathlib import Path
@@ -55,10 +56,15 @@ def render(template: str, ctx: dict) -> str:
     return result
 
 
-def make_context(slug: str, title: str, prefix: str) -> dict:
+def make_context(slug: str, title: str, prefix: str, stapel_apps: list[str] | None = None) -> dict:
     module = slug.replace("-", "_")
     module_cap = "".join(p.capitalize() for p in module.split("_"))
     dir_name = f"{prefix}{slug}" if prefix else slug
+    apps = stapel_apps or []
+    stapel_apps_block = "".join(f'\n    "{app}",' for app in apps)
+    url_includes = "".join(
+        f'\n    path(f"{{url_prefix}}api/", include("{app}.urls")),' for app in apps
+    )
     return {
         "TITLE": title,
         "SLUG": slug,
@@ -69,6 +75,8 @@ def make_context(slug: str, title: str, prefix: str) -> dict:
         "DIR": dir_name,
         "DB_NAME": f"stapel_{module}",
         "URL_PREFIX": f"{slug}/",
+        "STAPEL_APPS": stapel_apps_block,
+        "STAPEL_URL_INCLUDES": url_includes,
     }
 
 
@@ -128,12 +136,17 @@ def _update_services_conf(root: Path, slug: str):
     if slug not in lines:
         lines.append(slug)
         conf.write_text("\n".join(lines) + "\n")
-        print(f"  updated services.conf")
+        print("  updated services.conf")
 
 
 def _update_stapel_services(root: Path, slug: str, title: str):
-    """Update STAPEL_SERVICES in any config.py found at the project root."""
-    candidates = list(root.rglob("config.py"))
+    """Update STAPEL_SERVICES in any project-owned config.py."""
+    candidates = [
+        cfg for cfg in root.rglob("config.py")
+        # Skip vendored library checkouts (stapel_* submodules) — patching
+        # framework source from the scaffolder corrupts the submodule tree.
+        if not any(part.startswith("stapel_") for part in cfg.relative_to(root).parts[:-1])
+    ]
     for cfg in candidates:
         text = cfg.read_text()
         if "STAPEL_SERVICES" not in text:
@@ -158,13 +171,15 @@ def _update_compose_base(root: Path, slug: str, dir_name: str):
     if not path.exists():
         return
     lines = path.read_text().splitlines()
+    db_name = f"stapel_{slug.replace('-', '_')}"
 
-    # Update POSTGRES_MULTIPLE_DATABASES
+    # Update POSTGRES_MULTIPLE_DATABASES, keeping the value one quoted scalar
     for i, line in enumerate(lines):
-        if "POSTGRES_MULTIPLE_DATABASES" in line and slug not in line:
+        if "POSTGRES_MULTIPLE_DATABASES" in line and db_name not in line:
             prefix, value = line.split(":", 1)
-            value = value.strip()
-            lines[i] = f"{prefix}: {value}, stapel_{slug.replace('-', '_')}"
+            value = value.strip().strip('"').strip("'")
+            value = f"{value},{db_name}" if value else db_name
+            lines[i] = f'{prefix}: "{value}"'
             break
 
     # Update nginx depends_on
@@ -174,14 +189,20 @@ def _update_compose_base(root: Path, slug: str, dir_name: str):
             while j < len(lines) and "depends_on:" not in lines[j]:
                 j += 1
             if j < len(lines):
-                k = j + 1
-                exists = any(dir_name in lines[x] for x in range(k, min(k + 20, len(lines))))
-                if not exists:
-                    lines.insert(j + 1, f"      - {dir_name}")
+                indent = len(lines[j]) - len(lines[j].lstrip())
+                item = " " * (indent + 2) + f"- {dir_name}"
+                if lines[j].strip() in ("depends_on: []", "depends_on: [ ]"):
+                    lines[j] = " " * indent + "depends_on:"
+                    lines.insert(j + 1, item)
+                else:
+                    k = j + 1
+                    exists = any(dir_name in lines[x] for x in range(k, min(k + 20, len(lines))))
+                    if not exists:
+                        lines.insert(j + 1, item)
             break
 
     path.write_text("\n".join(lines) + "\n")
-    print(f"  updated docker-compose.base.yml")
+    print("  updated docker-compose.base.yml")
 
 
 def _update_compose_file(root: Path, filename: str, slug: str, dir_name: str, debug_port: int = 0):
@@ -201,6 +222,7 @@ def _update_compose_file(root: Path, filename: str, slug: str, dir_name: str, de
             f'      - "{debug_port}:5678"\n'
             f"    volumes:\n"
             f"      - ./{dir_name}:/app\n"
+            f"      - ./stapel_core:/app/stapel_core\n"
         )
     else:
         block = (
@@ -279,7 +301,7 @@ def _update_prometheus(root: Path, slug: str, dir_name: str):
     else:
         text = text.rstrip() + job
     path.write_text(text)
-    print(f"  updated prometheus.yml")
+    print("  updated prometheus.yml")
 
 
 def _update_vscode(root: Path, slug: str, dir_name: str, title: str, debug_port: int):
@@ -298,7 +320,7 @@ def _update_vscode(root: Path, slug: str, dir_name: str, title: str, debug_port:
                 changed = True
         if changed:
             settings_path.write_text(json.dumps(data, indent=2) + "\n")
-            print(f"  updated .vscode/settings.json")
+            print("  updated .vscode/settings.json")
 
     if launch_path.exists():
         data = json.loads(launch_path.read_text())
@@ -316,7 +338,7 @@ def _update_vscode(root: Path, slug: str, dir_name: str, title: str, debug_port:
             })
             data["configurations"] = configs
             launch_path.write_text(json.dumps(data, indent=4))
-            print(f"  updated .vscode/launch.json")
+            print("  updated .vscode/launch.json")
 
 
 def _update_pyrightconfig(root: Path, dir_name: str):
@@ -329,7 +351,7 @@ def _update_pyrightconfig(root: Path, dir_name: str):
         extra.append(dir_name)
         data["extraPaths"] = extra
         path.write_text(json.dumps(data, indent=2) + "\n")
-        print(f"  updated pyrightconfig.json")
+        print("  updated pyrightconfig.json")
 
 
 def _update_run_tests(root: Path, slug: str):
@@ -343,7 +365,7 @@ def _update_run_tests(root: Path, slug: str):
     m = re.search(pattern, text)
     if m:
         path.write_text(re.sub(pattern, f"\\g<1>{m.group(2)} {slug}", text))
-        print(f"  updated run_tests.sh")
+        print("  updated run_tests.sh")
 
 
 def _add_celery_to_service_yml(root: Path, slug: str, dir_name: str):
@@ -404,10 +426,14 @@ def scaffold_service(
     project_root: Optional[Path] = None,
     celery: bool = False,
     dry_run: bool = False,
+    stapel_apps: Optional[list[str]] = None,
 ):
+    """Scaffold a service. stapel_apps — Django app names of Stapel feature
+    modules (e.g. ["stapel_auth"]) to wire into INSTALLED_APPS and urls;
+    their packages are expected inside the service dir (git submodule)."""
     cwd = Path.cwd()
     root = project_root or find_project_root(cwd) or cwd
-    ctx = make_context(slug, title, prefix)
+    ctx = make_context(slug, title, prefix, stapel_apps=stapel_apps)
     dir_name = ctx["DIR"]
 
     if (root / dir_name).exists():
@@ -445,9 +471,9 @@ def scaffold_service(
         _add_celery_to_service_yml(root, slug, dir_name)
 
     print(f"\nService {dir_name} created. Next steps:")
-    print(f"  1. Add secrets to .env")
+    print("  1. Add secrets to .env")
     print(f"  2. Add {dir_name} submodule deps if needed")
-    print(f"  3. Run migrations: ./iron_container.sh {dir_name} python manage.py migrate")
+    print(f"  3. Run migrations: docker compose run --rm {dir_name} python manage.py migrate")
 
 
 # ---------------------------------------------------------------------------
@@ -466,11 +492,27 @@ def main():
     parser.add_argument("--celery", action="store_true", help="Add Celery worker and beat containers")
     parser.add_argument("--project-root", type=Path, help="Explicit project root (default: auto-detect)")
     parser.add_argument("--dry-run", action="store_true", help="Preview what would be created")
+    parser.add_argument(
+        "--stapel-apps", nargs="*", default=[], metavar="APP",
+        help="Stapel feature apps to wire in (e.g. stapel_auth stapel_gdpr); "
+             "add each as a git submodule inside the service dir afterwards",
+    )
     args = parser.parse_args()
 
     slug = args.name
     if not re.fullmatch(r"[a-z0-9\-]+", slug):
         print("Error: name must be lowercase alphanumeric with optional dashes", file=sys.stderr)
+        sys.exit(1)
+    module = slug.replace("-", "_")
+    if not module.isidentifier() or keyword.iskeyword(module):
+        print(
+            f"Error: '{slug}' maps to Python module '{module}', which is not a valid module name "
+            "(must not start with a digit or be a keyword)",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if args.prefix and not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*-", args.prefix):
+        print("Error: prefix must be lowercase alphanumeric ending with a dash, e.g. 'svc-'", file=sys.stderr)
         sys.exit(1)
 
     title = args.title or " ".join(p.capitalize() for p in slug.replace("-", " ").split())
@@ -484,6 +526,7 @@ def main():
         project_root=args.project_root,
         celery=args.celery,
         dry_run=args.dry_run,
+        stapel_apps=args.stapel_apps,
     )
 
 
