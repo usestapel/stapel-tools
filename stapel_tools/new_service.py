@@ -63,6 +63,7 @@ def make_context(
     stapel_apps: list[str] | None = None,
     action_transport: str = "inprocess",
     function_transport: str = "inprocess",
+    task_dispatch: str = "action",
 ) -> dict:
     module = slug.replace("-", "_")
     module_cap = "".join(p.capitalize() for p in module.split("_"))
@@ -86,29 +87,55 @@ def make_context(
         "STAPEL_URL_INCLUDES": url_includes,
         "ACTION_TRANSPORT": action_transport,
         "FUNCTION_TRANSPORT": function_transport,
+        "TASK_DISPATCH": task_dispatch,
     }
 
 
 
 
-def _detect_transports(root: Path) -> tuple[str, str]:
-    """Infer comm transports from the project's declared broker.
-
-    Reads STAPEL_BUS_BACKEND from .env / .env.example so that services added
-    later match the choice made at project creation.
-    """
+def _read_project_env(root: Path) -> dict[str, str]:
+    env: dict[str, str] = {}
     for candidate in (".env", ".env.example"):
         f = root / candidate
         if not f.exists():
             continue
         for line in f.read_text().splitlines():
-            if line.strip().startswith("STAPEL_BUS_BACKEND="):
-                broker = line.split("=", 1)[1].strip()
-                if broker == "nats":
-                    return "bus", "nats"
-                if broker == "kafka":
-                    return "bus", "http"
-    return "inprocess", "inprocess"
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            env.setdefault(key.strip(), value.strip())
+    return env
+
+
+def _detect_transports(root: Path) -> tuple[str, str, str]:
+    """Infer comm transports from the project's declared broker.
+
+    Reads STAPEL_BUS_BACKEND / STAPEL_TASK_DISPATCH / STAPEL_BUS_ROUTES from
+    .env / .env.example so that services added later match the choice made at
+    project creation. Returns (action_transport, function_transport,
+    task_dispatch).
+    """
+    env = _read_project_env(root)
+    broker = env.get("STAPEL_BUS_BACKEND", "")
+    if env.get("STAPEL_TASK_DISPATCH", "") == "bus":
+        # The broker is dedicated to Tasks — Actions stay in-process.
+        return "inprocess", "inprocess", "bus"
+    if broker == "nats":
+        return "bus", "nats", "action"
+    if broker == "kafka":
+        return "bus", "http", "action"
+    if broker == "routing":
+        # Functions follow the DEFAULT event route ("" prefix).
+        import json
+
+        default = ""
+        try:
+            default = json.loads(env.get("STAPEL_BUS_ROUTES", "") or "{}").get("", "")
+        except ValueError:
+            pass
+        return "bus", ("nats" if default == "nats" else "http"), "action"
+    return "inprocess", "inprocess", "action"
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +487,7 @@ def scaffold_service(
     stapel_apps: Optional[list[str]] = None,
     action_transport: Optional[str] = None,
     function_transport: Optional[str] = None,
+    task_dispatch: Optional[str] = None,
 ):
     """Scaffold a service. stapel_apps — Django app names of Stapel feature
     modules (e.g. ["stapel_auth"]) to wire into INSTALLED_APPS and urls;
@@ -467,15 +495,17 @@ def scaffold_service(
     Transports default to whatever broker the project's .env declares."""
     cwd = Path.cwd()
     root = project_root or find_project_root(cwd) or cwd
-    if action_transport is None or function_transport is None:
-        detected_action, detected_function = _detect_transports(root)
+    if action_transport is None or function_transport is None or task_dispatch is None:
+        detected_action, detected_function, detected_dispatch = _detect_transports(root)
         action_transport = action_transport or detected_action
         function_transport = function_transport or detected_function
+        task_dispatch = task_dispatch or detected_dispatch
     ctx = make_context(
         slug, title, prefix,
         stapel_apps=stapel_apps,
         action_transport=action_transport,
         function_transport=function_transport,
+        task_dispatch=task_dispatch,
     )
     dir_name = ctx["DIR"]
 

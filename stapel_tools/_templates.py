@@ -173,6 +173,10 @@ DATA_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024
 STAPEL_COMM = {
     "ACTION_TRANSPORT": os.getenv("STAPEL_ACTION_TRANSPORT", "{{ACTION_TRANSPORT}}"),
     "FUNCTION_TRANSPORT": os.getenv("STAPEL_FUNCTION_TRANSPORT", "{{FUNCTION_TRANSPORT}}"),
+    # "bus" sends task.* events through the broker (STAPEL_BUS_BACKEND)
+    # even when Actions stay in-process — long-running Tasks execute in a
+    # dedicated worker instead of the web process.
+    "TASK_DISPATCH": os.getenv("STAPEL_TASK_DISPATCH", "{{TASK_DISPATCH}}"),
     "NATS_URL": os.getenv("NATS_URL", "nats://nats:4222"),
 }
 

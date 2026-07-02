@@ -28,6 +28,11 @@ jobs:
           pip install ruff --quiet
           ruff check . --select E,F,W --ignore E501
 
+      - name: Tests
+        run: |
+          pip install pytest --quiet
+          pytest tests/
+
       - name: Smoke-generate every project type
         run: |
           pip install pyyaml --quiet
@@ -37,20 +42,23 @@ jobs:
 
           tmp = Path(tempfile.mkdtemp())
           cases = [
-              ("mono", "monolith", None),
-              ("mono-nats", "monolith", "nats"),
-              ("micro", "microservices", None),
-              ("micro-kafka", "microservices", "kafka"),
-              ("mini", "minimal", None),
+              ("mono", "monolith", None, None),
+              ("mono-nats", "monolith", "nats", None),
+              ("mono-tasknats", "monolith", None, "nats"),
+              ("micro", "microservices", None, None),
+              ("micro-kafka", "microservices", "kafka", None),
+              ("micro-taskkafka", "microservices", None, "kafka"),
+              ("mini", "minimal", None, None),
           ]
           sys.path.insert(0, ".")
           from stapel_tools.create_project import create_project
-          for name, ptype, broker in cases:
+          for name, ptype, broker, task_broker in cases:
               create_project(name=name, project_type=ptype, title=name,
                              url="https://x.dev", company_name="X",
                              company_email="x@x.dev", modules=["core"],
                              output_dir=tmp, use_submodules=False,
-                             init_git=False, broker=broker)
+                             init_git=False, broker=broker,
+                             task_broker=task_broker)
               base = tmp / name / "docker-compose.base.yml"
               if base.exists():
                   yaml.safe_load(base.read_text())

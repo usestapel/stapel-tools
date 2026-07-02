@@ -53,7 +53,9 @@ server {
 
 # ─── Broker building blocks ─────────────────────────────────────────────────
 # Compose bases carry {{BROKER_SERVICES}} / {{BROKER_VOLUMES}} markers; the
-# generator splices the chosen broker in. Env templates carry {{BROKER_ENV}}.
+# generator splices the chosen broker(s) in. Env templates carry
+# {{BROKER_ENV}}. A dedicated Task broker (--task-broker) adds its blocks
+# next to the event broker's.
 
 NATS_SERVICE_BLOCK = """\
   # Events (JetStream) + RPC (request-reply) for stapel_core.comm
@@ -96,20 +98,64 @@ STAPEL_BUS_BACKEND=kafka
 KAFKA_BOOTSTRAP_SERVERS=kafka:9092
 """
 
+# Task broker only (monolith --task-broker nats): Actions stay in-process;
+# STAPEL_TASK_DISPATCH=bus makes stapel_core publish task.* events through
+# the broker to a dedicated worker (STAPEL_COMM["TASK_DISPATCH"]).
+TASK_ONLY_NATS_ENV_BLOCK = """\
+# ─── NATS: broker for long-running Tasks only (Actions stay in-process) ────
+STAPEL_BUS_BACKEND=nats
+NATS_URL=nats://nats:4222
+STAPEL_TASK_DISPATCH=bus
+"""
+
 _BROKER_SERVICES = {"nats": NATS_SERVICE_BLOCK, "kafka": KAFKA_SERVICE_BLOCK, "none": ""}
 _BROKER_VOLUMES = {"nats": "  nats-data:\n", "kafka": "  kafka-data:\n", "none": ""}
 _BROKER_ENV = {"nats": NATS_ENV_BLOCK, "kafka": KAFKA_ENV_BLOCK, "none": ""}
+_BROKER_URL_LINES = {
+    "nats": "NATS_URL=nats://nats:4222\n",
+    "kafka": "KAFKA_BOOTSTRAP_SERVERS=kafka:9092\n",
+}
 
 
-def render_compose_base(template: str, broker: str) -> str:
-    """Splice the chosen broker (nats | kafka | none) into a compose base."""
-    return template.replace("{{BROKER_SERVICES}}", _BROKER_SERVICES[broker]).replace(
-        "{{BROKER_VOLUMES}}", _BROKER_VOLUMES[broker]
+def render_compose_base(template: str, broker: str, task_broker: str = "none") -> str:
+    """Splice the chosen broker(s) (nats | kafka | none) into a compose base.
+
+    *task_broker* adds a second broker dedicated to Tasks when it differs
+    from the event broker.
+    """
+    brokers = [b for b in ("nats", "kafka") if b in (broker, task_broker)]
+    services = "".join(_BROKER_SERVICES[b] for b in brokers)
+    volumes = "".join(_BROKER_VOLUMES[b] for b in brokers)
+    return template.replace("{{BROKER_SERVICES}}", services).replace(
+        "{{BROKER_VOLUMES}}", volumes
     )
 
 
-def render_env(template: str, broker: str, ctx: dict) -> str:
-    return template.replace("{{BROKER_ENV}}", _BROKER_ENV[broker]).format(**ctx)
+def _broker_env(broker: str, task_broker: str) -> str:
+    if task_broker in ("none", broker):
+        return _BROKER_ENV[broker]
+    if broker == "none":
+        # Broker exists for Tasks only — Actions stay in-process.
+        return TASK_ONLY_NATS_ENV_BLOCK
+    # Two brokers: RoutingBus splits by topic prefix — task.* to the task
+    # broker, everything else to the event broker.
+    urls = "".join(
+        _BROKER_URL_LINES[b] for b in ("nats", "kafka") if b in (broker, task_broker)
+    )
+    return (
+        f"# ─── Brokers: {broker} for events/RPC, {task_broker} for Tasks ─────────────────\n"
+        "STAPEL_BUS_BACKEND=routing\n"
+        f'STAPEL_BUS_ROUTES={{"task.": "{task_broker}", "": "{broker}"}}\n'
+        f"{urls}"
+    )
+
+
+def render_env(template: str, broker: str, ctx: dict, task_broker: str = "none") -> str:
+    # Format first ({{BROKER_ENV}} collapses to {BROKER_ENV}), then splice the
+    # broker block in — it may contain literal braces (STAPEL_BUS_ROUTES JSON)
+    # that str.format must never see.
+    rendered = template.format(**ctx)
+    return rendered.replace("{BROKER_ENV}", _broker_env(broker, task_broker))
 
 
 MONOLITH_COMPOSE_BASE = """\

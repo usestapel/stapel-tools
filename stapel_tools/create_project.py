@@ -108,6 +108,17 @@ BROKER_ALLOWED = {
     "minimal": ("none",),
 }
 
+# Dedicated broker for long-running Tasks (--task-broker). "none" means
+# Tasks ride the Action transport (today's default). A monolith can keep
+# Actions in-process while task.* events go through NATS to a worker
+# (STAPEL_COMM["TASK_DISPATCH"]="bus"); microservices can split Tasks onto
+# Kafka while events stay on NATS (STAPEL_BUS_BACKEND=routing).
+TASK_BROKER_ALLOWED = {
+    "monolith": ("none", "nats"),
+    "microservices": ("none", "nats", "kafka"),
+    "minimal": ("none",),
+}
+
 
 def _transports_for(broker: str) -> tuple[str, str]:
     """(ACTION_TRANSPORT, FUNCTION_TRANSPORT) for a broker choice."""
@@ -221,7 +232,7 @@ def _write_shared_infra(project_dir: Path):
     ensure_script.chmod(0o755)
 
 
-def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str):
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none"):
     from .new_service import scaffold_service
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
@@ -235,12 +246,17 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
 
     slug = ctx["slug"]
     action_transport, function_transport = _transports_for(broker)
+    # A task broker in a broker-less monolith flips only the Task dispatch:
+    # Actions stay in-process, task.* events travel through the broker.
+    task_dispatch = "bus" if broker == "none" and task_broker != "none" else "action"
+    if task_broker == broker:
+        task_broker = "none"  # same broker — nothing extra to wire
 
     # docker-compose files
-    _write(project_dir / "docker-compose.base.yml", render_compose_base(MONOLITH_COMPOSE_BASE, broker))
+    _write(project_dir / "docker-compose.base.yml", render_compose_base(MONOLITH_COMPOSE_BASE, broker, task_broker))
     _write(project_dir / "docker-compose.yml", MONOLITH_COMPOSE_LOCAL)
     _write(project_dir / "docker-compose.dev.yml", MONOLITH_COMPOSE_DEV)
-    _write(project_dir / ".env.example", render_env(MONOLITH_ENV_TEMPLATE, broker, ctx))
+    _write(project_dir / ".env.example", render_env(MONOLITH_ENV_TEMPLATE, broker, ctx, task_broker))
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", f"{slug}\n")
     _write_shared_infra(project_dir)
@@ -256,6 +272,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         stapel_apps=stapel_apps,
         action_transport=action_transport,
         function_transport=function_transport,
+        task_dispatch=task_dispatch,
     )
 
 
@@ -296,7 +313,7 @@ def _create_minimal(project_dir: Path, ctx: dict):
     _write(project_dir / "apps" / module / "urls.py", "urlpatterns = []\n")
 
 
-def _create_microservices(project_dir: Path, ctx: dict, broker: str):
+def _create_microservices(project_dir: Path, ctx: dict, broker: str, task_broker: str = "none"):
     from ._compose_templates import (
         MICRO_COMPOSE_BASE,
         MICRO_COMPOSE_LOCAL,
@@ -305,9 +322,11 @@ def _create_microservices(project_dir: Path, ctx: dict, broker: str):
         render_compose_base,
         render_env,
     )
-    _write(project_dir / "docker-compose.base.yml", render_compose_base(MICRO_COMPOSE_BASE, broker))
+    if task_broker == broker:
+        task_broker = "none"  # same broker — nothing extra to wire
+    _write(project_dir / "docker-compose.base.yml", render_compose_base(MICRO_COMPOSE_BASE, broker, task_broker))
     _write(project_dir / "docker-compose.yml", MICRO_COMPOSE_LOCAL)
-    _write(project_dir / ".env.example", render_env(MICRO_ENV_TEMPLATE, broker, ctx))
+    _write(project_dir / ".env.example", render_env(MICRO_ENV_TEMPLATE, broker, ctx, task_broker))
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", "")
     _write_shared_infra(project_dir)
@@ -394,6 +413,7 @@ def create_project(
     use_submodules: bool = True,
     init_git: bool = True,
     broker: str | None = None,
+    task_broker: str | None = None,
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
@@ -405,6 +425,16 @@ def create_project(
         print(
             f"Error: broker '{broker}' is not valid for {project_type} projects "
             f"(allowed: {allowed})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    task_broker = task_broker or "none"
+    if task_broker not in TASK_BROKER_ALLOWED[project_type]:
+        allowed = ", ".join(TASK_BROKER_ALLOWED[project_type])
+        print(
+            f"Error: task broker '{task_broker}' is not valid for {project_type} "
+            f"projects (allowed: {allowed})",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -448,12 +478,12 @@ def create_project(
 
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker)
     elif project_type == "minimal":
         _create_minimal(project_dir, ctx)
         use_submodules = False  # minimal uses pip
     elif project_type == "microservices":
-        _create_microservices(project_dir, ctx, broker=broker)
+        _create_microservices(project_dir, ctx, broker=broker, task_broker=task_broker)
         if len(modules) > 1:
             print(
                 "  Note: feature modules are wired per-service. After "
@@ -532,6 +562,28 @@ def run_wizard() -> dict:
             },
             default="none",
         )
+
+    # Task broker — asked only where the answer differs from the event broker
+    # choice in a meaningful way.
+    task_broker = "none"
+    if project_type == "monolith" and broker == "none":
+        task_broker = _ask_choice(
+            "Task broker (broker for long-running Tasks)?",
+            {
+                "none": "none (in-process) — Tasks run where the requested-event lands",
+                "nats": "NATS — task.* events go through a broker to a dedicated worker",
+            },
+            default="none",
+        )
+    elif project_type == "microservices" and broker != "kafka":
+        task_broker = _ask_choice(
+            "Task broker?",
+            {
+                "none": f"same as events ({broker})",
+                "kafka": "Kafka — dedicated broker for task.* (hard retention/replay)",
+            },
+            default="none",
+        )
     url = _ask("Site URL", default=f"https://{_slugify(name)}.com")
     company_name = _ask("Company / sender name for emails", default=title)
     company_email = _ask("Company email address", default=f"hello@{_slugify(name)}.com")
@@ -560,6 +612,7 @@ def run_wizard() -> dict:
         "company_email": company_email,
         "modules": modules,
         "broker": broker,
+        "task_broker": task_broker,
     }
 
 
@@ -581,6 +634,14 @@ def main():
         "--broker", choices=["none", "nats", "kafka"],
         help="Event/RPC broker: minimal=none; monolith=none (default) or nats; "
              "microservices=nats (default) or kafka",
+    )
+    parser.add_argument(
+        "--task-broker", choices=["none", "nats", "kafka"],
+        help="Dedicated broker for long-running Tasks (default: none — Tasks "
+             "ride the Action transport). monolith: nats keeps Actions "
+             "in-process while task.* goes through NATS to a worker; "
+             "microservices: a broker differing from --broker routes task.* "
+             "to it via STAPEL_BUS_BACKEND=routing; minimal: none only",
     )
     parser.add_argument("--output-dir", type=Path, default=Path.cwd(), help="Parent directory for the project")
     parser.add_argument("--no-submodules", action="store_true", help="Use pip install instead of git submodules")
@@ -608,6 +669,7 @@ def main():
             "company_email": args.company_email,
             "modules": args.modules or [],
             "broker": args.broker,
+            "task_broker": args.task_broker,
         }
     else:
         # Wizard — pre-fill known values, ask for the rest
@@ -630,6 +692,8 @@ def main():
                 params["modules"] = args.modules
             if args.broker:
                 params["broker"] = args.broker
+            if args.task_broker:
+                params["task_broker"] = args.task_broker
         except (KeyboardInterrupt, EOFError):
             print("\nAborted.")
             sys.exit(0)
@@ -646,6 +710,7 @@ def main():
         use_submodules=not args.no_submodules,
         init_git=not args.no_git,
         broker=params.get("broker"),
+        task_broker=params.get("task_broker"),
     )
 
 
