@@ -14,6 +14,7 @@ dependencies = []
 stapel-lint = "stapel_tools.lint:main"
 stapel-new-service = "stapel_tools.new_service:main"
 stapel-new-module = "stapel_tools.new_module:main"
+stapel-new-library = "stapel_tools.new_library:main"
 stapel-remove-service = "stapel_tools.remove_service:main"
 stapel-create-project = "stapel_tools.create_project:main"
 

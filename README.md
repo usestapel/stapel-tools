@@ -41,6 +41,25 @@ stapel-new-service blog --celery
 stapel-new-service blog --dry-run
 ```
 
+### `stapel-new-library` — scaffold a standalone stapel-* package repo
+
+For contributing a new reusable package to the framework (or building your
+own to the same standard). Materializes the Stapel library standard: flat
+layout, `STAPEL_<NAME>` settings namespace, comm surface with JSON schemas,
+serializer seams, MODULE.md, community files, CI with the codecov
+ratchet/floor policy, ruff git hooks. The generated repo's own test suite
+is green out of the box.
+
+```bash
+stapel-new-library search                                 # L2 service module
+stapel-new-library attributes --kind library              # L1 importable lib
+stapel-new-library support-chat --title "Support chat" --dir ~/Projects
+```
+
+Kinds: `module` (default — Django app with models/views/comm surface;
+modules never import each other) and `library` (importable package without
+service identity, like stapel-attributes).
+
 ### `stapel-new-module` — add a Django app to a service
 
 ```bash
