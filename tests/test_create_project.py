@@ -1,4 +1,7 @@
 """Generator tests — per-primitive broker selection (--task-broker)."""
+import subprocess
+import sys
+
 import pytest
 
 from stapel_tools.create_project import create_project
@@ -193,6 +196,59 @@ class TestGeneratedRequirementPins:
         # No stale floor pointing at the untested 4.x/5.x lines.
         assert "django>=4.2" not in reqs
         assert "django>=5" not in reqs
+
+
+class TestOutboxHarness:
+    """G7: every generated project ships the transactional-outbox + file-mailtrap
+    integration harness (system-design §7.12.3 / §7.21) so no coder builds the
+    pattern from scratch."""
+
+    # Shared harness files, relative to the dir that owns the top-level tests
+    # package (project root for minimal, the service dir for a service).
+    HARNESS_FILES = [
+        "tests/__init__.py",
+        "tests/harness/__init__.py",
+        "tests/harness/outbox.py",
+        "tests/harness/wait.py",
+        "tests/harness/mailtrap.py",
+        "tests/test_outbox_harness_example.py",
+        "var/mailtrap/.gitkeep",
+    ]
+
+    def test_minimal_generates_harness_files(self, tmp_path):
+        proj = _create(tmp_path, "shop", "minimal", modules=["core"])
+        # Minimal keeps its conftest inside tests/.
+        for rel in [*self.HARNESS_FILES, "tests/conftest.py", "Makefile",
+                    "pyproject.toml"]:
+            assert (proj / rel).exists(), rel
+
+        settings = (proj / "core" / "settings.py").read_text()
+        assert "stapel_core.django.outbox" in settings
+        assert '"OUTBOX_ENABLED": True' in settings
+        assert "tests.harness.mailtrap.FileMailtrapBackend" in settings
+
+    def test_monolith_service_generates_harness_files(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core"])
+        svc = proj / "svc-app"
+        # Service conftest lives at the service root and carries the fixtures.
+        for rel in [*self.HARNESS_FILES, "conftest.py"]:
+            assert (svc / rel).exists(), rel
+        assert "drain_outbox" in (svc / "conftest.py").read_text()
+        assert "tests" in (svc / "pytest.ini").read_text().split("testpaths")[1]
+        dev = (svc / "core" / "settings" / "dev.py").read_text()
+        assert "FileMailtrapBackend" in dev
+
+    def test_minimal_harness_example_test_passes(self, tmp_path):
+        """The shipped example test proves the harness wiring end to end
+        (producer -> outbox row, drain -> effect, rollback -> no row, mailtrap)
+        in a scratch generation run with the current interpreter."""
+        proj = _create(tmp_path, "shop", "minimal", modules=["core"])
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest",
+             "tests/test_outbox_harness_example.py", "-q"],
+            cwd=proj, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
 
 class TestInvalidCombos:

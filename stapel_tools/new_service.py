@@ -25,7 +25,6 @@ from ._templates import (
     ASGI_PY,
     BASE_SETTINGS,
     BOOTSTRAP_SH,
-    CONFTEST_PY,
     DEV_SETTINGS,
     DOCKERFILE,
     LOCAL_SETTINGS,
@@ -165,8 +164,17 @@ def write_file(path: Path, content: str):
 
 
 def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
+    from ._harness_templates import HARNESS_CONFTEST_FIXTURES, harness_files
+
     d = ctx["DIR"]
     m = ctx["MODULE"]
+    # Service conftest = shared outbox/mailtrap harness fixtures + api_client.
+    service_conftest = HARNESS_CONFTEST_FIXTURES + (
+        "\n\n@pytest.fixture\n"
+        "def api_client():\n"
+        "    from rest_framework.test import APIClient\n\n"
+        "    return APIClient()\n"
+    )
     files = {
         root / d / "manage.py": render(MANAGE_PY, ctx),
         root / d / "version.txt": VERSION_TXT,
@@ -189,9 +197,12 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / m / "tests" / "__init__.py": "",
         root / d / m / "tests" / "test_models.py": render(TEST_MODELS_PY, ctx),
         root / d / "pytest.ini": render(PYTEST_INI, ctx),
-        root / d / "conftest.py": render(CONFTEST_PY, ctx),
+        root / d / "conftest.py": service_conftest,
+        root / d / "var" / "mailtrap" / ".gitkeep": "",
         root / f"{d}.yml": render(SERVICE_YML, ctx),
     }
+    # Outbox/mailtrap integration harness (G7, system-design §7.12.3 / §7.21).
+    files.update(harness_files(root / d / "tests"))
     return files
 
 

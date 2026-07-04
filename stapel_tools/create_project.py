@@ -277,9 +277,13 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
 
 
 def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None):
+    from ._harness_templates import harness_files
     from ._minimal_templates import (
+        MINIMAL_CONFTEST,
         MINIMAL_GITIGNORE,
+        MINIMAL_MAKEFILE,
         MINIMAL_MANAGE,
+        MINIMAL_PYPROJECT,
         MINIMAL_README,
         MINIMAL_REQUIREMENTS,
         MINIMAL_SETTINGS,
@@ -324,13 +328,25 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     _write(project_dir / "core" / "settings.py", r(MINIMAL_SETTINGS))
     _write(project_dir / "core" / "urls.py", r(MINIMAL_URLS))
     _write(project_dir / "core" / "wsgi.py",
-           "import os\nfrom django.core.wsgi import get_wsgi_application\n"
+           "import os\n\n"
+           "from django.core.wsgi import get_wsgi_application\n\n"
            "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')\n"
            "application = get_wsgi_application()\n")
     _write(project_dir / "apps" / module / "__init__.py", "")
-    _write(project_dir / "apps" / module / "models.py", "from django.db import models\n")
+    _write(project_dir / "apps" / module / "models.py",
+           "# Add your models here.\n# from django.db import models\n")
     _write(project_dir / "apps" / module / "views.py", "")
     _write(project_dir / "apps" / module / "urls.py", "urlpatterns = []\n")
+
+    # Controls + the outbox/mailtrap integration test harness (G7,
+    # system-design §7.12.3 / §7.21) — shipped in the template so no generated
+    # project has to build the pattern from scratch.
+    _write(project_dir / "Makefile", r(MINIMAL_MAKEFILE))
+    _write(project_dir / "pyproject.toml", MINIMAL_PYPROJECT)
+    _write(project_dir / "tests" / "conftest.py", r(MINIMAL_CONFTEST))
+    for path, content in harness_files(project_dir / "tests").items():
+        _write(path, content)
+    _write(project_dir / "var" / "mailtrap" / ".gitkeep", "")
 
 
 def _create_microservices(project_dir: Path, ctx: dict, broker: str, task_broker: str = "none"):

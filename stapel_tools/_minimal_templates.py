@@ -35,7 +35,10 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "drf_spectacular",{{STAPEL_APPS}}
+    "drf_spectacular",
+    # Transactional outbox — every stapel_core.comm.emit() writes through it
+    # (delivery guarantee + test harness, system-design §7.21).
+    "stapel_core.django.outbox",{{STAPEL_APPS}}
     "apps.{{MODULE}}",
 ]
 
@@ -87,11 +90,27 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "{{title}} — built with Stapel",
     "VERSION": "1.0.0",
 }
+
+USE_TZ = True
+
+# Inter-service comm + transactional outbox (docs: module-communication.md,
+# system-design §7.21). Every emit() writes an outbox row in the caller's
+# transaction; delivery runs after commit. Kept in-process for the minimal
+# preset — same at-least-once guarantee, no broker.
+STAPEL_COMM = {
+    "OUTBOX_ENABLED": True,
+    "ACTION_TRANSPORT": "inprocess",
+}
+
+# File mailtrap (dev/preview + async-consumer tests): outbound mail is written
+# to var/mailtrap/ as JSON instead of hitting SMTP, so it stays inspectable.
+MAILTRAP_DIR = BASE_DIR / "var" / "mailtrap"
+EMAIL_BACKEND = "tests.harness.mailtrap.FileMailtrapBackend"
 """
 
 MINIMAL_URLS = """\
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 
 urlpatterns = [
@@ -106,6 +125,12 @@ MINIMAL_REQUIREMENTS = """\
 django>=6,<7
 djangorestframework>=3.14,<4
 drf-spectacular>=0.27
+
+# Controls (make controls): lint + the outbox/mailtrap test harness.
+pytest>=7.4
+pytest-django>=4.7
+ruff>=0.4
+
 # Stapel core (choose one):
 # Option A — pip from GitHub:
 # stapel_core @ git+https://github.com/usestapel/stapel-core.git
@@ -123,6 +148,7 @@ venv/
 db.sqlite3
 media/
 staticfiles/
+var/mailtrap/*.json
 .DS_Store
 """
 
@@ -142,3 +168,104 @@ python manage.py runserver
 
 API docs: http://localhost:8000/api/docs/
 """
+
+MINIMAL_MAKEFILE = """\
+# {{title}} — project controls.
+# Override the interpreter: make controls PYTHON=/path/to/python
+PYTHON ?= python
+
+.PHONY: controls lint test openapi run
+
+controls: lint test
+
+lint:
+\t$(PYTHON) -m ruff check .
+
+test:
+\t$(PYTHON) -m pytest tests -q
+
+openapi:
+\t$(PYTHON) manage.py spectacular --format openapi-json --file openapi.json --validate
+
+run:
+\t$(PYTHON) manage.py migrate && $(PYTHON) manage.py runserver
+"""
+
+MINIMAL_PYPROJECT = """\
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+exclude = ["migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "apps", "tests"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "core.settings"
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+"""
+
+MINIMAL_CONFTEST = '''\
+"""Shared fixtures for the {{title}} test suite (architect-owned).
+
+Includes the outbox/mailtrap integration harness (system-design §7.21):
+`drain_outbox`, `mailtrap`, and in-process comm with the outbox enabled.
+"""
+import pytest
+from rest_framework.test import APIClient
+
+from tests.harness import clear_mailtrap, read_mailtrap
+from tests.harness import drain_outbox as _drain_outbox
+
+
+@pytest.fixture
+def api_client():
+    """Unauthenticated DRF API client."""
+    return APIClient()
+
+
+@pytest.fixture(autouse=True)
+def _reset_comm_registries():
+    """Isolate action subscribers between tests (the registry is process-global)."""
+    from stapel_core.comm import action_registry, function_registry
+
+    action_registry.clear()
+    function_registry.clear()
+    yield
+    action_registry.clear()
+    function_registry.clear()
+
+
+@pytest.fixture(autouse=True)
+def outbox_comm(settings):
+    """Run comm in-process with the transactional outbox ENABLED against the
+    test DB — the production delivery path (emit -> outbox row -> dispatch),
+    so producer/consumer/atomicity assertions exercise real behaviour."""
+    settings.STAPEL_COMM = {
+        **getattr(settings, "STAPEL_COMM", {}),
+        "OUTBOX_ENABLED": True,
+        "ACTION_TRANSPORT": "inprocess",
+    }
+
+
+@pytest.fixture
+def drain_outbox():
+    """Synchronously flush pending outbox rows through delivery (the test-time
+    stand-in for ``manage.py dispatch_outbox``). Returns rows delivered."""
+    return _drain_outbox
+
+
+@pytest.fixture
+def mailtrap(settings):
+    """File mailtrap: force the file email backend, clear var/mailtrap/, then
+    yield read_mailtrap(). pytest-django swaps EMAIL_BACKEND to locmem by
+    default; async-consumer tests assert on the on-disk trap instead."""
+    settings.EMAIL_BACKEND = "tests.harness.mailtrap.FileMailtrapBackend"
+    clear_mailtrap()
+    yield read_mailtrap
+    clear_mailtrap()
+'''

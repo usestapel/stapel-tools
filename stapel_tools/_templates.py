@@ -202,6 +202,11 @@ from .base import *  # noqa
 DEBUG = True
 ALLOWED_HOSTS += ["dev.{{SLUG}}.local"]
 
+# File mailtrap for local/dev + async-consumer tests (see tests/harness):
+# outbound mail is written to var/mailtrap/ as JSON instead of hitting SMTP.
+MAILTRAP_DIR = BASE_DIR / "var" / "mailtrap"
+EMAIL_BACKEND = "tests.harness.mailtrap.FileMailtrapBackend"
+
 if not SECRET_KEY:
     SECRET_KEY = "django-insecure-{{SLUG}}-dev-only"
     JWT_SECRET_KEY = JWT_SECRET_KEY or SECRET_KEY
@@ -282,7 +287,7 @@ DJANGO_SETTINGS_MODULE = core.settings.local
 python_files = tests.py test_*.py *_test.py
 python_classes = Test* *Tests
 python_functions = test_*
-testpaths = {{MODULE}}
+testpaths = {{MODULE}} tests
 """
 
 CONFTEST_PY = """\
