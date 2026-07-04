@@ -1,7 +1,6 @@
 # Changelog
 
-## [Unreleased]
-
+## 0.3.1 — 2026-07-04
 ### Added
 - `stapel-new-library` — scaffolds a standalone `stapel-*` package repo
   implementing the library standard (workspace `docs/library-standard.md`):
