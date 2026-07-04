@@ -151,6 +151,9 @@ def scaffold_library(
         f"  pip install -e . && pip install pytest pytest-django ruff\n"
         f"  pytest tests/   # scaffold suite is green out of the box\n"
         f"  # replace the ping example with your domain; keep MODULE.md in sync\n"
+        f"  # BEFORE the first vX.Y.Z tag: register a PyPI *pending* trusted publisher\n"
+        f"  #   (owner usestapel, this repo, workflow publish.yml, env pypi),\n"
+        f"  #   otherwise publish.yml fails with invalid-publisher\n"
     )
     if kind == "module":
         print(
