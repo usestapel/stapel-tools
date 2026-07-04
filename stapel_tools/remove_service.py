@@ -21,7 +21,6 @@ from typing import Optional
 
 from .new_service import find_project_root
 
-
 DRY_RUN = False
 
 

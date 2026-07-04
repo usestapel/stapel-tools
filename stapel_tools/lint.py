@@ -28,7 +28,6 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Iterator
 
-
 SKIP_DIRS = {
     "migrations",
     "__pycache__",

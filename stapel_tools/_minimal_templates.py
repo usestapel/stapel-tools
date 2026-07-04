@@ -35,7 +35,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "drf_spectacular",
+    "drf_spectacular",{{STAPEL_APPS}}
     "apps.{{MODULE}}",
 ]
 
@@ -98,13 +98,13 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     path("api/docs/", SpectacularSwaggerView.as_view(url_name="schema"), name="swagger-ui"),
-    path("api/", include("apps.{{MODULE}}.urls")),
+    path("api/", include("apps.{{MODULE}}.urls")),{{STAPEL_URL_INCLUDES}}
 ]
 """
 
 MINIMAL_REQUIREMENTS = """\
-django>=4.2,<5.0
-djangorestframework>=3.14
+django>=5.1,<6
+djangorestframework>=3.14,<4
 drf-spectacular>=0.27
 # Stapel core (choose one):
 # Option A — pip from GitHub:

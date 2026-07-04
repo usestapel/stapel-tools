@@ -20,12 +20,26 @@ from pathlib import Path
 from typing import Optional
 
 from ._templates import (
-    ADMIN_PY, APP_PY, ASGI_PY, BASE_SETTINGS, BOOTSTRAP_SH, CONFTEST_PY,
-    DEV_SETTINGS, DOCKERFILE, LOCAL_SETTINGS, MANAGE_PY, MODELS_PY,
-    PROD_SETTINGS, PYTEST_INI, REQUIREMENTS_TXT, SERVICE_YML, TEST_MODELS_PY,
-    URLS_PY, VERSION_TXT, WSGI_PY,
+    ADMIN_PY,
+    APP_PY,
+    ASGI_PY,
+    BASE_SETTINGS,
+    BOOTSTRAP_SH,
+    CONFTEST_PY,
+    DEV_SETTINGS,
+    DOCKERFILE,
+    LOCAL_SETTINGS,
+    MANAGE_PY,
+    MODELS_PY,
+    PROD_SETTINGS,
+    PYTEST_INI,
+    REQUIREMENTS_TXT,
+    SERVICE_YML,
+    TEST_MODELS_PY,
+    URLS_PY,
+    VERSION_TXT,
+    WSGI_PY,
 )
-
 
 # ---------------------------------------------------------------------------
 # Root detection

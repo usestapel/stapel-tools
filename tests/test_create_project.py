@@ -5,7 +5,7 @@ from stapel_tools.create_project import create_project
 from stapel_tools.new_service import _detect_transports, scaffold_service
 
 
-def _create(tmp_path, name, project_type, broker=None, task_broker=None):
+def _create(tmp_path, name, project_type, broker=None, task_broker=None, modules=None):
     create_project(
         name=name,
         project_type=project_type,
@@ -13,7 +13,7 @@ def _create(tmp_path, name, project_type, broker=None, task_broker=None):
         url="https://x.dev",
         company_name="X",
         company_email="x@x.dev",
-        modules=["core"],
+        modules=modules or ["core"],
         output_dir=tmp_path,
         use_submodules=False,
         init_git=False,
@@ -128,6 +128,65 @@ class TestMicroservicesTaskBroker:
         proj = _create(tmp_path, "app", "microservices", task_broker="kafka")
         # Actions ride the bus; Functions follow the default ("") route.
         assert _detect_transports(proj) == ("bus", "nats", "action")
+
+
+class TestModuleWiring:
+    """G10: a --modules choice must land in requirements AND be mounted in
+    INSTALLED_APPS AND urls — a dependency that is installed but never added
+    to INSTALLED_APPS is dead weight."""
+
+    def test_minimal_wires_module_everywhere(self, tmp_path):
+        proj = _create(tmp_path, "app", "minimal", modules=["core", "auth"])
+
+        reqs = (proj / "requirements.txt").read_text()
+        assert "stapel_auth @ git+" in reqs
+
+        settings = (proj / "core" / "settings.py").read_text()
+        assert '"stapel_auth",' in settings
+
+        urls = (proj / "core" / "urls.py").read_text()
+        assert 'include("stapel_auth.urls")' in urls
+
+    def test_minimal_wires_multiple_modules(self, tmp_path):
+        proj = _create(tmp_path, "app", "minimal", modules=["core", "auth", "billing"])
+
+        reqs = (proj / "requirements.txt").read_text()
+        settings = (proj / "core" / "settings.py").read_text()
+        urls = (proj / "core" / "urls.py").read_text()
+        for app in ("stapel_auth", "stapel_billing"):
+            assert f"{app} @ git+" in reqs
+            assert f'"{app}",' in settings
+            assert f'include("{app}.urls")' in urls
+
+    def test_minimal_no_modules_leaves_only_local_app(self, tmp_path):
+        proj = _create(tmp_path, "app", "minimal", modules=["core"])
+        settings = (proj / "core" / "settings.py").read_text()
+        assert "stapel_" not in settings
+        urls = (proj / "core" / "urls.py").read_text()
+        assert "stapel_" not in urls
+
+    def test_monolith_wires_module_everywhere(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "auth"])
+
+        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
+        assert '"stapel_auth",' in settings
+
+        urls = (proj / "svc-app" / "core" / "urls.py").read_text()
+        assert 'include("stapel_auth.urls")' in urls
+
+
+class TestGeneratedRequirementPins:
+    """G11: generated minimal requirements pin framework ranges matching what
+    stapel-core supports, so a fresh project cannot ride an incompatible
+    Django/DRF (version skew)."""
+
+    def test_minimal_pins_django_and_drf_ranges(self, tmp_path):
+        proj = _create(tmp_path, "app", "minimal", modules=["core"])
+        reqs = (proj / "requirements.txt").read_text()
+        assert "django>=5.1,<6" in reqs
+        assert "djangorestframework>=3.14" in reqs
+        # No unbounded / stale Django floor below what stapel-core needs.
+        assert "django>=4.2" not in reqs
 
 
 class TestInvalidCombos:

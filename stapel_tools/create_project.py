@@ -233,16 +233,16 @@ def _write_shared_infra(project_dir: Path):
 
 
 def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none"):
-    from .new_service import scaffold_service
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
-        MONOLITH_COMPOSE_LOCAL,
         MONOLITH_COMPOSE_DEV,
+        MONOLITH_COMPOSE_LOCAL,
         MONOLITH_ENV_TEMPLATE,
         MONOLITH_GITIGNORE,
         render_compose_base,
         render_env,
     )
+    from .new_service import scaffold_service
 
     slug = ctx["slug"]
     action_transport, function_transport = _transports_for(broker)
@@ -276,20 +276,40 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     )
 
 
-def _create_minimal(project_dir: Path, ctx: dict):
+def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None):
     from ._minimal_templates import (
+        MINIMAL_GITIGNORE,
         MINIMAL_MANAGE,
+        MINIMAL_README,
+        MINIMAL_REQUIREMENTS,
         MINIMAL_SETTINGS,
         MINIMAL_URLS,
-        MINIMAL_REQUIREMENTS,
-        MINIMAL_GITIGNORE,
-        MINIMAL_README,
     )
     slug = ctx["slug"]
     module = slug.replace("-", "_")
     module_cap = "".join(p.capitalize() for p in module.split("_"))
 
-    render_ctx = {**ctx, "MODULE": module, "MODULE_CAP": module_cap}
+    # Wire selected Stapel feature modules into INSTALLED_APPS + urls so the
+    # dependency written into requirements.txt is actually mounted (a module
+    # in requirements but absent from INSTALLED_APPS is dead weight). Each
+    # module is mounted under its own /<key>/api/ prefix, mirroring how
+    # stapel-example-monolith wires per-module url includes.
+    feature_modules = feature_modules or []
+    stapel_apps_block = "".join(
+        f'\n    "{STAPEL_LIBS[key]["dir"]}",' for key in feature_modules
+    )
+    url_includes = "".join(
+        f'\n    path("{key}/api/", include("{STAPEL_LIBS[key]["dir"]}.urls")),'
+        for key in feature_modules
+    )
+
+    render_ctx = {
+        **ctx,
+        "MODULE": module,
+        "MODULE_CAP": module_cap,
+        "STAPEL_APPS": stapel_apps_block,
+        "STAPEL_URL_INCLUDES": url_includes,
+    }
 
     def r(s):
         for k, v in render_ctx.items():
@@ -480,7 +500,7 @@ def create_project(
     if project_type == "monolith":
         _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker)
     elif project_type == "minimal":
-        _create_minimal(project_dir, ctx)
+        _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"])
         use_submodules = False  # minimal uses pip
     elif project_type == "microservices":
         _create_microservices(project_dir, ctx, broker=broker, task_broker=task_broker)
