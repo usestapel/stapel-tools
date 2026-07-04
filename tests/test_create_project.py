@@ -160,10 +160,14 @@ class TestModuleWiring:
 
     def test_minimal_no_modules_leaves_only_local_app(self, tmp_path):
         proj = _create(tmp_path, "app", "minimal", modules=["core"])
+        # stapel_core (outbox app) is always present; no FEATURE module
+        # (stapel_auth, stapel_billing, ...) may sneak in unrequested.
         settings = (proj / "core" / "settings.py").read_text()
-        assert "stapel_" not in settings
         urls = (proj / "core" / "urls.py").read_text()
-        assert "stapel_" not in urls
+        for key in ("auth", "billing", "cdn", "notifications", "profiles",
+                    "translate", "workspaces", "gdpr"):
+            assert f"stapel_{key}" not in settings
+            assert f"stapel_{key}" not in urls
 
     def test_monolith_wires_module_everywhere(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith", modules=["core", "auth"])
@@ -176,17 +180,19 @@ class TestModuleWiring:
 
 
 class TestGeneratedRequirementPins:
-    """G11: generated minimal requirements pin framework ranges matching what
-    stapel-core supports, so a fresh project cannot ride an incompatible
-    Django/DRF (version skew)."""
+    """G11: generated minimal requirements pin the Django line the stapel
+    suites are actually validated on — Django 6.x (workspace venv and the
+    source codebases run 6; 5.x is untested) — so a fresh project cannot
+    ride an incompatible or untested Django/DRF (version skew)."""
 
     def test_minimal_pins_django_and_drf_ranges(self, tmp_path):
         proj = _create(tmp_path, "app", "minimal", modules=["core"])
         reqs = (proj / "requirements.txt").read_text()
-        assert "django>=5.1,<6" in reqs
+        assert "django>=6,<7" in reqs
         assert "djangorestframework>=3.14" in reqs
-        # No unbounded / stale Django floor below what stapel-core needs.
+        # No stale floor pointing at the untested 4.x/5.x lines.
         assert "django>=4.2" not in reqs
+        assert "django>=5" not in reqs
 
 
 class TestInvalidCombos:

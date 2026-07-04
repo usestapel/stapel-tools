@@ -10,10 +10,13 @@
   stapel-example-monolith mounts per-module urls. (Monolith already wired
   modules via the service scaffold — covered by new regression tests.)
 - Generated **minimal** `requirements.txt` now pins framework ranges
-  (`django>=5.1,<6`, `djangorestframework>=3.14,<4`) matching what stapel-core
-  supports, instead of the stale `django>=4.2,<5.0` floor that let a fresh
-  project ride a Django below stapel-core's `>=5.1` requirement (G11,
-  version skew).
+  (`django>=6,<7`, `djangorestframework>=3.14,<4`) — the Django line every
+  stapel suite is actually validated on (the source codebases and the
+  workspace venv run Django 6; 5.1/5.2 has never been tested) — instead of
+  the stale `django>=4.2,<5.0` floor that let a fresh project ride an
+  untested Django (G11, version skew). Note: stapel-core still declares
+  `Django>=5.1`, an untested claim tracked in
+  docs/module-extension-gaps.md.
 
 ## 0.3.1 — 2026-07-04
 ### Added

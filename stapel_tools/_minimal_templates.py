@@ -103,7 +103,7 @@ urlpatterns = [
 """
 
 MINIMAL_REQUIREMENTS = """\
-django>=5.1,<6
+django>=6,<7
 djangorestframework>=3.14,<4
 drf-spectacular>=0.27
 # Stapel core (choose one):
