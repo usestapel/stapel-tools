@@ -76,6 +76,29 @@ stapel-remove-service auth --prefix iron- --yes
 stapel-remove-service auth --dry-run
 ```
 
+### `stapel-codegen` — emit the frontend codegen source artifacts
+
+Runs *inside* a configured all-modules Django instance (e.g.
+stapel-example-monolith on sqlite) and emits the two language-agnostic backend
+artifacts the frontend TS client is generated from (docs/flow-system.md §0.1):
+
+- `schema.json` — the unified drf-spectacular OpenAPI for every installed
+  module (same document the instance serves at `/schema/`, produced offline via
+  the `spectacular` management command — no server, byte-stable).
+- `flows.json` — the `generate_flow_docs` machine artifact.
+
+Both use a byte-stable JSON encoding, so regenerating without a code change
+yields zero diff — the invariant a drift gate rests on.
+
+```bash
+DJANGO_ENV=local DJANGO_SETTINGS_MODULE=core.settings.codegen \
+    python -m stapel_tools.codegen --out codegen/generated
+```
+
+In stapel-example-monolith this is wrapped as `make codegen` (regenerate) and
+`make codegen-check` (drift gate). The generated `schema.json` then feeds
+`stapel-react`'s `pnpm gen:api` (openapi-typescript → typed `@stapel/core` API).
+
 ### `stapel-lint` — project-specific static linter
 
 ```bash
