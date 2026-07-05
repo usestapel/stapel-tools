@@ -10,7 +10,6 @@ output.
 import json
 
 import django
-import pytest
 from django.conf import settings
 
 if not settings.configured:

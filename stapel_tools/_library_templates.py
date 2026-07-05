@@ -22,13 +22,27 @@ license = { text = "MIT" }
 requires-python = ">=3.11"
 keywords = ["django", "stapel", "{{SLUG}}"]
 classifiers = [
+    "Development Status :: 4 - Beta",
     "Framework :: Django",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
 ]
 dependencies = [
     "stapel-core>=0.3.0,<0.4",
 ]
+
+[project.urls]
+Homepage = "https://github.com/usestapel/{{NAME_DASH}}"
+Repository = "https://github.com/usestapel/{{NAME_DASH}}"
+Documentation = "https://github.com/usestapel/{{NAME_DASH}}#readme"
+Changelog = "https://github.com/usestapel/{{NAME_DASH}}/blob/main/CHANGELOG.md"
+Issues = "https://github.com/usestapel/{{NAME_DASH}}/issues"
 
 [project.optional-dependencies]
 all = []
@@ -39,6 +53,14 @@ packages = [{{PACKAGES}}]
 
 [tool.setuptools.package-data]
 {{PKG}} = ["py.typed"{{PACKAGE_DATA_EXTRA}}]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# Single source for the git hooks and CI (they pass the same flags on the CLI).
+select = ["E", "F", "W"]
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 django_find_project = false
@@ -828,6 +850,16 @@ build/
 .env
 *.sqlite3
 .coverage
+coverage.xml
 htmlcov/
+junit.xml
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# editor / OS cruft
+.DS_Store
+
+# build/test stderr scratch
+*.err
 '''

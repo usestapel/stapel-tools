@@ -55,10 +55,13 @@ def file_plan(kind: str, ctx: dict) -> dict:
     """Relative path -> rendered content for the chosen kind."""
     module_only = kind == "module"
 
-    packages = [ctx["PKG"], f"{ctx['PKG']}.tests"]
+    # Tests are deliberately NOT listed as a shipped package: they must not
+    # land in the wheel/sdist (top-tier hygiene). The flat-layout editable
+    # install still resolves ``{{PKG}}.tests.urls`` for the test ROOT_URLCONF.
+    packages = [ctx["PKG"]]
     package_data_extra = ""
     if module_only:
-        packages.insert(1, f"{ctx['PKG']}.migrations")
+        packages.append(f"{ctx['PKG']}.migrations")
         package_data_extra = ', "migrations/*.py", "schemas/**/*.json"'
     ctx = {
         **ctx,

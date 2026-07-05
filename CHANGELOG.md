@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 
+### Changed
+- `stapel-new-library` artifact hygiene (top-tier packaging): the generated
+  `tests` package is no longer listed in `[tool.setuptools] packages`, so test
+  files and `conftest.py` no longer ship inside the built wheel/sdist (the
+  flat-layout editable install still resolves `<pkg>.tests.urls` for the test
+  `ROOT_URLCONF`, so the scaffold suite stays green). Generated `pyproject.toml`
+  now carries a full `[project.urls]` block, completed trove classifiers
+  (`License :: OSI Approved :: MIT License`, Python 3.13, `Typing :: Typed`,
+  `Intended Audience`, `Operating System`, `Development Status`,
+  `Python :: 3 :: Only`) matching the CI matrix, and a `[tool.ruff]` section
+  single-sourcing the lint config the git hooks/CI pass on the CLI. Generated
+  `.gitignore` now also covers `.ruff_cache/`, `.mypy_cache/`, `coverage.xml`,
+  `junit.xml`, `.DS_Store` and `*.err`.
+- Dropped an unused `pytest` import in `tests/test_codegen.py` (ruff F401).
+
 ### Fixed
 - `stapel-create-project --modules <mod>` on **minimal** projects now wires each
   chosen module into `INSTALLED_APPS` and mounts its urls under `/<mod>/api/`,
