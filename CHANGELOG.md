@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.0] — 2026-07-06
+
+### Added — i18n doc-link lint rule + seed export (i18n-shipping wave 0)
+- **`stapel-lint` R100** (WARNING) — when a repo carries i18n artifacts, its
+  README must link the docs in *each* language (i18n-shipping.md §4): if
+  `docs/flows/` exists, a link per flow-doc language (en + ru at minimum); if
+  `docs/errors.json` or any `docs/errors.<lang>.md` exists, a link per error
+  language. Emitted at warning level — the convention is rolling out (W→E after
+  the sweep), so `stapel-lint` now exits non-zero only on *error*-level
+  violations; warnings are printed but non-blocking. `Violation` gained a
+  `level` field (`"error"` default). Repo-level checks (README ↔ artifacts) run
+  once per directory root, alongside the existing per-file AST rules.
+- **`stapel-i18n-seed`** — one-shot export of a `translate_catalogs` seed from
+  the curated `stapel-translate` builtin fixtures
+  (`fixtures/builtin/<lang>.json`): `--fixtures DIR --domain {errors,notifications}
+  --lang X [--out FILE]` projects the flat corpus, filtered to the domain's key
+  prefix, into a byte-stable seed file (sorted keys, matches
+  `stapel_core.i18n.dump_catalog`). This is how the first ru of a module's
+  errors is *copied* from the paid-for corpus rather than re-translated
+  (i18n-shipping.md §5, requirement "clients don't spend tokens").
+
 ## [0.6.1] — 2026-07-06
 
 ### Fixed

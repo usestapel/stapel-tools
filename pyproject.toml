@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.6.1"
+version = "0.7.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -20,6 +20,7 @@ stapel-remove-service = "stapel_tools.remove_service:main"
 stapel-create-project = "stapel_tools.create_project:main"
 stapel-codegen = "stapel_tools.codegen:main"
 stapel-analytics-report = "stapel_tools.analytics_report:main"
+stapel-i18n-seed = "stapel_tools.i18n_seed:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
