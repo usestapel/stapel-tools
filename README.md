@@ -60,6 +60,32 @@ Kinds: `module` (default — Django app with models/views/comm surface;
 modules never import each other) and `library` (importable package without
 service identity, like stapel-attributes).
 
+### `stapel-new-react-lib` — scaffold a headless `@stapel/<module>-react` pair
+
+The frontend counterpart to `stapel-new-library`: materializes a headless
+React/TS pair from the auth-react etalon (frontend-standard §9,
+frontend-core-architecture §4 checklist) into a stapel-react monorepo
+(`packages/<module>-react`). Emits the layer stack `api → model → flows →
+headless → i18n`, namespaced query keys, the `create<Module>Runtime` /
+`<Module>Provider` wiring, a module-scoped i18n bundle + errors map, a vitest
+smoke suite, and full package hygiene (ESM, `sideEffects:false`,
+`isolatedDeclarations`, src-in-tarball, size-limit, `manifest`/`llms.txt`
+exports). The `createFlowMachine` primitive is imported from `@stapel/core`,
+never copied.
+
+```bash
+stapel-new-react-lib notifications                        # → @stapel/notifications-react
+stapel-new-react-lib billing --title "Billing"            # backend defaults to stapel-billing
+stapel-new-react-lib profiles --react-dir ~/Projects/stapel/stapel-react
+```
+
+Fork-free: the generated `package.json` wires the monorepo's env-parametrized
+codegen drivers (`scripts/gen-{flows,errors,manifest}.mjs`) via env knobs
+rather than duplicating them. Each pair owns three per-package drift gates
+(`gen:{flows,errors,manifest}:check`); `gen:api` is core-owned. After
+scaffolding: `pnpm install && pnpm --filter @stapel/<module>-react gen build
+lint test`.
+
 ### `stapel-new-module` — add a Django app to a service
 
 ```bash

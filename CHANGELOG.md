@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0]
+
+### Added
+- `stapel-new-react-lib <module>` — scaffold a headless `@stapel/<module>-react`
+  pair into a stapel-react monorepo, from the auth-react etalon (frontend-standard
+  §9, frontend-core-architecture §4 checklist). Emits the full layer stack
+  (`api → model → flows → headless → i18n`), namespaced query keys, the
+  `create<Module>Runtime`/`<Module>Provider` wiring, the module-scoped
+  `toFlowError`/i18n bundle, an errors map with `explain<Module>Error`, a vitest
+  smoke suite, and package hygiene (ESM, `sideEffects:false`, `isolatedDeclarations`,
+  src-in-tarball, size-limit, exports for `manifest`/`llms.txt`). The
+  `createFlowMachine` primitive is IMPORTED from `@stapel/core`, never copied.
+  Fork-free: the generated `package.json` wires the etalon's env-parametrized
+  monorepo drivers (`scripts/gen-{flows,errors,manifest}.mjs`) via env knobs
+  (`FLOW_MODULE`, `ERRORS_*`, `MANIFEST_*`) rather than duplicating codegen — a
+  pair owns three per-package drift gates (`gen:{flows,errors,manifest}:check`);
+  `gen:api` stays core-owned. Usage: `stapel-new-react-lib notifications
+  [--backend stapel-notifications] [--path-prefix /notifications/api/]
+  [--react-dir <stapel-react>]`.
+
 ## [Unreleased]
 
 ### Changed
