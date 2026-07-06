@@ -223,30 +223,42 @@ def _update_services_conf(root: Path, slug: str):
 
 
 def _update_stapel_services(root: Path, slug: str, title: str):
-    """Update STAPEL_SERVICES in any project-owned config.py."""
-    candidates = [
-        cfg for cfg in root.rglob("config.py")
-        # Skip vendored library checkouts (stapel_* submodules) — patching
-        # framework source from the scaffolder corrupts the submodule tree.
-        if not any(part.startswith("stapel_") for part in cfg.relative_to(root).parts[:-1])
-    ]
-    for cfg in candidates:
-        text = cfg.read_text()
-        if "STAPEL_SERVICES" not in text:
+    """Append this service to the STAPEL_SERVICES env-JSON (admin-suite AS-4).
+
+    The service navigation registry moved out of framework code into a
+    deploy-config env-JSON (12-factor, read by both Python and the non-Django
+    agent service). stapel-create-project seeds ``STAPEL_SERVICES=[]`` in the
+    project ``.env`` / ``.env.example``; each new service appends a row — the
+    same discipline as ``STAPEL_BUS_ROUTES``. Idempotent: a service already
+    present (by prefix) is left untouched.
+    """
+    svc_name = title or "".join(
+        p.capitalize() for p in slug.replace("-", "_").split("_")
+    )
+    for filename in (".env", ".env.example"):
+        path = root / filename
+        if not path.exists():
             continue
-        if slug in text:
-            continue
-        pattern = r"(STAPEL_SERVICES\s*=\s*\[\s*)([^\]]*)(\])"
-        m = re.search(pattern, text, re.DOTALL)
-        if not m:
-            continue
-        svc_name = "".join(p.capitalize() for p in slug.replace("-", "_").split("_"))
-        entry = f"    {{'name': '{svc_name}', 'prefix': '{slug}'}},\n"
-        new_block = m.group(1) + m.group(2) + entry + m.group(3)
-        text = re.sub(pattern, new_block, text, flags=re.DOTALL)
-        cfg.write_text(text)
-        print(f"  updated {cfg.relative_to(root)}")
-        break
+        lines = path.read_text().splitlines()
+        for i, line in enumerate(lines):
+            if not line.lstrip().startswith("STAPEL_SERVICES="):
+                continue
+            _, _, raw = line.partition("=")
+            try:
+                services = json.loads(raw) if raw.strip() else []
+            except json.JSONDecodeError:
+                break  # malformed — leave for the operator, don't clobber
+            if not isinstance(services, list):
+                break
+            if any(
+                isinstance(s, dict) and s.get("prefix") == slug for s in services
+            ):
+                break  # already registered — idempotent
+            services.append({"name": svc_name, "prefix": slug})
+            lines[i] = f"STAPEL_SERVICES={json.dumps(services)}"
+            path.write_text("\n".join(lines) + "\n")
+            print(f"  updated {filename} (STAPEL_SERVICES)")
+            break
 
 
 def _update_compose_base(root: Path, slug: str, dir_name: str):

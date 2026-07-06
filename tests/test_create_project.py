@@ -1,4 +1,5 @@
 """Generator tests — per-primitive broker selection (--task-broker)."""
+import json
 import subprocess
 import sys
 
@@ -289,6 +290,58 @@ class TestMountConventions:
         assert 'LOGIN_REDIRECT_URL = "admin:index"' in settings
         assert 'STAPEL_AUTH_SERVICE_PREFIX = os.getenv("STAPEL_AUTH_SERVICE_PREFIX", "")' in settings
         assert 'getattr(settings, "STAPEL_AUTH_SERVICE_PREFIX", "")' in urls
+
+
+class TestStapelServicesEnv:
+    """admin-suite AS-4: the service-navigation registry is a deploy-config
+    env-JSON, seeded by create-project and appended by new-service — not a
+    framework hardcode."""
+
+    def test_monolith_seeds_single_service(self, tmp_path):
+        proj = _create(tmp_path, "shop", "monolith")
+        env = (proj / ".env.example").read_text()
+        line = next(
+            ln for ln in env.splitlines() if ln.startswith("STAPEL_SERVICES=")
+        )
+        services = json.loads(line.split("=", 1)[1])
+        # A monolith is one service; the generated URL_PREFIX is the slug, so
+        # the seed carries that prefix (scaffold_service's append is a no-op —
+        # idempotent on the already-present prefix).
+        assert services == [{"name": "shop", "prefix": "shop"}]
+
+    def test_microservices_seeds_empty_then_new_service_appends(self, tmp_path):
+        proj = _create(tmp_path, "app", "microservices")
+        env = (proj / ".env.example").read_text()
+        assert "STAPEL_SERVICES=[]" in env
+
+        scaffold_service(slug="auth", title="Auth", prefix="svc-", project_root=proj)
+        scaffold_service(
+            slug="billing", title="Billing", prefix="svc-", project_root=proj
+        )
+        line = next(
+            ln for ln in (proj / ".env.example").read_text().splitlines()
+            if ln.startswith("STAPEL_SERVICES=")
+        )
+        services = json.loads(line.split("=", 1)[1])
+        assert services == [
+            {"name": "Auth", "prefix": "auth"},
+            {"name": "Billing", "prefix": "billing"},
+        ]
+
+    def test_new_service_is_idempotent(self, tmp_path):
+        proj = _create(tmp_path, "app", "microservices")
+        scaffold_service(slug="auth", title="Auth", prefix="svc-", project_root=proj)
+        # Re-registering the same prefix must not duplicate the row.
+        from stapel_tools.new_service import _update_stapel_services
+
+        _update_stapel_services(proj, "auth", "Auth")
+        line = next(
+            ln for ln in (proj / ".env.example").read_text().splitlines()
+            if ln.startswith("STAPEL_SERVICES=")
+        )
+        assert json.loads(line.split("=", 1)[1]) == [
+            {"name": "Auth", "prefix": "auth"}
+        ]
 
 
 class TestAppLabelCollision:

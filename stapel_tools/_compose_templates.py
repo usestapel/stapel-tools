@@ -253,6 +253,13 @@ JWT_SECRET_KEY=change_me_to_another_long_random_string
 ALLOWED_HOSTS={domain}
 SITE_URL={url}
 
+# ─── Service navigation (admin-suite AS-4) ──────────────────────────────────
+# The admin/Swagger "Services" menu is driven by this deploy-config env-JSON.
+# A monolith is a single service (one admin); the menu's "All Services"
+# section collapses. Add tool/monitoring links via STAPEL_ADMIN["NAV_LINKS"]
+# in settings.
+STAPEL_SERVICES=[{{"name": "{title}", "prefix": "{slug}"}}]
+
 # ─── Email ─────────────────────────────────────────────────────────────────
 DEFAULT_FROM_EMAIL={company_name} <{company_email}>
 EMAIL_HOST=smtp.example.com
@@ -360,6 +367,13 @@ SECRET_KEY=change_me_to_a_long_random_string
 JWT_SECRET_KEY=change_me_to_another_long_random_string
 ALLOWED_HOSTS={domain}
 SITE_URL={url}
+
+# ─── Service navigation (admin-suite AS-4) ──────────────────────────────────
+# The admin/Swagger "Services" menu is driven by this deploy-config env-JSON,
+# shared verbatim across every service (compose passes the same .env to all).
+# stapel-new-service appends a row here; add tool/monitoring links via
+# STAPEL_ADMIN["NAV_LINKS"] in settings.
+STAPEL_SERVICES=[]
 
 # ─── Email ─────────────────────────────────────────────────────────────────
 DEFAULT_FROM_EMAIL={company_name} <{company_email}>

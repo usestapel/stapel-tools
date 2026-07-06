@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.8.3] — 2026-07-06
+
+### Changed — generators write the service-navigation registry as env-JSON (admin-suite AS-4)
+The service list feeding the admin/Swagger "Services" menu moved out of
+framework code (`stapel_core.core.config.STAPEL_SERVICES`, now removed) into a
+deploy-config env-JSON. The generators own it:
+- **`stapel-create-project`** seeds `STAPEL_SERVICES` in the project `.env` /
+  `.env.example`: a monolith gets its single service
+  (`[{"name": "<Title>", "prefix": "<slug>"}]`, "All Services" collapses); a
+  microservices project gets an empty `STAPEL_SERVICES=[]` for `new-service`
+  to fill.
+- **`stapel-new-service`** now appends `{"name", "prefix"}` to that env-JSON
+  (idempotent by prefix) — the same discipline as `STAPEL_BUS_ROUTES` —
+  instead of patching a project-owned `config.py`'s `STAPEL_SERVICES` list
+  (the old, largely-dormant behavior, removed).
+- Tests: `TestStapelServicesEnv` (monolith seed, microservices empty-then-
+  append, idempotent re-registration).
+
 ## [0.8.2] — 2026-07-06
 
 ### Fixed — three scaffold defects (generated output was dishonest / uncollectable)
