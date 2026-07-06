@@ -280,6 +280,7 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     from ._harness_templates import harness_files
     from ._minimal_templates import (
         MINIMAL_CONFTEST,
+        MINIMAL_ENV_EXAMPLE,
         MINIMAL_GITIGNORE,
         MINIMAL_MAKEFILE,
         MINIMAL_MANAGE,
@@ -324,6 +325,11 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     _write(project_dir / "requirements.txt", r(MINIMAL_REQUIREMENTS))
     _write(project_dir / ".gitignore", MINIMAL_GITIGNORE)
     _write(project_dir / "README.md", r(MINIMAL_README))
+    # .env.example keeps a placeholder SECRET_KEY (committed); the shared
+    # _write_env_from_ctx() call in create_project() turns it into a real
+    # .env with a freshly generated secret (SEC-6), same as monolith/
+    # microservices.
+    _write(project_dir / ".env.example", MINIMAL_ENV_EXAMPLE)
     _write(project_dir / "core" / "__init__.py", "")
     _write(project_dir / "core" / "settings.py", r(MINIMAL_SETTINGS))
     _write(project_dir / "core" / "urls.py", r(MINIMAL_URLS))
@@ -546,6 +552,9 @@ def create_project(
         print("  initial commit created")
 
     print(f"\nProject '{name}' created at {project_dir}/")
+    # .env was already created from .env.example with freshly generated
+    # secrets (SEC-6) — don't tell the user to re-copy .env.example over it,
+    # that would clobber the generated secrets with the shipped placeholders.
     if project_type == "minimal":
         print("  cd", project_dir)
         print("  python -m venv .venv && source .venv/bin/activate")
@@ -553,7 +562,8 @@ def create_project(
         print("  python manage.py migrate && python manage.py runserver")
     else:
         print("  cd", project_dir)
-        print("  cp .env.example .env  # fill in secrets")
+        print("  # .env already created with generated secrets (SECRET_KEY, "
+              "JWT_SECRET_KEY, POSTGRES_PASSWORD) — review, then:")
         print("  docker compose up -d")
 
 

@@ -23,9 +23,40 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv("SECRET_KEY", "django-insecure-change-this-in-production")
-DEBUG = os.getenv("DEBUG", "true").lower() in ("true", "1", "yes")
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
+# NOT FOR PRODUCTION BY DEFAULT: this preset (SQLite, no Docker) is meant for
+# local development. Nothing stops deploying it as-is, so DJANGO_ENV=prod
+# below turns on the same hardening the monolith/microservices presets ship
+# (security-programme.md SEC-4/B8) — set it explicitly if you deploy this.
+DJANGO_ENV = os.getenv("DJANGO_ENV", "local")
+_IS_PROD = DJANGO_ENV == "prod"
+
+# stapel-create-project (SEC-6) writes a freshly generated random value into
+# .env at project creation; this fallback only matters for a hand-copied
+# .env.example, and DJANGO_ENV=prod refuses to boot on it (see guard_secret
+# below) instead of silently running with a guessable key.
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+if not SECRET_KEY and not _IS_PROD:
+    SECRET_KEY = "django-insecure-{{slug}}-dev-only"
+
+DEBUG = os.getenv("DEBUG", "false" if _IS_PROD else "true").lower() in ("true", "1", "yes")
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "" if _IS_PROD else "*").split(",")
+
+if _IS_PROD:
+    from stapel_core.django.prodguard import guard_secret
+
+    guard_secret("SECRET_KEY", SECRET_KEY)
+
+    DEBUG = False
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True").lower() == "true"
+    # HSTS ramp — conservative default, no subdomains/preload; raise once
+    # HTTPS is verified stable (see the monolith/microservices prod.py
+    # template comment for the full rationale; security-programme.md SEC-4).
+    SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "86400"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+    SECURE_CONTENT_TYPE_NOSNIFF = True
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -51,6 +82,27 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+if _IS_PROD:
+    # Content-Security-Policy — report-only by default (Django's native CSP
+    # middleware, Django>=6; this preset already pins django>=6,<7). Strict
+    # enforcement can break django-admin's inline scripts/styles without
+    # per-project tuning, so this ships observing violations rather than
+    # blocking them — see the monolith/microservices prod.py template for
+    # the full rationale (security-programme.md §8.4, open question).
+    try:
+        from django.utils.csp import CSP
+
+        MIDDLEWARE = MIDDLEWARE + ["django.middleware.csp.ContentSecurityPolicyMiddleware"]
+        SECURE_CSP_REPORT_ONLY = {
+            "default-src": [CSP.SELF],
+            "script-src": [CSP.SELF],
+            "style-src": [CSP.SELF, CSP.UNSAFE_INLINE],
+            "img-src": [CSP.SELF, "data:"],
+            "font-src": [CSP.SELF],
+        }
+    except ImportError:
+        pass
 
 ROOT_URLCONF = "core.urls"
 WSGI_APPLICATION = "core.wsgi.application"
@@ -152,10 +204,32 @@ var/mailtrap/*.json
 .DS_Store
 """
 
+MINIMAL_ENV_EXAMPLE = """\
+# .env is created automatically from this file at project creation, with a
+# freshly generated SECRET_KEY (security-programme.md SEC-6). This file
+# (.env.example) keeps a placeholder and is safe to commit; .env is
+# gitignored.
+SECRET_KEY=change_me_to_a_long_random_string
+
+# local (default) — DEBUG on, ALLOWED_HOSTS=* — this preset is NOT FOR
+# PRODUCTION by default (SQLite, no Docker). Deploying it is possible but
+# not the intended path; if you do, set DJANGO_ENV=prod: DEBUG turns off,
+# SECURE_SSL_REDIRECT/HSTS/CSP-report-only turn on, and SECRET_KEY is
+# guarded against placeholders/short values (see core/settings.py).
+DJANGO_ENV=local
+DEBUG=true
+ALLOWED_HOSTS=*
+"""
+
 MINIMAL_README = """\
 # {{title}}
 
 Minimal Stapel/Django project — SQLite, no Docker.
+
+**NOT FOR PRODUCTION by default.** This preset is meant for local
+development; nothing stops deploying it, but the settings module only turns
+on TLS/HSTS/CSP hardening and the placeholder-secret guard when
+`DJANGO_ENV=prod` is set (security-programme.md SEC-4/B8) — see `.env.example`.
 
 ## Quick start
 
@@ -166,7 +240,8 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-API docs: http://localhost:8000/api/docs/
+`.env` was already created from `.env.example` with a freshly generated
+`SECRET_KEY`. API docs: http://localhost:8000/api/docs/
 """
 
 MINIMAL_MAKEFILE = """\

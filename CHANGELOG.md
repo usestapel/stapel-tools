@@ -20,7 +20,48 @@
   [--backend stapel-notifications] [--path-prefix /notifications/api/]
   [--react-dir <stapel-react>]`.
 
-## [Unreleased]
+## [0.5.1] — 2026-07-06
+
+### Added — settings hardening + generated secrets (SEC-4/SEC-6)
+- **prod settings tier (monolith/microservices `core/settings/prod.py`):**
+  `SECURE_SSL_REDIRECT=True`, a conservative `SECURE_HSTS_SECONDS=86400`
+  (no `include_subdomains`, no `preload` — both one-way doors, left for the
+  deploying team to decide; ramp to `31536000` once HTTPS is verified
+  stable), `SECURE_CONTENT_TYPE_NOSNIFF=True`, and `JWT_COOKIE_SECURE=True`
+  alongside the existing `SESSION_COOKIE_SECURE`/`CSRF_COOKIE_SECURE`
+  (security-programme.md gaps B1/B3). Also ships a report-only
+  Content-Security-Policy (Django's native CSP middleware, Django>=6; a
+  `default-src 'self'`-based policy) — report-only because a strict enforced
+  policy can break django-admin/Vite inline scripts without per-project
+  tuning (gap B7, §8.4 open question); the CSP block is skipped gracefully
+  (`try`/`except ImportError`) on Django<6.
+- **`stapel_core.django.prodguard` (new in stapel-core 0.8.1-unreleased)**
+  wired into prod settings: `guard_secret` rejects an empty, `change_me*`-
+  or `django-insecure-`-prefixed, or under-50-character `SECRET_KEY`/
+  `JWT_SECRET_KEY`; `guard_db_password` rejects the shipped
+  `POSTGRES_PASSWORD` placeholder/dev-default (`change_me`/`stapel`). The
+  previous inline guard only caught an empty or `django-insecure-`-prefixed
+  `SECRET_KEY` — the actual `.env.example` placeholder
+  (`change_me_to_a_long_random_string`) sailed straight through (gap B2/B6).
+- **Minimal preset now has a prod profile** (previously none at all, gap
+  B8): `core/settings.py` gains a `DJANGO_ENV` switch (default `local`,
+  unaffected DX — `DEBUG`/`ALLOWED_HOSTS` behave exactly as before) and a
+  `DJANGO_ENV=prod` branch applying the same `SECURE_*`/HSTS/CSP-report-only
+  hardening and `guard_secret` check as the monolith/microservices tiers.
+  `.env.example`/README now carry a "NOT FOR PRODUCTION by default" banner.
+  The hardcoded insecure `SECRET_KEY` fallback is gone — it only applies
+  outside `DJANGO_ENV=prod`, same shape as the monolith/microservices dev
+  fallback.
+- **`stapel-create-project` now generates `.env` (with a fresh random
+  `SECRET_KEY`) for the minimal preset too** (SEC-6) — previously only
+  monolith/microservices got generated secrets; minimal fell through to the
+  hardcoded dev-only fallback with no `.env` at all. `.env.example` keeps
+  the placeholder (safe to commit); `.env` is gitignored, as before.
+- Fixed the post-generation guidance for monolith/microservices: it used to
+  print `cp .env.example .env  # fill in secrets`, which — followed
+  literally — would overwrite the already-generated random secrets with the
+  committed placeholders right back. Now states `.env` was already created
+  with generated secrets.
 
 ### Changed
 - `stapel-new-library` artifact hygiene (top-tier packaging): the generated
