@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — codegen emits the Gherkin feature bundles (flow-system.md §3)
+`stapel_tools.codegen.generate()` now also runs stapel-core's
+`generate_flow_features` into `<out>/features/`: one bundle per project
+language (localized `.feature` files + the playwright-bdd step library over
+the codegen typed client), byte-stable like the three JSON artifacts — the
+same drift-gate discipline. New `emit_features()`; the CLI summary reports
+the feature-file count. Tests: bundle layout per language, byte-stability,
+`generate()` summary.
+
 ## [0.8.3] — 2026-07-06
 
 ### Changed — generators write the service-navigation registry as env-JSON (admin-suite AS-4)

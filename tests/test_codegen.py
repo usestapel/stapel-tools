@@ -44,8 +44,8 @@ if not settings.configured:
 from rest_framework import serializers, views  # noqa: E402
 from rest_framework.response import Response  # noqa: E402
 from rest_framework.urls import path  # noqa: E402  (re-exported django path)
-
 from stapel_core.flows import Flow  # noqa: E402
+
 from stapel_tools import codegen  # noqa: E402
 
 
@@ -146,12 +146,40 @@ def test_emit_errors_is_byte_stable(tmp_path):
     assert a.read_bytes() == b.read_bytes()
 
 
-def test_generate_emits_all_three_artifacts(tmp_path):
+def test_emit_features_writes_language_bundles(tmp_path):
+    out = tmp_path / "features"
+    feature_count = codegen.emit_features(out)
+
+    # one bundle per project language (en/ru default), each with the probe
+    # flow's .feature + the playwright-bdd step library
+    for lang in ("en", "ru"):
+        assert (out / lang / "probe.login.feature").is_file()
+        assert (out / lang / "steps" / "flows.steps.ts").is_file()
+        assert (out / lang / "steps" / "fixtures.ts").is_file()
+    assert feature_count == len(list(out.rglob("*.feature"))) == 2
+    assert "Feature:" in (out / "en" / "probe.login.feature").read_text()
+    assert (out / "ru" / "probe.login.feature").read_text().startswith(
+        "# language: ru\n")
+
+
+def test_emit_features_is_byte_stable(tmp_path):
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    codegen.emit_features(a)
+    codegen.emit_features(b)
+    tree_a = {p.relative_to(a): p.read_bytes() for p in a.rglob("*") if p.is_file()}
+    tree_b = {p.relative_to(b): p.read_bytes() for p in b.rglob("*") if p.is_file()}
+    assert tree_a == tree_b
+
+
+def test_generate_emits_all_artifacts(tmp_path):
     # django.setup() already ran at import; generate() calls it again (idempotent).
     summary = codegen.generate(tmp_path)
     assert (tmp_path / "schema.json").exists()
     assert (tmp_path / "flows.json").exists()
     assert (tmp_path / "errors.json").exists()
+    assert (tmp_path / "features" / "en").is_dir()
     assert summary["paths"] >= 1
     assert summary["flows"] >= 1
     assert summary["errors"] >= 1
+    assert summary["features"] >= 1

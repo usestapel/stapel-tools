@@ -21,9 +21,15 @@ sqlite). From it we emit three language-agnostic artifacts:
     the backend companion documented in stapel-core's
     ``stapel_core/django/api/errors.py``.
 
-All three are re-normalised to a stable JSON encoding (sorted-free, 2-space
-indent, trailing newline) so that regenerating without a code change yields
-zero diff.
+Plus one localized projection (flow-system.md §3):
+
+  - features/     — the ``generate_flow_features`` Gherkin bundles: one
+    directory per project language with ``.feature`` files + the
+    playwright-bdd step library over the codegen typed client.
+
+The JSON artifacts are re-normalised to a stable encoding (sorted-free, 2-space
+indent, trailing newline) and the feature bundles render deterministically, so
+that regenerating without a code change yields zero diff.
 
 This module is the reusable *mechanism*. It must run inside an already-configured
 Django instance: the caller sets ``DJANGO_SETTINGS_MODULE`` (and PYTHONPATH) to
@@ -110,8 +116,22 @@ def emit_errors(errors_json_path: Path) -> int:
     return len(errors)
 
 
+def emit_features(features_dir: Path) -> int:
+    """Emit the Gherkin bundles into ``features_dir``. Returns the .feature count.
+
+    ``generate_flow_features`` (stapel-core, flow-system.md §3) writes one
+    self-consistent bundle per project language: localized ``.feature`` files
+    plus the playwright-bdd step library over the codegen typed client.
+    Byte-stable like the JSON artifacts — same drift-gate discipline.
+    """
+    from django.core.management import call_command
+
+    call_command("generate_flow_features", "--out", str(features_dir), verbosity=0)
+    return len(list(features_dir.rglob("*.feature"))) if features_dir.exists() else 0
+
+
 def generate(out_dir: Path) -> dict:
-    """Emit all three artifacts into ``out_dir``. Returns a summary dict."""
+    """Emit all four artifacts into ``out_dir``. Returns a summary dict."""
     import django
 
     django.setup()
@@ -119,10 +139,12 @@ def generate(out_dir: Path) -> dict:
     paths = emit_schema(out_dir / "schema.json")
     flows = emit_flows(out_dir / "flows.json")
     errors = emit_errors(out_dir / "errors.json")
+    features = emit_features(out_dir / "features")
     return {
         "paths": paths,
         "flows": flows,
         "errors": errors,
+        "features": features,
         "out_dir": str(out_dir),
     }
 
@@ -144,7 +166,8 @@ def main(argv: list[str] | None = None) -> int:
     summary = generate(Path(args.out))
     print(
         f"stapel-codegen: {summary['paths']} paths, {summary['flows']} flows, "
-        f"{summary['errors']} error keys → {summary['out_dir']}/",
+        f"{summary['errors']} error keys, {summary['features']} feature file(s) "
+        f"→ {summary['out_dir']}/",
         file=sys.stderr,
     )
     return 0
