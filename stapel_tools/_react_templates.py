@@ -14,12 +14,20 @@ Tokens (``{{KEY}}``) filled by ``new_react_lib.build_context``:
   ERRORS_SOURCE  errors.py path relative to react root e.g. "../stapel-notifications/errors.py"
   TITLE          human title                           e.g. "Notifications"
   DESC           package.json description
+  CORE_PEER      @stapel/core peer range (floor = core's current minor,
+                 ceiling <1.0.0)                        e.g. ">=0.2.0 <1.0.0"
   YEAR           current year
 
-The four codegen drivers are NOT copied here (fork-free rule): the generated
-package.json wires the etalon's env-parametrized ``scripts/gen-*.mjs`` at the
-monorepo root via env knobs. A pair owns three per-package gates
-(flows/errors/manifest); ``gen:api`` is core-owned (the shared schema.ts).
+The codegen drivers are NOT copied here (fork-free rule): the etalon's
+env-parametrized ``scripts/gen-*.mjs`` live at the monorepo root, and — exactly
+like the auth-react/tokens etalon — a pair's own package.json owns NO ``gen:*``
+scripts. The scaffold instead wires this pair into the ROOT ``gen``/``gen:check``
+aggregates (``new_react_lib._patch_root_gen``), appending one env-parametrized
+invocation per driver (gen-flows/errors/events/demos/manifest). ``gen:api`` and
+``gen:tokens`` are core/tokens-owned. Demos are first-class code (compiled by
+``tsconfig.demo.json``, linted with the product ruleset, smoke-rendered by
+``test/demos.test.tsx``) but never shipped (excluded from the ``files``
+allowlist — proven by ``test/prodBundlePurity.test.ts``).
 """
 
 # ── package.json ──────────────────────────────────────────────────────────────
@@ -59,17 +67,9 @@ PACKAGE_JSON = """{
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "test": "tsc -p tsconfig.demo.json && vitest run",
     "lint": "eslint .",
-    "size": "size-limit",
-    "gen:flows": "FLOW_MODULE={{MODULE}} node ../../scripts/gen-flows.mjs",
-    "gen:flows:check": "FLOW_MODULE={{MODULE}} node ../../scripts/gen-flows.mjs && git diff --exit-code -- src/flows/generated",
-    "gen:errors": "AUTH_ERRORS_SOURCES={{ERRORS_SOURCE}} ERRORS_OUT=src/i18n/generated ERRORS_CONST={{UPPER}}_ERRORS ERRORS_TYPE_PREFIX={{CAMEL}} node ../../scripts/gen-errors.mjs",
-    "gen:errors:check": "AUTH_ERRORS_SOURCES={{ERRORS_SOURCE}} ERRORS_OUT=src/i18n/generated ERRORS_CONST={{UPPER}}_ERRORS ERRORS_TYPE_PREFIX={{CAMEL}} node ../../scripts/gen-errors.mjs && git diff --exit-code -- src/i18n/generated",
-    "gen:manifest": "MANIFEST_PKG_DIR=packages/{{PKG_DIR}} MANIFEST_MODULE={{BACKEND}} MANIFEST_TAGPREFIX={{PATH_PREFIX}} node ../../scripts/gen-manifest.mjs",
-    "gen:manifest:check": "MANIFEST_PKG_DIR=packages/{{PKG_DIR}} MANIFEST_MODULE={{BACKEND}} MANIFEST_TAGPREFIX={{PATH_PREFIX}} node ../../scripts/gen-manifest.mjs && git diff --exit-code -- manifest.json llms.txt",
-    "gen": "pnpm gen:flows && pnpm gen:errors && pnpm gen:manifest",
-    "gen:check": "pnpm gen:flows:check && pnpm gen:errors:check && pnpm gen:manifest:check"
+    "size": "size-limit"
   },
   "size-limit": [
     {
@@ -78,13 +78,15 @@ PACKAGE_JSON = """{
     }
   ],
   "peerDependencies": {
-    "@stapel/core": "workspace:^",
+    "@stapel/core": "{{CORE_PEER}}",
     "@tanstack/react-query": "^5.0.0",
     "react": ">=19"
   },
   "devDependencies": {
     "@size-limit/preset-small-lib": "^11.2.0",
     "@stapel/core": "workspace:^",
+    "@stapel/showcase": "workspace:^",
+    "@stapel/tokens": "workspace:^",
     "@tanstack/react-query": "^5.81.0",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.1.0",
@@ -132,6 +134,31 @@ TSCONFIG = """{
     "rootDir": "src"
   },
   "include": ["src"]
+}
+"""
+
+# ── tsconfig.demo.json (demos are first-class code; §4.2) ─────────────────────
+TSCONFIG_DEMO = """{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "_comment": "Type-checks the demos (frontend-guardrails §4.2: 'demos are first-class code, compiled'). noEmit — demos are never shipped (not in package `files`); the build tsconfig emits src only. Runs in the `test` task. Generated stories are excluded (they are drift-gated, not hand-edited).",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noEmit": true
+  },
+  "include": ["src", "demo"],
+  "exclude": ["demo/generated"]
 }
 """
 
@@ -494,39 +521,22 @@ export function explain{{CAMEL}}Error(code: string): Remediation | undefined {
 }
 """
 
-# ── test/pair.test.ts ─────────────────────────────────────────────────────────
+# ── test/pair.test.ts (query keys + drift-gated self-description) ──────────────
 TEST_TS = """import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   {{MODULE}}QueryKeys,
-  {{UPPER}}_ERROR_CODES,
-  {{MODULE}}ErrorBundleEn,
   {{MODULE}}I18nBundleEn,
-  explain{{CAMEL}}Error,
   register{{CAMEL}}I18n,
 } from "../src/index.js";
 
-describe("query keys", () => {
+describe("query keys (frontend-standard §2 — namespaced)", () => {
   it("namespaces under the module root", () => {
     expect({{MODULE}}QueryKeys.all[0]).toBe("{{MODULE}}");
   });
 });
 
-describe("generated error bundle (frontend-standard §9 — en fallbacks total)", () => {
-  it("ships an en fallback for every generated backend code", () => {
-    for (const code of {{UPPER}}_ERROR_CODES) {
-      expect({{MODULE}}ErrorBundleEn[code], code).toBeTruthy();
-      // and it survives the merge into the shipped i18n bundle
-      expect({{MODULE}}I18nBundleEn[code], code).toBeTruthy();
-    }
-  });
-
-  it("explains a remediation for every generated code", () => {
-    for (const code of {{UPPER}}_ERROR_CODES) {
-      expect(explain{{CAMEL}}Error(code), code).toBeDefined();
-    }
-  });
-
+describe("i18n registration", () => {
   it("pins the module-scoped unknown fallback", () => {
     expect({{MODULE}}I18nBundleEn["{{MODULE}}.error.unknown"]).toBeTruthy();
   });
@@ -543,14 +553,436 @@ describe("generated error bundle (frontend-standard §9 — en fallbacks total)"
 });
 
 describe("self-description (frontend-core §2.4 — drift-gated manifest)", () => {
-  it("manifest.json describes this package", () => {
+  it("manifest.json describes this package + its backend contract", () => {
     // vitest runs from the package root, so a cwd-relative path is stable
     // across node/jsdom (jsdom's import.meta.url is not a file:// URL).
     const manifest = JSON.parse(readFileSync("manifest.json", "utf8"));
     expect(manifest.package).toBe("{{PKG_NAME}}");
     expect(manifest.backend.module).toBe("{{BACKEND}}");
+    // backend.contract (gen:manifest ← MANIFEST_BACKEND_PYPROJECT): the semver
+    // range this surface was generated against — a backend minor bump reddens
+    // the drift gate (frontend-core §2.4 / §3.4.2).
+    expect(manifest.backend.contract).toBeTruthy();
     expect(Array.isArray(manifest.layers)).toBe(true);
   });
+});
+"""
+
+# ── test/errorsBundle.test.ts (en-fallback coverage — errors drift gate teeth) ─
+ERRORS_BUNDLE_TEST = """import { describe, expect, it } from "vitest";
+import { {{MODULE}}I18nBundleEn } from "../src/i18n/keys.js";
+import {
+  {{UPPER}}_ERROR_CODES,
+  {{MODULE}}ErrorBundleEn,
+  explain{{CAMEL}}Error,
+} from "../src/i18n/errorsMap.js";
+
+/**
+ * The teeth of the errors drift gate (frontend-core-architecture §2.5, §4c):
+ * every backend error key the pair knows about ALSO has an English fallback in
+ * the i18n bundle. Combined with `pnpm gen:errors:check` (a NEW backend key = a
+ * red diff), a backend key can never reach the host as a raw, untranslated key.
+ * A hand-edit that drops the generated spread from `{{MODULE}}I18nBundleEn` fails
+ * here.
+ */
+describe("backend error keys all have an en fallback", () => {
+  it("every {{UPPER}}_ERROR_CODE resolves in {{MODULE}}I18nBundleEn", () => {
+    const missing = {{UPPER}}_ERROR_CODES.filter(
+      (code) => !(code in {{MODULE}}I18nBundleEn)
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it("the generated fallback bundle covers exactly the registry", () => {
+    expect(Object.keys({{MODULE}}ErrorBundleEn).sort()).toEqual(
+      [...{{UPPER}}_ERROR_CODES].sort()
+    );
+  });
+
+  it("explains a remediation for every generated code", () => {
+    for (const code of {{UPPER}}_ERROR_CODES) {
+      expect(explain{{CAMEL}}Error(code), code).toBeDefined();
+    }
+  });
+});
+"""
+
+# ── test/flowsContract.test.ts (flows.json → registry drift-gate teeth) ────────
+FLOWS_CONTRACT_TEST = """import { describe, expect, it } from "vitest";
+import { {{UPPER}}_FLOWS } from "../src/flows/generated/flows.gen.js";
+
+/**
+ * The flow CONTRACT test (docs/flow-system.md §5): proves the flows.json →
+ * registry drift gate is not cosmetic. Each registry entry's key equals its
+ * canonical id and carries well-formed i18n keys with ordered steps — so a
+ * backend flow rename / re-endpoint (regenerated by `pnpm gen:flows`) breaks
+ * these assertions rather than silently skewing the analytics funnel or the
+ * client contract. Machine ↔ registry binding + HTTP-surface assertions arrive
+ * per flow as you scaffold machines from flows.json (see auth-react
+ * `test/flowsContract.test.ts` for the full msw-backed pattern).
+ */
+describe("flow registry integrity", () => {
+  it("every entry's key equals its canonical id and carries well-formed i18n keys", () => {
+    for (const [key, spec] of Object.entries({{UPPER}}_FLOWS)) {
+      expect(spec.id).toBe(key);
+      expect(spec.titleKey).toBe(`flow.${spec.id}.title`);
+      expect(spec.descriptionKey).toBe(`flow.${spec.id}.description`);
+      const orders = spec.steps.map((s) => s.order);
+      expect(orders).toEqual([...orders].sort((a, b) => a - b));
+    }
+  });
+});
+"""
+
+# ── test/demos.test.tsx (smoke-render every demo — demos are first-class code) ─
+DEMOS_TEST_TSX = """import { describe, expect, it } from "vitest";
+import { render } from "@testing-library/react";
+import { renderDemoVariant, variantIds } from "@stapel/showcase";
+import type { DemoDef } from "@stapel/showcase";
+
+/**
+ * Smoke render for every {{MODULE}}-react demo (frontend-guardrails §4.2: demos
+ * are first-class code — compiled, linted, RENDERED). Discovers demos by glob so
+ * a new `*.demo.tsx` is covered automatically, mounts each default variant with
+ * its mock harness, and asserts it renders without throwing.
+ */
+const modules = import.meta.glob("../demo/*.demo.tsx", { eager: true }) as Record<
+  string,
+  { default: DemoDef }
+>;
+
+describe("{{MODULE}}-react demos", () => {
+  const entries = Object.entries(modules);
+
+  it("discovers demos via glob", () => {
+    expect(entries.length).toBeGreaterThan(0);
+  });
+
+  for (const [path, mod] of entries) {
+    const demo = mod.default;
+    const first = variantIds(demo)[0];
+    it(`renders ${demo.id} (${path})`, () => {
+      expect(first).toBeDefined();
+      if (!first) return;
+      const { container } = render(renderDemoVariant(demo, first));
+      expect(container.firstChild).not.toBeNull();
+    });
+  }
+});
+"""
+
+# ── test/prodBundlePurity.test.ts (§5.1 — no showcase/demo code ships) ─────────
+PROD_BUNDLE_PURITY_TEST = """// @vitest-environment node
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+
+/**
+ * Introspection-gating, layer 1 (frontend-guardrails §5.1): the showcase/demo
+ * tooling is OUT of the pair's production bundle *by construction*, not by a
+ * runtime flag. A pair is a headless product surface; the showcase format
+ * (`@stapel/showcase`) and the `*.demo.tsx` files exist only to author demos and
+ * must never reach a customer's app or the published tarball. This test is the
+ * teeth: it fails if a demo dependency leaks into the runtime graph or the demos
+ * slip into the shipped files.
+ */
+const PKG_DIR = resolve(fileURLToPath(new URL(".", import.meta.url)), "..");
+const pkg = JSON.parse(
+  readFileSync(resolve(PKG_DIR, "package.json"), "utf8")
+) as {
+  dependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  files?: string[];
+};
+
+const INTROSPECTION_ONLY = ["@stapel/showcase", "@stapel/showcase-viewer"];
+
+describe("prod bundle carries no showcase/demo code (§5.1)", () => {
+  it("no showcase package is a runtime (deps) or peer dependency", () => {
+    const runtime = {
+      ...(pkg.dependencies ?? {}),
+      ...(pkg.peerDependencies ?? {}),
+    };
+    const leaked = INTROSPECTION_ONLY.filter((name) => name in runtime);
+    expect(leaked).toEqual([]);
+  });
+
+  it("@stapel/showcase is present, but only as a devDependency", () => {
+    // It IS used (to author demos) — so assert the intended location, not just
+    // absence, to catch an accidental promotion to dependencies.
+    expect(pkg.devDependencies ?? {}).toHaveProperty("@stapel/showcase");
+  });
+
+  it("the published `files` allowlist excludes demo/", () => {
+    const files = pkg.files ?? [];
+    expect(files).not.toContain("demo");
+    expect(files.some((f) => /(^|\\/)demo(\\/|$)/.test(f))).toBe(false);
+  });
+
+  it("the packed tarball contains no demo or showcase files", () => {
+    // `npm pack --dry-run --json` reports exactly what would publish, honoring
+    // the files allowlist + .npmignore — the ground truth, not just config.
+    const out = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+      cwd: PKG_DIR,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const paths: string[] = JSON.parse(out)[0].files.map(
+      (f: { path: string }) => f.path
+    );
+    expect(paths.filter((p) => /(^|\\/)demo(\\/|\\.)/i.test(p))).toEqual([]);
+    expect(paths.filter((p) => /showcase/i.test(p))).toEqual([]);
+  }, 30_000); // `npm pack` cold-starts slowly — beyond vitest's 5s default
+});
+"""
+
+# ── demo/_harness.tsx (shared mock harness; product-linted first-class code) ───
+HARNESS_TSX = """/**
+ * Shared harness for the {{MODULE}}-react demos (frontend-guardrails §4.2). Demos
+ * are first-class code — compiled, linted with the PRODUCT ruleset, smoke-rendered
+ * — so this file obeys the same guardrails as `src/`:
+ *
+ *  - no raw colours: every colour is a token via `cssVar()`.
+ *  - no hardcoded text: every label is an i18n key rendered with `t()`.
+ *  - clickable-needs-event: {@link DemoButton} carries `data-analytics=\"flow\"` —
+ *    honest, because a headless bag action STEPS a flow machine, which is
+ *    auto-instrumented (`flow.<id>.<step>`). The action prop is named `run` (not
+ *    `onClick`) so the CALL site is not itself an untracked clickable — the
+ *    tracked point is the real `<button>` in here.
+ *
+ * The mock runtime injects a canned `fetch` (no MSW worker needed) so a demo
+ * renders identically in Ladle (interactive) and in vitest (smoke). Themes are
+ * the viewer's job (data-theme + tokens.css); this only wires the providers a
+ * headless component needs: query client, i18n, and the {{MODULE}} runtime.
+ */
+import { useMemo } from "react";
+import type { CSSProperties, ReactElement, ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { I18nProvider, createI18n, useT } from "@stapel/core";
+import { cssVar, radii, spacing, fontSize } from "@stapel/tokens";
+import { create{{CAMEL}}Runtime } from "../src/index.js";
+import { {{CAMEL}}Provider, register{{CAMEL}}I18n } from "../src/index.js";
+
+/** The base every mock handler mounts on (mirrors {{BACKEND}} `{{PATH_PREFIX}}`). */
+export const DEMO_BASE = "https://{{MODULE}}.demo.stapel.dev{{PATH_PREFIX}}";
+
+/**
+ * A handler map: path suffix → response. A plain value is a 200 JSON body; a
+ * `[status, body]` tuple sets the HTTP status (so a demo can reach an error
+ * step).
+ */
+export type DemoResponse = unknown | readonly [number, unknown];
+export type DemoHandlers = Readonly<Record<string, DemoResponse>>;
+
+function statusAndBody(value: DemoResponse): [number, unknown] {
+  if (
+    Array.isArray(value) &&
+    value.length === 2 &&
+    typeof value[0] === "number"
+  ) {
+    return [value[0], value[1]];
+  }
+  return [200, value];
+}
+
+/** Build a canned `fetch` from a suffix→response map; unmatched paths return `{}`. */
+export function mockFetch(handlers: DemoHandlers): typeof globalThis.fetch {
+  return ((input: RequestInfo | URL): Promise<Response> => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    let matched: DemoResponse = {};
+    for (const [suffix, value] of Object.entries(handlers)) {
+      if (url.includes(suffix)) {
+        matched = value;
+        break;
+      }
+    }
+    const [status, body] = statusAndBody(matched);
+    return Promise.resolve(
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { \"content-type\": \"application/json\" },
+      })
+    );
+  }) as typeof globalThis.fetch;
+}
+
+/** i18n copy for the demo chrome — a `demo.*` (unmanaged) namespace, so the
+ * i18n-key-exists lint treats it as app-local and never false-positives. */
+const demoBundleEn: Record<string, string> = {
+  \"demo.action.start\": \"Start\",
+  \"demo.action.submit\": \"Submit\",
+  \"demo.action.reset\": \"Reset\",
+  \"demo.label.step\": \"state.step\",
+};
+
+/**
+ * Provider frame every {{MODULE}} demo variant renders inside. Builds a fresh mock
+ * runtime + query client per mount so variants stay isolated.
+ */
+export function {{CAMEL}}DemoHarness(props: {
+  handlers?: DemoHandlers;
+  children: ReactNode;
+}): ReactElement {
+  const { handlers } = props;
+  const { runtime, queryClient, i18n } = useMemo(() => {
+    const rt = create{{CAMEL}}Runtime({
+      baseUrl: DEMO_BASE,
+      fetch: mockFetch(handlers ?? {}),
+    });
+    const engine = createI18n({ locale: \"en\" });
+    register{{CAMEL}}I18n(engine);
+    engine.registerBundle(\"en\", demoBundleEn);
+    return {
+      runtime: rt,
+      queryClient: new QueryClient({
+        defaultOptions: { queries: { retry: false } },
+      }),
+      i18n: engine,
+    };
+  }, [handlers]);
+  return (
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider i18n={i18n}>
+        <{{CAMEL}}Provider runtime={runtime}>{props.children}</{{CAMEL}}Provider>
+      </I18nProvider>
+    </QueryClientProvider>
+  );
+}
+
+// ── shared demo UI (token-driven; no raw colours, no literal prose) ───────────
+
+const cardStyle: CSSProperties = {
+  background: cssVar(\"card-bg\"),
+  color: cssVar(\"color-text-primary\"),
+  border: `1px solid ${cssVar(\"card-border\")}`,
+  borderRadius: radii.lg,
+  padding: spacing[\"5\"],
+  display: \"flex\",
+  flexDirection: \"column\",
+  gap: spacing[\"3\"],
+  maxWidth: \"24rem\",
+  fontSize: fontSize.md.fontSize,
+};
+
+/** A titled card wrapper for a demo body. `heading` (not `title`) keeps the
+ * no-hardcoded-text rule from treating a technical component name as prose. */
+export function DemoCard(props: {
+  heading: ReactNode;
+  children: ReactNode;
+}): ReactElement {
+  return (
+    <div style={cardStyle} data-theme-surface>
+      <strong style={{ fontSize: fontSize.lg.fontSize }}>{props.heading}</strong>
+      {props.children}
+    </div>
+  );
+}
+
+/** Renders the current flow step (a technical token, never user prose). */
+export function StepBadge(props: { step: string }): ReactElement {
+  const t = useT();
+  return (
+    <div style={{ display: \"flex\", gap: spacing[\"2\"], alignItems: \"center\" }}>
+      <span style={{ color: cssVar(\"color-text-secondary\") }}>
+        {t(\"demo.label.step\")}
+      </span>
+      <code
+        style={{
+          background: cssVar(\"color-background-secondary\"),
+          color: cssVar(\"color-text-brand\"),
+          borderRadius: radii.sm,
+          // Size tokens are unitless numbers; React only auto-appends `px` to
+          // single numeric values, so multi-value shorthands spell the unit.
+          padding: `${spacing[\"1\"]}px ${spacing[\"2\"]}px`,
+        }}
+      >
+        {props.step}
+      </code>
+    </div>
+  );
+}
+
+const buttonStyle: CSSProperties = {
+  background: cssVar(\"button-primary-bg\"),
+  color: cssVar(\"button-primary-text\"),
+  border: \"none\",
+  borderRadius: radii.md,
+  // See StepBadge: unitless tokens need an explicit unit in shorthands.
+  padding: `${spacing[\"2\"]}px ${spacing[\"4\"]}px`,
+  cursor: \"pointer\",
+  fontSize: fontSize.sm.fontSize,
+};
+
+/**
+ * A demo action button. The interactive prop is `run` (not `onClick`) so the
+ * call site is not an untracked clickable; the real `<button>` here declares
+ * `data-analytics=\"flow\"` — the bag action it triggers steps an
+ * auto-instrumented flow machine.
+ */
+export function DemoButton(props: {
+  run: () => void;
+  labelKey: string;
+}): ReactElement {
+  const t = useT();
+  return (
+    <button style={buttonStyle} data-analytics=\"flow\" onClick={props.run}>
+      {t(props.labelKey)}
+    </button>
+  );
+}
+
+/** A row of demo action buttons. */
+export function DemoActions(props: { children: ReactNode }): ReactElement {
+  return (
+    <div style={{ display: \"flex\", gap: spacing[\"2\"], flexWrap: \"wrap\" }}>
+      {props.children}
+    </div>
+  );
+}
+"""
+
+# ── demo/<Camel>.demo.tsx (starter demo — covers the starter headless export) ──
+DEMO_TSX = """/** {{TITLE}} provider — the pair's headless root (starter demo). */
+import type { ReactElement } from "react";
+import { defineDemo } from "@stapel/showcase";
+import { {{CAMEL}}Provider } from "../src/index.js";
+import { {{CAMEL}}DemoHarness, DemoCard, StepBadge } from "./_harness.js";
+
+function {{CAMEL}}ProviderDemo(): ReactElement {
+  return (
+    <{{CAMEL}}DemoHarness>
+      <DemoCard heading="{{CAMEL}}Provider">
+        <StepBadge step="ready" />
+      </DemoCard>
+    </{{CAMEL}}DemoHarness>
+  );
+}
+
+/**
+ * The completeness gate (gen:demos) requires every exported headless component
+ * to have ≥1 demo. This starter demo covers `{{CAMEL}}Provider` — the pair's only
+ * headless export at scaffold time. Add one `<Name>.demo.tsx` per headless flow
+ * component (with `defineDemo({ component: <X>, flow: \"{{MODULE}}.<id>\", … })`)
+ * as you build them; each becomes a smoke test AND a Ladle story automatically.
+ */
+export default defineDemo({
+  id: "{{MODULE}}.provider",
+  title: "{{TITLE}} provider",
+  description:
+    "The headless {{MODULE}} root wires the runtime, i18n engine, and query client into React context. Replace with per-flow demos as you add headless components.",
+  component: {{CAMEL}}Provider,
+  tokens: ["card-bg"],
+  variants: {
+    default: { render: () => <{{CAMEL}}ProviderDemo /> },
+  },
 });
 """
 
@@ -576,19 +1008,36 @@ src/
   flows/      createFlowMachine flow machines (+ generated registry)
   headless/   renderless components ({{CAMEL}}Provider, flow render-props)
   i18n/       translation keys + generated backend error map
+  analytics/  generated typed-event registry (events.json)
+demo/         first-class demos (compiled, product-linted, smoke-rendered)
 ```
 
 ## Generated surfaces (drift-gated)
 
-| Surface | Command | Gate |
+| Surface | Path | Gate |
 |---|---|---|
-| Flow registry | `pnpm gen:flows` | `pnpm gen:flows:check` |
-| Backend error map + en bundle | `pnpm gen:errors` | `pnpm gen:errors:check` |
-| `manifest.json` + `llms.txt` | `pnpm gen:manifest` | `pnpm gen:manifest:check` |
+| Flow registry | `src/flows/generated/` | `pnpm gen:flows:check` |
+| Backend error map + en bundle | `src/i18n/generated/` | `pnpm gen:errors:check` |
+| Typed-event registry | `src/analytics/generated/events.json` | `pnpm gen:events:check` |
+| Demos → Ladle stories | `demo/generated/` | `pnpm gen:demos:check` |
+| `manifest.json` + `llms.txt` | package root | `pnpm gen:manifest:check` |
 
-All three (`pnpm gen` / `pnpm gen:check`) drive the monorepo `scripts/gen-*.mjs`
-with this package's env knobs — the drivers are shared, not forked. The typed
-`schema.ts` is core-owned (`pnpm gen:api` at the root).
+These drift gates run at the **monorepo root** (`pnpm gen` / `pnpm gen:check`) —
+the etalon's env-parametrized `scripts/gen-*.mjs` drivers are shared, not forked.
+`stapel-new-react-lib` wired this pair into the root `gen`/`gen:check` aggregates
+at scaffold time (one env-parametrized invocation per driver). The typed
+`schema.ts` is core-owned (`pnpm gen:api`); design tokens are tokens-owned
+(`pnpm gen:tokens`).
+
+## Guardrails
+
+Linted by the shared `@stapel/eslint-plugin` flat config (no raw colours, no raw
+token imports, no raw fetch, i18n-key existence, typed analytics, headless-only)
+and the shared **stylelint** preset — `pnpm lint` per package plus `pnpm lint:css`
+at the root (colours only ever `var(--stapel-*)`). Demos are first-class code:
+compiled by `tsconfig.demo.json`, linted with the product ruleset, and
+smoke-rendered by `test/demos.test.tsx` — but never shipped (excluded from the
+`files` allowlist; proven by `test/prodBundlePurity.test.ts`).
 
 ## License
 
@@ -617,6 +1066,14 @@ generated `llms.txt` (agent context) and `manifest.json` (machine catalog).
   runtime into context. shadcn-copyable (frontend-standard §7).
 - **i18n/** — `{{UPPER}}_I18N_KEYS` + en bundle; the generated backend error
   bundle is merged in so every `error.*` code has a fallback.
+- **analytics/** — `generated/events.json`, the typed-event registry projected
+  from `defineEvent` call sites + flow funnels (`pnpm gen:events`). Read by the
+  analytics lint and embedded into `manifest.json`; nothing to hand-edit.
+- **demo/** — first-class demos (`defineDemo`, `@stapel/showcase`): `_harness.tsx`
+  wires a mock runtime + i18n + query client; each `<Name>.demo.tsx` is compiled,
+  product-linted, smoke-rendered, and projected to a Ladle story (`pnpm gen:demos`).
+  The completeness gate requires ≥1 demo per exported headless component; the
+  starter `{{CAMEL}}.demo.tsx` covers `{{CAMEL}}Provider`. Demos never ship.
 
 ## Extension seams (frontend-standard §7)
 

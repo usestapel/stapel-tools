@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.8.0] — 2026-07-06
+
+### Changed — `stapel-new-react-lib` re-etalon (auth-react after `ebc8f6c`/`4524a53`/`2b1449f`/`8f6b999`)
+The React-pair scaffold predated the G1–G8 guardrails contract; this brings it
+back to the confirmed etalon. Eight deltas closed:
+
+1. **Typed-event registry** — the pair is wired into `gen:events` /
+   `gen:events:check` (root), and `src/analytics/generated/events.json` is a
+   generated, drift-gated surface (documented in README/MODULE.md).
+2. **Demo layer** — `demo/_harness.tsx` (mock-`fetch`, token chrome via
+   `cssVar()`, `demo.*` i18n keys, `data-analytics="flow"`, `run` prop) plus a
+   starter `<Camel>.demo.tsx` that covers the starter headless export
+   (`<Camel>Provider`), so the `gen:demos` completeness gate passes on a fresh
+   scaffold; `tsconfig.demo.json` compiles demos as first-class code.
+3. **`@stapel/showcase`** (and `@stapel/tokens`) added as **devDependencies**
+   only — never runtime/peer.
+4. **`manifest.backend.contract`** — `gen:manifest` wired with
+   `MANIFEST_BACKEND_PYPROJECT` so the manifest states the backend semver range
+   it was generated against (a backend minor bump reddens the gate).
+5. **Etalon test family** — `demos.test.tsx` (glob smoke-render),
+   `prodBundlePurity.test.ts` (real `npm pack --dry-run` ground truth),
+   `errorsBundle.test.ts` (en-fallback coverage), `flowsContract.test.ts`
+   (registry integrity) — replacing the single `pair.test.ts` (a slim residual
+   retains query-key + drift-gated manifest self-description).
+6. **Peer policy** — `@stapel/core` peer is a pinned floor
+   `>=<current-core-minor>.0 <1.0.0` (read from the monorepo core package.json at
+   scaffold time), not `workspace:^` — stops changesets force-majoring the pair
+   on an out-of-range core minor. The local link stays `workspace:^` (devDep).
+7. **Root `gen`/`gen:check` enumeration** — matching the etalon (pairs own NO
+   `gen:*` scripts; the drivers live at the root and are listed per package), the
+   scaffold now **idempotently patches** the monorepo root package.json,
+   appending one env-parametrized invocation per driver
+   (flows/errors/events/demos/manifest) to each `gen:*` and `gen:*:check`. Falls
+   back to printing the exact edits when the root shape is unexpected.
+8. **CSS guardrail** — README documents `lint:css`/stylelint alongside the
+   ESLint plugin.
+
+Fork-free preserved: the scaffold WIRES the etalon's env-parametrized
+`scripts/gen-*.mjs` drivers (via `FLOW_MODULE`/`ERRORS_*`/`EVENTS_PKG_DIR`/
+`DEMOS_PKG_DIR`/`MANIFEST_*`), never copies driver logic. Also fixed a latent
+pre-contract bug: the old per-pair `gen:errors` used a nonexistent env knob
+(`AUTH_ERRORS_SOURCES`) pointed at `errors.py`; the driver reads
+`AUTH_ERRORS_JSON` (a backend `docs/errors.json`).
+
+Smoke-validated end-to-end on a throwaway `notifications-react` in stapel-react
+(install + all 5 gens + build + lint + lint:css + test 14/14 + size 720 B; the
+completeness gate fails closed when the starter demo is removed).
+
 ## [0.7.0] — 2026-07-06
 
 ### Added — i18n doc-link lint rule + seed export (i18n-shipping wave 0)
