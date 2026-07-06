@@ -1,0 +1,28 @@
+{
+  "$generated": "by scripts/gen-events.mjs — do not edit; drift-gated (pnpm gen:events:check)",
+  "package": "shop-app",
+  "version": "0.0.0",
+  "defined": [
+    {
+      "name": "app.opened",
+      "description": "App shell mounted",
+      "props": {},
+      "source": { "file": "src/analytics/events.ts", "line": 14 }
+    },
+    {
+      "name": "pricing.plan.selected",
+      "description": "User picked a pricing plan",
+      "props": {
+        "plan": {
+          "type": "string",
+          "description": "Plan code",
+          "options": ["free", "pro"]
+        },
+        "entry": { "type": "string", "description": "Entry point" }
+      },
+      "flow": "billing.checkout",
+      "source": { "file": "src/analytics/events.ts", "line": 3 }
+    }
+  ],
+  "flows": []
+}

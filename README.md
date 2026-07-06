@@ -125,6 +125,34 @@ In stapel-example-monolith this is wrapped as `make codegen` (regenerate) and
 `make codegen-check` (drift gate). The generated `schema.json` then feeds
 `stapel-react`'s `pnpm gen:api` (openapi-typescript → typed `@stapel/core` API).
 
+### `stapel-analytics-report` — typed-analytics summary report
+
+Generates the analytics/flow report (frontend-guardrails §3.3) across a pnpm
+workspace of `@stapel/*-react` pairs and/or a customer app, from static
+generated artifacts (`events.json`/`manifest.events`, backend `flows.json`,
+`manifest.machines`) plus a syntactic scan of TS/TSX call sites
+(`tracked()`/`trackedSubmit()`/`track()`, `data-analytics="flow"/"none"`
+markers, `eslint-disable … -- description`). Two slices are always separated:
+**app** (customer code) and **library** (`@stapel/*` pairs).
+
+```bash
+# machine-readable report.json to stdout
+stapel-analytics-report path/to/stapel-react
+
+# report.json + report.md + report.html into a dir, with canonical backend prose
+stapel-analytics-report path/to/stapel-react \
+    --backend-flows path/to/monolith/codegen/generated/flows.json \
+    --out ./analytics-report
+
+stapel-analytics-report ./my-app --package packages/web --format md
+```
+
+Outputs `report.json` (for the Studio project passport), `report.md`, and a
+self-contained `report.html`. Per event: description, typed props, emit sites
+(`file:line` + component), linked flow. The flow report joins backend flows with
+frontend coverage and renders a `[gated: <ENV>]` badge (from `gated_by`, task
+G6 — absent means always-on). `--capabilities` is reserved (§3.4 env-aware).
+
 ### `stapel-lint` — project-specific static linter
 
 ```bash

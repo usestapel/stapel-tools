@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.6.0] — 2026-07-06
+
+### Added — `stapel-analytics-report` (frontend-guardrails §3.3, task G5)
+- New CLI `stapel-analytics-report <workspace-dir>` (+ `--package DIR`,
+  repeatable, for a single package/app). Generates the typed-analytics summary
+  report across a pnpm workspace of `@stapel/*-react` pairs and/or a customer
+  app, from STATIC generated artifacts only (§3.3): `events.json` /
+  `manifest.events` (defineEvent catalog + auto-instrumented flow funnels),
+  `flows.json` (canonical backend flows, prose + endpoints), `manifest.machines`,
+  and a syntactic scan of TS/TSX for call sites (`tracked()`/`trackedSubmit()`/
+  `track()` emit points, `data-analytics="flow"/"none"` markers with reasons,
+  `eslint-disable … -- description` escape hatches).
+- Two always-separate slices — **app** (customer code) and **library**
+  (`@stapel/*` pairs) — reported summarily and split, classified by package name.
+- Outputs: machine-readable `report.json` (for the Studio project passport,
+  user decision Q13) plus presentable human-readable `report.md` and self-
+  contained (CSP-safe, theme-aware) `report.html`. `--out DIR` writes all three;
+  otherwise `--format {json,md,html,all}` prints to stdout.
+- Per event: description, typed props (types + options + descriptions), emit
+  sites (`file:line` + enclosing component), and the linked backend flow when
+  declared. Flow funnels list their documented steps. The canonical flow report
+  joins backend `flows.json` (prose title/description, actors, endpoints) with
+  frontend coverage (covering pairs, funnel event, name-matched machine, linked
+  app events) and renders a `[gated: <ENV>]` badge from the `gated_by` field
+  (placeholder for task G6 — absent field means always-on). Coverage summary
+  counts clickable outcomes by static marker (tracked / flow / untracked /
+  disabled).
+- Cross-file (and `import { X as Y }` alias) call-site → event resolution reuses
+  the events.json TS-AST catalog (produced by `scripts/events-lib.mjs`) as the
+  authoritative event set — not the intentionally conservative in-file lint
+  resolver. Missing `events.json` degrades to source-derived bindings and the
+  `manifest.events` fallback; a package with no catalog at all is flagged, never
+  crashes. `--capabilities` is reserved for the §3.4 env-aware mode (ignored).
+- Pure Python, zero new dependencies (no Node runtime): the heavy TS-AST work is
+  already done by the workspace's drift-gated `gen:events` and consumed here.
+
 ## [0.5.0]
 
 ### Added

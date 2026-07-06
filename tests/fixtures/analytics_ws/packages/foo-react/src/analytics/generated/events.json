@@ -1,0 +1,27 @@
+{
+  "$generated": "by scripts/gen-events.mjs — do not edit; drift-gated (pnpm gen:events:check)",
+  "package": "@stapel/foo-react",
+  "version": "1.0.0",
+  "defined": [],
+  "flows": [
+    {
+      "flow": "shop.checkout",
+      "event": "flow.shop.checkout.<step>",
+      "titleKey": "flow.shop.checkout.title",
+      "descriptionKey": "flow.shop.checkout.description",
+      "props": {
+        "phase": {
+          "type": "string",
+          "description": "Transition phase of the funnel step",
+          "options": ["started", "completed", "failed"]
+        }
+      },
+      "steps": [
+        { "order": 0, "kind": "human", "noteKey": "flow.shop.checkout.step.0.note" },
+        { "order": 1, "kind": "http", "noteKey": "flow.shop.checkout.step.1.note" },
+        { "order": 2, "kind": "http", "noteKey": "flow.shop.checkout.step.2.note" }
+      ],
+      "source": "flows.json"
+    }
+  ]
+}

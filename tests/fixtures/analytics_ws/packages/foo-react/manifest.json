@@ -1,0 +1,11 @@
+{
+  "$generated": "by scripts/gen-manifest.mjs",
+  "package": "@stapel/foo-react",
+  "machines": ["createCheckoutFlow", "createRefundFlow"],
+  "events": {
+    "defined": [],
+    "flows": [
+      { "flow": "shop.checkout", "event": "flow.shop.checkout.<step>", "steps": 3 }
+    ]
+  }
+}

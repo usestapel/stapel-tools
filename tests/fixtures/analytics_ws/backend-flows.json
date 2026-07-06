@@ -1,0 +1,49 @@
+[
+  {
+    "id": "billing.checkout",
+    "title": "Billing checkout",
+    "title_key": "flow.billing.checkout.title",
+    "description": "The user completes payment and starts a subscription. Enabled by the BILLING_CHECKOUT setting.",
+    "description_key": "flow.billing.checkout.description",
+    "actors": ["Authenticated user"],
+    "gated_by": ["BILLING_CHECKOUT"],
+    "steps": [
+      { "kind": "human", "order": 0, "note": "The user reviews the plan", "note_key": "flow.billing.checkout.step.0.note", "ref": "" },
+      {
+        "kind": "http",
+        "order": 1,
+        "note": "Start the checkout session",
+        "note_key": "flow.billing.checkout.step.1.note",
+        "ref": "billing.checkout.views.CheckoutViewSet.start",
+        "endpoints": [{ "method": "POST", "path": "/billing/api/checkout/start/" }]
+      }
+    ]
+  },
+  {
+    "id": "shop.checkout",
+    "title": "Shop checkout",
+    "title_key": "flow.shop.checkout.title",
+    "description": "A shopper places an order and pays for it.",
+    "description_key": "flow.shop.checkout.description",
+    "actors": ["Shopper"],
+    "steps": [
+      { "kind": "human", "order": 0, "note": "The shopper opens the cart", "note_key": "flow.shop.checkout.step.0.note", "ref": "" },
+      {
+        "kind": "http",
+        "order": 1,
+        "note": "Start checkout",
+        "note_key": "flow.shop.checkout.step.1.note",
+        "ref": "shop.checkout.views.CheckoutViewSet.start",
+        "endpoints": [{ "method": "POST", "path": "/shop/api/checkout/start/" }]
+      },
+      {
+        "kind": "http",
+        "order": 2,
+        "note": "Confirm and pay",
+        "note_key": "flow.shop.checkout.step.2.note",
+        "ref": "shop.checkout.views.CheckoutViewSet.confirm",
+        "endpoints": [{ "method": "POST", "path": "/shop/api/checkout/confirm/" }]
+      }
+    ]
+  }
+]

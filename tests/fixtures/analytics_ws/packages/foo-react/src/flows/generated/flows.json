@@ -1,0 +1,25 @@
+[
+  {
+    "id": "shop.checkout",
+    "titleKey": "flow.shop.checkout.title",
+    "descriptionKey": "flow.shop.checkout.description",
+    "actors": ["Shopper"],
+    "steps": [
+      { "kind": "human", "order": 0, "noteKey": "flow.shop.checkout.step.0.note", "ref": "", "endpoints": [] },
+      {
+        "kind": "http",
+        "order": 1,
+        "noteKey": "flow.shop.checkout.step.1.note",
+        "ref": "shop.checkout.views.CheckoutViewSet.start",
+        "endpoints": [{ "method": "POST", "path": "/shop/api/checkout/start/" }]
+      },
+      {
+        "kind": "http",
+        "order": 2,
+        "noteKey": "flow.shop.checkout.step.2.note",
+        "ref": "shop.checkout.views.CheckoutViewSet.confirm",
+        "endpoints": [{ "method": "POST", "path": "/shop/api/checkout/confirm/" }]
+      }
+    ]
+  }
+]
