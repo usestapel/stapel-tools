@@ -105,16 +105,20 @@ stapel-remove-service auth --dry-run
 ### `stapel-codegen` — emit the frontend codegen source artifacts
 
 Runs *inside* a configured all-modules Django instance (e.g.
-stapel-example-monolith on sqlite) and emits the two language-agnostic backend
+stapel-example-monolith on sqlite) and emits the three language-agnostic backend
 artifacts the frontend TS client is generated from (docs/flow-system.md §0.1):
 
 - `schema.json` — the unified drf-spectacular OpenAPI for every installed
   module (same document the instance serves at `/schema/`, produced offline via
   the `spectacular` management command — no server, byte-stable).
 - `flows.json` — the `generate_flow_docs` machine artifact.
+- `errors.json` — the `generate_error_keys` machine artifact: every
+  `error.<status>.<name>` key the instance can raise, with its HTTP status,
+  `{param}` slots, remediation hint and canonical English text
+  (stapel-core's `stapel_core/django/api/errors.py`).
 
-Both use a byte-stable JSON encoding, so regenerating without a code change
-yields zero diff — the invariant a drift gate rests on.
+All three use a byte-stable JSON encoding, so regenerating without a code
+change yields zero diff — the invariant a drift gate rests on.
 
 ```bash
 DJANGO_ENV=local DJANGO_SETTINGS_MODULE=core.settings.codegen \

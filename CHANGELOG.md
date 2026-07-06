@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.1] — 2026-07-06
+
+### Fixed
+- `stapel-codegen`'s `generate()` now also emits `errors.json` alongside
+  `schema.json`/`flows.json`, wired onto stapel-core's `generate_error_keys`
+  management command (the mechanism landed in stapel-core `08b6c40` but was
+  never plumbed into the orchestrator). Same byte-stable re-normalisation and
+  drift-gate invariant as the other two artifacts; format matches
+  stapel-auth's `docs/errors.json` (`code`/`status`/`params`/`remediation`/`en`).
+
 ## [0.6.0] — 2026-07-06
 
 ### Added — `stapel-analytics-report` (frontend-guardrails §3.3, task G5)

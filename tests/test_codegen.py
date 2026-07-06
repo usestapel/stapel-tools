@@ -119,10 +119,39 @@ def test_emit_flows_is_byte_stable(tmp_path):
     assert a.read_bytes() == b.read_bytes()
 
 
-def test_generate_emits_both_artifacts(tmp_path):
+def test_emit_errors_writes_valid_registry(tmp_path):
+    out = tmp_path / "errors.json"
+    error_count = codegen.emit_errors(out)
+
+    errors = json.loads(out.read_text())
+    assert isinstance(errors, list)
+    assert error_count == len(errors) >= 1
+    for entry in errors:
+        assert set(entry) == {"code", "status", "params", "remediation", "en"}
+        assert isinstance(entry["code"], str)
+        assert isinstance(entry["status"], int)
+        assert isinstance(entry["params"], list)
+        assert isinstance(entry["remediation"], str)
+        assert isinstance(entry["en"], str)
+    codes = [e["code"] for e in errors]
+    assert codes == sorted(codes)
+    assert out.read_text().endswith("\n")
+
+
+def test_emit_errors_is_byte_stable(tmp_path):
+    a = tmp_path / "a.json"
+    b = tmp_path / "b.json"
+    codegen.emit_errors(a)
+    codegen.emit_errors(b)
+    assert a.read_bytes() == b.read_bytes()
+
+
+def test_generate_emits_all_three_artifacts(tmp_path):
     # django.setup() already ran at import; generate() calls it again (idempotent).
     summary = codegen.generate(tmp_path)
     assert (tmp_path / "schema.json").exists()
     assert (tmp_path / "flows.json").exists()
+    assert (tmp_path / "errors.json").exists()
     assert summary["paths"] >= 1
     assert summary["flows"] >= 1
+    assert summary["errors"] >= 1
