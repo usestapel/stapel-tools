@@ -89,7 +89,7 @@ admin.site.site_header = f"{service_name} Admin"
 admin.site.site_title = f"{service_name} Admin"
 admin.site.index_title = f"{service_name} Admin — v{settings.APP_VERSION_NUMBER}"
 
-auth_prefix = getattr(settings, "AUTH_SERVICE_PREFIX", "")
+auth_prefix = getattr(settings, "STAPEL_AUTH_SERVICE_PREFIX", "")
 if auth_prefix:
     setup_centralized_admin_login(admin.site, auth_service_prefix=auth_prefix)
 
@@ -137,8 +137,10 @@ JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
 ALLOWED_HOSTS = ALLOWED_HOSTS + ["{{DIR}}"]  # type: ignore[name-defined]
 
 # Prefix of the dedicated auth service (e.g. "auth") when running in a
-# multi-service stack. Leave empty to use Django's own admin login.
-AUTH_SERVICE_PREFIX = os.getenv("AUTH_SERVICE_PREFIX", "")
+# multi-service stack. Leave empty to use Django's own admin login. Canonical
+# name (read by stapel_core.django.mounts / AdminLoginRedirectMiddleware) —
+# do not rename without updating both sides.
+STAPEL_AUTH_SERVICE_PREFIX = os.getenv("STAPEL_AUTH_SERVICE_PREFIX", "")
 
 INSTALLED_APPS = COMMON_INSTALLED_APPS + [{{STAPEL_APPS}}
     "{{MODULE}}",
@@ -161,7 +163,9 @@ CACHES = {
     }
 }
 
-LOGIN_REDIRECT_URL = "/{{SLUG}}/admin/"
+# URL *name*, not a hardcoded path (house convention: absolute paths break
+# under a mount prefix; Django's resolve_url() reverses names lazily).
+LOGIN_REDIRECT_URL = "admin:index"
 AUTH_USER_MODEL = "users.User"
 
 FILE_UPLOAD_MAX_MEMORY_SIZE = 50 * 1024 * 1024

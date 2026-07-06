@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.8.1] — 2026-07-06
+
+### Fixed
+- `stapel-new-service` / `stapel-create-project` (monolith & microservices)
+  generated `LOGIN_REDIRECT_URL = "/{{SLUG}}/admin/"` — a root-relative path
+  that 404s once the service is mounted under a prefix. Now emits the URL
+  *name* `"admin:index"` (house convention, stapel-core MODULE.md → "URL
+  mounting"), same as the example-monolith etalon (`ca64fa7`).
+- The scaffolded `AUTH_SERVICE_PREFIX` setting didn't match the name
+  `stapel_core.django.mounts` / `AdminLoginRedirectMiddleware` actually read
+  (`STAPEL_AUTH_SERVICE_PREFIX`) — every generated service silently had two
+  disconnected "is there a dedicated auth service" toggles. Renamed to the
+  canonical `STAPEL_AUTH_SERVICE_PREFIX` in both `core/urls.py` and
+  `core/settings/base.py` templates. Added `TestMountConventions` regression
+  coverage in `tests/test_create_project.py`.
+
+
 ## [0.8.0] — 2026-07-06
 
 ### Changed — `stapel-new-react-lib` re-etalon (auth-react after `ebc8f6c`/`4524a53`/`2b1449f`/`8f6b999`)

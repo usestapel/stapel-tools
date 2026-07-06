@@ -251,6 +251,46 @@ class TestOutboxHarness:
         assert result.returncode == 0, result.stdout + result.stderr
 
 
+class TestMountConventions:
+    """Follow-up to the arch-monolith-mounting P0: a scaffolded service must
+    never hardcode a root-relative admin URL, and its "is there a dedicated
+    auth service" setting must be spelled the way stapel_core.django.mounts /
+    AdminLoginRedirectMiddleware actually read it (STAPEL_AUTH_SERVICE_PREFIX)
+    — a name drift here silently breaks centralized admin login wiring in
+    every generated service."""
+
+    def test_monolith_login_redirect_is_a_url_name(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
+        assert 'LOGIN_REDIRECT_URL = "admin:index"' in settings
+        assert "/admin/" not in settings.split("LOGIN_REDIRECT_URL")[1].split("\n")[0]
+
+    def test_monolith_auth_prefix_setting_matches_core_convention(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
+        urls = (proj / "svc-app" / "core" / "urls.py").read_text()
+        assert 'STAPEL_AUTH_SERVICE_PREFIX = os.getenv("STAPEL_AUTH_SERVICE_PREFIX", "")' in settings
+        assert 'getattr(settings, "STAPEL_AUTH_SERVICE_PREFIX", "")' in urls
+        # No stale un-prefixed name left over anywhere in the generated service.
+        assert "settings, \"AUTH_SERVICE_PREFIX\"" not in urls
+        assert '"AUTH_SERVICE_PREFIX"' not in settings.replace(
+            "STAPEL_AUTH_SERVICE_PREFIX", ""
+        )
+
+    def test_microservices_scaffolded_service_same_conventions(self, tmp_path):
+        # "microservices" only lays down the shared base; individual services
+        # are added with scaffold_service() (stapel-new-service), same as a
+        # monolith adding a second service — both paths render BASE_SETTINGS.
+        proj = _create(tmp_path, "app", "microservices")
+        scaffold_service(slug="auth", title="Auth", prefix="svc-", project_root=proj)
+
+        settings = (proj / "svc-auth" / "core" / "settings" / "base.py").read_text()
+        urls = (proj / "svc-auth" / "core" / "urls.py").read_text()
+        assert 'LOGIN_REDIRECT_URL = "admin:index"' in settings
+        assert 'STAPEL_AUTH_SERVICE_PREFIX = os.getenv("STAPEL_AUTH_SERVICE_PREFIX", "")' in settings
+        assert 'getattr(settings, "STAPEL_AUTH_SERVICE_PREFIX", "")' in urls
+
+
 class TestInvalidCombos:
     def test_minimal_rejects_task_broker(self, tmp_path):
         with pytest.raises(SystemExit):
