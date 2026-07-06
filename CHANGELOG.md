@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.8.2] — 2026-07-06
+
+### Fixed — three scaffold defects (generated output was dishonest / uncollectable)
+- **`stapel-new-service` / `stapel-new-module` app-label collision.** A service
+  or module named after a hosted Stapel app (`auth`, `profiles`, `notifications`,
+  …) took the bare app label and clashed with `django.contrib.auth`
+  (label `auth`) or the hosted `stapel_<x>` module (which sets `label="<x>"`),
+  so `django.setup()` raised `ImproperlyConfigured: Application labels aren't
+  unique` and **no test could even collect**. The scaffolded `AppConfig` now
+  carries an explicit, collision-proof `label = "<module>_local"` (keeps the
+  Python `name`; the `_local` suffix marks it the service's OWN app vs. the
+  hosted module, and mirrors `core.settings.local`). Safe for existing users:
+  the templates never shipped an explicit label and a fresh scaffold has no
+  models/migrations, so the label has no `db_table` history to migrate.
+- **`stapel-new-react-lib` dishonest `data-analytics="flow"` marker.** The demo
+  `DemoButton` hardcoded `data-analytics="flow"` even for a pair with zero flow
+  machines — a lie (the button steps no auto-instrumented flow). The scaffold now
+  reads the unified `flows.json` (the same source `gen:flows` reads) and picks
+  the marker HONESTLY from the module's flow count: `data-analytics="flow"` when
+  it owns flows, else `data-analytics="none" data-analytics-reason="no-flow-machines"`.
+- **`stapel-new-react-lib` `@stapel/core` peer floor too low.** The floor was the
+  monorepo core's current minor, which could sit below `0.3.0` — the minor that
+  first re-exported the `createFlowMachine`/`useFlow` primitive every pair
+  re-exports. The floor is now `max(0.3.0, current-minor)`, so a pair can never
+  advertise a core range (`>=0.2.0`) that lacks the symbol it imports.
+
 ## [0.8.1] — 2026-07-06
 
 ### Fixed

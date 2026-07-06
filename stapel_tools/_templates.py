@@ -318,6 +318,13 @@ from django.apps import AppConfig
 class {{MODULE_CAP}}Config(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "{{MODULE}}"
+    # Explicit, collision-proof label: a service named after a hosted Stapel
+    # module (e.g. "auth", "profiles") would otherwise take the bare "{{MODULE}}"
+    # label and clash with django.contrib.auth / stapel_{{MODULE}} (which sets
+    # label="{{MODULE}}"), raising ImproperlyConfigured before any test collects.
+    # The "_local" suffix marks this as the SERVICE'S OWN app (vs. the hosted
+    # stapel_* module) and mirrors the core.settings.local naming convention.
+    label = "{{MODULE}}_local"
     verbose_name = "{{TITLE}}"
 """
 
@@ -447,6 +454,13 @@ from django.apps import AppConfig
 class {{MODULE_CAP}}Config(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "{{APP_PATH}}"
+    # Explicit, collision-proof label: a module named after a hosted Stapel app
+    # (e.g. "auth", "profiles") would otherwise take the bare "{{MODULE}}" label
+    # and clash with django.contrib.auth / stapel_{{MODULE}} (which sets
+    # label="{{MODULE}}"), raising ImproperlyConfigured before any test collects.
+    # The "_local" suffix marks this as a project-local app (vs. a hosted
+    # stapel_* module).
+    label = "{{MODULE}}_local"
     verbose_name = "{{TITLE}}"
 """
 

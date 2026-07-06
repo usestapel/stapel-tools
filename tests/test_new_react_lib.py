@@ -4,9 +4,11 @@ family, core peer floor), and the idempotent root gen:* wiring (delta 7)."""
 import json
 
 from stapel_tools.new_react_lib import (
+    analytics_marker,
     build_context,
     core_peer_range,
     file_plan,
+    module_flow_count,
     patch_root_gen,
     root_gen_invocations,
     scaffold_react_lib,
@@ -44,6 +46,7 @@ TOKENS = (
     "{{MODULE}}", "{{CAMEL}}", "{{UPPER}}", "{{PKG_DIR}}", "{{PKG_NAME}}",
     "{{BACKEND}}", "{{PATH_PREFIX}}", "{{ERRORS_SOURCE}}", "{{TITLE}}",
     "{{DESC}}", "{{CORE_PEER}}", "{{YEAR}}",
+    "{{DEMO_BUTTON_ATTRS}}", "{{DEMO_BUTTON_NOTE}}",
 )
 
 
@@ -58,8 +61,8 @@ class TestContext:
         assert ctx["PKG_DIR"] == "notifications-react"
         # gen-errors reads the backend's docs/errors.json artifact, not errors.py.
         assert ctx["ERRORS_SOURCE"] == "../stapel-notifications/docs/errors.json"
-        # default core peer floor (no react-dir wired)
-        assert ctx["CORE_PEER"] == ">=0.2.0 <1.0.0"
+        # default core peer floor (no react-dir wired) — the flow-primitive minor
+        assert ctx["CORE_PEER"] == ">=0.3.0 <1.0.0"
 
 
 class TestFilePlan:
@@ -117,10 +120,12 @@ class TestFilePlan:
 
     def test_core_peer_floor_not_workspace(self):
         """Delta 6: core peer is a pinned floor `>=X.Y.0 <1.0.0` (stops the
-        changeset peer-cascade force-major), while the local devDep is workspace:^."""
+        changeset peer-cascade force-major), while the local devDep is workspace:^.
+        The default floor is the flow-primitive minor (0.3.0), never core's very
+        first minor — the pair re-exports createFlowMachine (core 0.3.0)."""
         _, plan = self._plan()
         pkg = json.loads(plan["package.json"])
-        assert pkg["peerDependencies"]["@stapel/core"] == ">=0.2.0 <1.0.0"
+        assert pkg["peerDependencies"]["@stapel/core"] == ">=0.3.0 <1.0.0"
         assert pkg["devDependencies"]["@stapel/core"] == "workspace:^"
 
     def test_showcase_and_tokens_are_dev_only(self):
@@ -147,14 +152,33 @@ class TestFilePlan:
 
     def test_harness_is_token_and_i18n_driven(self):
         """The demo harness obeys the product ruleset: colours via cssVar(), labels
-        via t(), the tracked <button> carries data-analytics."""
+        via t(), the tracked <button> carries an HONEST data-analytics marker. A
+        fresh scaffold owns no flow machines, so the marker is `none` with a
+        reason — never a lying `flow` (defect 1)."""
         _, plan = self._plan()
         harness = plan["demo/_harness.tsx"]
         assert "cssVar(" in harness
         assert 'from "@stapel/tokens"' in harness
-        assert 'data-analytics="flow"' in harness
+        # the real <button> carries an honest `none` marker + machine-readable reason
+        assert (
+            'style={buttonStyle} data-analytics="none" '
+            'data-analytics-reason="no-flow-machines" onClick={props.run}'
+        ) in harness
+        # never the lying `flow` attribute on the button (defect 1)
+        assert 'style={buttonStyle} data-analytics="flow"' not in harness
         assert "NotificationsDemoHarness" in harness
         assert "createNotificationsRuntime" in harness
+
+    def test_harness_marker_is_flow_when_module_owns_flows(self):
+        """When the module DOES own flow machines, the marker is the honest
+        `flow` (a bag action steps an auto-instrumented machine)."""
+        ctx = build_context(
+            "auth", "Auth", "stapel-auth", "/auth/api/", flow_count=3
+        )
+        harness = file_plan(ctx)["demo/_harness.tsx"]
+        assert 'style={buttonStyle} data-analytics="flow" onClick={props.run}' in harness
+        assert 'data-analytics="none"' not in harness
+        assert "data-analytics-reason" not in harness
 
     def test_prod_bundle_purity_uses_npm_pack(self):
         """Delta 5: the purity test proves it against the real packed tarball."""
@@ -186,13 +210,62 @@ class TestFilePlan:
 
 class TestCorePeerRange:
     def test_reads_current_core_minor(self, tmp_path):
+        # current minor (0.5) is above the flow-primitive floor (0.3) → use it
         core = tmp_path / "packages" / "core"
         core.mkdir(parents=True)
         (core / "package.json").write_text(json.dumps({"version": "0.5.3"}))
         assert core_peer_range(tmp_path) == ">=0.5.0 <1.0.0"
 
+    def test_clamps_up_to_flow_primitive_floor(self, tmp_path):
+        """Defect 2: a core minor BELOW the flow-primitive minor must not lower
+        the floor — the pair re-exports createFlowMachine (core 0.3.0), so the
+        floor clamps up to 0.3.0 even when the monorepo core reads 0.2.x."""
+        core = tmp_path / "packages" / "core"
+        core.mkdir(parents=True)
+        (core / "package.json").write_text(json.dumps({"version": "0.2.9"}))
+        assert core_peer_range(tmp_path) == ">=0.3.0 <1.0.0"
+
     def test_falls_back_when_core_absent(self, tmp_path):
-        assert core_peer_range(tmp_path) == ">=0.2.0 <1.0.0"
+        # no monorepo core to read → the flow-primitive floor, not core's first minor
+        assert core_peer_range(tmp_path) == ">=0.3.0 <1.0.0"
+
+
+class TestModuleFlowCount:
+    def _flows(self, tmp_path, flows):
+        src = tmp_path / "flows.json"
+        src.write_text(json.dumps(flows))
+        return src
+
+    def test_counts_only_module_owned_flows(self, tmp_path):
+        src = self._flows(tmp_path, [
+            {"id": "auth.password_login"},
+            {"id": "auth.step_up"},
+            {"id": "billing.checkout"},
+        ])
+        assert module_flow_count(tmp_path, "auth", flows_json=src) == 2
+        assert module_flow_count(tmp_path, "billing", flows_json=src) == 1
+        assert module_flow_count(tmp_path, "notifications", flows_json=src) == 0
+
+    def test_zero_when_source_absent(self, tmp_path):
+        # a fresh backend with no annotated flows / no monolith sibling
+        assert module_flow_count(tmp_path, "notifications") == 0
+
+    def test_zero_on_malformed_source(self, tmp_path):
+        src = tmp_path / "flows.json"
+        src.write_text("not json {")
+        assert module_flow_count(tmp_path, "auth", flows_json=src) == 0
+
+
+class TestAnalyticsMarker:
+    def test_none_marker_when_no_flows(self):
+        frag = analytics_marker(0)
+        assert frag["DEMO_BUTTON_ATTRS"] == (
+            'data-analytics="none" data-analytics-reason="no-flow-machines"'
+        )
+
+    def test_flow_marker_when_flows_present(self):
+        frag = analytics_marker(2)
+        assert frag["DEMO_BUTTON_ATTRS"] == 'data-analytics="flow"'
 
 
 # A minimal root package.json mirroring the etalon's root gen:* shape.

@@ -36,11 +36,20 @@ from pathlib import Path
 
 from . import _react_templates as T
 
+# The minor of `@stapel/core` that first re-exported the flow-machine primitive
+# (`createFlowMachine`/`useFlow`) the pair re-exports from its `src/index.ts`.
+# EVERY scaffolded pair re-exports it (see _react_templates INDEX_TS), so the
+# peer floor can never sit below this minor no matter how old the monorepo core
+# is — the pair would import a symbol that does not exist there.
+FLOW_PRIMITIVE_MIN_CORE = (0, 3)  # createFlowMachine appeared in @stapel/core 0.3.0
+
 # Fallback @stapel/core peer floor when the monorepo core package.json cannot be
 # read (e.g. structural unit tests without a react-dir). Mirrors the etalon's
 # post-`2b1449f` policy: a fixed floor + `<1.0.0` ceiling, NOT `workspace:^`
 # (which made changesets force-major the pair on an out-of-range core minor).
-DEFAULT_CORE_PEER = ">=0.2.0 <1.0.0"
+# The floor is the flow-primitive minor, not core's very first minor: a pair
+# that re-exports createFlowMachine cannot honestly claim `>=0.2.0`.
+DEFAULT_CORE_PEER = ">=0.3.0 <1.0.0"
 
 
 def render(template: str, ctx: dict) -> str:
@@ -51,18 +60,80 @@ def render(template: str, ctx: dict) -> str:
 
 
 def core_peer_range(react_dir: Path) -> str:
-    """`@stapel/core` peer range for a fresh pair: floor = core's CURRENT minor
-    (`>=<major>.<minor>.0`), ceiling `<1.0.0`. Read from the monorepo core
-    package.json at scaffold time so a pair pins the compatibility it was built
-    against — the etalon fix (`2b1449f`) that stopped the changeset peer-cascade
-    from force-majoring the pair. The local devDep stays `workspace:^`."""
+    """`@stapel/core` peer range for a fresh pair: floor = **max** of the
+    flow-primitive minor (`FLOW_PRIMITIVE_MIN_CORE`, the minor that introduced the
+    `createFlowMachine`/`useFlow` re-export every pair depends on) and core's
+    CURRENT minor read from the monorepo package.json; ceiling `<1.0.0`.
+
+    Reading the current minor pins the compatibility the pair was built against
+    (the etalon fix `2b1449f` that stopped the changeset peer-cascade force-major);
+    clamping up to the flow-primitive minor stops the scaffold emitting a floor
+    (`>=0.2.0`) below the minor where the re-exported primitive actually appeared —
+    a floor that would let the pair install against a core missing the symbol.
+    The local devDep stays `workspace:^`."""
+    floor = FLOW_PRIMITIVE_MIN_CORE
     core_pkg = react_dir / "packages" / "core" / "package.json"
     try:
         version = json.loads(core_pkg.read_text(encoding="utf-8"))["version"]
-        major, minor = version.split(".")[:2]
-        return f">={int(major)}.{int(minor)}.0 <1.0.0"
+        major, minor = (int(part) for part in version.split(".")[:2])
+        floor = max(floor, (major, minor))
     except (OSError, ValueError, KeyError, json.JSONDecodeError):
-        return DEFAULT_CORE_PEER
+        pass  # keep the flow-primitive floor — the hard minimum for any pair
+    return f">={floor[0]}.{floor[1]}.0 <1.0.0"
+
+
+def module_flow_count(react_dir: Path, module: str, flows_json: Path | None = None) -> int:
+    """Number of flows the module OWNS, read from the unified `flows.json` the
+    pair's `gen:flows` driver reads (`stapel-example-monolith` codegen output, a
+    sibling of the monorepo — the same default `scripts/gen-flows.mjs` uses).
+
+    Flows are namespaced by an `id` prefixed `<module>.`, mirroring gen-flows'
+    module filter, so this returns exactly what `pnpm gen:flows` would emit into
+    the pair's registry. Returns 0 when the source is absent/unreadable (a fresh
+    backend that has not annotated `@flow_step` yet) — the honest default."""
+    source = flows_json or (
+        react_dir / ".." / "stapel-example-monolith" / "codegen" / "generated" / "flows.json"
+    )
+    try:
+        flows = json.loads(Path(source).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return 0
+    if not isinstance(flows, list):
+        return 0
+    prefix = f"{module}."
+    return sum(
+        1 for flow in flows
+        if isinstance(flow, dict) and str(flow.get("id", "")).startswith(prefix)
+    )
+
+
+def analytics_marker(flow_count: int) -> dict:
+    """Choose the demo `DemoButton` analytics marker HONESTLY from the module's
+    flow count. A `data-analytics="flow"` marker is only true when a bag action
+    steps an auto-instrumented flow machine; a pair with zero flow machines
+    (every fresh scaffold, until the backend annotates `@flow_step`) must instead
+    declare `data-analytics="none"` with a machine-readable reason, so the
+    clickable-needs-event lint stays satisfied WITHOUT the button lying about a
+    flow event it never emits. Returns the template context fragment."""
+    if flow_count > 0:
+        return {
+            "DEMO_BUTTON_ATTRS": 'data-analytics="flow"',
+            "DEMO_BUTTON_NOTE": (
+                '`data-analytics="flow"` — honest, because a headless bag action '
+                "STEPS a flow machine, which is auto-instrumented (`flow.<id>.<step>`)"
+            ),
+        }
+    return {
+        "DEMO_BUTTON_ATTRS": (
+            'data-analytics="none" data-analytics-reason="no-flow-machines"'
+        ),
+        "DEMO_BUTTON_NOTE": (
+            '`data-analytics="none"` with a `data-analytics-reason` — honest, '
+            "because this scaffold ships no flow machines yet (only the "
+            "provider), so the button steps nothing auto-instrumented. Switch to "
+            '`data-analytics="flow"` once a bag action drives a real machine'
+        ),
+    }
 
 
 def build_context(
@@ -72,6 +143,7 @@ def build_context(
     path_prefix: str,
     desc: str | None = None,
     core_peer: str = DEFAULT_CORE_PEER,
+    flow_count: int = 0,
 ) -> dict:
     camel = module.capitalize()
     default_desc = (
@@ -92,6 +164,7 @@ def build_context(
         "DESC": desc or default_desc,
         "CORE_PEER": core_peer,
         "YEAR": str(datetime.date.today().year),
+        **analytics_marker(flow_count),
     }
 
 
@@ -272,6 +345,7 @@ def scaffold_react_lib(
     ctx = build_context(
         module, title, backend, path_prefix, desc,
         core_peer=core_peer_range(react_dir),
+        flow_count=module_flow_count(react_dir, module),
     )
 
     packages_dir = react_dir / "packages"

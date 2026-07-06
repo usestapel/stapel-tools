@@ -14,8 +14,13 @@ Tokens (``{{KEY}}``) filled by ``new_react_lib.build_context``:
   ERRORS_SOURCE  errors.py path relative to react root e.g. "../stapel-notifications/errors.py"
   TITLE          human title                           e.g. "Notifications"
   DESC           package.json description
-  CORE_PEER      @stapel/core peer range (floor = core's current minor,
-                 ceiling <1.0.0)                        e.g. ">=0.2.0 <1.0.0"
+  CORE_PEER      @stapel/core peer range (floor = max of the flow-primitive
+                 minor 0.3.0 and core's current minor;
+                 ceiling <1.0.0)                        e.g. ">=0.3.0 <1.0.0"
+  DEMO_BUTTON_ATTRS  DemoButton analytics attrs, chosen by the module's flow
+                 count: `data-analytics="flow"` when it owns flows, else
+                 `data-analytics="none" data-analytics-reason="no-flow-machines"`
+  DEMO_BUTTON_NOTE   prose explaining why that marker is honest (JSDoc)
   YEAR           current year
 
 The codegen drivers are NOT copied here (fork-free rule): the etalon's
@@ -747,11 +752,9 @@ HARNESS_TSX = """/**
  *
  *  - no raw colours: every colour is a token via `cssVar()`.
  *  - no hardcoded text: every label is an i18n key rendered with `t()`.
- *  - clickable-needs-event: {@link DemoButton} carries `data-analytics=\"flow\"` —
- *    honest, because a headless bag action STEPS a flow machine, which is
- *    auto-instrumented (`flow.<id>.<step>`). The action prop is named `run` (not
- *    `onClick`) so the CALL site is not itself an untracked clickable — the
- *    tracked point is the real `<button>` in here.
+ *  - clickable-needs-event: {@link DemoButton} carries {{DEMO_BUTTON_NOTE}}. The
+ *    action prop is named `run` (not `onClick`) so the CALL site is not itself an
+ *    untracked clickable — the tracked point is the real `<button>` in here.
  *
  * The mock runtime injects a canned `fetch` (no MSW worker needed) so a demo
  * renders identically in Ladle (interactive) and in vitest (smoke). Themes are
@@ -924,8 +927,7 @@ const buttonStyle: CSSProperties = {
 /**
  * A demo action button. The interactive prop is `run` (not `onClick`) so the
  * call site is not an untracked clickable; the real `<button>` here declares
- * `data-analytics=\"flow\"` — the bag action it triggers steps an
- * auto-instrumented flow machine.
+ * {{DEMO_BUTTON_NOTE}}.
  */
 export function DemoButton(props: {
   run: () => void;
@@ -933,7 +935,7 @@ export function DemoButton(props: {
 }): ReactElement {
   const t = useT();
   return (
-    <button style={buttonStyle} data-analytics=\"flow\" onClick={props.run}>
+    <button style={buttonStyle} {{DEMO_BUTTON_ATTRS}} onClick={props.run}>
       {t(props.labelKey)}
     </button>
   );

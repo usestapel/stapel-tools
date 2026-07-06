@@ -291,6 +291,40 @@ class TestMountConventions:
         assert 'getattr(settings, "STAPEL_AUTH_SERVICE_PREFIX", "")' in urls
 
 
+class TestAppLabelCollision:
+    """Defect 3: a service/module named after a hosted Stapel app must not take
+    the bare app label (django.contrib.auth is label='auth', stapel_profiles is
+    label='profiles'). The scaffold gives its own app an explicit, collision-proof
+    `<module>_local` label so `django.setup()` does not raise ImproperlyConfigured
+    ('Application labels aren't unique')."""
+
+    def test_service_app_gets_explicit_local_label(self, tmp_path):
+        proj = _create(tmp_path, "app", "microservices")
+        scaffold_service(slug="auth", title="Auth", prefix="svc-", project_root=proj)
+        apps_py = (proj / "svc-auth" / "auth" / "apps.py").read_text()
+        # keeps its Python module name, but the app LABEL is namespaced
+        assert 'name = "auth"' in apps_py
+        assert 'label = "auth_local"' in apps_py
+
+    def test_service_named_profiles_avoids_stapel_profiles_label(self, tmp_path):
+        proj = _create(tmp_path, "app", "microservices")
+        scaffold_service(slug="profiles", title="Profiles", prefix="svc-", project_root=proj)
+        apps_py = (proj / "svc-profiles" / "profiles" / "apps.py").read_text()
+        assert 'label = "profiles_local"' in apps_py
+
+    def test_scaffolded_module_gets_explicit_local_label(self, tmp_path):
+        from stapel_tools.new_module import scaffold_module
+
+        svc = tmp_path / "svc-auth"
+        (svc / "apps").mkdir(parents=True)
+        (svc / "manage.py").write_text("# manage\n")
+        scaffold_module("profiles", "Profiles", svc)
+        apps_py = (svc / "apps" / "profiles" / "apps.py").read_text()
+        # module keeps its dotted import path but the label is collision-proof
+        assert 'name = "apps.profiles"' in apps_py
+        assert 'label = "profiles_local"' in apps_py
+
+
 class TestInvalidCombos:
     def test_minimal_rejects_task_broker(self, tmp_path):
         with pytest.raises(SystemExit):
