@@ -1,6 +1,7 @@
 # stapel-tools
 
 [![CI](https://github.com/usestapel/stapel-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/usestapel/stapel-tools/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/stapel-tools.svg)](https://pypi.org/project/stapel-tools/)
 
 CLI scaffold and linting tools for Stapel/Django projects.
 
