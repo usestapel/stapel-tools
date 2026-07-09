@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.9.0] — 2026-07-09
 
 ### Added — release-management R-1: migration-lint + release.json manifest (release-management.md §1/§3/§8)
 The OSS mechanism layer of release management (platform models/UI are R-2,
