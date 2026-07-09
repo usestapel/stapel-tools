@@ -246,7 +246,7 @@ def make_module(
     """Bare stapel-* module repo shape: root pyproject.toml + docs/*.json —
     NOT a scaffolded customer project. release-manifest is also run directly
     against a module's own checkout when cutting THAT module's release
-    (the client-project calendar/recordings process bug this gate closes)."""
+    (the calendar/recordings release process bug this gate closes)."""
     proj = tmp_path / name
     proj.mkdir()
     (proj / "pyproject.toml").write_text(
