@@ -74,6 +74,11 @@ def scaffold_module(
         sys.exit(1)
 
     files = {
+        # apps/ must be a REGULAR package so INSTALLED_APPS can carry the full
+        # dotted path "apps.<module>" (Django ticket #24801). Freshly generated
+        # services already ship apps/__init__.py; write it defensively so this
+        # also works in a service scaffolded before that was the default.
+        service_dir / apps_dir_name / "__init__.py": "",
         target / "__init__.py": MODULE_INIT,
         target / "apps.py": render(MODULE_APPS, ctx),
         target / "models.py": render(MODULE_MODELS, ctx),
@@ -96,7 +101,7 @@ def scaffold_module(
         path.write_text(content, encoding="utf-8")
         print(f"  created {path.relative_to(service_dir)}")
 
-    print(f"\nDone. Add '{app_path}' to INSTALLED_APPS in core/settings/base.py")
+    print(f"\nDone. Add '{app_path}' to INSTALLED_APPS in config/settings/base.py")
     print(f"Then include urls: path('{slug}/', include('{app_path}.urls'))")
 
 

@@ -7,7 +7,7 @@ import sys
 
 
 def main():
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     from django.core.management import execute_from_command_line
     execute_from_command_line(sys.argv)
 
@@ -104,8 +104,8 @@ if _IS_PROD:
     except ImportError:
         pass
 
-ROOT_URLCONF = "core.urls"
-WSGI_APPLICATION = "core.wsgi.application"
+ROOT_URLCONF = "config.urls"
+WSGI_APPLICATION = "config.wsgi.application"
 
 TEMPLATES = [
     {
@@ -218,7 +218,7 @@ SECRET_KEY=change_me_to_a_long_random_string
 # PRODUCTION by default (SQLite, no Docker). Deploying it is possible but
 # not the intended path; if you do, set DJANGO_ENV=prod: DEBUG turns off,
 # SECURE_SSL_REDIRECT/HSTS/CSP-report-only turn on, and SECRET_KEY is
-# guarded against placeholders/short values (see core/settings.py).
+# guarded against placeholders/short values (see config/settings.py).
 DJANGO_ENV=local
 DEBUG=true
 ALLOWED_HOSTS=*
@@ -299,10 +299,10 @@ exclude = ["migrations"]
 select = ["E", "F", "W", "I", "B", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["core", "apps", "tests"]
+known-first-party = ["config", "apps", "tests"]
 
 [tool.pytest.ini_options]
-DJANGO_SETTINGS_MODULE = "core.settings"
+DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py"]
 testpaths = ["tests"]
 """

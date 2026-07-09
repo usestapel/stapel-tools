@@ -272,7 +272,7 @@ GOOGLE_OAUTH2_KEY=
 GOOGLE_OAUTH2_SECRET=
 
 # ─── Run command ────────────────────────────────────────────────────────────
-RUN_CMD=gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 2
+RUN_CMD=gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
 """
 
 MONOLITH_GITIGNORE = """\
@@ -383,5 +383,5 @@ EMAIL_HOST_USER=
 EMAIL_HOST_PASSWORD=
 
 # ─── Run command ────────────────────────────────────────────────────────────
-RUN_CMD=gunicorn core.wsgi:application --bind 0.0.0.0:8000 --workers 2
+RUN_CMD=gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
 """

@@ -279,7 +279,6 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
 
 def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None, module_config: dict | None = None):
     from ._harness_templates import harness_files
-    from ._module_config import render_settings_block
     from ._minimal_templates import (
         MINIMAL_CONFTEST,
         MINIMAL_ENV_EXAMPLE,
@@ -292,6 +291,7 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
         MINIMAL_SETTINGS,
         MINIMAL_URLS,
     )
+    from ._module_config import render_settings_block
     slug = ctx["slug"]
     module = slug.replace("-", "_")
     module_cap = "".join(p.capitalize() for p in module.split("_"))
@@ -333,14 +333,18 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     # .env with a freshly generated secret (SEC-6), same as monolith/
     # microservices.
     _write(project_dir / ".env.example", MINIMAL_ENV_EXAMPLE)
-    _write(project_dir / "core" / "__init__.py", "")
-    _write(project_dir / "core" / "settings.py", r(MINIMAL_SETTINGS))
-    _write(project_dir / "core" / "urls.py", r(MINIMAL_URLS))
-    _write(project_dir / "core" / "wsgi.py",
+    _write(project_dir / "config" / "__init__.py", "")
+    _write(project_dir / "config" / "settings.py", r(MINIMAL_SETTINGS))
+    _write(project_dir / "config" / "urls.py", r(MINIMAL_URLS))
+    _write(project_dir / "config" / "wsgi.py",
            "import os\n\n"
            "from django.core.wsgi import get_wsgi_application\n\n"
-           "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')\n"
+           "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')\n"
            "application = get_wsgi_application()\n")
+    # apps/ is a REGULAR package (apps/__init__.py present) so INSTALLED_APPS
+    # can carry the full dotted path "apps.<module>" (Django ticket #24801);
+    # a namespace package there would break AppConfig discovery.
+    _write(project_dir / "apps" / "__init__.py", "")
     _write(project_dir / "apps" / module / "__init__.py", "")
     _write(project_dir / "apps" / module / "models.py",
            "# Add your models here.\n# from django.db import models\n")

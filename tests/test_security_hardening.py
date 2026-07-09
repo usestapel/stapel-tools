@@ -112,7 +112,7 @@ class TestProdSettingsTemplateContent:
 
     def test_monolith_prod_settings(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
-        prod = (proj / "svc-app" / "core" / "settings" / "prod.py").read_text()
+        prod = (proj / "svc-app" / "config" / "settings" / "prod.py").read_text()
 
         assert "SECURE_SSL_REDIRECT" in prod
         assert 'SECURE_HSTS_SECONDS = int(os.getenv("SECURE_HSTS_SECONDS", "86400"))' in prod
@@ -131,7 +131,7 @@ class TestProdSettingsTemplateContent:
     def test_minimal_gets_a_prod_profile(self, tmp_path):
         """B8: the minimal preset previously had no prod profile at all."""
         proj = _create(tmp_path, "app", "minimal")
-        settings = (proj / "core" / "settings.py").read_text()
+        settings = (proj / "config" / "settings.py").read_text()
 
         assert "DJANGO_ENV" in settings
         assert "_IS_PROD" in settings
@@ -150,7 +150,7 @@ class TestProdGuardRuntimeBehavior:
         proj = _create(tmp_path, "app", "monolith")
         svc = proj / "svc-app"
         env = _read_env(proj / ".env")
-        result = _boot(svc, "core.settings.prod", {
+        result = _boot(svc, "config.settings.prod", {
             "SECRET_KEY": env["SECRET_KEY"],
             "JWT_SECRET_KEY": env["JWT_SECRET_KEY"],
             "POSTGRES_PASSWORD": env["POSTGRES_PASSWORD"],
@@ -161,7 +161,7 @@ class TestProdGuardRuntimeBehavior:
         proj = _create(tmp_path, "app", "monolith")
         svc = proj / "svc-app"
         env = _read_env(proj / ".env")
-        result = _boot(svc, "core.settings.prod", {
+        result = _boot(svc, "config.settings.prod", {
             "SECRET_KEY": PLACEHOLDER_SECRET,
             "JWT_SECRET_KEY": env["JWT_SECRET_KEY"],
             "POSTGRES_PASSWORD": env["POSTGRES_PASSWORD"],
@@ -174,7 +174,7 @@ class TestProdGuardRuntimeBehavior:
         proj = _create(tmp_path, "app", "monolith")
         svc = proj / "svc-app"
         env = _read_env(proj / ".env")
-        result = _boot(svc, "core.settings.prod", {
+        result = _boot(svc, "config.settings.prod", {
             "SECRET_KEY": env["SECRET_KEY"],
             "JWT_SECRET_KEY": env["JWT_SECRET_KEY"],
             "POSTGRES_PASSWORD": PLACEHOLDER_DB_PASSWORD,
@@ -196,7 +196,7 @@ class TestProdGuardRuntimeBehavior:
         # Explicitly unset POSTGRES_PASSWORD so get_default_database() falls
         # back to its 'stapel' dev default rather than inheriting the parent
         # shell's value.
-        merged = {**os.environ, "DJANGO_SETTINGS_MODULE": "core.settings.prod", **boot_env}
+        merged = {**os.environ, "DJANGO_SETTINGS_MODULE": "config.settings.prod", **boot_env}
         merged.pop("POSTGRES_PASSWORD", None)
         result = subprocess.run(
             [sys.executable, "-c", "import django; django.setup()"],
@@ -210,7 +210,7 @@ class TestProdGuardRuntimeBehavior:
         working with zero configuration, exactly like before this change."""
         proj = _create(tmp_path, "app", "minimal")
         env = {k: v for k, v in os.environ.items() if k not in ("DJANGO_ENV", "SECRET_KEY")}
-        env["DJANGO_SETTINGS_MODULE"] = "core.settings"
+        env["DJANGO_SETTINGS_MODULE"] = "config.settings"
         result = subprocess.run(
             [sys.executable, "-c", "import django; django.setup()"],
             cwd=proj, env=env, capture_output=True, text=True,
@@ -220,7 +220,7 @@ class TestProdGuardRuntimeBehavior:
     def test_minimal_prod_boots_with_generated_secret(self, tmp_path):
         proj = _create(tmp_path, "app", "minimal")
         env = _read_env(proj / ".env")
-        result = _boot(proj, "core.settings", {
+        result = _boot(proj, "config.settings", {
             "DJANGO_ENV": "prod",
             "SECRET_KEY": env["SECRET_KEY"],
         })
@@ -228,7 +228,7 @@ class TestProdGuardRuntimeBehavior:
 
     def test_minimal_prod_rejects_placeholder_secret(self, tmp_path):
         proj = _create(tmp_path, "app", "minimal")
-        result = _boot(proj, "core.settings", {
+        result = _boot(proj, "config.settings", {
             "DJANGO_ENV": "prod",
             "SECRET_KEY": PLACEHOLDER_SECRET,
         })
@@ -238,7 +238,7 @@ class TestProdGuardRuntimeBehavior:
     def test_minimal_prod_rejects_missing_secret(self, tmp_path):
         proj = _create(tmp_path, "app", "minimal")
         env = {k: v for k, v in os.environ.items() if k != "SECRET_KEY"}
-        env["DJANGO_SETTINGS_MODULE"] = "core.settings"
+        env["DJANGO_SETTINGS_MODULE"] = "config.settings"
         env["DJANGO_ENV"] = "prod"
         result = subprocess.run(
             [sys.executable, "-c", "import django; django.setup()"],

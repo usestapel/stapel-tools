@@ -185,21 +185,25 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / "requirements.txt": REQUIREMENTS_TXT,
         root / d / "bootstrap.sh": render(BOOTSTRAP_SH, ctx),
         root / d / "Dockerfile": render(DOCKERFILE, ctx),
-        root / d / "core" / "__init__.py": "",
-        root / d / "core" / "asgi.py": render(ASGI_PY, ctx),
-        root / d / "core" / "wsgi.py": render(WSGI_PY, ctx),
-        root / d / "core" / "urls.py": render(URLS_PY, ctx),
-        root / d / "core" / "settings" / "__init__.py": "",
-        root / d / "core" / "settings" / "base.py": render(BASE_SETTINGS, ctx),
-        root / d / "core" / "settings" / "dev.py": render(DEV_SETTINGS, ctx),
-        root / d / "core" / "settings" / "local.py": render(LOCAL_SETTINGS, ctx),
-        root / d / "core" / "settings" / "prod.py": render(PROD_SETTINGS, ctx),
-        root / d / m / "__init__.py": "",
-        root / d / m / "apps.py": render(APP_PY, ctx),
-        root / d / m / "models.py": render(MODELS_PY, ctx),
-        root / d / m / "admin.py": render(ADMIN_PY, ctx),
-        root / d / m / "tests" / "__init__.py": "",
-        root / d / m / "tests" / "test_models.py": render(TEST_MODELS_PY, ctx),
+        root / d / "config" / "__init__.py": "",
+        root / d / "config" / "asgi.py": render(ASGI_PY, ctx),
+        root / d / "config" / "wsgi.py": render(WSGI_PY, ctx),
+        root / d / "config" / "urls.py": render(URLS_PY, ctx),
+        root / d / "config" / "settings" / "__init__.py": "",
+        root / d / "config" / "settings" / "base.py": render(BASE_SETTINGS, ctx),
+        root / d / "config" / "settings" / "dev.py": render(DEV_SETTINGS, ctx),
+        root / d / "config" / "settings" / "local.py": render(LOCAL_SETTINGS, ctx),
+        root / d / "config" / "settings" / "prod.py": render(PROD_SETTINGS, ctx),
+        # The service's own app lives under apps/ (regular package) just like
+        # every stapel-new-module app, so INSTALLED_APPS carries "apps.<module>"
+        # uniformly (Django ticket #24801).
+        root / d / "apps" / "__init__.py": "",
+        root / d / "apps" / m / "__init__.py": "",
+        root / d / "apps" / m / "apps.py": render(APP_PY, ctx),
+        root / d / "apps" / m / "models.py": render(MODELS_PY, ctx),
+        root / d / "apps" / m / "admin.py": render(ADMIN_PY, ctx),
+        root / d / "apps" / m / "tests" / "__init__.py": "",
+        root / d / "apps" / m / "tests" / "test_models.py": render(TEST_MODELS_PY, ctx),
         root / d / "pytest.ini": render(PYTEST_INI, ctx),
         root / d / "conftest.py": service_conftest,
         root / d / "var" / "mailtrap" / ".gitkeep": "",
@@ -482,7 +486,7 @@ def _add_celery_to_service_yml(root: Path, slug: str, dir_name: str):
       context: .
       dockerfile: {dir_name}/Dockerfile
     command: >
-      sh -c "celery -A core worker --loglevel=info ${{CELERY_WORKER_OPTS:-}}"
+      sh -c "celery -A config worker --loglevel=info ${{CELERY_WORKER_OPTS:-}}"
     restart: unless-stopped
     environment:
       POSTGRES_DB: "{db_name}"
@@ -499,7 +503,7 @@ def _add_celery_to_service_yml(root: Path, slug: str, dir_name: str):
       context: .
       dockerfile: {dir_name}/Dockerfile
     command: >
-      sh -c "celery -A core beat --loglevel=info"
+      sh -c "celery -A config beat --loglevel=info"
     restart: unless-stopped
     environment:
       POSTGRES_DB: "{db_name}"

@@ -27,9 +27,9 @@ def make_project(tmp_path, name="demo"):
     proj = tmp_path / name
     proj.mkdir()
     (proj / "manage.py").write_text("#!/usr/bin/env python\n")
-    core = proj / "core"
-    core.mkdir()
-    (core / "settings.py").write_text(
+    config = proj / "config"
+    config.mkdir()
+    (config / "settings.py").write_text(
         "DEBUG = False\n"
         'STAPEL_COMM = {"OUTBOX_ENABLED": True, "ACTION_TRANSPORT": "inprocess"}\n'
         'STAPEL_AUTH = {"MFA": "totp"}\n'
@@ -203,7 +203,7 @@ class TestConfigDigest:
         assert digest_a == compute_config_digest(proj)
         assert digest_a.startswith("sha256:")
 
-        settings = proj / "core" / "settings.py"
+        settings = proj / "config" / "settings.py"
         settings.write_text(
             settings.read_text().replace('"MFA": "totp"', '"MFA": "webauthn"')
         )
@@ -212,18 +212,18 @@ class TestConfigDigest:
     def test_non_stapel_settings_do_not_move_the_digest(self, tmp_path):
         proj = make_project(tmp_path)
         digest_a = compute_config_digest(proj)
-        settings = proj / "core" / "settings.py"
+        settings = proj / "config" / "settings.py"
         settings.write_text(settings.read_text().replace(
             "DEBUG = False", "DEBUG = True\nEXTRA = 42"
         ))
         assert compute_config_digest(proj) == digest_a
 
     def test_settings_package_layout(self, tmp_path):
-        # monolith layout: core/settings/base.py
+        # monolith layout: config/settings/base.py
         proj = tmp_path / "m"
-        (proj / "core" / "settings").mkdir(parents=True)
+        (proj / "config" / "settings").mkdir(parents=True)
         (proj / "manage.py").write_text("")
-        (proj / "core" / "settings" / "base.py").write_text(
+        (proj / "config" / "settings" / "base.py").write_text(
             'STAPEL_COMM = {"ACTION_TRANSPORT": "bus"}\n'
         )
         assert compute_config_digest(proj) != compute_config_digest(tmp_path / "m2")

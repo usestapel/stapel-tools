@@ -42,7 +42,7 @@ class TestMonolithTaskBroker:
         assert "STAPEL_TASK_DISPATCH=bus" in env
         assert "routing" not in env
 
-        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
         # Tasks go to the broker; Actions stay in-process.
         assert '"TASK_DISPATCH": os.getenv("STAPEL_TASK_DISPATCH", "bus")' in settings
         assert '"ACTION_TRANSPORT": os.getenv("STAPEL_ACTION_TRANSPORT", "inprocess")' in settings
@@ -59,7 +59,7 @@ class TestMonolithTaskBroker:
         assert "STAPEL_BUS_BACKEND" not in env
         assert "STAPEL_TASK_DISPATCH" not in env
 
-        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
         assert '"TASK_DISPATCH": os.getenv("STAPEL_TASK_DISPATCH", "action")' in settings
 
     def test_task_broker_same_as_event_broker_needs_no_routing(self, tmp_path):
@@ -73,7 +73,7 @@ class TestMonolithTaskBroker:
         assert "STAPEL_TASK_DISPATCH" not in env
         assert "routing" not in env
 
-        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
         # Tasks already ride the bus via the Action transport.
         assert '"TASK_DISPATCH": os.getenv("STAPEL_TASK_DISPATCH", "action")' in settings
         assert '"ACTION_TRANSPORT": os.getenv("STAPEL_ACTION_TRANSPORT", "bus")' in settings
@@ -85,7 +85,7 @@ class TestMonolithTaskBroker:
         scaffold_service(
             slug="worker", title="Worker", prefix="svc-", project_root=proj
         )
-        settings = (proj / "svc-worker" / "core" / "settings" / "base.py").read_text()
+        settings = (proj / "svc-worker" / "config" / "settings" / "base.py").read_text()
         assert '"TASK_DISPATCH": os.getenv("STAPEL_TASK_DISPATCH", "bus")' in settings
         assert '"ACTION_TRANSPORT": os.getenv("STAPEL_ACTION_TRANSPORT", "inprocess")' in settings
 
@@ -145,18 +145,18 @@ class TestModuleWiring:
         reqs = (proj / "requirements.txt").read_text()
         assert "stapel_auth @ git+" in reqs
 
-        settings = (proj / "core" / "settings.py").read_text()
+        settings = (proj / "config" / "settings.py").read_text()
         assert '"stapel_auth",' in settings
 
-        urls = (proj / "core" / "urls.py").read_text()
+        urls = (proj / "config" / "urls.py").read_text()
         assert 'include("stapel_auth.urls")' in urls
 
     def test_minimal_wires_multiple_modules(self, tmp_path):
         proj = _create(tmp_path, "app", "minimal", modules=["core", "auth", "billing"])
 
         reqs = (proj / "requirements.txt").read_text()
-        settings = (proj / "core" / "settings.py").read_text()
-        urls = (proj / "core" / "urls.py").read_text()
+        settings = (proj / "config" / "settings.py").read_text()
+        urls = (proj / "config" / "urls.py").read_text()
         for app in ("stapel_auth", "stapel_billing"):
             assert f"{app} @ git+" in reqs
             assert f'"{app}",' in settings
@@ -166,8 +166,8 @@ class TestModuleWiring:
         proj = _create(tmp_path, "app", "minimal", modules=["core"])
         # stapel_core (outbox app) is always present; no FEATURE module
         # (stapel_auth, stapel_billing, ...) may sneak in unrequested.
-        settings = (proj / "core" / "settings.py").read_text()
-        urls = (proj / "core" / "urls.py").read_text()
+        settings = (proj / "config" / "settings.py").read_text()
+        urls = (proj / "config" / "urls.py").read_text()
         for key in ("auth", "billing", "cdn", "notifications", "profiles",
                     "translate", "workspaces", "gdpr"):
             assert f"stapel_{key}" not in settings
@@ -176,10 +176,10 @@ class TestModuleWiring:
     def test_monolith_wires_module_everywhere(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith", modules=["core", "auth"])
 
-        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
         assert '"stapel_auth",' in settings
 
-        urls = (proj / "svc-app" / "core" / "urls.py").read_text()
+        urls = (proj / "svc-app" / "config" / "urls.py").read_text()
         assert 'include("stapel_auth.urls")' in urls
 
 
@@ -223,7 +223,7 @@ class TestOutboxHarness:
                     "pyproject.toml"]:
             assert (proj / rel).exists(), rel
 
-        settings = (proj / "core" / "settings.py").read_text()
+        settings = (proj / "config" / "settings.py").read_text()
         assert "stapel_core.django.outbox" in settings
         assert '"OUTBOX_ENABLED": True' in settings
         assert "tests.harness.mailtrap.FileMailtrapBackend" in settings
@@ -236,7 +236,7 @@ class TestOutboxHarness:
             assert (svc / rel).exists(), rel
         assert "drain_outbox" in (svc / "conftest.py").read_text()
         assert "tests" in (svc / "pytest.ini").read_text().split("testpaths")[1]
-        dev = (svc / "core" / "settings" / "dev.py").read_text()
+        dev = (svc / "config" / "settings" / "dev.py").read_text()
         assert "FileMailtrapBackend" in dev
 
     def test_minimal_harness_example_test_passes(self, tmp_path):
@@ -262,14 +262,14 @@ class TestMountConventions:
 
     def test_monolith_login_redirect_is_a_url_name(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
-        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
         assert 'LOGIN_REDIRECT_URL = "admin:index"' in settings
         assert "/admin/" not in settings.split("LOGIN_REDIRECT_URL")[1].split("\n")[0]
 
     def test_monolith_auth_prefix_setting_matches_core_convention(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
-        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
-        urls = (proj / "svc-app" / "core" / "urls.py").read_text()
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
+        urls = (proj / "svc-app" / "config" / "urls.py").read_text()
         assert 'STAPEL_AUTH_SERVICE_PREFIX = os.getenv("STAPEL_AUTH_SERVICE_PREFIX", "")' in settings
         assert 'getattr(settings, "STAPEL_AUTH_SERVICE_PREFIX", "")' in urls
         # No stale un-prefixed name left over anywhere in the generated service.
@@ -285,8 +285,8 @@ class TestMountConventions:
         proj = _create(tmp_path, "app", "microservices")
         scaffold_service(slug="auth", title="Auth", prefix="svc-", project_root=proj)
 
-        settings = (proj / "svc-auth" / "core" / "settings" / "base.py").read_text()
-        urls = (proj / "svc-auth" / "core" / "urls.py").read_text()
+        settings = (proj / "svc-auth" / "config" / "settings" / "base.py").read_text()
+        urls = (proj / "svc-auth" / "config" / "urls.py").read_text()
         assert 'LOGIN_REDIRECT_URL = "admin:index"' in settings
         assert 'STAPEL_AUTH_SERVICE_PREFIX = os.getenv("STAPEL_AUTH_SERVICE_PREFIX", "")' in settings
         assert 'getattr(settings, "STAPEL_AUTH_SERVICE_PREFIX", "")' in urls
@@ -354,15 +354,15 @@ class TestAppLabelCollision:
     def test_service_app_gets_explicit_local_label(self, tmp_path):
         proj = _create(tmp_path, "app", "microservices")
         scaffold_service(slug="auth", title="Auth", prefix="svc-", project_root=proj)
-        apps_py = (proj / "svc-auth" / "auth" / "apps.py").read_text()
-        # keeps its Python module name, but the app LABEL is namespaced
-        assert 'name = "auth"' in apps_py
+        apps_py = (proj / "svc-auth" / "apps" / "auth" / "apps.py").read_text()
+        # dotted path under the apps/ package, and a namespaced app LABEL
+        assert 'name = "apps.auth"' in apps_py
         assert 'label = "auth_local"' in apps_py
 
     def test_service_named_profiles_avoids_stapel_profiles_label(self, tmp_path):
         proj = _create(tmp_path, "app", "microservices")
         scaffold_service(slug="profiles", title="Profiles", prefix="svc-", project_root=proj)
-        apps_py = (proj / "svc-profiles" / "profiles" / "apps.py").read_text()
+        apps_py = (proj / "svc-profiles" / "apps" / "profiles" / "apps.py").read_text()
         assert 'label = "profiles_local"' in apps_py
 
     def test_scaffolded_module_gets_explicit_local_label(self, tmp_path):
@@ -416,7 +416,7 @@ class TestModuleConfig:
 
     def test_minimal_renders_exact_block(self, tmp_path):
         proj = self._create(tmp_path, "app", "minimal", self.AUTH_CONFIG)
-        settings = (proj / "core" / "settings.py").read_text()
+        settings = (proj / "config" / "settings.py").read_text()
         assert self.AUTH_BLOCK in settings
         # exactly one block, only the provided keys
         assert settings.count("STAPEL_AUTH") == 1
@@ -425,7 +425,7 @@ class TestModuleConfig:
 
     def test_monolith_renders_block_in_service_settings(self, tmp_path):
         proj = self._create(tmp_path, "app", "monolith", self.AUTH_CONFIG)
-        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
         assert self.AUTH_BLOCK in settings
 
     def test_multiple_modules_sorted_with_per_module_comments(self, tmp_path):
@@ -436,7 +436,7 @@ class TestModuleConfig:
         proj = self._create(
             tmp_path, "app", "minimal", config, modules=["core", "auth", "gdpr"]
         )
-        settings = (proj / "core" / "settings.py").read_text()
+        settings = (proj / "config" / "settings.py").read_text()
         assert "STAPEL_AUTH = {" in settings
         assert "STAPEL_GDPR = {" in settings
         assert settings.index("STAPEL_AUTH") < settings.index("STAPEL_GDPR")
@@ -456,7 +456,7 @@ class TestModuleConfig:
             }
 
         assert tree(a) == tree(b)
-        settings = (a / "core" / "settings.py").read_text()
+        settings = (a / "config" / "settings.py").read_text()
         assert "STAPEL_AUTH" not in settings
         assert "{{STAPEL_MODULE_CONFIG}}" not in settings
 
@@ -483,8 +483,8 @@ class TestModuleConfig:
         the core-only harness run in TestOutboxHarness covers the executable
         path this suite normally verifies.)"""
         proj = self._create(tmp_path, "shop", "minimal", self.AUTH_CONFIG)
-        compile((proj / "core" / "settings.py").read_text(), "settings.py", "exec")
-        assert self.AUTH_BLOCK in (proj / "core" / "settings.py").read_text()
+        compile((proj / "config" / "settings.py").read_text(), "settings.py", "exec")
+        assert self.AUTH_BLOCK in (proj / "config" / "settings.py").read_text()
 
 
 class TestModuleConfigValidation:

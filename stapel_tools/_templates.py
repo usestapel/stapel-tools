@@ -22,7 +22,7 @@ import sys
 
 
 def main():
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings.base")
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.base")
     from django.core.management import execute_from_command_line
     execute_from_command_line(sys.argv)
 
@@ -54,15 +54,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # stapel_core is vendored as a git submodule at the project root
 COPY stapel_core ./stapel_core
 COPY {{DIR}} .
-ENV DJANGO_SETTINGS_MODULE=core.settings.prod
-CMD ["gunicorn", "core.wsgi:application", "--bind", "0.0.0.0:8000"]
+ENV DJANGO_SETTINGS_MODULE=config.settings.prod
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
 """
 
 ASGI_PY = """\
 import os
 from django.core.asgi import get_asgi_application
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings.base")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.base")
 application = get_asgi_application()
 """
 
@@ -70,7 +70,7 @@ WSGI_PY = """\
 import os
 from django.core.wsgi import get_wsgi_application
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings.base")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.base")
 application = get_wsgi_application()
 """
 
@@ -145,14 +145,14 @@ ALLOWED_HOSTS = ALLOWED_HOSTS + ["{{DIR}}"]  # type: ignore[name-defined]
 STAPEL_AUTH_SERVICE_PREFIX = os.getenv("STAPEL_AUTH_SERVICE_PREFIX", "")
 
 INSTALLED_APPS = COMMON_INSTALLED_APPS + [{{STAPEL_APPS}}
-    "{{MODULE}}",
+    "apps.{{MODULE}}",
 ]{{STAPEL_MODULE_CONFIG}}
 
 MIDDLEWARE = COMMON_MIDDLEWARE
 
-ROOT_URLCONF = "core.urls"
+ROOT_URLCONF = "config.urls"
 TEMPLATES = get_common_templates(BASE_DIR)
-WSGI_APPLICATION = "core.wsgi.application"
+WSGI_APPLICATION = "config.wsgi.application"
 
 DATABASES = {
     "default": get_default_database("{{DB_NAME}}"),
@@ -319,13 +319,16 @@ from django.apps import AppConfig
 
 class {{MODULE_CAP}}Config(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "{{MODULE}}"
+    # Full dotted path — the service's own app lives under the apps/ regular
+    # package (apps/__init__.py present), same as every stapel-new-module app
+    # (Django ticket #24801).
+    name = "apps.{{MODULE}}"
     # Explicit, collision-proof label: a service named after a hosted Stapel
     # module (e.g. "auth", "profiles") would otherwise take the bare "{{MODULE}}"
     # label and clash with django.contrib.auth / stapel_{{MODULE}} (which sets
     # label="{{MODULE}}"), raising ImproperlyConfigured before any test collects.
     # The "_local" suffix marks this as the SERVICE'S OWN app (vs. the hosted
-    # stapel_* module) and mirrors the core.settings.local naming convention.
+    # stapel_* module) and mirrors the config.settings.local naming convention.
     label = "{{MODULE}}_local"
     verbose_name = "{{TITLE}}"
 """
@@ -344,11 +347,11 @@ from django.contrib import admin
 
 PYTEST_INI = """\
 [pytest]
-DJANGO_SETTINGS_MODULE = core.settings.local
+DJANGO_SETTINGS_MODULE = config.settings.local
 python_files = tests.py test_*.py *_test.py
 python_classes = Test* *Tests
 python_functions = test_*
-testpaths = {{MODULE}} tests
+testpaths = apps tests
 """
 
 CONFTEST_PY = """\
@@ -432,7 +435,7 @@ psycopg[binary]>=3.1
 gunicorn>=21.2
 celery>=5.3
 
-# Dev / test (used by core.settings.dev and pytest)
+# Dev / test (used by config.settings.dev and pytest)
 django-debug-toolbar>=4.2
 debugpy>=1.8
 pytest>=7.4
