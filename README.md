@@ -227,6 +227,28 @@ reverse requires `# stapel: irreversible` (lowers the app's
 `reversible_floor` in release.json); MIG004 NOT NULL `AddField` without
 `default`/`db_default` on an existing model (breaks N-1 rollback).
 
+### `stapel-adoption-lint` — honesty gate for stapel-module adoption
+
+```bash
+stapel-adoption-lint .                       # lint the project in .
+stapel-adoption-lint proj/ --json            # machine output
+stapel-adoption-lint proj/ --strict          # warnings become errors
+stapel-adoption-lint proj/ --workspace ~/ws  # extra root for sibling module repos
+```
+
+Catches modules "adopted" on paper but not in fact (a dependency without a
+mount, a route re-implemented over one the module ships, a done migration off
+`main`). ADO001 (error) a module installed (`requirements`/`INSTALLED_APPS`)
+and shipping a urlconf but not mounted in ROOT_URLCONF — declare intentional
+headless use with `# stapel: headless <mod>`; library-only modules are exempt.
+ADO002 (error) a project-owned urlpattern whose route (params normalized, so
+`<int:pk>` ≡ `{id}`) duplicates a path in an installed module's
+`docs/schema.json`. ADO003 (warning) `STAPEL-MIGRATION.md` records done work
+but the branch is not `main`/`master` nor merged into it. ADO004 (warning) a
+`requirements` pin never imported anywhere (dead pin, e.g. `PyJWT`→`jwt`);
+stapel modules, settings-configured packages, and an entry-point-only
+runtime/tooling allowlist are exempt.
+
 ### `stapel-release-manifest` — build the open `release.json` manifest
 
 ```bash

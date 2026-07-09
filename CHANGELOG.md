@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Added — `stapel-adoption-lint`: honesty gate for stapel-module adoption (BACKLOG §26/§30/§32, §35)
+
+- New `stapel-adoption-lint <project_dir>` CLI (`stapel_tools/adoption_lint.py`),
+  in the `stapel-migration-lint` idiom (rule codes, `--json`, `--strict`, exit 1
+  on any error). It fails the ways a module gets "adopted" on paper but not in
+  fact.
+- **ADO001 (error)** — a stapel module is installed (in `requirements*.txt` or
+  `INSTALLED_APPS`) and ships a urlconf, but its urls are not mounted in the
+  project's ROOT_URLCONF (no `include("stapel_<mod>.urls")`); its endpoints
+  don't exist. Deliberate headless use is declared with a file-level
+  `# stapel: headless <mod>` marker (short or full package name) in the urlconf
+  or a settings file. Library-only modules (no `urls`) are never flagged.
+- **ADO002 (error)** — a project-owned urlpattern duplicates an installed
+  module's operation: its route, normalized (so `<int:pk>` ≡ `{id}`), equals a
+  path the module publishes in `docs/schema.json` (OpenAPI). The finding names
+  the shadowed operation(s). Schemas are read next to the installed package
+  (`importlib` spec — editable/dev installs and the neighbour-repo workspace
+  layout) or a sibling `stapel-<mod>/docs/schema.json`; when none is discoverable
+  the check is skipped for that module with a note (never a false error).
+- **ADO003 (warning)** — a `STAPEL-MIGRATION.md` records *done* work but the
+  current git branch is neither `main`/`master` nor merged into it (a finished
+  migration lingering off `main`). Git-only, no network.
+- **ADO004 (warning)** — a `requirements` pin is never imported anywhere in the
+  project (dead pin; canonical case `PyJWT`, correctly resolved to its `jwt`
+  import via `packages_distributions()` + a small alias table). stapel modules
+  (referenced by dotted string), a small entry-point-only runtime/tooling
+  allowlist (servers, DB drivers, test/lint tools), and packages configured by
+  string in settings (INSTALLED_APPS/backends) are exempt.
+- Deliberate parsing limits are documented in the module docstring: mounts are
+  recognised only from literal `include("<pkg>.urls")` strings and inline-list
+  includes (opaque/dynamic includes need the headless marker); custom routes are
+  gathered from the ROOT_URLCONF file(s), not from app-level urlconfs reached via
+  a string include; `re_path` regexes are normalised best-effort; ADO004 judges
+  only dists whose import names resolve, and sees only the project's own tree (a
+  dep used solely transitively by a module reads as a dead pin — don't pin your
+  dependencies' dependencies). Covered by `tests/test_adoption_lint.py` (mounted
+  / unmounted / headless-marker / inline-include; duplicate-route + param
+  normalization + no-schema skip; dead pin + imported/stapel/settings-string/
+  runtime-only/unresolvable exemptions; the git branch gate; CLI/JSON/exit codes).
+
 ### Added — `stapel-catalog`: module-catalog aggregator (BACKLOG §33 p.1)
 
 - New `stapel-catalog` CLI (`stapel_tools/catalog.py`) that aggregates every
