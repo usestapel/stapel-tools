@@ -28,7 +28,7 @@ jobs:
 
       - name: Tests
         run: |
-          pip install pytest django djangorestframework "stapel-core @ git+https://github.com/usestapel/stapel-core.git" --quiet
+          pip install pytest pytest-django django djangorestframework "psycopg[binary]" "stapel-core @ git+https://github.com/usestapel/stapel-core.git" --quiet
           pytest tests/
 
       - name: Smoke-generate every project type

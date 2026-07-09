@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3] — 2026-07-10
+
+### Fixed
+- CI/publish gate: two more real test deps (psycopg for generated-project boot
+  tests, pytest-django for the generated harness run) — verified against a
+  clean venv this time, full suite green. 0.9.2 never reached PyPI.
+
 ## [0.9.2] — 2026-07-10
 
 ### Fixed
