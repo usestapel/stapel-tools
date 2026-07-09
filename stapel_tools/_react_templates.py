@@ -14,9 +14,10 @@ Tokens (``{{KEY}}``) filled by ``new_react_lib.build_context``:
   ERRORS_SOURCE  errors.py path relative to react root e.g. "../stapel-notifications/errors.py"
   TITLE          human title                           e.g. "Notifications"
   DESC           package.json description
-  CORE_PEER      @stapel/core peer range (floor = max of the flow-primitive
-                 minor 0.3.0 and core's current minor;
-                 ceiling <1.0.0)                        e.g. ">=0.3.0 <1.0.0"
+  CORE_PEER      @stapel/core peer range (floor = max of the pair-primitive
+                 minor — createFlowMachine 0.3.0, the slim-wave module
+                 factories/<StapelProvider> 0.4.0 — and core's current minor;
+                 ceiling <1.0.0)                        e.g. ">=0.4.0 <1.0.0"
   DEMO_BUTTON_ATTRS  DemoButton analytics attrs, chosen by the module's flow
                  count: `data-analytics="flow"` when it owns flows, else
                  `data-analytics="none" data-analytics-reason="no-flow-machines"`
@@ -205,12 +206,12 @@ export type {
   FlowError,
 } from "@stapel/core";
 export { toFlowError } from "./flows/errors.js";
-export { {{UPPER}}_FLOWS, flowEndpoints } from "./flows/generated/flows.gen.js";
+export { {{UPPER}}_FLOWS, flowEndpoints } from "./flows/registry.js";
 export type {
   {{CAMEL}}FlowId,
   {{CAMEL}}FlowSpec,
   FlowEndpoint,
-} from "./flows/generated/flows.gen.js";
+} from "./flows/registry.js";
 
 // ── model (runtime wiring, query keys, context) ──────────────────────────────
 export { create{{CAMEL}}Runtime } from "./model/runtime.js";
@@ -319,85 +320,63 @@ export const {{MODULE}}QueryKeys: {
 };
 """
 
-# ── src/model/runtime.ts ──────────────────────────────────────────────────────
-RUNTIME_TS = """import { createStapelClient } from "@stapel/core";
-import type { Analytics, StapelClient } from "@stapel/core";
+# ── src/model/runtime.ts (thin binding of core's createModuleRuntime; §21/S2) ─
+RUNTIME_TS = """import { createModuleRuntime } from "@stapel/core";
+import type { CreateModuleRuntimeOptions, ModuleRuntime } from "@stapel/core";
 import { create{{CAMEL}}Api } from "../api/{{MODULE}}Api.js";
 import type { {{CAMEL}}Api } from "../api/{{MODULE}}Api.js";
 
 /**
- * The wired {{MODULE}} runtime — builds a {@link StapelClient} and the pair's
- * API over it. The returned `client` is what the host injects into core's
- * `StapelConfigProvider` (as the default or the `"{{MODULE}}"` module client),
- * preserving the client-injection fork seam (frontend-standard §7.2). Auth
- * token/refresh and the verification-403 seam are supplied by the host's auth
- * runtime on the shared client — this pair does not re-implement them.
+ * The wired {{MODULE}} runtime — core's `ModuleRuntime` bound to this pair's
+ * API (slim wave §21/S2: the plumbing lives once in `@stapel/core`'s
+ * `createModuleRuntime`/`createModuleContext`; this module only binds the
+ * module-prefixed names). The returned `client` is what the host injects
+ * into core's `StapelConfigProvider` (as the default or the `"{{MODULE}}"`
+ * module client), preserving the client-injection fork seam
+ * (frontend-standard §7.2). Auth token/refresh and the verification-403 seam
+ * are supplied by the host's auth runtime on the shared client — this pair
+ * does not re-implement them.
  */
-export interface {{CAMEL}}Runtime {
-  readonly client: StapelClient;
-  readonly api: {{CAMEL}}Api;
-  readonly analytics: Analytics | null;
-}
+export type {{CAMEL}}Runtime = ModuleRuntime<{{CAMEL}}Api>;
 
-export interface Create{{CAMEL}}RuntimeOptions {
-  /** e.g. `{{PATH_PREFIX}}` or `https://app.example.com{{PATH_PREFIX}}`. */
-  readonly baseUrl: string;
-  readonly fetch?: typeof globalThis.fetch;
-  readonly credentials?: RequestCredentials;
-  readonly analytics?: Analytics | null;
-  /** Extra headers merged into every request (e.g. a tenant id). */
-  readonly defaultHeaders?: Record<string, string>;
-}
+export type Create{{CAMEL}}RuntimeOptions = CreateModuleRuntimeOptions;
 
 export function create{{CAMEL}}Runtime(
   options: Create{{CAMEL}}RuntimeOptions
 ): {{CAMEL}}Runtime {
-  const analytics = options.analytics ?? null;
-  const client = createStapelClient({
-    baseUrl: options.baseUrl,
-    ...(options.fetch !== undefined ? { fetch: options.fetch } : {}),
-    ...(options.credentials !== undefined
-      ? { credentials: options.credentials }
-      : {}),
-    ...(options.defaultHeaders !== undefined
-      ? { defaultHeaders: options.defaultHeaders }
-      : {}),
-  });
-  const api = create{{CAMEL}}Api(client);
-  return { client, api, analytics };
+  return createModuleRuntime(create{{CAMEL}}Api, options);
 }
 """
 
-# ── src/model/context.tsx ─────────────────────────────────────────────────────
-CONTEXT_TSX = """import { createContext, useContext } from "react";
-import type { Context } from "react";
-import type { Analytics } from "@stapel/core";
+# ── src/model/context.tsx (thin binding of core's createModuleContext; §21/S2) ─
+CONTEXT_TSX = """import type { Context } from "react";
+import { createModuleContext } from "@stapel/core";
+import type { Analytics, ModuleContextKit } from "@stapel/core";
 import type { {{CAMEL}}Api } from "../api/{{MODULE}}Api.js";
 import type { {{CAMEL}}Runtime } from "./runtime.js";
 
 /**
  * The wired {{CAMEL}}Runtime shared through React context by
  * `<{{CAMEL}}Provider>`. Hooks in `model/` and `headless/` read the singletons
- * from here.
+ * from here. One reviewed copy of this plumbing lives in `@stapel/core`
+ * (`createModuleContext`, slim wave §21/S2); this module binds it under the
+ * pair's public names.
  */
+const kit: ModuleContextKit<{{CAMEL}}Runtime> =
+  createModuleContext<{{CAMEL}}Runtime>("{{CAMEL}}");
+
 export const {{CAMEL}}RuntimeContext: Context<{{CAMEL}}Runtime | null> =
-  createContext<{{CAMEL}}Runtime | null>(null);
+  kit.RuntimeContext;
 
-export function use{{CAMEL}}Runtime(): {{CAMEL}}Runtime {
-  const runtime = useContext({{CAMEL}}RuntimeContext);
-  if (runtime === null) {
-    throw new Error("{{CAMEL}} hooks must be used within a <{{CAMEL}}Provider>");
-  }
-  return runtime;
-}
+export const use{{CAMEL}}Runtime: () => {{CAMEL}}Runtime = kit.useRuntime;
 
-export function use{{CAMEL}}Api(): {{CAMEL}}Api {
-  return use{{CAMEL}}Runtime().api;
-}
+export const use{{CAMEL}}Api: () => {{CAMEL}}Api = kit.useApi;
 
-export function use{{CAMEL}}Analytics(): Analytics | null {
-  return use{{CAMEL}}Runtime().analytics;
-}
+export const use{{CAMEL}}Analytics: () => Analytics | null = kit.useAnalytics;
+
+/** @internal Re-exported as `<{{CAMEL}}Provider>` from `headless/`. */
+export const ModuleProvider: ModuleContextKit<{{CAMEL}}Runtime>["Provider"] =
+  kit.Provider;
 """
 
 # ── src/flows/errors.ts ───────────────────────────────────────────────────────
@@ -419,15 +398,16 @@ export function toFlowError(error: unknown): FlowError {
 }
 """
 
-# ── src/headless/<Camel>Provider.tsx ──────────────────────────────────────────
+# ── src/headless/<Camel>Provider.tsx (core's module provider, bound; §21/S2) ──
 PROVIDER_TSX = """import type { ReactElement, ReactNode } from "react";
-import { {{CAMEL}}RuntimeContext } from "../model/context.js";
+import { ModuleProvider } from "../model/context.js";
 import type { {{CAMEL}}Runtime } from "../model/runtime.js";
 
 /**
  * Provides the wired {@link {{CAMEL}}Runtime} to every {{MODULE}} hook and
  * headless component below it. Bring your own visual shell — this component
- * renders nothing of its own.
+ * renders nothing of its own. (Core's `createModuleContext` provider, bound
+ * to this pair — slim wave §21/S2.)
  *
  * ```tsx
  * const runtime = create{{CAMEL}}Runtime({ baseUrl: "{{PATH_PREFIX}}" });
@@ -435,15 +415,44 @@ import type { {{CAMEL}}Runtime } from "../model/runtime.js";
  * <{{CAMEL}}Provider runtime={runtime}>{app}</{{CAMEL}}Provider>
  * ```
  */
-export function {{CAMEL}}Provider(props: {
+export const {{CAMEL}}Provider: (props: {
   runtime: {{CAMEL}}Runtime;
   children: ReactNode;
-}): ReactElement {
-  return (
-    <{{CAMEL}}RuntimeContext.Provider value={props.runtime}>
-      {props.children}
-    </{{CAMEL}}RuntimeContext.Provider>
-  );
+}) => ReactElement = ModuleProvider;
+"""
+
+# ── src/flows/registry.ts (zero-flow shim; §21/S3) ─────────────────────────────
+FLOWS_REGISTRY_TS = """/**
+ * Zero-flow registry shim (slim wave §21/S3). {{BACKEND}} annotates no
+ * `@flow_step` yet — its backend `docs/flows.json` carries no `{{MODULE}}.*`
+ * flows, so `gen:flows` skips emission for this pair (no `flows/generated/`
+ * scaffolding). This hand-written shim preserves the pair's public
+ * flow-registry surface at its zero-flow shape.
+ *
+ * When the backend annotates flows, `pnpm gen:flows` emits
+ * `./generated/flows.gen.ts` again — replace these exports with re-exports
+ * from it (the shapes match by construction) and delete this file.
+ */
+export const {{UPPER}}_FLOWS = {} as const;
+
+/** Canonical flow ids present in flows.json (none yet — see above). */
+export type {{CAMEL}}FlowId = keyof typeof {{UPPER}}_FLOWS;
+
+export type {{CAMEL}}FlowSpec = (typeof {{UPPER}}_FLOWS)[{{CAMEL}}FlowId];
+
+export interface FlowEndpoint {
+  readonly method: string;
+  readonly path: string;
+}
+
+/** All HTTP endpoints a flow touches, in step order (for the contract test / MSW). */
+export function flowEndpoints(id: {{CAMEL}}FlowId): readonly FlowEndpoint[] {
+  // Same widened body as the generated registry's — valid for the zero-flow
+  // shape AND correct once flows exist.
+  const spec = {{UPPER}}_FLOWS[id] as
+    | { readonly steps: readonly { readonly endpoints: readonly FlowEndpoint[] }[] }
+    | undefined;
+  return spec ? spec.steps.flatMap((s) => s.endpoints) : [];
 }
 """
 
@@ -612,32 +621,10 @@ describe("backend error keys all have an en fallback", () => {
 });
 """
 
-# ── test/flowsContract.test.ts (flows.json → registry drift-gate teeth) ────────
-FLOWS_CONTRACT_TEST = """import { describe, expect, it } from "vitest";
-import { {{UPPER}}_FLOWS } from "../src/flows/generated/flows.gen.js";
-
-/**
- * The flow CONTRACT test (docs/flow-system.md §5): proves the flows.json →
- * registry drift gate is not cosmetic. Each registry entry's key equals its
- * canonical id and carries well-formed i18n keys with ordered steps — so a
- * backend flow rename / re-endpoint (regenerated by `pnpm gen:flows`) breaks
- * these assertions rather than silently skewing the analytics funnel or the
- * client contract. Machine ↔ registry binding + HTTP-surface assertions arrive
- * per flow as you scaffold machines from flows.json (see auth-react
- * `test/flowsContract.test.ts` for the full msw-backed pattern).
- */
-describe("flow registry integrity", () => {
-  it("every entry's key equals its canonical id and carries well-formed i18n keys", () => {
-    for (const [key, spec] of Object.entries({{UPPER}}_FLOWS)) {
-      expect(spec.id).toBe(key);
-      expect(spec.titleKey).toBe(`flow.${spec.id}.title`);
-      expect(spec.descriptionKey).toBe(`flow.${spec.id}.description`);
-      const orders = spec.steps.map((s) => s.order);
-      expect(orders).toEqual([...orders].sort((a, b) => a - b));
-    }
-  });
-});
-"""
+# NOTE: no flowsContract.test.ts template — a fresh pair is zero-flow (§21/S3):
+# gen:flows emits nothing and the registry is the hand-written shim above, so a
+# contract test would be vacuous. Scaffold it per flow (the auth-react msw-backed
+# pattern) once the backend annotates @flow_step and gen:flows emits a registry.
 
 # ── test/demos.test.tsx (smoke-render every demo — demos are first-class code) ─
 DEMOS_TEST_TSX = """import { describe, expect, it } from "vitest";
@@ -996,10 +983,51 @@ README_MD = """# {{PKG_NAME}}
 Headless React flow pair for **{{BACKEND}}** (frontend-standard §2). Business +
 state only, zero visual opinion — any design layers on top. Built on
 `@stapel/core` (typed client + `StapelApiError` envelope, token refresh,
-verification-403 interception, i18n engine, analytics facade, TanStack Query).
+verification-403 interception, i18n engine, analytics seam, TanStack Query).
 
 Scaffolded by `stapel-new-react-lib`. See `MODULE.md` for the layer map, machine
 table, extension seams, and persist policy.
+
+## Install
+
+```
+pnpm add {{PKG_NAME}} @stapel/core @tanstack/react-query react
+```
+
+## Wire the app once
+
+One `<StapelProvider>` for the whole app (core's config + query + i18n in a
+single component — slim wave §21/S4), one `<{{CAMEL}}Provider>` for this pair:
+
+```tsx
+import { createI18n, StapelProvider } from "@stapel/core";
+import {
+  create{{CAMEL}}Runtime,
+  {{CAMEL}}Provider,
+  register{{CAMEL}}I18n,
+} from "{{PKG_NAME}}";
+
+const runtime = create{{CAMEL}}Runtime({ baseUrl: "{{PATH_PREFIX}}" });
+const i18n = createI18n({ locale: "en" });
+register{{CAMEL}}I18n(i18n); // the pair's key bundle → core's engine
+
+export function Root({ children }: { children: React.ReactNode }) {
+  return (
+    <StapelProvider client={runtime.client} i18n={i18n} cacheVersion="0.0.0">
+      <{{CAMEL}}Provider runtime={runtime}>{children}</{{CAMEL}}Provider>
+    </StapelProvider>
+  );
+}
+```
+
+Hooks and headless components work anywhere below `<{{CAMEL}}Provider>`
+(`use{{CAMEL}}Api`, the query/mutation hooks you add in `model/`, the
+render-prop components — see `MODULE.md`). Already wired a `<StapelProvider>`
+for another pair (or auth-react)? Keep the ONE provider: pass this runtime's
+client as a per-module override — `clients={{ {{MODULE}}: runtime.client }}` —
+and nest `<{{CAMEL}}Provider>` next to your other pair providers. The
+individual core providers (`StapelConfigProvider` + `QueryClientProvider` +
+`I18nProvider`) remain exported for bespoke composition.
 
 ## Layers
 
@@ -1007,7 +1035,8 @@ table, extension seams, and persist policy.
 src/
   api/        typed client — thin adapter over @stapel/core `components`
   model/      query keys, runtime wiring, context/hooks
-  flows/      createFlowMachine flow machines (+ generated registry)
+  flows/      toFlowError + zero-flow registry shim (machines + generated
+              registry arrive with the backend's first @flow_step)
   headless/   renderless components ({{CAMEL}}Provider, flow render-props)
   i18n/       translation keys + generated backend error map
   analytics/  generated typed-event registry (events.json)
@@ -1018,7 +1047,7 @@ demo/         first-class demos (compiled, product-linted, smoke-rendered)
 
 | Surface | Path | Gate |
 |---|---|---|
-| Flow registry | `src/flows/generated/` | `pnpm gen:flows:check` |
+| Flow registry | none — zero-flow module (`src/flows/registry.ts` shim); `gen:flows` emits `src/flows/generated/` once the backend documents flows | `pnpm gen:flows:check` |
 | Backend error map + en bundle | `src/i18n/generated/` | `pnpm gen:errors:check` |
 | Typed-event registry | `src/analytics/generated/events.json` | `pnpm gen:events:check` |
 | Demos → Ladle stories | `demo/generated/` | `pnpm gen:demos:check` |
@@ -1061,16 +1090,21 @@ generated `llms.txt` (agent context) and `manifest.json` (machine catalog).
 - **model/** — `{{MODULE}}QueryKeys` (single key factory, `["{{MODULE}}"]`
   namespace), `create{{CAMEL}}Runtime`, React context/hooks. Declare the
   persist/optimistic policy here as you add read hooks and mutations.
-- **flows/** — `createFlowMachine`-based machines (primitive imported from
-  `@stapel/core`), bound to the generated `{{UPPER}}_FLOWS` registry. Scaffold
-  new machines from flows.json; keep them under `gen:flows:check`.
+- **flows/** — `toFlowError` + the zero-flow `{{UPPER}}_FLOWS` registry shim
+  (`registry.ts`, slim wave §21/S3 — `gen:flows` emits no scaffolding for a
+  zero-flow module). Once {{BACKEND}} annotates `@flow_step`, `pnpm gen:flows`
+  emits `generated/flows.gen.ts`: swap the shim for re-exports, scaffold
+  `createFlowMachine`-based machines (primitive imported from `@stapel/core`)
+  and keep them under `gen:flows:check`.
 - **headless/** — render-prop components; `<{{CAMEL}}Provider>` wires the
   runtime into context. shadcn-copyable (frontend-standard §7).
 - **i18n/** — `{{UPPER}}_I18N_KEYS` + en bundle; the generated backend error
   bundle is merged in so every `error.*` code has a fallback.
 - **analytics/** — `generated/events.json`, the typed-event registry projected
-  from `defineEvent` call sites + flow funnels (`pnpm gen:events`). Read by the
-  analytics lint and embedded into `manifest.json`; nothing to hand-edit.
+  from `defineEvent` (`@stapel/analytics` — the impl package; core keeps only
+  the type seam, slim wave §21/S1) call sites + flow funnels (`pnpm gen:events`).
+  Read by the analytics lint and embedded into `manifest.json`; nothing to
+  hand-edit.
 - **demo/** — first-class demos (`defineDemo`, `@stapel/showcase`): `_harness.tsx`
   wires a mock runtime + i18n + query client; each `<Name>.demo.tsx` is compiled,
   product-linted, smoke-rendered, and projected to a Ladle story (`pnpm gen:demos`).

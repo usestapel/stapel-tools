@@ -29,12 +29,12 @@ REQUIRED = [
     "src/model/runtime.ts",
     "src/model/context.tsx",
     "src/flows/errors.ts",
+    "src/flows/registry.ts",
     "src/i18n/keys.ts",
     "src/i18n/errorsMap.ts",
     "demo/_harness.tsx",
     "test/pair.test.ts",
     "test/errorsBundle.test.ts",
-    "test/flowsContract.test.ts",
     "test/demos.test.tsx",
     "test/prodBundlePurity.test.ts",
 ]
@@ -61,8 +61,9 @@ class TestContext:
         assert ctx["PKG_DIR"] == "notifications-react"
         # gen-errors reads the backend's docs/errors.json artifact, not errors.py.
         assert ctx["ERRORS_SOURCE"] == "../stapel-notifications/docs/errors.json"
-        # default core peer floor (no react-dir wired) — the flow-primitive minor
-        assert ctx["CORE_PEER"] == ">=0.3.0 <1.0.0"
+        # default core peer floor (no react-dir wired) — the module-factory minor
+        # (slim wave §21/S2: the pair binds createModuleRuntime/createModuleContext)
+        assert ctx["CORE_PEER"] == ">=0.4.0 <1.0.0"
 
 
 class TestFilePlan:
@@ -121,11 +122,12 @@ class TestFilePlan:
     def test_core_peer_floor_not_workspace(self):
         """Delta 6: core peer is a pinned floor `>=X.Y.0 <1.0.0` (stops the
         changeset peer-cascade force-major), while the local devDep is workspace:^.
-        The default floor is the flow-primitive minor (0.3.0), never core's very
-        first minor — the pair re-exports createFlowMachine (core 0.3.0)."""
+        The default floor is the module-factory minor (0.4.0, slim wave §21/S2),
+        never core's very first minor — the pair binds createModuleRuntime/
+        createModuleContext and its README wires <StapelProvider>."""
         _, plan = self._plan()
         pkg = json.loads(plan["package.json"])
-        assert pkg["peerDependencies"]["@stapel/core"] == ">=0.3.0 <1.0.0"
+        assert pkg["peerDependencies"]["@stapel/core"] == ">=0.4.0 <1.0.0"
         assert pkg["devDependencies"]["@stapel/core"] == "workspace:^"
 
     def test_showcase_and_tokens_are_dev_only(self):
@@ -197,6 +199,81 @@ class TestFilePlan:
         for rel, content in plan.items():
             assert "function createFlowMachine" not in content, rel
 
+    def test_slim_model_binds_core_module_factories(self):
+        """Slim wave §21/S2: model/runtime.ts, model/context.tsx and
+        headless/<Mod>Provider.tsx are THIN BINDINGS of core's
+        createModuleRuntime/createModuleContext — the stamped plumbing lives
+        once in @stapel/core (matches the profiles-react slim shape)."""
+        _, plan = self._plan()
+        runtime = plan["src/model/runtime.ts"]
+        assert 'import { createModuleRuntime } from "@stapel/core"' in runtime
+        assert "return createModuleRuntime(createNotificationsApi, options);" in runtime
+        assert "NotificationsRuntime = ModuleRuntime<NotificationsApi>" in runtime
+        assert "CreateNotificationsRuntimeOptions = CreateModuleRuntimeOptions" in runtime
+        assert "createStapelClient" not in runtime  # the plumbing is core's now
+
+        context = plan["src/model/context.tsx"]
+        assert 'import { createModuleContext } from "@stapel/core"' in context
+        assert 'createModuleContext<NotificationsRuntime>("Notifications")' in context
+        assert "kit.useRuntime" in context and "kit.useApi" in context
+        assert "createContext(" not in context  # no stamped copy
+
+        provider = plan["src/headless/NotificationsProvider.tsx"]
+        assert 'import { ModuleProvider } from "../model/context.js"' in provider
+        assert "= ModuleProvider;" in provider
+        assert "RuntimeContext.Provider" not in provider
+
+    def test_zero_flow_registry_shim(self):
+        """Slim wave §21/S3: gen:flows no longer emits an empty registry for a
+        zero-flow module — the scaffold ships the hand-written shim and the
+        index re-exports the flow surface from it, not from flows/generated/."""
+        _, plan = self._plan()
+        registry = plan["src/flows/registry.ts"]
+        assert "export const NOTIFICATIONS_FLOWS = {} as const;" in registry
+        assert "NotificationsFlowId = keyof typeof NOTIFICATIONS_FLOWS" in registry
+        assert "export function flowEndpoints(" in registry
+        index = plan["src/index.ts"]
+        assert 'from "./flows/registry.js"' in index
+        assert "flows/generated" not in index
+        # no vacuous flows-contract test for a zero-flow scaffold
+        assert "test/flowsContract.test.ts" not in plan
+
+    def test_readme_install_and_wire_the_app_once(self):
+        """Slim wave §21/S4: the scaffolded README leads with Install + a
+        single <StapelProvider> wiring example (core's one-provider setup),
+        and the flows row is honest about the zero-flow shim."""
+        _, plan = self._plan()
+        readme = plan["README.md"]
+        assert "## Install" in readme
+        assert "## Wire the app once" in readme
+        assert 'import { createI18n, StapelProvider } from "@stapel/core"' in readme
+        assert "<StapelProvider client={runtime.client}" in readme
+        assert "<NotificationsProvider runtime={runtime}>" in readme
+        assert "clients={{ notifications: runtime.client }}" in readme
+        assert "zero-flow module (`src/flows/registry.ts` shim)" in readme
+        assert "analytics seam" in readme  # S1: the impl moved to @stapel/analytics
+
+    def test_no_analytics_impl_imports_from_core(self):
+        """Slim wave §21/S1: the analytics IMPLEMENTATION lives in
+        @stapel/analytics; templates may only use core's TYPE seam. No template
+        IMPORTS impl symbols (createAnalytics, defineEvent, createTracked, …)
+        from @stapel/core (a prose mention crediting @stapel/analytics is fine)."""
+        import re
+
+        _, plan = self._plan()
+        impl_symbols = ("createAnalytics", "defineEvent", "createTracked",
+                        "useTracked")
+        for rel, content in plan.items():
+            for match in re.finditer(
+                r'import\s*(?:type\s*)?{([^}]*)}\s*from\s*"@stapel/core"', content
+            ):
+                names = match.group(1)
+                for symbol in impl_symbols:
+                    assert symbol not in names, (
+                        f"{rel} imports {symbol} from @stapel/core — the impl "
+                        "moved to @stapel/analytics (slim wave S1)"
+                    )
+
     def test_tsconfig_isolated_declarations(self):
         _, plan = self._plan()
         ts = json.loads(plan["tsconfig.json"])
@@ -216,18 +293,22 @@ class TestCorePeerRange:
         (core / "package.json").write_text(json.dumps({"version": "0.5.3"}))
         assert core_peer_range(tmp_path) == ">=0.5.0 <1.0.0"
 
-    def test_clamps_up_to_flow_primitive_floor(self, tmp_path):
-        """Defect 2: a core minor BELOW the flow-primitive minor must not lower
-        the floor — the pair re-exports createFlowMachine (core 0.3.0), so the
-        floor clamps up to 0.3.0 even when the monorepo core reads 0.2.x."""
+    def test_clamps_up_to_pair_primitive_floor(self, tmp_path):
+        """Defect 2 + slim wave §21/S2: a core minor BELOW the newest bound
+        primitive must not lower the floor — the pair binds
+        createModuleRuntime/createModuleContext (core 0.4.0), so the floor
+        clamps up to 0.4.0 even when the monorepo core still reads 0.3.x
+        (the wave landed with changesets pending) or 0.2.x."""
         core = tmp_path / "packages" / "core"
         core.mkdir(parents=True)
+        (core / "package.json").write_text(json.dumps({"version": "0.3.0"}))
+        assert core_peer_range(tmp_path) == ">=0.4.0 <1.0.0"
         (core / "package.json").write_text(json.dumps({"version": "0.2.9"}))
-        assert core_peer_range(tmp_path) == ">=0.3.0 <1.0.0"
+        assert core_peer_range(tmp_path) == ">=0.4.0 <1.0.0"
 
     def test_falls_back_when_core_absent(self, tmp_path):
-        # no monorepo core to read → the flow-primitive floor, not core's first minor
-        assert core_peer_range(tmp_path) == ">=0.3.0 <1.0.0"
+        # no monorepo core to read → the pair-primitive floor, not core's first minor
+        assert core_peer_range(tmp_path) == ">=0.4.0 <1.0.0"
 
 
 class TestModuleFlowCount:
