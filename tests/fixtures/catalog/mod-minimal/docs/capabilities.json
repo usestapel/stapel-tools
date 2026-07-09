@@ -1,0 +1,13 @@
+{
+  "module": "stapel-mini",
+  "version": "0.1.0",
+  "provides": "Minimal module: no axes, one extension point.",
+  "axes": [],
+  "extension_points": [
+    {"name": "MINI_SETTINGS", "kind": "json_settings", "summary": "a settings bag"}
+  ],
+  "operations_total": 3,
+  "requires": [
+    {"module": "stapel-core", "optional": false, "reason": "comm bus"}
+  ]
+}

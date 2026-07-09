@@ -160,6 +160,39 @@ self-contained `report.html`. Per event: description, typed props, emit sites
 frontend coverage and renders a `[gated: <ENV>]` badge (from `gated_by`, task
 G6 — absent means always-on). `--capabilities` is reserved (§3.4 env-aware).
 
+### `stapel-catalog` — module-catalog aggregator
+
+Aggregates every module's `docs/capabilities.json` (the fourth contract
+artifact) into a catalog for stack advisors and CTO prompts. Emits
+`catalog.json` (the full machine aggregate — every source document verbatim
+plus roll-up totals and curated recipes) and `catalog.md` (a compact,
+prompt-ready projection: header roll-up, then per module a `provides`
+one-liner, an axis table `key | default | ops gated`, extension-point names and
+requires). Both outputs are deterministic (modules sorted by name, axes by key,
+no timestamps), so `catalog.md` is stable enough to commit into other repos'
+system prompts.
+
+```bash
+# scan a workspace (repos without capabilities.json are skipped with a warning)
+stapel-catalog --workspace ~/Projects/stapel --out-dir ./catalog
+
+# explicit module repos (or direct capabilities.json paths)
+stapel-catalog ../stapel-auth ../stapel-billing --out-dir ./catalog
+
+# add curated composite recipes (marketplace = N modules) as their own section
+stapel-catalog --workspace ~/Projects/stapel --recipes recipes.yaml --out-dir ./catalog
+```
+
+Recipes are curated, not derived — a minimal, dependency-free YAML subset:
+
+```yaml
+recipes:
+  - name: marketplace
+    summary: Two-sided marketplace — accounts, profiles and listings.
+    modules: [stapel-auth, stapel-profiles, stapel-listings]
+    notes: reviews live in a separate target-generic module
+```
+
 ### `stapel-lint` — project-specific static linter
 
 ```bash

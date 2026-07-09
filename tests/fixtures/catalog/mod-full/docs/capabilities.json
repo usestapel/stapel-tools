@@ -1,0 +1,53 @@
+{
+  "module": "stapel-demo",
+  "version": "1.2.3",
+  "provides": "Demo module: a rich fixture exercising gated axes, a behavior-only axis, extension points and requires.",
+  "axes": [
+    {
+      "key": "DEMO_ZEBRA",
+      "kind": "bool",
+      "default": true,
+      "group": "demo.z",
+      "gates": {
+        "operations": [
+          "demo_api_z_one",
+          "demo_api_z_two"
+        ],
+        "co_gates": ["DEMO_ALPHA"]
+      },
+      "curated": {"summary": "z", "business_label": "Z"}
+    },
+    {
+      "key": "DEMO_ALPHA",
+      "kind": "bool",
+      "default": false,
+      "group": "demo.a",
+      "gates": {
+        "operations": ["demo_api_a_one"],
+        "co_gates": ["DEMO_ZEBRA"]
+      },
+      "curated": {"summary": "a", "business_label": "A"}
+    },
+    {
+      "key": "DEMO_STEPUP",
+      "kind": "bool",
+      "default": false,
+      "group": "demo.stepup",
+      "gates": {
+        "operations": [],
+        "co_gates": [],
+        "behavior": "When on, an extra check runs; gates no endpoint of its own."
+      },
+      "curated": {"summary": "s", "business_label": "S"}
+    }
+  ],
+  "extension_points": [
+    {"name": "DEMO_BACKEND", "kind": "dotted_path", "summary": "swap the backend"},
+    {"name": "DEMO_STAGES", "kind": "merge_registry", "summary": "add stages"}
+  ],
+  "operations_total": 7,
+  "requires": [
+    {"module": "stapel-core", "optional": false, "reason": "comm bus"},
+    {"module": "stapel-notifications", "optional": true, "reason": "emails"}
+  ]
+}

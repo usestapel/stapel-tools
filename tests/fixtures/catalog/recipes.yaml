@@ -1,0 +1,12 @@
+# Curated composite projections (BACKLOG §33 p.1 "составные рецепты").
+recipes:
+  - name: marketplace
+    summary: Two-sided marketplace — accounts, profiles and listings.
+    modules: [stapel-auth, stapel-profiles, stapel-listings]
+    notes: reviews live in a separate target-generic module
+
+  - name: booking
+    summary: Appointment booking on top of calendars.
+    modules:
+      - stapel-auth
+      - stapel-calendar

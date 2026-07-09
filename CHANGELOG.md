@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — `stapel-catalog`: module-catalog aggregator (BACKLOG §33 p.1)
+
+- New `stapel-catalog` CLI (`stapel_tools/catalog.py`) that aggregates every
+  module's `docs/capabilities.json` (the fourth contract artifact) into two
+  catalog artifacts: `catalog.json` — the full machine aggregate (every source
+  document verbatim + roll-up totals + curated recipes) — and `catalog.md` — a
+  compact, prompt-ready projection (header roll-up, then per module: name,
+  version, `provides` one-liner, an axis table `key | default | ops gated`,
+  extension-point names, requires).
+- Inputs are explicit module repo paths (or direct `capabilities.json` paths)
+  and/or `--workspace <dir>`, which scans `stapel-*/docs/capabilities.json`.
+  A source with no artifact, malformed JSON, or no `module` field is skipped
+  with a warning — never a crash; a partial catalog still emits.
+- Curated **recipes** (composite projections — a marketplace = N modules) are
+  read from a separate `--recipes <file>` and rendered as their own catalog.md
+  section. The minimal recipe schema (a restricted, dependency-free YAML
+  subset — `recipes:` list of `{name, summary, modules, notes}`) is documented
+  in the module docstring; a malformed recipes file is a loud error (curated
+  input, not a discovered artifact).
+- Both artifacts are deterministic (modules sorted by name, axes by key, no
+  timestamps) so `catalog.md` is stable enough to commit into other repos'
+  system prompts. Covered by `tests/test_catalog.py` (fixture capabilities of
+  every shape — full / minimal / broken JSON / absent; byte-for-byte
+  determinism across two runs).
+
 ## [0.10.0] — 2026-07-10
 
 ### Changed — generated-project layout aligned with the community canon (BACKLOG §29)
