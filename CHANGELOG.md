@@ -1,5 +1,35 @@
 # Changelog
 
+## [0.10.0] — 2026-07-10
+
+### Changed — generated-project layout aligned with the community canon (BACKLOG §29)
+
+**Breaking for generated projects** (the scaffolders' output changes; the CLI
+surface is unchanged). Regenerate, or rename by hand in existing projects.
+
+- **Settings package `core/` → `config/`** across every preset (minimal,
+  monolith, microservices). `ROOT_URLCONF`, `WSGI_APPLICATION`,
+  `DJANGO_SETTINGS_MODULE`, the WSGI/ASGI modules, `Dockerfile`/compose
+  `gunicorn`/`celery` targets, `manage.py`, `pytest.ini`/`pyproject`, and the
+  isort `known-first-party` list all now point at `config`. Matches
+  cookiecutter-django / HackSoft / Two Scoops, and drops the name collision
+  with the `stapel-core` package. The monolith/microservices settings split
+  keeps its existing file set (`base`/`dev`/`local`/`prod`) — only the package
+  name moved.
+- **User modules live under `apps/` uniformly, as a regular package.** Every
+  scaffolded app — the starter module in a service AND anything added by
+  `stapel-new-module` — is now `apps/<module>` with `apps/__init__.py` present,
+  `INSTALLED_APPS = ["apps.<module>"]`, and `AppConfig.name = "apps.<module>"`
+  (full dotted path, Django ticket #24801). Fixes the layout bug where a
+  monolith's first module was created top-level while `stapel-new-module`
+  placed later ones in `apps/` (incompatible paths in one fresh service), and
+  where the minimal preset's `apps/` had no `__init__.py` (namespace-package
+  edge case). `stapel-new-module` now also writes `apps/__init__.py`
+  defensively. Follows the wemake-django-template pattern.
+- The minimal preset keeps its single `config/settings.py` (deliberate — the
+  falco / Adam Johnson camp for a small, no-Docker project); only larger
+  presets get the settings split.
+
 ## [0.9.3] — 2026-07-10
 
 ### Fixed

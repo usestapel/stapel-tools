@@ -211,6 +211,48 @@ byte-deterministic (sorted keys; `--created-at`/`SOURCE_DATE_EPOCH`).
 The platform bake step calls this during image build and bakes the file
 into the image at `/app/release.json`.
 
+## Project layout
+
+Generated projects follow the mainstream Django community canon so the shape is
+familiar to anyone who has used the popular templates.
+
+- **`config/` — the settings/URLs/WSGI package.** Not `core/`. This is the
+  convention of [cookiecutter-django](https://github.com/cookiecutter/cookiecutter-django),
+  the [HackSoft styleguide](https://github.com/HackSoftware/Django-Styleguide),
+  and *Two Scoops of Django* (`ROOT_URLCONF = "config.urls"`). It also avoids
+  colliding with the `stapel-core` package name. The monolith and microservices
+  presets split it into `config/settings/{base,dev,local,prod}.py`; **minimal**
+  keeps a single `config/settings.py` — a deliberate choice for a small,
+  no-Docker project (the [falco](https://github.com/falcopackages/falco) / Adam
+  Johnson "one settings file until you need more" camp).
+
+- **`apps/` — a regular package holding your Django apps.** Every module lives at
+  `apps/<module>` with an `apps/__init__.py`, is listed as
+  `INSTALLED_APPS = ["apps.<module>"]`, and sets `AppConfig.name = "apps.<module>"`
+  (the full dotted path — see [Django ticket #24801](https://code.djangoproject.com/ticket/24801)).
+  This is the [wemake-django-template](https://github.com/wemake-services/wemake-django-template)
+  pattern, and it is uniform: the starter module and everything added later by
+  `stapel-new-module` share the same import path.
+
+```
+myapp/                      # monolith / microservices service (svc-myapp/)
+├── config/
+│   ├── settings/{base,dev,local,prod}.py
+│   ├── urls.py  wsgi.py  asgi.py
+├── apps/
+│   ├── __init__.py         # regular package (required)
+│   └── myapp/              # apps.myapp — INSTALLED_APPS + AppConfig.name
+├── tests/                  # outbox/mailtrap integration harness
+└── manage.py
+
+myapp/                      # minimal preset (no Docker, SQLite)
+├── config/
+│   ├── settings.py         # single file (deliberate)
+│   ├── urls.py  wsgi.py
+├── apps/__init__.py  apps/myapp/
+└── manage.py
+```
+
 ## Available modules
 
 | Module | Description |
