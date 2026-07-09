@@ -71,7 +71,7 @@ INSTALLED_APPS = [
     # (delivery guarantee + test harness, system-design §7.21).
     "stapel_core.django.outbox",{{STAPEL_APPS}}
     "apps.{{MODULE}}",
-]
+]{{STAPEL_MODULE_CONFIG}}
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

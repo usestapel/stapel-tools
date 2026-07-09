@@ -77,7 +77,10 @@ def make_context(
     action_transport: str = "inprocess",
     function_transport: str = "inprocess",
     task_dispatch: str = "action",
+    module_config: dict[str, dict] | None = None,
 ) -> dict:
+    from ._module_config import render_settings_block
+
     module = slug.replace("-", "_")
     module_cap = "".join(p.capitalize() for p in module.split("_"))
     dir_name = f"{prefix}{slug}" if prefix else slug
@@ -98,6 +101,7 @@ def make_context(
         "URL_PREFIX": f"{slug}/",
         "STAPEL_APPS": stapel_apps_block,
         "STAPEL_URL_INCLUDES": url_includes,
+        "STAPEL_MODULE_CONFIG": render_settings_block(module_config),
         "ACTION_TRANSPORT": action_transport,
         "FUNCTION_TRANSPORT": function_transport,
         "TASK_DISPATCH": task_dispatch,
@@ -525,11 +529,21 @@ def scaffold_service(
     action_transport: Optional[str] = None,
     function_transport: Optional[str] = None,
     task_dispatch: Optional[str] = None,
+    module_config: Optional[dict[str, dict]] = None,
 ):
     """Scaffold a service. stapel_apps — Django app names of Stapel feature
     modules (e.g. ["stapel_auth"]) to wire into INSTALLED_APPS and urls;
     their packages are expected inside the service dir (git submodule).
-    Transports default to whatever broker the project's .env declares."""
+    module_config — {module: {SETTING_KEY: value}} rendered as STAPEL_<MOD>
+    blocks into settings/base.py (non-default capability axes only; validated
+    against the module's docs/capabilities.json when the sibling checkout has
+    one). Transports default to whatever broker the project's .env declares."""
+    from ._module_config import validate_module_config
+
+    validate_module_config(
+        module_config,
+        selected=[app.removeprefix("stapel_") for app in (stapel_apps or [])],
+    )
     cwd = Path.cwd()
     root = project_root or find_project_root(cwd) or cwd
     if action_transport is None or function_transport is None or task_dispatch is None:
@@ -543,6 +557,7 @@ def scaffold_service(
         action_transport=action_transport,
         function_transport=function_transport,
         task_dispatch=task_dispatch,
+        module_config=module_config,
     )
     dir_name = ctx["DIR"]
 
@@ -607,6 +622,13 @@ def main():
         help="Stapel feature apps to wire in (e.g. stapel_auth stapel_gdpr); "
              "add each as a git submodule inside the service dir afterwards",
     )
+    parser.add_argument(
+        "--module-config", type=Path, metavar="PATH",
+        help="JSON file {module: {SETTING_KEY: value}} rendered as "
+             "STAPEL_<MOD> = {...} blocks in settings/base.py (non-default "
+             "capability axes only; keys validated against the module's "
+             "docs/capabilities.json when a sibling checkout has one)",
+    )
     args = parser.parse_args()
 
     slug = args.name
@@ -629,6 +651,12 @@ def main():
     if not title.endswith("Service") and not args.title:
         title = f"{title} Service"
 
+    module_config = None
+    if args.module_config:
+        from ._module_config import load_module_config_file
+
+        module_config = load_module_config_file(args.module_config)
+
     scaffold_service(
         slug=slug,
         title=title,
@@ -637,6 +665,7 @@ def main():
         celery=args.celery,
         dry_run=args.dry_run,
         stapel_apps=args.stapel_apps,
+        module_config=module_config,
     )
 
 

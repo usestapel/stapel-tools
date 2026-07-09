@@ -11,6 +11,8 @@ Placeholders:
   {{MODULE_CAP}} - CamelCase of module, e.g. "Auth"
   {{DB_NAME}}    - database name, e.g. "stapel_auth"
   {{URL_PREFIX}} - URL prefix, e.g. "auth/"
+  {{STAPEL_MODULE_CONFIG}} - rendered STAPEL_<MOD> = {...} settings blocks
+                 (only non-default capability axes; "" when no module_config)
 """
 
 MANAGE_PY = """\
@@ -144,7 +146,7 @@ STAPEL_AUTH_SERVICE_PREFIX = os.getenv("STAPEL_AUTH_SERVICE_PREFIX", "")
 
 INSTALLED_APPS = COMMON_INSTALLED_APPS + [{{STAPEL_APPS}}
     "{{MODULE}}",
-]
+]{{STAPEL_MODULE_CONFIG}}
 
 MIDDLEWARE = COMMON_MIDDLEWARE
 

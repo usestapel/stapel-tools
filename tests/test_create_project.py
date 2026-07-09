@@ -378,6 +378,181 @@ class TestAppLabelCollision:
         assert 'label = "profiles_local"' in apps_py
 
 
+class TestModuleConfig:
+    """A5 (capability-config.md §4 p.1): create_project/scaffold_service render
+    STAPEL_<MOD> = {...} blocks from module_config — only the provided
+    (non-default) keys, with a comment pointing at the module's
+    docs/capabilities.json; no config → byte-for-byte the previous output."""
+
+    AUTH_CONFIG = {
+        "auth": {"AUTH_PASSWORD_LOGIN": True, "AUTH_EMAIL_REGISTRATION": False}
+    }
+    AUTH_BLOCK = (
+        "# auth: non-default capability axes only — defaults live in "
+        "stapel_auth/conf.py;\n"
+        "# the full axis list is stapel-auth/docs/capabilities.json "
+        "(emitted by `make contract`).\n"
+        "STAPEL_AUTH = {\n"
+        '    "AUTH_PASSWORD_LOGIN": True,\n'
+        '    "AUTH_EMAIL_REGISTRATION": False,\n'
+        "}\n"
+    )
+
+    def _create(self, tmp_path, name, project_type, module_config, modules=None):
+        create_project(
+            name=name,
+            project_type=project_type,
+            title=name,
+            url="https://x.dev",
+            company_name="X",
+            company_email="x@x.dev",
+            modules=modules or ["core", "auth"],
+            output_dir=tmp_path,
+            use_submodules=False,
+            init_git=False,
+            module_config=module_config,
+        )
+        return tmp_path / name
+
+    def test_minimal_renders_exact_block(self, tmp_path):
+        proj = self._create(tmp_path, "app", "minimal", self.AUTH_CONFIG)
+        settings = (proj / "core" / "settings.py").read_text()
+        assert self.AUTH_BLOCK in settings
+        # exactly one block, only the provided keys
+        assert settings.count("STAPEL_AUTH") == 1
+        assert "AUTH_PHONE_LOGIN" not in settings
+        assert "{{STAPEL_MODULE_CONFIG}}" not in settings
+
+    def test_monolith_renders_block_in_service_settings(self, tmp_path):
+        proj = self._create(tmp_path, "app", "monolith", self.AUTH_CONFIG)
+        settings = (proj / "svc-app" / "core" / "settings" / "base.py").read_text()
+        assert self.AUTH_BLOCK in settings
+
+    def test_multiple_modules_sorted_with_per_module_comments(self, tmp_path):
+        config = {
+            "gdpr": {"GDPR_EXPORT_ENABLED": True},
+            "auth": {"AUTH_PASSWORD_LOGIN": True},
+        }
+        proj = self._create(
+            tmp_path, "app", "minimal", config, modules=["core", "auth", "gdpr"]
+        )
+        settings = (proj / "core" / "settings.py").read_text()
+        assert "STAPEL_AUTH = {" in settings
+        assert "STAPEL_GDPR = {" in settings
+        assert settings.index("STAPEL_AUTH") < settings.index("STAPEL_GDPR")
+        assert "stapel-gdpr/docs/capabilities.json" in settings
+
+    def test_no_config_is_byte_identical(self, tmp_path):
+        """The seam is inert: module_config=None and module_config={} produce
+        byte-for-byte the tree the scaffolder produced before A5."""
+        a = self._create(tmp_path / "a", "app", "minimal", None)
+        b = self._create(tmp_path / "b", "app", "minimal", {})
+
+        def tree(root):
+            return {
+                p.relative_to(root): p.read_bytes()
+                for p in sorted(root.rglob("*"))
+                if p.is_file() and ".env" not in p.name  # .env carries secrets
+            }
+
+        assert tree(a) == tree(b)
+        settings = (a / "core" / "settings.py").read_text()
+        assert "STAPEL_AUTH" not in settings
+        assert "{{STAPEL_MODULE_CONFIG}}" not in settings
+
+    def test_config_for_unselected_module_is_hard_error(self, tmp_path):
+        import pytest
+
+        with pytest.raises(SystemExit, match="billing"):
+            self._create(
+                tmp_path, "app", "minimal",
+                {"billing": {"BILLING_PROVIDER": "stripe"}},
+                modules=["core", "auth"],
+            )
+
+    def test_microservices_rejects_module_config(self, tmp_path):
+        import pytest
+
+        with pytest.raises(SystemExit):
+            self._create(tmp_path, "app", "microservices", self.AUTH_CONFIG)
+
+    def test_minimal_project_checks_still_pass_with_config(self, tmp_path):
+        """The generated settings module stays valid Python with a config block
+        present. (Booting Django with stapel_auth mounted needs the module's
+        full env — user model swap, JWT config — out of scope for tools CI;
+        the core-only harness run in TestOutboxHarness covers the executable
+        path this suite normally verifies.)"""
+        proj = self._create(tmp_path, "shop", "minimal", self.AUTH_CONFIG)
+        compile((proj / "core" / "settings.py").read_text(), "settings.py", "exec")
+        assert self.AUTH_BLOCK in (proj / "core" / "settings.py").read_text()
+
+
+class TestModuleConfigValidation:
+    """The validation seam: sibling docs/capabilities.json (when present) is
+    the axes+extension key surface; unknown key = hard error with the known
+    keys; absent artifact = warn and pass through."""
+
+    def _workspace(self, tmp_path, axes=("AUTH_PASSWORD_LOGIN",), extensions=()):
+        docs = tmp_path / "stapel-auth" / "docs"
+        docs.mkdir(parents=True)
+        (docs / "capabilities.json").write_text(json.dumps({
+            "module": "stapel-auth",
+            "axes": [{"key": k} for k in axes],
+            "extension_points": [{"name": n} for n in extensions],
+        }))
+        return tmp_path
+
+    def test_unknown_key_is_hard_error_with_known_keys(self, tmp_path):
+        import pytest
+
+        from stapel_tools._module_config import validate_module_config
+
+        root = self._workspace(tmp_path, axes=("AUTH_PASSWORD_LOGIN",
+                                               "AUTH_EMAIL_LOGIN"))
+        with pytest.raises(SystemExit) as exc:
+            validate_module_config(
+                {"auth": {"AUTH_NO_SUCH_KEY": True}},
+                selected=["auth"], workspace_root=root,
+            )
+        message = str(exc.value)
+        assert "AUTH_NO_SUCH_KEY" in message
+        assert "AUTH_PASSWORD_LOGIN" in message  # the known-keys list
+        assert "AUTH_EMAIL_LOGIN" in message
+
+    def test_extension_surface_keys_are_known(self, tmp_path):
+        from stapel_tools._module_config import validate_module_config
+
+        root = self._workspace(
+            tmp_path, axes=("AUTH_PASSWORD_LOGIN",),
+            extensions=("OAUTH_PROVIDER_CLASSES",),
+        )
+        validate_module_config(  # does not raise
+            {"auth": {"OAUTH_PROVIDER_CLASSES": ["x.Y"]}},
+            selected=["auth"], workspace_root=root,
+        )
+
+    def test_absent_capabilities_warns_and_passes(self, tmp_path, capsys):
+        from stapel_tools._module_config import validate_module_config
+
+        validate_module_config(  # module not swept yet — no artifact
+            {"auth": {"AUTH_ANYTHING_GOES": 1}},
+            selected=["auth"], workspace_root=tmp_path,
+        )
+        assert "Warning" in capsys.readouterr().err
+
+    def test_real_sibling_auth_keys_validate(self):
+        """In the workspace checkout the default root finds the real
+        stapel-auth capabilities.json; the A5 example keys are real axes."""
+        from stapel_tools._module_config import known_config_keys
+
+        known = known_config_keys("auth")
+        if known is None:  # module CI checks out only this repo
+            import pytest
+
+            pytest.skip("stapel-auth sibling not present")
+        assert {"AUTH_PASSWORD_LOGIN", "AUTH_EMAIL_REGISTRATION"} <= known
+
+
 class TestInvalidCombos:
     def test_minimal_rejects_task_broker(self, tmp_path):
         with pytest.raises(SystemExit):

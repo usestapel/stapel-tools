@@ -232,7 +232,7 @@ def _write_shared_infra(project_dir: Path):
     ensure_script.chmod(0o755)
 
 
-def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none"):
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None):
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
         MONOLITH_COMPOSE_DEV,
@@ -273,11 +273,13 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         action_transport=action_transport,
         function_transport=function_transport,
         task_dispatch=task_dispatch,
+        module_config=module_config,
     )
 
 
-def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None):
+def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None, module_config: dict | None = None):
     from ._harness_templates import harness_files
+    from ._module_config import render_settings_block
     from ._minimal_templates import (
         MINIMAL_CONFTEST,
         MINIMAL_ENV_EXAMPLE,
@@ -314,6 +316,7 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
         "MODULE_CAP": module_cap,
         "STAPEL_APPS": stapel_apps_block,
         "STAPEL_URL_INCLUDES": url_includes,
+        "STAPEL_MODULE_CONFIG": render_settings_block(module_config),
     }
 
     def r(s):
@@ -456,6 +459,7 @@ def create_project(
     init_git: bool = True,
     broker: str | None = None,
     task_broker: str | None = None,
+    module_config: dict[str, dict] | None = None,
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
@@ -480,6 +484,20 @@ def create_project(
             file=sys.stderr,
         )
         sys.exit(1)
+
+    if module_config:
+        if project_type == "microservices":
+            print(
+                "Error: --module-config applies to monolith/minimal projects; "
+                "for microservices pass it to 'stapel-new-service' per service",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        from ._module_config import validate_module_config
+
+        # Fail before any file is written: unknown module, or a key outside the
+        # module's capabilities.json axes+extension surface, is a hard error.
+        validate_module_config(module_config, selected=[*modules, "core"])
 
     slug = _slugify(name)
     project_dir = output_dir / name
@@ -520,9 +538,9 @@ def create_project(
 
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config)
     elif project_type == "minimal":
-        _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"])
+        _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"], module_config=module_config)
         use_submodules = False  # minimal uses pip
     elif project_type == "microservices":
         _create_microservices(project_dir, ctx, broker=broker, task_broker=task_broker)
@@ -689,10 +707,24 @@ def main():
              "microservices: a broker differing from --broker routes task.* "
              "to it via STAPEL_BUS_BACKEND=routing; minimal: none only",
     )
+    parser.add_argument(
+        "--module-config", type=Path, metavar="PATH",
+        help="JSON file {module: {SETTING_KEY: value}} rendered as "
+             "STAPEL_<MOD> = {...} blocks in the generated settings "
+             "(non-default capability axes only, e.g. from the CTO brief; "
+             "keys validated against the module's docs/capabilities.json "
+             "when a sibling checkout has one). Monolith/minimal only.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path.cwd(), help="Parent directory for the project")
     parser.add_argument("--no-submodules", action="store_true", help="Use pip install instead of git submodules")
     parser.add_argument("--no-git", action="store_true", help="Skip git init")
     args = parser.parse_args()
+
+    module_config = None
+    if args.module_config:
+        from ._module_config import load_module_config_file
+
+        module_config = load_module_config_file(args.module_config)
 
     # Determine if wizard is needed
     non_interactive = (
@@ -757,6 +789,7 @@ def main():
         init_git=not args.no_git,
         broker=params.get("broker"),
         task_broker=params.get("task_broker"),
+        module_config=module_config,
     )
 
 
