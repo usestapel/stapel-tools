@@ -12,6 +12,7 @@ dependencies = []
 
 [project.scripts]
 stapel-lint = "stapel_tools.lint:main"
+stapel-migration-lint = "stapel_tools.migration_lint:main"
 stapel-new-service = "stapel_tools.new_service:main"
 stapel-new-module = "stapel_tools.new_module:main"
 stapel-new-library = "stapel_tools.new_library:main"
