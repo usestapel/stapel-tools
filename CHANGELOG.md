@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2] — 2026-07-10
+
+### Fixed
+- CI/publish install stapel-core from git main: the generated templates depend
+  on prodguard/SecretProvider not yet in a PyPI core release (templates
+  themselves install core from git). 0.9.1 never reached PyPI (gate failure).
+
 ## [0.9.1] — 2026-07-10
 
 ### Fixed
