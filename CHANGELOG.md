@@ -32,6 +32,29 @@ private):
 - Tests: 65 new (every rule incl. a throwaway-git-repo base-sha fixture, floor
   computation, manifest determinism, scaffolded-minimal end-to-end).
 
+### Added — contract artifact freshness gate in release-manifest (process-gap §26)
+Caught in production: the stapel-calendar 0.2.3 and stapel-recordings 0.1.3
+release bumps raised `version` in `pyproject.toml` but did not regenerate
+`docs/capabilities.json` — the tag went out with a stale version baked into
+the artifact and the contract tests red. `stapel_tools.release` now catches
+this BEFORE the tag:
+- **`check_contract_freshness()`** — compares each `docs/*.json` contract
+  artifact's own embedded TOP-LEVEL `version` against the repo's
+  `pyproject.toml`. REL001 (error): an artifact's version is behind
+  pyproject — `build_manifest`/the CLI aborts, no manifest is emitted.
+  REL002 (warning): `docs/capabilities.json` is missing while the repo has a
+  `make contract` Makefile target — printed, non-fatal. Only
+  `capabilities.json` is ever actually flagged by REL001: `schema.json`'s
+  OpenAPI version lives nested under `info` (a drf-spectacular placeholder,
+  never wired to the module version) and `flows.json`/`errors.json` are bare
+  lists with no envelope — looking only at the top level correctly skips
+  both without special-casing filenames.
+- Unlike `gates.migration_lint` (recorded, not fatal — the pipeline is the
+  actual gate), this check is fatal to the manifest build itself.
+- Tests: 9 new (clean match, stale capabilities.json, schema.json's nested
+  placeholder never checked, missing artifact with/without a contract
+  target, no pyproject.toml, `build_manifest` abort/pass-through).
+
 ### Added — codegen emits the Gherkin feature bundles (flow-system.md §3)
 `stapel_tools.codegen.generate()` now also runs stapel-core's
 `generate_flow_features` into `<out>/features/`: one bundle per project

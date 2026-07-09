@@ -10,6 +10,7 @@ from stapel_tools.create_project import create_project
 from stapel_tools.release import (
     SCHEMA_VERSION,
     build_manifest,
+    check_contract_freshness,
     collect_contracts,
     compute_config_digest,
     main,
@@ -226,6 +227,119 @@ class TestConfigDigest:
             'STAPEL_COMM = {"ACTION_TRANSPORT": "bus"}\n'
         )
         assert compute_config_digest(proj) != compute_config_digest(tmp_path / "m2")
+
+
+# ---------------------------------------------------------------------------
+# contract artifact freshness — REL001/REL002
+# ---------------------------------------------------------------------------
+
+
+def make_module(
+    tmp_path,
+    *,
+    name="stapel-demo",
+    version="0.2.3",
+    cap_version="0.2.3",
+    include_capabilities=True,
+    contract_target=False,
+):
+    """Bare stapel-* module repo shape: root pyproject.toml + docs/*.json —
+    NOT a scaffolded customer project. release-manifest is also run directly
+    against a module's own checkout when cutting THAT module's release
+    (the client-project calendar/recordings process bug this gate closes)."""
+    proj = tmp_path / name
+    proj.mkdir()
+    (proj / "pyproject.toml").write_text(
+        f'[project]\nname = "{name}"\nversion = "{version}"\n'
+    )
+    docs = proj / "docs"
+    docs.mkdir()
+    if include_capabilities:
+        (docs / "capabilities.json").write_text(json.dumps(
+            {"module": name, "version": cap_version, "provides": "x"}
+        ))
+    # schema.json's OpenAPI version is nested under "info" — a drf-spectacular
+    # placeholder, never wired to the module version — and stays "0.0.0"
+    # regardless of the module's actual version (real shape, see e.g.
+    # stapel-calendar/docs/schema.json).
+    (docs / "schema.json").write_text(json.dumps(
+        {"openapi": "3.0.3", "info": {"title": "", "version": "0.0.0"}, "paths": {}}
+    ))
+    (docs / "flows.json").write_text(json.dumps([]))
+    (docs / "errors.json").write_text(json.dumps([]))
+    if contract_target:
+        (proj / "Makefile").write_text("contract:\n\t@echo emit\n")
+    return proj
+
+
+class TestContractFreshness:
+    def test_clean_when_versions_match(self, tmp_path):
+        proj = make_module(tmp_path, version="0.2.3", cap_version="0.2.3")
+        assert check_contract_freshness(proj) == []
+
+    def test_stale_capabilities_version_is_blocking(self, tmp_path):
+        proj = make_module(tmp_path, version="0.2.3", cap_version="0.2.2")
+        violations = check_contract_freshness(proj)
+        assert len(violations) == 1
+        assert violations[0].rule == "REL001"
+        assert violations[0].level == "error"
+        assert "0.2.2" in violations[0].message
+        assert "0.2.3" in violations[0].message
+        assert "capabilities.json" in violations[0].path
+
+    def test_schema_json_nested_version_is_never_checked(self, tmp_path):
+        # schema.json's info.version is stuck at "0.0.0" by design (see
+        # make_module) — it must never be flagged, only a top-level envelope
+        # version counts.
+        proj = make_module(tmp_path, version="9.9.9", cap_version="9.9.9")
+        assert check_contract_freshness(proj) == []
+
+    def test_missing_capabilities_with_contract_target_is_warning(self, tmp_path):
+        proj = make_module(tmp_path, include_capabilities=False, contract_target=True)
+        violations = check_contract_freshness(proj)
+        assert len(violations) == 1
+        assert violations[0].rule == "REL002"
+        assert violations[0].level == "warning"
+
+    def test_missing_capabilities_without_contract_target_is_silent(self, tmp_path):
+        proj = make_module(tmp_path, include_capabilities=False, contract_target=False)
+        assert check_contract_freshness(proj) == []
+
+    def test_no_pyproject_is_silent(self, tmp_path):
+        # a scaffolded customer project has no root pyproject.toml — the
+        # artifacts belong to its vendored stapel-* module checkouts instead.
+        proj = tmp_path / "no-pyproject"
+        proj.mkdir()
+        (proj / "docs").mkdir()
+        (proj / "docs" / "capabilities.json").write_text('{"version": "9.9.9"}')
+        assert check_contract_freshness(proj) == []
+
+    def test_build_manifest_fails_on_stale_artifact(self, tmp_path, capsys):
+        proj = make_module(tmp_path, version="0.2.3", cap_version="0.2.2")
+        with pytest.raises(SystemExit, match="contract artifact"):
+            build_manifest(
+                proj, release="r1", git_sha="a" * 40, images={}, verify_sha=False,
+            )
+        assert "REL001" in capsys.readouterr().err
+
+    def test_build_manifest_clean_when_fresh(self, tmp_path):
+        proj = make_module(tmp_path, version="0.2.3", cap_version="0.2.3")
+        manifest = build_manifest(
+            proj, release="r1", git_sha="a" * 40, images={}, verify_sha=False,
+            created_at="2026-07-09T00:00:00Z",
+        )
+        assert manifest["release"] == "r1"
+
+    def test_build_manifest_warns_but_does_not_fail_on_missing_artifact(
+        self, tmp_path, capsys,
+    ):
+        proj = make_module(tmp_path, include_capabilities=False, contract_target=True)
+        manifest = build_manifest(
+            proj, release="r1", git_sha="a" * 40, images={}, verify_sha=False,
+            created_at="2026-07-09T00:00:00Z",
+        )
+        assert manifest["release"] == "r1"
+        assert "REL002" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

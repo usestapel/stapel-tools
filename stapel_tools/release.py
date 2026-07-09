@@ -57,6 +57,31 @@ Schema (schema_version 1)
 Output is deterministic: sorted keys, fixed indent, trailing newline — the
 same drift-gate discipline as the codegen artifacts. Same inputs (including
 created_at) → byte-identical output.
+
+Contract artifact freshness (REL001/REL002, process-gap §26)
+--------------------------------------------------------------
+A version bump in ``pyproject.toml`` that forgets to regenerate the contract
+triad (``make contract``) leaves a stale ``version`` baked into
+``docs/capabilities.json`` — the release tags clean, but the contract tests
+go red on the very next check. Unlike migration_lint (recorded into
+``gates``, not fatal here — the pipeline is the actual gate), this check is
+fatal to the manifest build itself: it must be caught BEFORE the tag, not
+after.
+
+REL001  a ``docs/*.json`` contract artifact's own embedded TOP-LEVEL
+        ``version`` is behind the repo's ``pyproject.toml`` → ERROR,
+        ``build_manifest``/the CLI aborts (no manifest is emitted). Only
+        ``capabilities.json`` carries a version that actually tracks the
+        module (``stapel_tools.capabilities`` writes it verbatim from
+        pyproject); ``schema.json``'s OpenAPI version lives nested under
+        ``info`` (a drf-spectacular placeholder, never wired to the module
+        version — see ``_codegen_settings.py``) and ``flows.json`` /
+        ``errors.json`` are bare lists with no envelope, so looking only at
+        the TOP level naturally skips both without special-casing filenames.
+REL002  ``docs/capabilities.json`` is missing while the repo has a
+        ``make contract`` target (a ``contract:`` rule in its ``Makefile``)
+        → WARNING, printed but non-fatal — the artifact was presumably never
+        emitted.
 """
 
 from __future__ import annotations
@@ -76,6 +101,7 @@ from typing import Optional
 
 from .migration_lint import (
     SKIP_DIRS,
+    Violation,
     app_report,
     lint_paths,
 )
@@ -182,6 +208,83 @@ def collect_contracts(project_dir: Path) -> dict:
 
     contracts.update(vendored)
     return contracts
+
+
+# ---------------------------------------------------------------------------
+# contract artifact freshness — REL001/REL002 (process-gap §26, see module
+# docstring): a version bump must not outrun `make contract`.
+# ---------------------------------------------------------------------------
+
+_CONTRACT_ARTIFACTS = ("capabilities.json", "schema.json", "flows.json", "errors.json")
+_CONTRACT_TARGET_RE = re.compile(r"(?m)^contract:")
+
+
+def check_contract_freshness(project_dir: Path) -> list:
+    """Compare each ``docs/*.json`` contract artifact's own embedded
+    TOP-LEVEL ``version`` (when it carries one) against this repo's
+    ``pyproject.toml`` ``project.version``. See the module docstring for why
+    only ``capabilities.json`` is ever actually caught by REL001, and why
+    that is correct (not a gap): ``schema.json``'s OpenAPI version is nested
+    under ``info``, not top-level, and ``flows.json``/``errors.json`` are
+    bare lists — neither carries a real envelope version to compare.
+
+    No ``pyproject.toml`` at ``project_dir`` (e.g. a scaffolded customer
+    project — contract artifacts live in its vendored stapel-* module
+    checkouts, not at the project root) → nothing to check, silently."""
+    violations: list = []
+    pyproject_path = project_dir / "pyproject.toml"
+    if not pyproject_path.is_file():
+        return violations
+    try:
+        pyproject = tomllib.loads(pyproject_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return violations
+    project_version = pyproject.get("project", {}).get("version")
+    if not project_version:
+        return violations
+
+    docs_dir = project_dir / "docs"
+    capabilities_path = docs_dir / "capabilities.json"
+
+    if not capabilities_path.is_file():
+        makefile = project_dir / "Makefile"
+        has_contract_target = False
+        if makefile.is_file():
+            try:
+                has_contract_target = bool(
+                    _CONTRACT_TARGET_RE.search(makefile.read_text(encoding="utf-8"))
+                )
+            except (OSError, UnicodeDecodeError):
+                pass
+        if has_contract_target:
+            violations.append(Violation(
+                "docs/capabilities.json", 1, "REL002",
+                "docs/capabilities.json is missing though this repo has a "
+                "'make contract' target — run make contract and commit it",
+                level="warning",
+            ))
+        return violations
+
+    for name in _CONTRACT_ARTIFACTS:
+        path = docs_dir / name
+        if not path.is_file():
+            continue
+        try:
+            artifact = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(artifact, dict):
+            continue  # flows.json / errors.json — bare lists, no envelope
+        version = artifact.get("version")
+        if not version or version == project_version:
+            continue  # no top-level version (e.g. schema.json) — not checked
+        violations.append(Violation(
+            f"docs/{name}", 1, "REL001",
+            f"артефакт {name}: version {version} отстаёт от pyproject "
+            f"{project_version} — прогони make contract и закоммить",
+            level="error",
+        ))
+    return violations
 
 
 # ---------------------------------------------------------------------------
@@ -303,6 +406,20 @@ def build_manifest(
         )
     if verify_sha:
         _verify_git_sha(project_dir, git_sha)
+
+    # contract artifact freshness (REL001/REL002) — fatal, unlike the gates
+    # below: this must be caught BEFORE the tag, not merely recorded for a
+    # pipeline to notice later.
+    contract_findings = check_contract_freshness(project_dir)
+    for finding in contract_findings:
+        print(finding, file=sys.stderr)
+    contract_errors = [f for f in contract_findings if f.level == "error"]
+    if contract_errors:
+        raise SystemExit(
+            f"Error: {len(contract_errors)} contract artifact(s) behind "
+            f"pyproject.toml (REL001 above) — run make contract and commit "
+            f"before cutting this release"
+        )
 
     # migration analysis — shared with stapel-migration-lint (same scan, same
     # floor semantics), so the gate and the manifest can never disagree
