@@ -201,6 +201,9 @@ db.sqlite3
 media/
 staticfiles/
 var/mailtrap/*.json
+# build artifact of `make release-manifest` — lives in the image/registry,
+# never in the checkout
+release.json
 .DS_Store
 """
 
@@ -249,7 +252,7 @@ MINIMAL_MAKEFILE = """\
 # Override the interpreter: make controls PYTHON=/path/to/python
 PYTHON ?= python
 
-.PHONY: controls lint test openapi run
+.PHONY: controls lint test openapi run migration-lint release-manifest
 
 controls: lint test
 
@@ -264,6 +267,26 @@ openapi:
 
 run:
 \t$(PYTHON) manage.py migrate && $(PYTHON) manage.py runserver
+
+# --- Release seam (stapel docs/release-management.md, R-1) ------------------
+# Both targets need stapel-tools on PATH (pip install stapel-tools).
+#
+# migration-lint — expand/contract gate over this project's migrations.
+# Pass BASE_SHA=<previous release sha> to also verify nothing destroyed by a
+# new migration is still referenced by the code of the previous release.
+migration-lint:
+\tstapel-migration-lint . $(if $(BASE_SHA),--base-sha $(BASE_SHA),)
+
+# release-manifest — describe this checkout as a release artifact
+# (release.json: migration watermarks, reversible floors, stapel-* contract
+# pins, config digest, gate results). The platform bake step invokes this
+# during image build and bakes the file into the image; standalone:
+#   make release-manifest RELEASE=r1 [IMAGES=images.json] [BASE_SHA=<sha>]
+release-manifest:
+\ttest -n "$(RELEASE)" || (echo "usage: make release-manifest RELEASE=r<N>" >&2; exit 2)
+\tstapel-release-manifest . --release $(RELEASE) --git-sha $$(git rev-parse HEAD) \\
+\t\t$(if $(IMAGES),--images-json $(IMAGES),) $(if $(BASE_SHA),--base-sha $(BASE_SHA),) \\
+\t\t--out release.json
 """
 
 MINIMAL_PYPROJECT = """\

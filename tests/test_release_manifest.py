@@ -360,3 +360,13 @@ class TestScaffoldedProjectEndToEnd:
 
         # byte-determinism against the scaffold, twice
         assert to_json(manifest) == to_json(build(proj, project="e2e"))
+
+        # the generated Makefile carries the release seam (R-1 §3 hook: the
+        # platform bake step calls these; standalone use documented inline)
+        makefile = (proj / "Makefile").read_text()
+        assert "release-manifest:" in makefile
+        assert "stapel-release-manifest . --release $(RELEASE)" in makefile
+        assert "migration-lint:" in makefile
+        assert "stapel-migration-lint ." in makefile
+        # the artifact itself never lands in the checkout
+        assert "release.json" in (proj / ".gitignore").read_text()
