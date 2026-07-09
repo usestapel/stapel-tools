@@ -124,7 +124,7 @@ All three use a byte-stable JSON encoding, so regenerating without a code
 change yields zero diff — the invariant a drift gate rests on.
 
 ```bash
-DJANGO_ENV=local DJANGO_SETTINGS_MODULE=core.settings.codegen \
+DJANGO_ENV=local DJANGO_SETTINGS_MODULE=config.settings.codegen \
     python -m stapel_tools.codegen --out codegen/generated
 ```
 

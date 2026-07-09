@@ -34,10 +34,10 @@ that regenerating without a code change yields zero diff.
 This module is the reusable *mechanism*. It must run inside an already-configured
 Django instance: the caller sets ``DJANGO_SETTINGS_MODULE`` (and PYTHONPATH) to
 point at the all-modules instance. The concrete instance + orchestration live in
-stapel-example-monolith (``core.settings.codegen`` + ``codegen/generate.sh``).
+stapel-example-monolith (``config.settings.codegen`` + ``codegen/generate.sh``).
 
 Usage (from the monolith service dir):
-    DJANGO_ENV=local DJANGO_SETTINGS_MODULE=core.settings.codegen \\
+    DJANGO_ENV=local DJANGO_SETTINGS_MODULE=config.settings.codegen \\
         python -m stapel_tools.codegen --out ../codegen/generated
 """
 
