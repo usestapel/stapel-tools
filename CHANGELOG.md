@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.9.1] — 2026-07-10
+
+### Fixed
+- CI/publish workflows install the real test deps (django, DRF, stapel-core) —
+  the 0.9.0 publish gate failed at test collection on a bare `pip install pytest`.
+
 ## [0.9.0] — 2026-07-09
 
 ### Added — release-management R-1: migration-lint + release.json manifest (release-management.md §1/§3/§8)

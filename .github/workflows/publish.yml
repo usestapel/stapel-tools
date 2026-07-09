@@ -28,7 +28,7 @@ jobs:
 
       - name: Tests
         run: |
-          pip install pytest --quiet
+          pip install pytest django djangorestframework "stapel-core>=0.8,<0.9" --quiet
           pytest tests/
 
       - name: Smoke-generate every project type
