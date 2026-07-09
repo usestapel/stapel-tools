@@ -174,6 +174,43 @@ R004 `@dataclass` without docstring, R005 hardcoded error string, R006 `StapelRe
 
 Suppress per-line: `# noqa: R001`
 
+### `stapel-migration-lint` — expand/contract gate for Django migrations
+
+```bash
+stapel-migration-lint                        # lint every app under .
+stapel-migration-lint svc-app/ --json        # machine output (+watermarks/floors)
+stapel-migration-lint . --base-sha <sha>     # verify against the previous release
+stapel-migration-lint . --strict             # warnings become errors
+```
+
+Static (AST) analysis — no Django settings needed, so it runs on customer
+project checkouts at release cut AND on `stapel-*` module repos in CI.
+Rules: MIG001 destructive op (`RemoveField`/`DeleteModel`/`Rename*`/narrowing
+`AlterField`) requires the `# stapel: contract-phase` file marker (destructive
+changes ship one release after the code stopped using the target); MIG002
+with `--base-sha` the destroyed target must not be referenced by the app's
+code at the previous release's sha; MIG003 `RunPython`/`RunSQL` without a
+reverse requires `# stapel: irreversible` (lowers the app's
+`reversible_floor` in release.json); MIG004 NOT NULL `AddField` without
+`default`/`db_default` on an existing model (breaks N-1 rollback).
+
+### `stapel-release-manifest` — build the open `release.json` manifest
+
+```bash
+stapel-release-manifest . --release r4 --git-sha $(git rev-parse HEAD) \
+    --image app=registry/tenant/proj/app:r4 --out release.json
+```
+
+Describes one gated build (release-management.md §1): per-app migration
+watermarks (max migration *file* at the sha — the artifact, not a DB),
+`reversible_floor` per app, `contracts` (stapel-* version pins),
+`config_digest` over the `STAPEL_<MOD>` settings blocks, and gate results
+(`migration_lint` computed via the shared analyzer; `prodguard`/
+`handover_scan` recorded from `--gate name=pass|fail`). Output is
+byte-deterministic (sorted keys; `--created-at`/`SOURCE_DATE_EPOCH`).
+The platform bake step calls this during image build and bakes the file
+into the image at `/app/release.json`.
+
 ## Available modules
 
 | Module | Description |

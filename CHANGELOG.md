@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Added — release-management R-1: migration-lint + release.json manifest (release-management.md §1/§3/§8)
+The OSS mechanism layer of release management (platform models/UI are R-2,
+private):
+- **`stapel-migration-lint`** (`stapel_tools/migration_lint.py`) — AST-based
+  expand/contract gate over Django migration files (no Django boot needed, so
+  it runs on customer checkouts at cut time AND on stapel-* module repos in
+  CI). Rules: MIG001 destructive op (RemoveField/DeleteModel/Rename*/narrowing
+  AlterField) requires `# stapel: contract-phase`; MIG002 `--base-sha`
+  verifies the previous release no longer references the destroyed target
+  (grep-level via `git show`, new-since-base migrations only); MIG003
+  RunPython/RunSQL without reverse requires `# stapel: irreversible` (lowers
+  the app's reversible_floor); MIG004 NOT NULL AddField without
+  default/db_default on an existing model (breaks N-1); MIG101/MIG102
+  warnings. `--json`, `--strict`, exit 1 on errors.
+- **`stapel-release-manifest`** (`stapel_tools/release.py`) — builds the open
+  `release.json` (schema_version 1): release r\<N\>, git_sha (verified against
+  HEAD), images, per-app migration watermarks (max migration FILE at the sha —
+  describes the artifact, not a DB), reversible_floor (shared analyzer, latest
+  irreversible migration or "zero"), contracts (stapel-* pins: vendored
+  checkout pyproject > ==pin > git tag > spec verbatim), config_digest
+  (sha256 over `STAPEL_<MOD>` settings blocks), gates (migration_lint
+  computed, prodguard/handover_scan recorded via `--gate`), created_at
+  (SOURCE_DATE_EPOCH-aware). Byte-deterministic output (sorted keys) — the
+  codegen drift-gate discipline.
+- **Minimal scaffold Makefile** grows `migration-lint` and `release-manifest`
+  targets (the seam the R-2 bake step calls); generated `.gitignore` excludes
+  `release.json`. Container bake itself is R-2, deliberately not built.
+- Tests: 65 new (every rule incl. a throwaway-git-repo base-sha fixture, floor
+  computation, manifest determinism, scaffolded-minimal end-to-end).
+
 ### Added — codegen emits the Gherkin feature bundles (flow-system.md §3)
 `stapel_tools.codegen.generate()` now also runs stapel-core's
 `generate_flow_features` into `<out>/features/`: one bundle per project
