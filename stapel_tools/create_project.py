@@ -280,6 +280,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
 def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None, module_config: dict | None = None):
     from ._harness_templates import harness_files
     from ._minimal_templates import (
+        MINIMAL_BOOT_SMOKE_SETTINGS,
         MINIMAL_CONFTEST,
         MINIMAL_ENV_EXAMPLE,
         MINIMAL_GITIGNORE,
@@ -335,6 +336,9 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     _write(project_dir / ".env.example", MINIMAL_ENV_EXAMPLE)
     _write(project_dir / "config" / "__init__.py", "")
     _write(project_dir / "config" / "settings.py", r(MINIMAL_SETTINGS))
+    # boot-smoke gate (R3/§44, `make boot-smoke` — part of `make controls`):
+    # dummy-DB overlay over this project's own settings; see its docstring.
+    _write(project_dir / "config" / "settings_boot_smoke.py", MINIMAL_BOOT_SMOKE_SETTINGS)
     _write(project_dir / "config" / "urls.py", r(MINIMAL_URLS))
     _write(project_dir / "config" / "wsgi.py",
            "import os\n\n"

@@ -252,6 +252,77 @@ class TestOutboxHarness:
         assert result.returncode == 0, result.stdout + result.stderr
 
 
+class TestBootSmoke:
+    """R3 (§44): app loading (INSTALLED_APPS import + every AppConfig.ready())
+    must never need a live database — a stray ready()/import-time DB query,
+    or a harness/env leak clobbering this project's DJANGO_SETTINGS_MODULE
+    with someone else's settings, must fail `make controls` instead of
+    shipping a client a 500 on first boot. See stapel-studio's
+    studio_orchestrator/controls.py for the harness-leak case this defends
+    against in depth."""
+
+    def test_minimal_generates_boot_smoke_settings(self, tmp_path):
+        proj = _create(tmp_path, "shop", "minimal", modules=["core"])
+        smoke = proj / "config" / "settings_boot_smoke.py"
+        assert smoke.exists()
+        content = smoke.read_text()
+        assert "from .settings import *" in content
+        assert "django.db.backends.dummy" in content
+
+    def test_minimal_makefile_wires_boot_smoke_into_controls(self, tmp_path):
+        proj = _create(tmp_path, "shop", "minimal", modules=["core"])
+        makefile = (proj / "Makefile").read_text()
+        assert "boot-smoke" in makefile
+        # part of the gate a coder can't skip, not an opt-in side target
+        controls_line = next(
+            line for line in makefile.splitlines() if line.startswith("controls:")
+        )
+        assert "boot-smoke" in controls_line
+
+    def test_boot_smoke_passes_on_the_clean_skeleton(self, tmp_path):
+        """The gate itself must be green on the generated skeleton (no false
+        positive) — proven by actually running `manage.py check` under it."""
+        proj = _create(tmp_path, "shop", "minimal", modules=["core"])
+        result = subprocess.run(
+            [sys.executable, "manage.py", "check"],
+            cwd=proj, capture_output=True, text=True,
+            env={**__import__("os").environ, "DJANGO_SETTINGS_MODULE": "config.settings_boot_smoke"},
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_boot_smoke_catches_a_ready_time_db_query(self, tmp_path):
+        """The gate must actually fail a module that violates the ready()-
+        never-touches-the-database law (the class of bug R3 exists for)."""
+        import os as _os
+
+        proj = _create(tmp_path, "shop", "minimal", modules=["core"])
+        module_dir = proj / "apps" / "shop"
+        (module_dir / "apps.py").write_text(
+            "from django.apps import AppConfig\n\n\n"
+            "class ShopConfig(AppConfig):\n"
+            '    name = "apps.shop"\n\n'
+            "    def ready(self):\n"
+            "        from django.contrib.auth import get_user_model\n"
+            "        get_user_model().objects.count()\n"
+        )
+        settings_path = proj / "config" / "settings.py"
+        settings_text = settings_path.read_text()
+        assert '"apps.shop",' in settings_text
+        settings_path.write_text(
+            settings_text.replace(
+                '"apps.shop",',
+                '"apps.shop.apps.ShopConfig",',
+            )
+        )
+        result = subprocess.run(
+            [sys.executable, "manage.py", "check"],
+            cwd=proj, capture_output=True, text=True,
+            env={**_os.environ, "DJANGO_SETTINGS_MODULE": "config.settings_boot_smoke"},
+        )
+        assert result.returncode != 0
+        assert "ImproperlyConfigured" in result.stdout + result.stderr
+
+
 class TestMountConventions:
     """Follow-up to the arch-monolith-mounting P0: a scaffolded service must
     never hardcode a root-relative admin URL, and its "is there a dedicated

@@ -160,6 +160,26 @@ MAILTRAP_DIR = BASE_DIR / "var" / "mailtrap"
 EMAIL_BACKEND = "tests.harness.mailtrap.FileMailtrapBackend"
 """
 
+MINIMAL_BOOT_SMOKE_SETTINGS = """\
+\"\"\"Boot-smoke settings (R3/§44) — `make boot-smoke`, part of `make controls`.
+
+Layers over this project's own config/settings.py and swaps DATABASES for
+Django's `dummy` backend, which raises loudly on the first real connection
+attempt. `manage.py check` under this module exercises exactly the phase a
+generated project's client would hit on first boot — INSTALLED_APPS import
+plus every AppConfig.ready() — with no live database reachable, proving that
+phase never needs one. It would have caught the class of bug where a stray
+ready()/import-time DB query (or a harness/env leak clobbering this project's
+DJANGO_SETTINGS_MODULE with someone else's settings) turned "generate a
+project" into a client-visible 500 before a single test ran.
+
+Never point real traffic at this module — it has no usable database.
+\"\"\"
+from .settings import *  # noqa: F401,F403
+
+DATABASES = {"default": {"ENGINE": "django.db.backends.dummy"}}
+"""
+
 MINIMAL_URLS = """\
 from django.contrib import admin
 from django.urls import include, path
@@ -252,12 +272,23 @@ MINIMAL_MAKEFILE = """\
 # Override the interpreter: make controls PYTHON=/path/to/python
 PYTHON ?= python
 
-.PHONY: controls lint test openapi run migration-lint release-manifest
+.PHONY: controls lint test boot-smoke openapi run migration-lint release-manifest
 
-controls: lint test
+controls: lint boot-smoke test
 
 lint:
 \t$(PYTHON) -m ruff check .
+
+# boot-smoke (R3/§44) — app loading (INSTALLED_APPS import + every
+# AppConfig.ready()) must never need a live database. Runs `manage.py check`
+# under config/settings_boot_smoke.py, which layers over this project's own
+# settings and swaps DATABASES for Django's `dummy` backend (raises loudly on
+# ANY connection attempt). Catches both a stray ready()/import-time DB query
+# in a stapel-* module AND a harness/env leak overriding this project's own
+# settings with someone else's database — either way, a generated project
+# must never 500 a client because *loading* the app touched a database.
+boot-smoke:
+\tDJANGO_SETTINGS_MODULE=config.settings_boot_smoke $(PYTHON) manage.py check
 
 test:
 \t$(PYTHON) -m pytest tests -q
