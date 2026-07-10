@@ -109,7 +109,7 @@ stapel-remove-service auth --dry-run
 
 Runs *inside* a configured all-modules Django instance (e.g.
 stapel-example-monolith on sqlite) and emits the three language-agnostic backend
-artifacts the frontend TS client is generated from (docs/flow-system.md §0.1):
+artifacts the frontend TS client is generated from (docs/done/flow-system-v1.md §0.1):
 
 - `schema.json` — the unified drf-spectacular OpenAPI for every installed
   module (same document the instance serves at `/schema/`, produced offline via
