@@ -124,16 +124,18 @@ class TestRegistryPins:
         assert "@v" not in reqs
 
     def test_ahead_of_pypi_lib_is_not_rendered_as_a_working_git_ref(self, tmp_path):
-        # core is ahead of its last-published PyPI release (owner publishes
-        # separately) — a `name @ git+...` line would look like a working pin
-        # when no vX.Y.Z tag exists upstream for these local-only fixes. The
-        # honest, actually-installable-today line is an editable sibling
-        # checkout, not a git ref.
-        assert STAPEL_LIBS["core"]["ahead_of_pypi"] is True
-        result = assemble_scaffold("app", libs=[], output_dir=tmp_path, verify=False)
+        # vault is ahead of / not yet on PyPI (owner publishes separately) —
+        # a `name @ git+...` line would look like a working pin when no vX.Y.Z
+        # tag exists upstream for these local-only fixes. The honest,
+        # actually-installable-today line is an editable sibling checkout, not
+        # a git ref.
+        assert STAPEL_LIBS["vault"]["ahead_of_pypi"] is True
+        result = assemble_scaffold(
+            "app", libs=["vault"], output_dir=tmp_path, verify=False
+        )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert f"v{STAPEL_LIBS['core']['pin']}" in reqs
-        assert "-e ../stapel-core" in reqs
+        assert f"v{STAPEL_LIBS['vault']['pin']}" in reqs
+        assert "-e ../stapel-vault" in reqs
         assert "git+" not in reqs
         assert "@v" not in reqs
 

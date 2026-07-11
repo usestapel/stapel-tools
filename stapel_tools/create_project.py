@@ -53,7 +53,7 @@ STAPEL_LIBS = {
         "required": True,
         "description": "Core framework (required)",
         "pin": "0.10.0",
-        "ahead_of_pypi": True,  # PyPI 0.8.0 @ 2026-07-11
+        "ahead_of_pypi": False,  # matches PyPI 0.10.0 @ 2026-07-11
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
@@ -80,7 +80,7 @@ STAPEL_LIBS = {
         "description": "File uploads & CDN",
         "default": False,
         "pin": "0.5.1",
-        "ahead_of_pypi": True,  # PyPI 0.4.4 @ 2026-07-11
+        "ahead_of_pypi": False,  # matches PyPI 0.5.1 @ 2026-07-11
     },
     "notifications": {
         "repo": "https://github.com/usestapel/stapel-notifications.git",
@@ -88,8 +88,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Email/push notifications",
         "default": False,
-        "pin": "0.3.6",
-        "ahead_of_pypi": True,  # PyPI 0.3.4 @ 2026-07-11
+        "pin": "0.3.7",
+        "ahead_of_pypi": False,  # matches PyPI 0.3.7 @ 2026-07-11
     },
     "profiles": {
         "repo": "https://github.com/usestapel/stapel-profiles.git",
@@ -97,8 +97,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "User profiles",
         "default": False,
-        "pin": "0.3.11",
-        "ahead_of_pypi": True,  # PyPI 0.3.8 @ 2026-07-11
+        "pin": "0.3.12",
+        "ahead_of_pypi": False,  # matches PyPI 0.3.12 @ 2026-07-11
     },
     "translate": {
         "repo": "https://github.com/usestapel/stapel-translate.git",
@@ -106,8 +106,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Translations & i18n",
         "default": False,
-        "pin": "0.4.6",
-        "ahead_of_pypi": True,  # PyPI 0.4.4 @ 2026-07-11
+        "pin": "0.4.7",
+        "ahead_of_pypi": False,  # matches PyPI 0.4.7 @ 2026-07-11
     },
     "workspaces": {
         "repo": "https://github.com/usestapel/stapel-workspaces.git",
@@ -115,8 +115,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Workspaces & multi-tenancy",
         "default": False,
-        "pin": "0.4.0",
-        "ahead_of_pypi": True,  # PyPI 0.3.6 @ 2026-07-11
+        "pin": "0.4.1",
+        "ahead_of_pypi": False,  # matches PyPI 0.4.1 @ 2026-07-11
     },
     "gdpr": {
         "repo": "https://github.com/usestapel/stapel-gdpr.git",
@@ -124,8 +124,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "GDPR / data export & deletion",
         "default": False,
-        "pin": "0.3.4",
-        "ahead_of_pypi": False,  # matches PyPI 0.3.4 @ 2026-07-11
+        "pin": "0.3.5",
+        "ahead_of_pypi": False,  # matches PyPI 0.3.5 @ 2026-07-11
     },
     # --- second onboarding wave (2026-07-11, static-scaffold-and-config.md §2
     # follow-up): 14 sibling checkouts brought into the registry. Dict order
@@ -135,15 +135,18 @@ STAPEL_LIBS = {
     # ("attributes" < "categories"/"listings"/"tasks"), so no manual reorder
     # was needed; a future entry with a *hard* requires that sorts AFTER its
     # dependency would need explicit reordering (see "requires" below).
-    # None of these has been published to PyPI yet — every pin is local-only.
+    # Publish update (2026-07-11): agent, attributes, calendar, categories,
+    # currencies, listings, mailtrap, recordings and tasks are now on PyPI
+    # (ahead_of_pypi=False, real pins below) — geo/chat/reviews/vault/video
+    # remain unpublished (editable, see each entry's comment for why).
     "agent": {
         "repo": "https://github.com/usestapel/stapel-agent.git",
         "dir": "stapel_agent",
         "required": False,
         "description": "LLM facade (complete/translate/transcribe/summarize/image)",
         "default": False,
-        "pin": "0.2.6",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.2.7",
+        "ahead_of_pypi": False,  # matches PyPI 0.2.7 @ 2026-07-11
         "http": True,
         "url_prefix": "agent/",
         "requires": [],
@@ -154,8 +157,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Typed attributes engine (feature-def/DTO/DAO) — L1 library",
         "default": False,
-        "pin": "0.3.2",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.3.3",
+        "ahead_of_pypi": False,  # matches PyPI 0.3.3 @ 2026-07-11
         # No models/migrations/views/urls/comm surface of its own (its own
         # __init__.py: "This is an L1 library"). Not a Django app: absent from
         # INSTALLED_APPS, mounted nowhere — a pure pip dependency for
@@ -170,8 +173,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Calendar, events & scheduling",
         "default": False,
-        "pin": "0.3.1",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.3.2",
+        "ahead_of_pypi": False,  # matches PyPI 0.3.2 @ 2026-07-11
         "http": True,
         "url_prefix": "calendar/",
         "requires": [],
@@ -183,7 +186,7 @@ STAPEL_LIBS = {
         "description": "Category tree & feature schema",
         "default": False,
         "pin": "0.4.1",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "ahead_of_pypi": False,  # matches PyPI 0.4.1 @ 2026-07-11
         "http": True,
         "url_prefix": "categories/",
         "requires": ["attributes"],  # pyproject dependency, hard
@@ -206,8 +209,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Currencies & exchange rates",
         "default": False,
-        "pin": "0.1.2",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.1.3",
+        "ahead_of_pypi": False,  # matches PyPI 0.1.3 @ 2026-07-11
         "http": True,
         "url_prefix": "currencies/",
         "requires": [],
@@ -219,7 +222,10 @@ STAPEL_LIBS = {
         "description": "Geographic locations, geofiles & geocoding",
         "default": False,
         "pin": "0.2.1",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        # PyPI has 0.2.1, but the workspace checkout is 0.2.2 with a fix the
+        # release lacks and a failing test blocks re-publishing — kept editable
+        # (ahead of the last publishable release) until that test is green.
+        "ahead_of_pypi": True,
         "http": True,
         "url_prefix": "geo/",
         "requires": [],
@@ -230,8 +236,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Listings & catalog",
         "default": False,
-        "pin": "0.3.0",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.3.1",
+        "ahead_of_pypi": False,  # matches PyPI 0.3.1 @ 2026-07-11
         "http": True,
         "url_prefix": "listings/",
         "requires": ["attributes"],  # pyproject dependency, hard
@@ -242,8 +248,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Mail trap (dev/test outbound email capture)",
         "default": False,
-        "pin": "0.1.1",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.1.2",
+        "ahead_of_pypi": False,  # matches PyPI 0.1.2 @ 2026-07-11
         "http": True,
         "url_prefix": "mailtrap/",
         "requires": [],
@@ -254,8 +260,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Recording lifecycle, normalization & transcription",
         "default": False,
-        "pin": "0.3.0",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.3.1",
+        "ahead_of_pypi": False,  # matches PyPI 0.3.1 @ 2026-07-11
         "http": True,
         "url_prefix": "recordings/",
         "requires": [],
@@ -278,8 +284,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Tasks & kanban boards",
         "default": False,
-        "pin": "0.1.1",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.1.2",
+        "ahead_of_pypi": False,  # matches PyPI 0.1.2 @ 2026-07-11
         "http": True,
         "url_prefix": "tasks/",
         # attributes is a SOFT/optional seam here (features.py: import guarded
