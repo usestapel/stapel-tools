@@ -31,12 +31,29 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+# Registry pins — checked against each module's workspace-local pyproject.toml
+# `version` on 2026-07-11 (static-scaffold-and-config.md §1.3/§6.1, owner
+# directive: raise the registry to CURRENT local versions before wiring
+# assemble_scaffold, not stale ones). `ahead_of_pypi=True` means the local
+# checkout carries fixes the PyPI release does not yet have (compared against
+# the live `pypi.org/pypi/<name>/json` version at the same date) — publishing
+# those is the module owner's act, not stapel-tools'; this registry only
+# records the fact so a scaffold assembled today is documented against what it
+# actually got wired against. `pin` is NOT rendered as a git ref (no v{pin}
+# tag exists upstream yet for the ahead-of-PyPI modules — inventing one would
+# 404 on `pip install`); it is emitted as a comment above each requirements.txt
+# line so a human/CI diff can see what "current" meant at generation time.
+# The "upgrade libs to a newer pin" flow (re-stamp an existing project) is
+# §25/§52 scope — NOT built here; see `assemble_scaffold`'s module docstring
+# for the interface point future work should hang off.
 STAPEL_LIBS = {
     "core": {
         "repo": "https://github.com/usestapel/stapel-core.git",
         "dir": "stapel_core",
         "required": True,
         "description": "Core framework (required)",
+        "pin": "0.10.0",
+        "ahead_of_pypi": True,  # PyPI 0.8.0 @ 2026-07-11
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
@@ -44,6 +61,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Authentication (JWT, OAuth, OTP)",
         "default": True,
+        "pin": "0.5.4",
+        "ahead_of_pypi": False,  # matches PyPI 0.5.4 @ 2026-07-11
     },
     "billing": {
         "repo": "https://github.com/usestapel/stapel-billing.git",
@@ -51,6 +70,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Billing & subscriptions",
         "default": False,
+        "pin": "0.4.9",
+        "ahead_of_pypi": False,  # matches PyPI 0.4.9 @ 2026-07-11
     },
     "cdn": {
         "repo": "https://github.com/usestapel/stapel-cdn.git",
@@ -58,6 +79,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "File uploads & CDN",
         "default": False,
+        "pin": "0.5.1",
+        "ahead_of_pypi": True,  # PyPI 0.4.4 @ 2026-07-11
     },
     "notifications": {
         "repo": "https://github.com/usestapel/stapel-notifications.git",
@@ -65,6 +88,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Email/push notifications",
         "default": False,
+        "pin": "0.3.6",
+        "ahead_of_pypi": True,  # PyPI 0.3.4 @ 2026-07-11
     },
     "profiles": {
         "repo": "https://github.com/usestapel/stapel-profiles.git",
@@ -72,6 +97,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "User profiles",
         "default": False,
+        "pin": "0.3.11",
+        "ahead_of_pypi": True,  # PyPI 0.3.8 @ 2026-07-11
     },
     "translate": {
         "repo": "https://github.com/usestapel/stapel-translate.git",
@@ -79,6 +106,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Translations & i18n",
         "default": False,
+        "pin": "0.4.6",
+        "ahead_of_pypi": True,  # PyPI 0.4.4 @ 2026-07-11
     },
     "workspaces": {
         "repo": "https://github.com/usestapel/stapel-workspaces.git",
@@ -86,6 +115,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Workspaces & multi-tenancy",
         "default": False,
+        "pin": "0.4.0",
+        "ahead_of_pypi": True,  # PyPI 0.3.6 @ 2026-07-11
     },
     "gdpr": {
         "repo": "https://github.com/usestapel/stapel-gdpr.git",
@@ -93,6 +124,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "GDPR / data export & deletion",
         "default": False,
+        "pin": "0.3.4",
+        "ahead_of_pypi": False,  # matches PyPI 0.3.4 @ 2026-07-11
     },
 }
 
@@ -420,6 +453,21 @@ def _setup_pip_deps(project_dir: Path, modules: list[str]):
         info = STAPEL_LIBS[key]
         entry = f"{info['dir']} @ git+{info['repo']}"
         if entry not in lines:
+            # Version-pin comment (registry §STAPEL_LIBS, checked against each
+            # module's workspace-local pyproject.toml): documents what
+            # "current" meant at generation time. Not rendered as a git ref
+            # (@vX.Y.Z) — modules marked ahead_of_pypi have no such tag
+            # upstream yet (unpublished fixes), and inventing one would 404 on
+            # `pip install`. Re-pinning an existing project to a newer
+            # registry entry is §25/§52 scope, not built here.
+            pin = info.get("pin")
+            if pin:
+                note = (
+                    "AHEAD of last-published PyPI (owner publishes separately)"
+                    if info.get("ahead_of_pypi")
+                    else "matches last-published PyPI"
+                )
+                lines.append(f"# {info['dir']} — workspace-local v{pin} ({note})")
             lines.append(entry)
     reqs.write_text("\n".join(lines) + "\n")
 

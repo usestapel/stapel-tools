@@ -1,0 +1,220 @@
+"""assemble_scaffold — static scaffold assembler tests
+(static-scaffold-and-config.md §1.3/§1.4/§6.1).
+
+Covers: idempotent assembly of N libs, core-first INSTALLED_APPS ordering,
+green check+boot-smoke on the assembled project, and an unknown lib producing
+a structured gap report instead of a crash. The full four-lib proof
+(auth/notifications/gdpr/profiles — the exact set T-001/003/005/007 wired by
+hand through an LLM cycle) only runs its live check/boot-smoke assertions when
+those modules are actually importable in the current interpreter (true in the
+shared workspace venv; skipped in a bare stapel-tools-only checkout, same
+pattern as test_create_project's TestModuleConfigValidation sibling checks).
+"""
+import importlib.util
+import sys
+
+import pytest
+
+from stapel_tools.assemble_scaffold import assemble_scaffold, main
+from stapel_tools.create_project import STAPEL_LIBS
+
+PROOF_LIBS = ["auth", "notifications", "gdpr", "profiles"]
+
+
+def _importable(module: str) -> bool:
+    return importlib.util.find_spec(module) is not None
+
+
+def _tree(root):
+    return {
+        p.relative_to(root): p.read_bytes()
+        for p in sorted(root.rglob("*"))
+        if p.is_file() and ".env" not in p.name  # .env carries generated secrets
+    }
+
+
+class TestWiringAndGaps:
+    def test_unknown_lib_is_a_gap_not_a_crash(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["not-a-real-lib"], output_dir=tmp_path, verify=False
+        )
+        assert result.libs_unknown == ["not-a-real-lib"]
+        assert result.libs_applied == []
+        # the project was still created (core only) — a bad lib name in the
+        # request doesn't block assembly of the rest.
+        assert (result.project_dir / "manage.py").exists()
+
+    def test_known_and_unknown_libs_mixed(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["auth", "ghost-module", "gdpr"],
+            output_dir=tmp_path, verify=False,
+        )
+        assert result.libs_applied == ["auth", "gdpr"]
+        assert result.libs_unknown == ["ghost-module"]
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        assert "stapel_auth @ git+" in reqs
+        assert "stapel_gdpr @ git+" in reqs
+        assert "ghost-module" not in reqs
+
+    def test_core_is_never_duplicated_or_treated_as_unknown(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["core", "auth"], output_dir=tmp_path, verify=False
+        )
+        assert result.libs_unknown == []
+        assert result.libs_applied == ["auth"]
+
+    def test_duplicate_libs_deduped(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["auth", "auth", "gdpr"], output_dir=tmp_path, verify=False
+        )
+        assert result.libs_applied == ["auth", "gdpr"]
+
+    def test_libs_wired_into_requirements_apps_and_urls(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["auth", "gdpr"], output_dir=tmp_path, verify=False
+        )
+        settings = (result.project_dir / "config" / "settings.py").read_text()
+        urls = (result.project_dir / "config" / "urls.py").read_text()
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        for app in ("stapel_auth", "stapel_gdpr"):
+            assert f'"{app}",' in settings
+            assert f'include("{app}.urls")' in urls
+            assert f"{app} @ git+" in reqs
+
+    def test_module_config_reaches_settings(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["auth"],
+            config={"auth": {"AUTH_PASSWORD_LOGIN": True}},
+            output_dir=tmp_path, verify=False,
+        )
+        settings = (result.project_dir / "config" / "settings.py").read_text()
+        assert "STAPEL_AUTH = {" in settings
+        assert '"AUTH_PASSWORD_LOGIN": True,' in settings
+
+
+class TestRegistryPins:
+    """Owner directive: STAPEL_LIBS carries a workspace-local version pin and
+    flags whether that pin is ahead of the last-published PyPI release, so a
+    project assembled today is documented against what it actually got."""
+
+    def test_every_lib_has_a_pin(self):
+        for key, info in STAPEL_LIBS.items():
+            assert "pin" in info, key
+            assert "ahead_of_pypi" in info, key
+
+    def test_pin_rendered_as_comment_not_a_git_ref(self, tmp_path):
+        # A false git tag ref would 404 on `pip install` for ahead-of-PyPI
+        # modules (no vX.Y.Z tag exists upstream yet for local-only fixes).
+        result = assemble_scaffold("app", libs=["auth"], output_dir=tmp_path, verify=False)
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        assert f"workspace-local v{STAPEL_LIBS['auth']['pin']}" in reqs
+        assert "stapel_auth @ git+https://github.com/usestapel/stapel-auth.git" in reqs
+        assert "@v" not in reqs.split("stapel_auth @")[1].split("\n")[0]
+
+
+class TestIdempotency:
+    def test_same_inputs_produce_byte_identical_trees(self, tmp_path):
+        a = assemble_scaffold(
+            "app", libs=["auth", "gdpr"], output_dir=tmp_path / "a", verify=False
+        )
+        b = assemble_scaffold(
+            "app", libs=["auth", "gdpr"], output_dir=tmp_path / "b", verify=False
+        )
+        assert _tree(a.project_dir) == _tree(b.project_dir)
+
+    def test_lib_order_in_call_does_not_change_output(self, tmp_path):
+        a = assemble_scaffold(
+            "app", libs=["auth", "gdpr", "notifications"],
+            output_dir=tmp_path / "a", verify=False,
+        )
+        b = assemble_scaffold(
+            "app", libs=["notifications", "auth", "gdpr"],
+            output_dir=tmp_path / "b", verify=False,
+        )
+        assert _tree(a.project_dir) == _tree(b.project_dir)
+
+
+class TestInstalledAppsOrder:
+    def test_core_outbox_precedes_feature_libs_precedes_local_app(self, tmp_path):
+        result = assemble_scaffold(
+            "shop", libs=["auth", "gdpr"], output_dir=tmp_path, verify=False
+        )
+        settings = (result.project_dir / "config" / "settings.py").read_text()
+        i_core = settings.index("stapel_core.django.outbox")
+        i_auth = settings.index('"stapel_auth"')
+        i_gdpr = settings.index('"stapel_gdpr"')
+        i_local = settings.index('"apps.shop"')
+        assert i_core < i_auth < i_local
+        assert i_core < i_gdpr < i_local
+
+
+class TestStaticVerificationGates:
+    """R3/§44 boot-smoke reused as-is (efcb552); manage.py check under the
+    project's own settings. Uses core-only assembly so the gate itself is
+    exercised in every CI environment (stapel-core is always installed for
+    this repo's test suite; stapel-auth/etc. are not)."""
+
+    def test_core_only_assembly_is_green(self, tmp_path):
+        result = assemble_scaffold("app", libs=[], output_dir=tmp_path)
+        assert result.ok, [g.output for g in result.gates if not g.passed]
+        names = {g.name for g in result.gates}
+        assert names == {"check", "boot-smoke"}
+
+    def test_verify_false_skips_gates(self, tmp_path):
+        result = assemble_scaffold("app", libs=[], output_dir=tmp_path, verify=False)
+        assert result.gates == []
+        assert result.ok  # vacuously true — nothing ran, nothing failed
+
+    def test_monolith_boot_smoke_reported_as_skipped_not_silently_green(self, tmp_path):
+        result = assemble_scaffold(
+            "app", project_type="monolith", libs=[], output_dir=tmp_path,
+        )
+        boot = next(g for g in result.gates if g.name == "boot-smoke")
+        assert boot.skipped is True
+        assert boot.passed is True  # doesn't fail the whole assembly
+        assert "monolith" in boot.output
+
+
+@pytest.mark.skipif(
+    not all(_importable(f"stapel_{lib}") for lib in [*PROOF_LIBS, "core"]),
+    reason="proof requires stapel-core/auth/notifications/gdpr/profiles importable "
+    "(true in the shared workspace venv; not installed for a bare stapel-tools checkout)",
+)
+class TestFourLibProof:
+    """The literal T-001/003/005/007 replacement: one static call assembles a
+    project with all four libs those tasks wired by hand through an LLM cycle,
+    and both static gates come back green — in seconds, offline."""
+
+    def test_proof_project_assembles_and_is_green(self, tmp_path):
+        result = assemble_scaffold("proof", libs=PROOF_LIBS, output_dir=tmp_path)
+
+        assert result.libs_unknown == []
+        assert set(result.libs_applied) == set(PROOF_LIBS)
+        assert result.ok, [(g.name, g.output) for g in result.gates if not g.passed]
+
+        settings = (result.project_dir / "config" / "settings.py").read_text()
+        urls = (result.project_dir / "config" / "urls.py").read_text()
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        for lib in PROOF_LIBS:
+            app = f"stapel_{lib}"
+            assert f'"{app}",' in settings
+            assert f'include("{app}.urls")' in urls
+            assert f"{app} @ git+" in reqs
+
+
+class TestCLI:
+    def test_cli_reports_gap_and_exits_nonzero_only_on_gate_failure(self, tmp_path, capsys):
+        code = main(["app", "--libs", "auth", "bogus-lib", "--output-dir", str(tmp_path)])
+        out = capsys.readouterr()
+        assert code == 0  # gaps don't fail the run when gates pass
+        assert "bogus-lib" in out.err
+        assert "PASS" in out.out or "[PASS]" in out.out
+
+    def test_cli_no_verify_skips_gates_and_still_succeeds(self, tmp_path, capsys):
+        code = main(["app", "--libs", "auth", "--no-verify", "--output-dir", str(tmp_path)])
+        assert code == 0
+        proj = tmp_path / "app"
+        assert (proj / "manage.py").exists()
+
+    def test_cli_python_module_path(self):
+        assert "stapel_tools.assemble_scaffold" in sys.modules
