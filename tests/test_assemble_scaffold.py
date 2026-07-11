@@ -300,3 +300,74 @@ class TestAuthSubfeatureAxes:
                 config={"auth": {"AUTH_NOT_A_REAL_AXIS": True}},
                 output_dir=tmp_path, verify=False,
             )
+
+
+class TestAuthPipExtras:
+    """§20 visibility gap (owner, 2026-07-11): auth is one PyPI package, but
+    axes whose feature needs an external dependency (stapel-auth/pyproject.toml
+    optional-dependencies: oauth->social-auth-app-django, phone->twilio,
+    saml->lxml/signxml) must land their extra in requirements.txt, or the
+    project installs fine and crashes at runtime the moment that code path is
+    hit. Covers: single axis -> single extra, several axes -> sorted
+    de-duplicated extras, no dependency-bearing axis -> a bare pin (no
+    ``[...]`` at all — auth's password/email/qr/passkey/magic-link axes ship
+    in-package, no extra)."""
+
+    def test_oauth_axis_adds_oauth_extra(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["auth"],
+            config={"auth": {"AUTH_OAUTH_LOGIN": True}},
+            output_dir=tmp_path, verify=False,
+        )
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        assert "stapel-auth[oauth]>=0.5.4,<0.6" in reqs
+
+    def test_phone_axis_adds_phone_extra(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["auth"],
+            config={"auth": {"AUTH_PHONE_REGISTRATION": True}},
+            output_dir=tmp_path, verify=False,
+        )
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        assert "stapel-auth[phone]>=0.5.4,<0.6" in reqs
+
+    def test_saml_axis_adds_saml_extra(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["auth"],
+            config={"auth": {"AUTH_SSO_LOGIN": True}},
+            output_dir=tmp_path, verify=False,
+        )
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        assert "stapel-auth[saml]>=0.5.4,<0.6" in reqs
+
+    def test_multiple_dep_bearing_axes_produce_sorted_deduped_extras(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["auth"],
+            config={"auth": {
+                "AUTH_OAUTH_LOGIN": True,
+                "AUTH_OAUTH_REGISTRATION": True,  # also maps to "oauth" — deduped
+                "AUTH_PHONE_LOGIN": True,
+            }},
+            output_dir=tmp_path, verify=False,
+        )
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        assert "stapel-auth[oauth,phone]>=0.5.4,<0.6" in reqs
+
+    def test_no_dep_bearing_axis_stays_a_bare_pin(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["auth"],
+            config={"auth": {"AUTH_PASSWORD_LOGIN": True, "AUTH_TOTP": True}},
+            output_dir=tmp_path, verify=False,
+        )
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        assert "stapel-auth>=0.5.4,<0.6" in reqs
+        assert "stapel-auth[" not in reqs
+
+    def test_no_config_at_all_stays_a_bare_pin(self, tmp_path):
+        # No module_config -> nothing is known to have been turned on, so no
+        # extra is claimed (mirrors render_settings_block: an axis absent
+        # from module_config renders no settings key either).
+        result = assemble_scaffold("app", libs=["auth"], output_dir=tmp_path, verify=False)
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        assert "stapel-auth>=0.5.4,<0.6" in reqs
+        assert "stapel-auth[" not in reqs

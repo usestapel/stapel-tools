@@ -686,7 +686,58 @@ def _pin_ceiling(pin: str) -> str | None:
     return f"{major}.{minor + 1}"
 
 
-def _setup_pip_deps(project_dir: Path, modules: list[str]):
+# §20 visibility gap (owner, 2026-07-11): auth is NOT split into separate
+# PyPI packages — its modularity is (a) STAPEL_AUTH config axes (rendered
+# into settings by _module_config.render_settings_block, untouched here) and
+# (b) pip EXTRAS for the axes whose feature needs an external dependency
+# (stapel-auth/pyproject.toml [project.optional-dependencies]: phone->twilio,
+# oauth->social-auth-app-django, saml->lxml/signxml). Selecting an axis in
+# module_config without also landing its extra in requirements.txt is
+# exactly the bug this table closes: `AUTH_OAUTH_LOGIN: True` with a bare
+# `stapel-auth>=...` pin installs fine but crashes at runtime (ModuleNotFound
+# for the extra's dependency) the moment that feature's code path is hit.
+#
+# This is an EXPLICIT table, not derived from capabilities.json — the
+# capabilities.json axis entries (stapel-auth/docs/capabilities.json) carry
+# no axis->extra field today. Follow-up (generic mechanism, not just auth):
+# teach each module's docs/capabilities.json to annotate the axes that need
+# an extra (e.g. an `"extra": "oauth"` key on the axis object) and derive
+# this table from that artifact for every onboarded module, the same way
+# known_config_keys() already derives the axis/extension surface.
+PIP_EXTRA_AXES: dict[str, dict[str, str]] = {
+    "auth": {
+        "AUTH_OAUTH_LOGIN": "oauth",
+        "AUTH_OAUTH_REGISTRATION": "oauth",
+        "AUTH_PHONE_LOGIN": "phone",
+        "AUTH_PHONE_REGISTRATION": "phone",
+        "AUTH_SSO_LOGIN": "saml",
+    },
+}
+
+
+def _extras_for_lib(key: str, module_config: dict[str, dict] | None) -> list[str]:
+    """Pip extras ``key``'s requirements.txt line needs, given the axes this
+    project's ``module_config`` actually turned on for it.
+
+    Deliberately reads ONLY the axes present in ``module_config`` (the same
+    values ``render_settings_block`` renders into ``STAPEL_<MOD>`` — an axis
+    left at its library default is not represented in the generated settings
+    either, so an extra it would need is not claimed here). Sorted,
+    de-duplicated; empty for a lib with no entry in ``PIP_EXTRA_AXES`` or
+    when none of its dependency-bearing axes were turned on."""
+    axis_map = PIP_EXTRA_AXES.get(key)
+    if not axis_map or not module_config:
+        return []
+    config = module_config.get(key) or {}
+    extras = {extra for axis, extra in axis_map.items() if config.get(axis)}
+    return sorted(extras)
+
+
+def _setup_pip_deps(
+    project_dir: Path,
+    modules: list[str],
+    module_config: dict[str, dict] | None = None,
+):
     reqs = project_dir / "requirements.txt"
     if not reqs.exists():
         return
@@ -695,6 +746,8 @@ def _setup_pip_deps(project_dir: Path, modules: list[str]):
         info = STAPEL_LIBS[key]
         pin = info.get("pin")
         pypi_name = _pypi_name(info)
+        extras = _extras_for_lib(key, module_config)
+        extras_suffix = f"[{','.join(extras)}]" if extras else ""
         if info.get("ahead_of_pypi"):
             # NOT resolvable from PyPI at this pin today (owner publishes
             # separately — some of these have no PyPI release at all yet).
@@ -707,17 +760,22 @@ def _setup_pip_deps(project_dir: Path, modules: list[str]):
             # sibling workspace checkout (this project's own directory is a
             # sibling of stapel-core/, stapel-auth/, ... under the same
             # workspace root) — NOT a claim that a pip/PyPI install works.
-            entry = f"-e ../{pypi_name}"
+            # Extras compose the same way on an editable local install
+            # (`-e ../stapel-auth[oauth]`) as on a published one.
+            entry = f"-e ../{pypi_name}{extras_suffix}"
             note = (
                 f"# {info['dir']} — v{pin} is NOT YET installable from PyPI "
                 "(workspace-local, ahead of the last published release or "
                 "not published at all; owner publishes separately). Editable "
                 "install from the sibling checkout below; once published, "
-                f"replace with: {pypi_name}>={pin},<{_pin_ceiling(pin) or '?'}"
+                f"replace with: {pypi_name}{extras_suffix}>={pin},<{_pin_ceiling(pin) or '?'}"
             )
         else:
             ceiling = _pin_ceiling(pin) if pin else None
-            entry = f"{pypi_name}>={pin},<{ceiling}" if pin and ceiling else pypi_name
+            entry = (
+                f"{pypi_name}{extras_suffix}>={pin},<{ceiling}"
+                if pin and ceiling else f"{pypi_name}{extras_suffix}"
+            )
             note = f"# {info['dir']} — matches last-published PyPI v{pin}"
         if entry not in lines:
             lines.append(note)
@@ -871,7 +929,7 @@ def create_project(
         service_dir = ctx["service_dir_name"] if project_type == "monolith" else ""
         _setup_submodules(project_dir, modules, is_git, service_dir=service_dir)
     else:
-        _setup_pip_deps(project_dir, modules)
+        _setup_pip_deps(project_dir, modules, module_config)
 
     _write_env_from_ctx(project_dir, ctx)
 
