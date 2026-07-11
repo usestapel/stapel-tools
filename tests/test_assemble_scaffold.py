@@ -158,7 +158,19 @@ class TestStaticVerificationGates:
         result = assemble_scaffold("app", libs=[], output_dir=tmp_path)
         assert result.ok, [g.output for g in result.gates if not g.passed]
         names = {g.name for g in result.gates}
-        assert names == {"check", "boot-smoke"}
+        assert names == {"check", "config-lint", "boot-smoke"}
+
+    def test_assembly_writes_aggregated_config_md(self, tmp_path):
+        # §2: the project gets a CONFIG.MD aggregated from the connected libs'
+        # registries, and the config-lint gate passes on it.
+        result = assemble_scaffold("app", libs=[], output_dir=tmp_path)
+        config_md = result.project_dir / "CONFIG.MD"
+        assert config_md.is_file()
+        text = config_md.read_text()
+        assert "## stapel-core" in text
+        assert "SECRET_KEY" in text  # core's registry aggregated in
+        cfg = next(g for g in result.gates if g.name == "config-lint")
+        assert cfg.passed, cfg.output
 
     def test_verify_false_skips_gates(self, tmp_path):
         result = assemble_scaffold("app", libs=[], output_dir=tmp_path, verify=False)

@@ -54,6 +54,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .config_lint import collect_reads, lint_project
+from .config_manifest import ConfigEntry, aggregate_config_md, collect_lib_entries
 from .create_project import STAPEL_LIBS, create_project
 
 
@@ -74,6 +76,10 @@ class AssembleResult:
     libs_applied: list[str]
     libs_unknown: list[str]
     gates: list[GateResult] = field(default_factory=list)
+    #: libs whose CONFIG.MD registry is not shipped yet (per-module sweep is
+    #: the next wave — static-scaffold-and-config.md §2). A reported gap, not a
+    #: failure: the aggregate still carries every lib that does ship one.
+    config_libs_missing: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -81,6 +87,42 @@ class AssembleResult:
         reported gap, not a failure — assembly still succeeded for the known
         subset."""
         return all(g.passed for g in self.gates)
+
+
+def _write_config_md(project_dir: Path, slug: str, libs: list[str]) -> list[str]:
+    """Aggregate the selected libs' CONFIG.MD into the project root CONFIG.MD
+    (static-scaffold-and-config.md §1.2/§2), plus a project section auto-derived
+    from the keys the generated settings actually read that no lib already
+    covers — so the baseline is self-consistent (the config-lint gate below is
+    green by construction, and stays a live gate for the author's later edits).
+
+    Returns the list of selected libs that ship no CONFIG.MD yet (a gap)."""
+    lib_entries, missing = collect_lib_entries(libs)
+    covered = {e.key for e in lib_entries}
+    extra: list[ConfigEntry] = []
+    seen: set[str] = set()
+    for read in collect_reads(project_dir):
+        if not read.in_settings or read.key in covered or read.key in seen:
+            continue
+        seen.add(read.key)
+        extra.append(ConfigEntry(
+            key=read.key,
+            source="env",
+            purpose="project setting (generated — classify env or vault as needed)",
+            owner="project",
+        ))
+    text, missing = aggregate_config_md(
+        libs, title=f"CONFIG.MD — {slug}", extra_entries=extra
+    )
+    (project_dir / "CONFIG.MD").write_text(text, encoding="utf-8")
+    return missing
+
+
+def _run_config_lint(project_dir: Path) -> GateResult:
+    notes: list[str] = []
+    findings = lint_project(project_dir, notes=notes)
+    output = "\n".join([*notes, *(str(f) for f in findings)])
+    return GateResult("config-lint", passed=not findings, output=output)
 
 
 def _run_manage_check(project_dir: Path, python: str, *, settings_module: str, gate_name: str) -> GateResult:
@@ -173,11 +215,18 @@ def assemble_scaffold(
         module_config=config,
     )
 
+    # Aggregate the connected libs' CONFIG.MD registries into the project's own
+    # (§1.2/§2) — the config surface the advisor asks the client about and the
+    # config-lint gate checks. Written for every project type; the lint gate
+    # itself runs where the layout is fully known (minimal, like boot-smoke).
+    config_libs_missing = _write_config_md(project_dir, slug, ["core", *known_libs])
+
     result = AssembleResult(
         slug=slug,
         project_dir=project_dir,
         libs_applied=known_libs,
         libs_unknown=unknown_libs,
+        config_libs_missing=config_libs_missing,
     )
 
     if verify:
@@ -185,6 +234,7 @@ def assemble_scaffold(
             _run_manage_check(project_dir, python, settings_module="config.settings", gate_name="check")
         )
         if project_type == "minimal":
+            result.gates.append(_run_config_lint(project_dir))
             result.gates.append(
                 _run_manage_check(
                     project_dir, python,
@@ -193,6 +243,19 @@ def assemble_scaffold(
                 )
             )
         else:
+            result.gates.append(
+                GateResult(
+                    "config-lint",
+                    passed=True,
+                    skipped=True,
+                    output=(
+                        "skipped: the config-lint gate runs on --type minimal today "
+                        f"(CONFIG.MD written for {project_type} too, but its "
+                        "settings layout is not swept to get_config yet — §2 "
+                        "follow-up)."
+                    ),
+                )
+            )
             result.gates.append(
                 GateResult(
                     "boot-smoke",
@@ -279,6 +342,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     if result.libs_unknown:
         print(f"  gap: unknown libs skipped: {', '.join(result.libs_unknown)}", file=sys.stderr)
+    if result.config_libs_missing:
+        print(
+            f"  gap: no CONFIG.MD yet for: {', '.join(result.config_libs_missing)} "
+            "(per-module sweep is the next wave — CONFIG.MD still written for the "
+            "libs that ship one)",
+            file=sys.stderr,
+        )
     for gate in result.gates:
         status = "SKIP" if gate.skipped else ("PASS" if gate.passed else "FAIL")
         print(f"  [{status}] {gate.name}")
