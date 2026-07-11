@@ -56,7 +56,7 @@ from pathlib import Path
 
 from .config_lint import collect_reads, lint_project
 from .config_manifest import ConfigEntry, aggregate_config_md, collect_lib_entries
-from .create_project import STAPEL_LIBS, create_project
+from .create_project import STAPEL_LIBS, _expand_with_requires, create_project
 
 
 @dataclass
@@ -182,7 +182,11 @@ def assemble_scaffold(
             requested.add(lib)
         elif lib not in unknown_libs:
             unknown_libs.append(lib)
-    known_libs = [key for key in STAPEL_LIBS if key != "core" and key in requested]
+    # Close over hard "requires" (categories -> attributes, etc.) so a caller
+    # who only asked for "categories" still gets a project whose pip install
+    # actually resolves (create_project does the same closure — this mirrors
+    # it here so libs_applied/CONFIG.MD reporting matches what was wired).
+    known_libs = _expand_with_requires(list(requested))
 
     if unknown_libs:
         print(

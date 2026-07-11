@@ -127,6 +127,192 @@ STAPEL_LIBS = {
         "pin": "0.3.4",
         "ahead_of_pypi": False,  # matches PyPI 0.3.4 @ 2026-07-11
     },
+    # --- second onboarding wave (2026-07-11, static-scaffold-and-config.md §2
+    # follow-up): 14 sibling checkouts brought into the registry. Dict order
+    # here IS the INSTALLED_APPS/requirements.txt emission order (known_libs
+    # in assemble_scaffold is normalized to registry order) — alphabetical
+    # placement happens to satisfy the one real inter-module dependency
+    # ("attributes" < "categories"/"listings"/"tasks"), so no manual reorder
+    # was needed; a future entry with a *hard* requires that sorts AFTER its
+    # dependency would need explicit reordering (see "requires" below).
+    # None of these has been published to PyPI yet — every pin is local-only.
+    "agent": {
+        "repo": "https://github.com/usestapel/stapel-agent.git",
+        "dir": "stapel_agent",
+        "required": False,
+        "description": "LLM facade (complete/translate/transcribe/summarize/image)",
+        "default": False,
+        "pin": "0.2.6",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "agent/",
+        "requires": [],
+    },
+    "attributes": {
+        "repo": "https://github.com/usestapel/stapel-attributes.git",
+        "dir": "stapel_attributes",
+        "required": False,
+        "description": "Typed attributes engine (feature-def/DTO/DAO) — L1 library",
+        "default": False,
+        "pin": "0.3.2",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        # No models/migrations/views/urls/comm surface of its own (its own
+        # __init__.py: "This is an L1 library"). Not a Django app: absent from
+        # INSTALLED_APPS, mounted nowhere — a pure pip dependency for
+        # categories/listings/tasks to import.
+        "http": False,
+        "django_app": False,
+        "requires": [],
+    },
+    "calendar": {
+        "repo": "https://github.com/usestapel/stapel-calendar.git",
+        "dir": "stapel_calendar",
+        "required": False,
+        "description": "Calendar, events & scheduling",
+        "default": False,
+        "pin": "0.3.1",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "calendar/",
+        "requires": [],
+    },
+    "categories": {
+        "repo": "https://github.com/usestapel/stapel-categories.git",
+        "dir": "stapel_categories",
+        "required": False,
+        "description": "Category tree & feature schema",
+        "default": False,
+        "pin": "0.4.1",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "categories/",
+        "requires": ["attributes"],  # pyproject dependency, hard
+    },
+    "chat": {
+        "repo": "https://github.com/usestapel/stapel-chat.git",
+        "dir": "stapel_chat",
+        "required": False,
+        "description": "Chat & messaging (direct/group/support)",
+        "default": False,
+        "pin": "0.1.0",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "chat/",
+        "requires": [],
+    },
+    "currencies": {
+        "repo": "https://github.com/usestapel/stapel-currencies.git",
+        "dir": "stapel_currencies",
+        "required": False,
+        "description": "Currencies & exchange rates",
+        "default": False,
+        "pin": "0.1.2",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "currencies/",
+        "requires": [],
+    },
+    "geo": {
+        "repo": "https://github.com/usestapel/stapel-geo.git",
+        "dir": "stapel_geo",
+        "required": False,
+        "description": "Geographic locations, geofiles & geocoding",
+        "default": False,
+        "pin": "0.2.1",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "geo/",
+        "requires": [],
+    },
+    "listings": {
+        "repo": "https://github.com/usestapel/stapel-listings.git",
+        "dir": "stapel_listings",
+        "required": False,
+        "description": "Listings & catalog",
+        "default": False,
+        "pin": "0.3.0",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "listings/",
+        "requires": ["attributes"],  # pyproject dependency, hard
+    },
+    "mailtrap": {
+        "repo": "https://github.com/usestapel/stapel-mailtrap.git",
+        "dir": "stapel_mailtrap",
+        "required": False,
+        "description": "Mail trap (dev/test outbound email capture)",
+        "default": False,
+        "pin": "0.1.1",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "mailtrap/",
+        "requires": [],
+    },
+    "recordings": {
+        "repo": "https://github.com/usestapel/stapel-recordings.git",
+        "dir": "stapel_recordings",
+        "required": False,
+        "description": "Recording lifecycle, normalization & transcription",
+        "default": False,
+        "pin": "0.3.0",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "recordings/",
+        "requires": [],
+    },
+    "reviews": {
+        "repo": "https://github.com/usestapel/stapel-reviews.git",
+        "dir": "stapel_reviews",
+        "required": False,
+        "description": "Reviews & ratings (target-generic)",
+        "default": False,
+        "pin": "0.1.0",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "reviews/",
+        "requires": [],
+    },
+    "tasks": {
+        "repo": "https://github.com/usestapel/stapel-tasks.git",
+        "dir": "stapel_tasks",
+        "required": False,
+        "description": "Tasks & kanban boards",
+        "default": False,
+        "pin": "0.1.1",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "tasks/",
+        # attributes is a SOFT/optional seam here (features.py: import guarded
+        # by attributes_available(), degrades to pass-through when absent) —
+        # not declared as a hard "requires" (no pyproject dependency on it).
+        "requires": [],
+    },
+    "vault": {
+        "repo": "https://github.com/usestapel/stapel-vault.git",
+        "dir": "stapel_vault",
+        "required": False,
+        "description": "Production secret storage (OpenBao/Vault facade)",
+        "default": False,
+        "pin": "0.1.0",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        # A facade activated via STAPEL_SECRETS_PROVIDER (env), not a Django
+        # app: no models/urls of its own. Not mounted in INSTALLED_APPS.
+        "http": False,
+        "django_app": False,
+        "requires": [],
+    },
+    "video": {
+        "repo": "https://github.com/usestapel/stapel-video.git",
+        "dir": "stapel_video",
+        "required": False,
+        "description": "Video calls (rooms, lobby, LiveKit-backed by default)",
+        "default": False,
+        "pin": "0.1.0",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": True,
+        "url_prefix": "video/",
+        "requires": [],
+    },
 }
 
 
@@ -249,6 +435,30 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9\-]", "-", name.lower()).strip("-")
 
 
+def _expand_with_requires(modules: list[str]) -> list[str]:
+    """Transitive closure of each module's hard ``requires`` (e.g. categories
+    -> attributes), then re-ordered to STAPEL_LIBS registry order.
+
+    A hard requires is a real pyproject dependency (categories/listings on
+    attributes) — without this expansion a project that only requested
+    "categories" would ship a requirements.txt whose stapel-categories
+    entry declares ``stapel-attributes>=0.3,<0.4`` that pip cannot resolve
+    (attributes is not published to PyPI; only a project-local requirements
+    line satisfies it). Silent, deterministic, idempotent: requesting the
+    dependency explicitly too changes nothing.
+    """
+    needed = set(modules)
+    changed = True
+    while changed:
+        changed = False
+        for key in list(needed):
+            for dep in STAPEL_LIBS.get(key, {}).get("requires", []):
+                if dep not in needed:
+                    needed.add(dep)
+                    changed = True
+    return [key for key in STAPEL_LIBS if key in needed]
+
+
 # ---------------------------------------------------------------------------
 # Project type generators
 # ---------------------------------------------------------------------------
@@ -338,10 +548,20 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     feature_modules = feature_modules or []
     stapel_apps_block = "".join(
         f'\n    "{STAPEL_LIBS[key]["dir"]}",' for key in feature_modules
+        if STAPEL_LIBS[key].get("django_app", True)
     )
+    # Mount prefix: a lib's own registry entry wins (the newer modules already
+    # bake their canonical "/<mod>/" mount — some with an internal "api/"
+    # segment, some without — see each urls.py docstring); libs with no
+    # "url_prefix" declared keep the legacy "<key>/api/" mount (the first 8
+    # onboarded libs, whose own urls.py has no "api/" segment of its own).
+    # Headless libs ("http": False, e.g. attributes/vault) get no url row at
+    # all — they mount nowhere, not even bare.
     url_includes = "".join(
-        f'\n    path("{key}/api/", include("{STAPEL_LIBS[key]["dir"]}.urls")),'
+        f'\n    path("{STAPEL_LIBS[key].get("url_prefix", f"{key}/api/")}", '
+        f'include("{STAPEL_LIBS[key]["dir"]}.urls")),'
         for key in feature_modules
+        if STAPEL_LIBS[key].get("http", True)
     )
 
     render_ctx = {
@@ -586,11 +806,16 @@ def create_project(
         "service_dir_name": f"svc-{slug}",
     }
 
-    # Ensure core is always first
-    if "core" not in modules:
-        modules = ["core"] + modules
+    # Ensure core is always first, then close over any hard "requires" (a lib
+    # requested without a dependency it hard-needs would ship a broken pip
+    # install — see _expand_with_requires).
+    feature_only = _expand_with_requires([m for m in modules if m != "core"])
+    modules = ["core", *feature_only]
 
-    feature_apps = [STAPEL_LIBS[key]["dir"] for key in modules if key != "core"]
+    feature_apps = [
+        STAPEL_LIBS[key]["dir"] for key in modules
+        if key != "core" and STAPEL_LIBS[key].get("django_app", True)
+    ]
 
     # Generate project structure
     if project_type == "monolith":
