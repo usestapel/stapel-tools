@@ -67,11 +67,29 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "drf_spectacular",
+    # Common Stapel plumbing (admin-suite AS-3/AS-4 visibility+nav wiring,
+    # system checks) — same app every other preset installs via
+    # stapel_core.django.settings.COMMON_INSTALLED_APPS; listed explicitly
+    # here since minimal doesn't import that module wholesale.
+    "stapel_core.django.apps.CommonDjangoConfig",
+    # Stapel's own swappable User model (AUTH_USER_MODEL below) — every
+    # feature module that references a user (auth, profiles, ...) expects
+    # settings.AUTH_USER_MODEL / get_user_model() to resolve here, not to
+    # django.contrib.auth's default User.
+    "stapel_core.django.users",
     # Transactional outbox — every stapel_core.comm.emit() writes through it
     # (delivery guarantee + test harness, system-design §7.21).
     "stapel_core.django.outbox",{{STAPEL_APPS}}
     "apps.{{MODULE}}",
 ]{{STAPEL_MODULE_CONFIG}}
+
+# Stapel's swappable user model (stapel_core/django/users/models.py) — set
+# BEFORE the first migrate (scaffold-first: no migrations have run yet, so
+# swapping AUTH_USER_MODEL post-hoc never applies here). Every stapel-* module
+# that ships a user FK (auth, profiles, ...) references settings.AUTH_USER_MODEL
+# / get_user_model(), never django.contrib.auth's own User — this must point
+# at the Stapel model for those modules to work at all.
+AUTH_USER_MODEL = "users.User"
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -107,21 +125,14 @@ if _IS_PROD:
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
 
-TEMPLATES = [
-    {
-        "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
-        "APP_DIRS": True,
-        "OPTIONS": {
-            "context_processors": [
-                "django.template.context_processors.debug",
-                "django.template.context_processors.request",
-                "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
-            ],
-        },
-    },
-]
+# Reuses stapel-core's own template config (DIRS points at stapel_core's
+# admin/base_site.html override + registers the nav context processor,
+# admin-suite AS-4/§37) instead of hand-rolling a second copy that would drift
+# — this is the same helper monolith/microservices call via
+# `from stapel_core.django.settings import *`.
+from stapel_core.django.settings import get_common_templates  # noqa: E402
+
+TEMPLATES = get_common_templates(BASE_DIR)
 
 DATABASES = {
     "default": {
@@ -154,10 +165,17 @@ STAPEL_COMM = {
     "ACTION_TRANSPORT": "inprocess",
 }
 
-# File mailtrap (dev/preview + async-consumer tests): outbound mail is written
-# to var/mailtrap/ as JSON instead of hitting SMTP, so it stays inspectable.
-MAILTRAP_DIR = BASE_DIR / "var" / "mailtrap"
-EMAIL_BACKEND = "tests.harness.mailtrap.FileMailtrapBackend"
+# Cross-service admin nav (admin-suite AS-4/§37, stapel_core.django.nav): a
+# minimal project is always a single service, so this is the one-row form of
+# the same STAPEL_SERVICES registry the monolith/microservices presets seed
+# via .env.example — set directly here since minimal has no dotenv loader.
+# The "All Services" section collapses automatically for a single entry;
+# per-installed-app navigation + the aggregate Swagger (api/docs/ above) are
+# the per-module story until per-module swagger mounts ship (§9b follow-up).
+STAPEL_SERVICES = [{"name": "{{title}}", "prefix": ""}]
+
+# Dev-only outbound mail: writes to the console instead of hitting SMTP.
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
 """
 
 MINIMAL_BOOT_SMOKE_SETTINGS = """\
@@ -194,20 +212,25 @@ urlpatterns = [
 """
 
 MINIMAL_REQUIREMENTS = """\
-django>=6,<7
-djangorestframework>=3.14,<4
-drf-spectacular>=0.27
+# Runtime dependencies only. Django / djangorestframework / drf-spectacular
+# are DELIBERATELY not pinned here directly — they are transitive
+# dependencies of stapel_core's own pyproject.toml (Django>=5.1,
+# djangorestframework>=3.14, drf-spectacular>=0.27) and pip resolves them
+# from there. Pinning them again here would drift out of sync with what
+# stapel_core actually declares. Dev/controls-only tooling lives in
+# requirements-dev.txt, not here.
+#
+# The Stapel lib line(s) below are appended by stapel-create-project /
+# stapel-assemble (STAPEL_LIBS registry) — stapel_core is always present.
+"""
 
-# Controls (make controls): lint + the outbox/mailtrap test harness.
+MINIMAL_REQUIREMENTS_DEV = """\
+# Dev/controls tooling for `make controls` (lint + test) — kept out of
+# requirements.txt (the runtime dependency set) so a production install
+# doesn't pull test/lint machinery.
 pytest>=7.4
 pytest-django>=4.7
 ruff>=0.4
-
-# Stapel core (choose one):
-# Option A — pip from GitHub:
-# stapel_core @ git+https://github.com/usestapel/stapel-core.git
-# Option B — local submodule (add to sys.path in settings):
-# already on PYTHONPATH if submodule is at ./stapel_core
 """
 
 MINIMAL_GITIGNORE = """\
@@ -220,7 +243,6 @@ venv/
 db.sqlite3
 media/
 staticfiles/
-var/mailtrap/*.json
 # build artifact of `make release-manifest` — lives in the image/registry,
 # never in the checkout
 release.json
@@ -258,10 +280,13 @@ on TLS/HSTS/CSP hardening and the placeholder-secret guard when
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-dev.txt
 python manage.py migrate
 python manage.py runserver
 ```
+
+`requirements-dev.txt` is only needed for `make controls` (lint + test); a
+production install only needs `requirements.txt`.
 
 `.env` was already created from `.env.example` with a freshly generated
 `SECRET_KEY`. API docs: http://localhost:8000/api/docs/
@@ -341,14 +366,13 @@ testpaths = ["tests"]
 MINIMAL_CONFTEST = '''\
 """Shared fixtures for the {{title}} test suite (architect-owned).
 
-Includes the outbox/mailtrap integration harness (system-design §7.21):
-`drain_outbox`, `mailtrap`, and in-process comm with the outbox enabled.
+The outbox/mailtrap integration test HARNESS (tests/harness/, drain_outbox,
+mailtrap fixtures) is a monolith/example-project concern, not shipped in the
+minimal preset — see the harness's own docstring (system-design §7.21) if you
+add stapel-tools' harness_files() back in by hand for a specific project.
 """
 import pytest
 from rest_framework.test import APIClient
-
-from tests.harness import clear_mailtrap, read_mailtrap
-from tests.harness import drain_outbox as _drain_outbox
 
 
 @pytest.fixture
@@ -367,34 +391,28 @@ def _reset_comm_registries():
     yield
     action_registry.clear()
     function_registry.clear()
+'''
+
+MINIMAL_TEST_SMOKE = '''\
+"""Sanity checks for the generated project's own settings — not the
+outbox/mailtrap harness (monolith/example projects only)."""
+import pytest
+from django.contrib.auth import get_user_model
 
 
-@pytest.fixture(autouse=True)
-def outbox_comm(settings):
-    """Run comm in-process with the transactional outbox ENABLED against the
-    test DB — the production delivery path (emit -> outbox row -> dispatch),
-    so producer/consumer/atomicity assertions exercise real behaviour."""
-    settings.STAPEL_COMM = {
-        **getattr(settings, "STAPEL_COMM", {}),
-        "OUTBOX_ENABLED": True,
-        "ACTION_TRANSPORT": "inprocess",
-    }
+def test_auth_user_model_is_the_stapel_user():
+    """Every stapel-* feature module (auth, profiles, ...) references
+    settings.AUTH_USER_MODEL / get_user_model() expecting Stapel's own
+    swappable user (stapel_core/django/users/models.py), not Django's
+    default django.contrib.auth.models.User."""
+    from django.conf import settings
+
+    assert settings.AUTH_USER_MODEL == "users.User"
+    assert get_user_model()._meta.label == "users.User"
 
 
-@pytest.fixture
-def drain_outbox():
-    """Synchronously flush pending outbox rows through delivery (the test-time
-    stand-in for ``manage.py dispatch_outbox``). Returns rows delivered."""
-    return _drain_outbox
-
-
-@pytest.fixture
-def mailtrap(settings):
-    """File mailtrap: force the file email backend, clear var/mailtrap/, then
-    yield read_mailtrap(). pytest-django swaps EMAIL_BACKEND to locmem by
-    default; async-consumer tests assert on the on-disk trap instead."""
-    settings.EMAIL_BACKEND = "tests.harness.mailtrap.FileMailtrapBackend"
-    clear_mailtrap()
-    yield read_mailtrap
-    clear_mailtrap()
+@pytest.mark.django_db
+def test_admin_login_is_mounted(api_client):
+    response = api_client.get("/admin/login/")
+    assert response.status_code == 200
 '''

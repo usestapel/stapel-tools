@@ -25,6 +25,17 @@ def _importable(module: str) -> bool:
     return importlib.util.find_spec(module) is not None
 
 
+def _pip_entry(key: str) -> str:
+    """The requirements.txt line _setup_pip_deps renders for a STAPEL_LIBS
+    key: an editable sibling-checkout install for ahead-of-PyPI modules (not
+    honestly resolvable from PyPI yet), a plain version pin otherwise."""
+    info = STAPEL_LIBS[key]
+    pypi_name = info["repo"].rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+    if info.get("ahead_of_pypi"):
+        return f"-e ../{pypi_name}"
+    return f"{pypi_name}>={info['pin']}"
+
+
 def _tree(root):
     return {
         p.relative_to(root): p.read_bytes()
@@ -52,8 +63,8 @@ class TestWiringAndGaps:
         assert result.libs_applied == ["auth", "gdpr"]
         assert result.libs_unknown == ["ghost-module"]
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert "stapel_auth @ git+" in reqs
-        assert "stapel_gdpr @ git+" in reqs
+        assert _pip_entry("auth") in reqs
+        assert _pip_entry("gdpr") in reqs
         assert "ghost-module" not in reqs
 
     def test_core_is_never_duplicated_or_treated_as_unknown(self, tmp_path):
@@ -76,10 +87,10 @@ class TestWiringAndGaps:
         settings = (result.project_dir / "config" / "settings.py").read_text()
         urls = (result.project_dir / "config" / "urls.py").read_text()
         reqs = (result.project_dir / "requirements.txt").read_text()
-        for app in ("stapel_auth", "stapel_gdpr"):
+        for key, app in (("auth", "stapel_auth"), ("gdpr", "stapel_gdpr")):
             assert f'"{app}",' in settings
             assert f'include("{app}.urls")' in urls
-            assert f"{app} @ git+" in reqs
+            assert _pip_entry(key) in reqs
 
     def test_module_config_reaches_settings(self, tmp_path):
         result = assemble_scaffold(
@@ -102,14 +113,29 @@ class TestRegistryPins:
             assert "pin" in info, key
             assert "ahead_of_pypi" in info, key
 
-    def test_pin_rendered_as_comment_not_a_git_ref(self, tmp_path):
-        # A false git tag ref would 404 on `pip install` for ahead-of-PyPI
-        # modules (no vX.Y.Z tag exists upstream yet for local-only fixes).
+    def test_matching_pypi_lib_gets_a_plain_version_pin(self, tmp_path):
+        # auth matches the last-published PyPI release — a real, resolvable
+        # pin, not a git ref of any kind.
+        assert STAPEL_LIBS["auth"]["ahead_of_pypi"] is False
         result = assemble_scaffold("app", libs=["auth"], output_dir=tmp_path, verify=False)
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert f"workspace-local v{STAPEL_LIBS['auth']['pin']}" in reqs
-        assert "stapel_auth @ git+https://github.com/usestapel/stapel-auth.git" in reqs
-        assert "@v" not in reqs.split("stapel_auth @")[1].split("\n")[0]
+        assert f"stapel-auth>={STAPEL_LIBS['auth']['pin']}" in reqs
+        assert "git+" not in reqs
+        assert "@v" not in reqs
+
+    def test_ahead_of_pypi_lib_is_not_rendered_as_a_working_git_ref(self, tmp_path):
+        # core is ahead of its last-published PyPI release (owner publishes
+        # separately) — a `name @ git+...` line would look like a working pin
+        # when no vX.Y.Z tag exists upstream for these local-only fixes. The
+        # honest, actually-installable-today line is an editable sibling
+        # checkout, not a git ref.
+        assert STAPEL_LIBS["core"]["ahead_of_pypi"] is True
+        result = assemble_scaffold("app", libs=[], output_dir=tmp_path, verify=False)
+        reqs = (result.project_dir / "requirements.txt").read_text()
+        assert f"v{STAPEL_LIBS['core']['pin']}" in reqs
+        assert "-e ../stapel-core" in reqs
+        assert "git+" not in reqs
+        assert "@v" not in reqs
 
 
 class TestIdempotency:
@@ -211,7 +237,7 @@ class TestFourLibProof:
             app = f"stapel_{lib}"
             assert f'"{app}",' in settings
             assert f'include("{app}.urls")' in urls
-            assert f"{app} @ git+" in reqs
+            assert _pip_entry(lib) in reqs
 
 
 class TestCLI:
@@ -230,3 +256,47 @@ class TestCLI:
 
     def test_cli_python_module_path(self):
         assert "stapel_tools.assemble_scaffold" in sys.modules
+
+
+class TestAuthSubfeatureAxes:
+    """Defect 3: auth is one package, but its subfeatures (magic_link, mfa
+    (totp), sso, passkey, ...) are toggled by STAPEL_AUTH axes
+    (stapel-auth/docs/capabilities.json), not installed/uninstalled as
+    separate extras. assemble_scaffold's ``config`` param already renders
+    STAPEL_<MOD> settings blocks (_module_config.py) validated against each
+    module's real capabilities.json — this locks that mechanism in for the
+    exact auth subfeatures a future onboarding wizard (§53) would ask about,
+    and proves an unknown axis is a hard error rather than silently ignored."""
+
+    SUBFEATURE_CONFIG = {
+        "auth": {
+            "AUTH_MAGIC_LINK_LOGIN": False,
+            "AUTH_TOTP": True,
+            "AUTH_SSO_LOGIN": True,
+            "AUTH_PASSKEY_LOGIN": True,
+        }
+    }
+
+    def test_selected_auth_subfeature_axes_reach_settings(self, tmp_path):
+        result = assemble_scaffold(
+            "app", libs=["auth"], config=self.SUBFEATURE_CONFIG,
+            output_dir=tmp_path, verify=False,
+        )
+        settings = (result.project_dir / "config" / "settings.py").read_text()
+        assert "STAPEL_AUTH = {" in settings
+        assert '"AUTH_MAGIC_LINK_LOGIN": False,' in settings
+        assert '"AUTH_TOTP": True,' in settings
+        assert '"AUTH_SSO_LOGIN": True,' in settings
+        assert '"AUTH_PASSKEY_LOGIN": True,' in settings
+        # Not scooped wholesale — an axis NOT in the config is absent, not
+        # defaulted-in as a literal settings key (defaults stay in
+        # stapel_auth/conf.py).
+        assert "AUTH_EMAIL_LOGIN" not in settings
+
+    def test_unknown_auth_axis_is_a_hard_error_not_silently_passed_through(self, tmp_path):
+        with pytest.raises(SystemExit):
+            assemble_scaffold(
+                "app", libs=["auth"],
+                config={"auth": {"AUTH_NOT_A_REAL_AXIS": True}},
+                output_dir=tmp_path, verify=False,
+            )

@@ -124,8 +124,10 @@ class TestHeadlessMountingInGeneratedProject:
         settings = (result.project_dir / "config" / "settings.py").read_text()
         urls = (result.project_dir / "config" / "urls.py").read_text()
         reqs = (result.project_dir / "requirements.txt").read_text()
-        # Still a pip dependency (the facade is installed)...
-        assert "stapel_vault @ git+" in reqs
+        # Still a pip dependency (the facade is installed) — vault is
+        # ahead-of-PyPI (unpublished), so it renders as an editable sibling
+        # checkout install, not a `name @ git+...` line...
+        assert "-e ../stapel-vault" in reqs
         # ...but never mounted as a Django app or a route.
         assert '"stapel_vault"' not in settings
         assert "stapel_vault.urls" not in urls

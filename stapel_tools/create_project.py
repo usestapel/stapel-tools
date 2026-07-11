@@ -521,7 +521,6 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
 
 
 def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None, module_config: dict | None = None):
-    from ._harness_templates import harness_files
     from ._minimal_templates import (
         MINIMAL_BOOT_SMOKE_SETTINGS,
         MINIMAL_CONFTEST,
@@ -532,7 +531,9 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
         MINIMAL_PYPROJECT,
         MINIMAL_README,
         MINIMAL_REQUIREMENTS,
+        MINIMAL_REQUIREMENTS_DEV,
         MINIMAL_SETTINGS,
+        MINIMAL_TEST_SMOKE,
         MINIMAL_URLS,
     )
     from ._module_config import render_settings_block
@@ -580,6 +581,7 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
 
     _write(project_dir / "manage.py", r(MINIMAL_MANAGE))
     _write(project_dir / "requirements.txt", r(MINIMAL_REQUIREMENTS))
+    _write(project_dir / "requirements-dev.txt", MINIMAL_REQUIREMENTS_DEV)
     _write(project_dir / ".gitignore", MINIMAL_GITIGNORE)
     _write(project_dir / "README.md", r(MINIMAL_README))
     # .env.example keeps a placeholder SECRET_KEY (committed); the shared
@@ -608,15 +610,16 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     _write(project_dir / "apps" / module / "views.py", "")
     _write(project_dir / "apps" / module / "urls.py", "urlpatterns = []\n")
 
-    # Controls + the outbox/mailtrap integration test harness (G7,
-    # system-design §7.12.3 / §7.21) — shipped in the template so no generated
-    # project has to build the pattern from scratch.
+    # Controls (G7's outbox/mailtrap integration test HARNESS is a
+    # monolith/example-project concern — not shipped in minimal; see
+    # _minimal_templates.MINIMAL_CONFTEST's docstring). A small non-harness
+    # smoke test (AUTH_USER_MODEL + admin mount) ships instead so `make test`
+    # has something real to collect out of the box.
     _write(project_dir / "Makefile", r(MINIMAL_MAKEFILE))
     _write(project_dir / "pyproject.toml", MINIMAL_PYPROJECT)
+    _write(project_dir / "tests" / "__init__.py", "")
     _write(project_dir / "tests" / "conftest.py", r(MINIMAL_CONFTEST))
-    for path, content in harness_files(project_dir / "tests").items():
-        _write(path, content)
-    _write(project_dir / "var" / "mailtrap" / ".gitkeep", "")
+    _write(project_dir / "tests" / "test_project_smoke.py", MINIMAL_TEST_SMOKE)
 
 
 def _create_microservices(project_dir: Path, ctx: dict, broker: str, task_broker: str = "none"):
@@ -664,6 +667,25 @@ def _setup_submodules(project_dir: Path, modules: list[str], is_git: bool, servi
         _add_submodule(project_dir, info["repo"], target)
 
 
+def _pypi_name(info: dict) -> str:
+    """The PyPI project name for a STAPEL_LIBS entry — derived from its repo
+    URL (``.../usestapel/stapel-core.git`` -> ``stapel-core``), which is also
+    the dash-form pyproject.toml ``name`` for every module (checked against
+    each module's own pyproject.toml, not just the import ``dir``)."""
+    return info["repo"].rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+
+
+def _pin_ceiling(pin: str) -> str | None:
+    """``"0.5.4"`` -> ``"0.6"`` (next-minor exclusive ceiling), mirroring the
+    ``>=X.Y,<X.(Y+1)`` style each module's own pyproject.toml uses for its
+    stapel-* dependencies (e.g. stapel-auth pins ``stapel-core>=0.8,<0.9``)."""
+    parts = pin.split(".")
+    if len(parts) < 2 or not all(p.isdigit() for p in parts[:2]):
+        return None
+    major, minor = int(parts[0]), int(parts[1])
+    return f"{major}.{minor + 1}"
+
+
 def _setup_pip_deps(project_dir: Path, modules: list[str]):
     reqs = project_dir / "requirements.txt"
     if not reqs.exists():
@@ -671,23 +693,34 @@ def _setup_pip_deps(project_dir: Path, modules: list[str]):
     lines = reqs.read_text().splitlines()
     for key in modules:
         info = STAPEL_LIBS[key]
-        entry = f"{info['dir']} @ git+{info['repo']}"
+        pin = info.get("pin")
+        pypi_name = _pypi_name(info)
+        if info.get("ahead_of_pypi"):
+            # NOT resolvable from PyPI at this pin today (owner publishes
+            # separately — some of these have no PyPI release at all yet).
+            # Rendering a `name @ git+https://...` line here would look like
+            # a working pin when it is not one: no vX.Y.Z tag exists upstream
+            # for these local-only fixes, so `pip install` either 404s or
+            # silently resolves an OLDER published version than what this
+            # project was actually generated against. The honest, actually
+            # -installable-today option is an editable install of the
+            # sibling workspace checkout (this project's own directory is a
+            # sibling of stapel-core/, stapel-auth/, ... under the same
+            # workspace root) — NOT a claim that a pip/PyPI install works.
+            entry = f"-e ../{pypi_name}"
+            note = (
+                f"# {info['dir']} — v{pin} is NOT YET installable from PyPI "
+                "(workspace-local, ahead of the last published release or "
+                "not published at all; owner publishes separately). Editable "
+                "install from the sibling checkout below; once published, "
+                f"replace with: {pypi_name}>={pin},<{_pin_ceiling(pin) or '?'}"
+            )
+        else:
+            ceiling = _pin_ceiling(pin) if pin else None
+            entry = f"{pypi_name}>={pin},<{ceiling}" if pin and ceiling else pypi_name
+            note = f"# {info['dir']} — matches last-published PyPI v{pin}"
         if entry not in lines:
-            # Version-pin comment (registry §STAPEL_LIBS, checked against each
-            # module's workspace-local pyproject.toml): documents what
-            # "current" meant at generation time. Not rendered as a git ref
-            # (@vX.Y.Z) — modules marked ahead_of_pypi have no such tag
-            # upstream yet (unpublished fixes), and inventing one would 404 on
-            # `pip install`. Re-pinning an existing project to a newer
-            # registry entry is §25/§52 scope, not built here.
-            pin = info.get("pin")
-            if pin:
-                note = (
-                    "AHEAD of last-published PyPI (owner publishes separately)"
-                    if info.get("ahead_of_pypi")
-                    else "matches last-published PyPI"
-                )
-                lines.append(f"# {info['dir']} — workspace-local v{pin} ({note})")
+            lines.append(note)
             lines.append(entry)
     reqs.write_text("\n".join(lines) + "\n")
 

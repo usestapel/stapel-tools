@@ -111,6 +111,13 @@ _RELEASE_RE = re.compile(r"^r[1-9][0-9]*$|^r0$")
 _STAPEL_REQ_RE = re.compile(r"^(stapel[-_][A-Za-z0-9._\-]+)\s*(.*)$")
 _STAPEL_DIR_RE = re.compile(r"^stapel[-_][a-z0-9_\-]+$")
 _STAPEL_SETTING_RE = re.compile(r"^STAPEL_[A-Z0-9_]+$")
+# stapel-assemble/stapel-create-project render ahead-of-PyPI modules as an
+# editable sibling-checkout install (`-e ../stapel-core`), not a `stapel-core
+# @ ...` spec — _STAPEL_REQ_RE alone would silently drop these from the
+# contracts map. The version rides in the comment line immediately above
+# (`# stapel_core — vX.Y.Z ...`, written by _setup_pip_deps).
+_STAPEL_EDITABLE_RE = re.compile(r"^-e\s+\.\./(stapel[-_][A-Za-z0-9._\-]+)\s*$")
+_STAPEL_COMMENT_PIN_RE = re.compile(r"\bv([0-9][\w.\-]*)\b")
 _GATE_KEYS_OVERRIDABLE = ("prodguard", "handover_scan")
 
 
@@ -192,10 +199,18 @@ def collect_contracts(project_dir: Path) -> dict:
                     lines = (dirpath / fname).read_text(encoding="utf-8").splitlines()
                 except (OSError, UnicodeDecodeError):
                     continue
+                prev_line = ""
                 for line in lines:
                     parsed = _parse_requirement_line(line)
                     if parsed:
                         contracts.setdefault(*parsed)
+                    else:
+                        editable = _STAPEL_EDITABLE_RE.match(line.strip())
+                        if editable:
+                            pin_match = _STAPEL_COMMENT_PIN_RE.search(prev_line)
+                            version = f"v{pin_match.group(1)}" if pin_match else "unpinned"
+                            contracts.setdefault(_norm_module(editable.group(1)), version)
+                    prev_line = line
             elif fname == "pyproject.toml":
                 try:
                     doc = tomllib.loads((dirpath / fname).read_text(encoding="utf-8"))

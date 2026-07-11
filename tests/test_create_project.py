@@ -5,8 +5,20 @@ import sys
 
 import pytest
 
-from stapel_tools.create_project import create_project
+from stapel_tools.create_project import STAPEL_LIBS, create_project
 from stapel_tools.new_service import _detect_transports, scaffold_service
+
+
+def _pip_entry(key: str) -> str:
+    """The requirements.txt line _setup_pip_deps renders for a STAPEL_LIBS
+    key today: an editable sibling-checkout install for ahead-of-PyPI
+    modules (not honestly resolvable from PyPI yet), a plain version pin
+    otherwise."""
+    info = STAPEL_LIBS[key]
+    pypi_name = info["repo"].rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+    if info.get("ahead_of_pypi"):
+        return f"-e ../{pypi_name}"
+    return f"{pypi_name}>={info['pin']}"
 
 
 def _create(tmp_path, name, project_type, broker=None, task_broker=None, modules=None):
@@ -143,7 +155,7 @@ class TestModuleWiring:
         proj = _create(tmp_path, "app", "minimal", modules=["core", "auth"])
 
         reqs = (proj / "requirements.txt").read_text()
-        assert "stapel_auth @ git+" in reqs
+        assert _pip_entry("auth") in reqs
 
         settings = (proj / "config" / "settings.py").read_text()
         assert '"stapel_auth",' in settings
@@ -157,8 +169,8 @@ class TestModuleWiring:
         reqs = (proj / "requirements.txt").read_text()
         settings = (proj / "config" / "settings.py").read_text()
         urls = (proj / "config" / "urls.py").read_text()
-        for app in ("stapel_auth", "stapel_billing"):
-            assert f"{app} @ git+" in reqs
+        for key, app in (("auth", "stapel_auth"), ("billing", "stapel_billing")):
+            assert _pip_entry(key) in reqs
             assert f'"{app}",' in settings
             assert f'include("{app}.urls")' in urls
 
@@ -184,30 +196,42 @@ class TestModuleWiring:
 
 
 class TestGeneratedRequirementPins:
-    """G11: generated minimal requirements pin the Django line the stapel
-    suites are actually validated on — Django 6.x (workspace venv and the
-    source codebases run 6; 5.x is untested) — so a fresh project cannot
-    ride an incompatible or untested Django/DRF (version skew)."""
+    """Django/DRF/drf-spectacular are transitive dependencies of stapel_core's
+    own pyproject.toml (Django>=5.1, djangorestframework>=3.14,
+    drf-spectacular>=0.27) — pinning them again directly in the generated
+    requirements.txt would drift out of sync with what stapel_core actually
+    declares, so the minimal preset must NOT pin them itself."""
 
-    def test_minimal_pins_django_and_drf_ranges(self, tmp_path):
+    def test_minimal_does_not_pin_django_or_drf_directly(self, tmp_path):
         proj = _create(tmp_path, "app", "minimal", modules=["core"])
         reqs = (proj / "requirements.txt").read_text()
-        assert "django>=6,<7" in reqs
-        assert "djangorestframework>=3.14" in reqs
-        # No stale floor pointing at the untested 4.x/5.x lines.
-        assert "django>=4.2" not in reqs
-        assert "django>=5" not in reqs
+        for line in reqs.splitlines():
+            line = line.strip()
+            assert not line.lower().startswith("django>="), line
+            assert not line.lower().startswith("djangorestframework"), line
+            assert not line.lower().startswith("drf-spectacular"), line
+
+    def test_dev_only_tooling_lives_in_requirements_dev(self, tmp_path):
+        proj = _create(tmp_path, "app", "minimal", modules=["core"])
+        reqs = (proj / "requirements.txt").read_text()
+        dev = (proj / "requirements-dev.txt").read_text()
+        for tool in ("pytest", "pytest-django", "ruff"):
+            assert tool not in reqs
+            assert tool in dev
 
 
 class TestOutboxHarness:
-    """G7: every generated project ships the transactional-outbox + file-mailtrap
-    integration harness (system-design §7.12.3 / §7.21) so no coder builds the
-    pattern from scratch."""
+    """G7: the monolith/microservices presets ship the transactional-outbox +
+    file-mailtrap integration test harness (system-design §7.12.3 / §7.21) so
+    no coder builds the pattern from scratch. The minimal preset does NOT —
+    it is meant to be a small, quick-start skeleton (owner directive); the
+    harness and its example test are monolith/example-project territory."""
 
     # Shared harness files, relative to the dir that owns the top-level tests
-    # package (project root for minimal, the service dir for a service).
+    # package (the service dir for a monolith service). tests/__init__.py
+    # itself is not harness-specific (both presets ship a tests package
+    # regardless), so it's excluded from this list.
     HARNESS_FILES = [
-        "tests/__init__.py",
         "tests/harness/__init__.py",
         "tests/harness/outbox.py",
         "tests/harness/wait.py",
@@ -216,17 +240,31 @@ class TestOutboxHarness:
         "var/mailtrap/.gitkeep",
     ]
 
-    def test_minimal_generates_harness_files(self, tmp_path):
+    def test_minimal_has_no_harness_or_example_test(self, tmp_path):
         proj = _create(tmp_path, "shop", "minimal", modules=["core"])
-        # Minimal keeps its conftest inside tests/.
-        for rel in [*self.HARNESS_FILES, "tests/conftest.py", "Makefile",
-                    "pyproject.toml"]:
-            assert (proj / rel).exists(), rel
+        for rel in self.HARNESS_FILES:
+            assert not (proj / rel).exists(), rel
+        assert (proj / "tests" / "conftest.py").exists()
+        assert (proj / "Makefile").exists()
+        assert (proj / "pyproject.toml").exists()
 
         settings = (proj / "config" / "settings.py").read_text()
+        # The outbox Django app (delivery-guarantee plumbing) still ships —
+        # only the *test harness* around it is monolith/example-only.
         assert "stapel_core.django.outbox" in settings
         assert '"OUTBOX_ENABLED": True' in settings
-        assert "tests.harness.mailtrap.FileMailtrapBackend" in settings
+        assert "tests.harness.mailtrap.FileMailtrapBackend" not in settings
+
+    def test_minimal_smoke_test_passes(self, tmp_path):
+        """The non-harness smoke test minimal ships instead proves the
+        project actually boots and the AUTH_USER_MODEL wiring is correct, in
+        a scratch generation run with the current interpreter."""
+        proj = _create(tmp_path, "shop", "minimal", modules=["core"])
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests/test_project_smoke.py", "-q"],
+            cwd=proj, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
     def test_monolith_service_generates_harness_files(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith", modules=["core"])
@@ -238,18 +276,6 @@ class TestOutboxHarness:
         assert "tests" in (svc / "pytest.ini").read_text().split("testpaths")[1]
         dev = (svc / "config" / "settings" / "dev.py").read_text()
         assert "FileMailtrapBackend" in dev
-
-    def test_minimal_harness_example_test_passes(self, tmp_path):
-        """The shipped example test proves the harness wiring end to end
-        (producer -> outbox row, drain -> effect, rollback -> no row, mailtrap)
-        in a scratch generation run with the current interpreter."""
-        proj = _create(tmp_path, "shop", "minimal", modules=["core"])
-        result = subprocess.run(
-            [sys.executable, "-m", "pytest",
-             "tests/test_outbox_harness_example.py", "-q"],
-            cwd=proj, capture_output=True, text=True,
-        )
-        assert result.returncode == 0, result.stdout + result.stderr
 
 
 class TestBootSmoke:
@@ -640,3 +666,68 @@ class TestInvalidCombos:
     def test_minimal_allows_explicit_none(self, tmp_path):
         proj = _create(tmp_path, "app", "minimal", task_broker="none")
         assert (proj / "manage.py").exists()
+
+
+class TestMinimalAuthUserModel:
+    """Defect: a minimal project (with or without --modules auth) must point
+    AUTH_USER_MODEL at Stapel's own swappable user
+    (stapel_core/django/users/models.py, app label "users"), set BEFORE the
+    first migrate — not silently ride Django's own django.contrib.auth.User.
+    Every stapel-* module that ships a user FK (auth, profiles, ...)
+    references settings.AUTH_USER_MODEL / get_user_model() expecting this."""
+
+    def test_minimal_sets_stapel_auth_user_model(self, tmp_path):
+        proj = _create(tmp_path, "app", "minimal", modules=["core"])
+        settings = (proj / "config" / "settings.py").read_text()
+        assert 'AUTH_USER_MODEL = "users.User"' in settings
+        assert '"stapel_core.django.users",' in settings
+
+    def test_minimal_with_auth_still_resolves_to_stapel_user(self, tmp_path):
+        """The literal defect scenario: assembling with the auth lib must not
+        change which user model wins — get_user_model() must return Stapel's,
+        proven end to end with the current interpreter."""
+        proj = _create(tmp_path, "app", "minimal", modules=["core", "auth"])
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "import django, os\n"
+             "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')\n"
+             "django.setup()\n"
+             "from django.contrib.auth import get_user_model\n"
+             "assert get_user_model()._meta.label == 'users.User', get_user_model()._meta.label\n"
+             "print('OK')\n"],
+            cwd=proj, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "OK" in result.stdout
+
+
+class TestMinimalAdminNav:
+    """Defect (§37): the minimal preset must seed the admin cross-service nav
+    (stapel_core.django.nav) — STAPEL_SERVICES + the nav context processor —
+    same as monolith/microservices, not leave it entirely unwired."""
+
+    def test_minimal_seeds_stapel_services(self, tmp_path):
+        proj = _create(tmp_path, "shop", "minimal", modules=["core"])
+        settings = (proj / "config" / "settings.py").read_text()
+        assert "STAPEL_SERVICES" in settings
+
+    def test_minimal_wires_nav_context_processor(self, tmp_path):
+        # TEMPLATES is built by stapel_core.django.settings.get_common_templates
+        # at import time (not rendered as literal text into settings.py), so
+        # this checks the resolved runtime value, not the source text.
+        proj = _create(tmp_path, "shop", "minimal", modules=["core"])
+        settings = (proj / "config" / "settings.py").read_text()
+        assert "stapel_core.django.apps.CommonDjangoConfig" in settings
+        result = subprocess.run(
+            [sys.executable, "-c",
+             "import django, os\n"
+             "os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')\n"
+             "django.setup()\n"
+             "from django.conf import settings\n"
+             "processors = settings.TEMPLATES[0]['OPTIONS']['context_processors']\n"
+             "assert 'stapel_core.django.admin.context.stapel_services' in processors, processors\n"
+             "print('OK')\n"],
+            cwd=proj, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "OK" in result.stdout
