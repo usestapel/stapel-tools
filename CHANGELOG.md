@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-07-14
+
+### Fixed — CI: `v0.10.0` tagged but never published (pre-existing gap)
+
+- `v0.10.0`'s publish run failed: `test_minimal_with_auth_still_resolves_to_stapel_user`
+  and two `assemble_scaffold` auth-axis tests assemble a project with the auth
+  module and import `stapel_auth` in a subprocess — only importable on this
+  dev workspace (every stapel-* module editable-installed as siblings), never
+  in CI's isolated checkout, which installed `stapel-core` but not
+  `stapel-auth`/`stapel-gdpr`. Confirmed pre-existing (same failure on
+  `ci.yml` since before 2026-07-09). Added both to the `Tests` step's install
+  line, same pattern already used for `stapel-core`.
+
 ## [0.10.0] - 2026-07-14
 
 ### Added — `stapel-url-lint`: bare Django `URLField()` gate (library-standard.md §3.8)
