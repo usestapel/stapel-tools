@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-14
+
+### Added — `stapel-url-lint`: bare Django `URLField()` gate (library-standard.md §3.8)
+
+- New `stapel-url-lint [paths...]` CLI (`stapel_tools/url_lint.py`), in the
+  `stapel-migration-lint` / `stapel-config-lint` idiom (rule codes, `--json`,
+  `--strict`, exit 1 on any error).
+- **URL001 (error)** — `models.URLField(...)` (Django ORM field, including a
+  bare `URLField(...)` bound to `django.db.models` via `from
+  django.db.models import URLField`) with no explicit `max_length` keyword.
+  Django's implicit default is `varchar(200)`, which real external URLs
+  (OAuth avatar, IdP SSO/OIDC discovery, webhooks) routinely exceed —
+  degrading from a validation-time problem to a `StringDataRightTruncation`
+  500 on INSERT (incident: OAuth signup crash on a Google avatar URL > 200
+  chars; fixed in `stapel-core` 0.10.1 + `stapel-auth` 0.5.5). Suppress a
+  deliberate exception with `# noqa: URL001`.
+- `rest_framework.serializers.URLField` (and other DRF field classes) are
+  excluded by design — a `CharField` with no implicit `max_length` and no
+  backing DB column, so the truncation bug this rule guards against cannot
+  occur there. Detection is import-alias based; a `URLField(` bound to an
+  unrecognized qualifier defaults to flagged rather than silently passing.
+- Migrations directories are skipped (the model source is the single place
+  to fix; flagging the generated migration too would duplicate the finding).
+
 ### Added — `stapel-adoption-lint`: honesty gate for stapel-module adoption (BACKLOG §26/§30/§32, §35)
 
 - New `stapel-adoption-lint <project_dir>` CLI (`stapel_tools/adoption_lint.py`),
