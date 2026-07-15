@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-07-16
+
+### Fixed — CI: `TestAuthSubfeatureAxes` depended on a workspace sibling not present in an isolated checkout
+
+- `test_unknown_auth_axis_is_a_hard_error_not_silently_passed_through` (and
+  its siblings in `TestAuthSubfeatureAxes`, `tests/test_assemble_scaffold.py`)
+  validated `STAPEL_AUTH` config keys against the real
+  `stapel-auth/docs/capabilities.json`, resolved via
+  `_module_config._default_workspace_root()` as a sibling directory of this
+  repo's own checkout. That sibling exists in the shared dev workspace but
+  not in the publish-workflow's isolated single-repo checkout (`stapel-auth`
+  is pip-installed there for importability, which does not recreate the
+  sibling *directory* layout the validator looks for) — so
+  `known_config_keys` silently fell back to its warn-and-pass-through path
+  and the hard-error assertion never raised, failing the gate that blocked
+  `v0.10.1`/`v0.10.2` publishing.
+- Fixed the test design, not the check it exercises: `TestAuthSubfeatureAxes`
+  now carries an autouse fixture that builds a tmp fixture mini-registry
+  (`stapel-auth/docs/capabilities.json` with exactly the axes the class
+  references) and monkeypatches `_default_workspace_root` to it, so
+  validation is genuinely exercised — unknown axis still a hard error —
+  without depending on any sibling checkout. Same pattern already used
+  correctly by `test_create_project.py`'s `TestModuleConfigValidation`.
+- Audited `tests/` for the same disease (absolute/`../` paths, sibling-repo
+  reads outside `tests/fixtures/`); no other instance found — every other
+  `stapel-*` string reference in the suite is either a `tests/fixtures/`
+  file, a hardcoded registry-pin/rendered-content assertion, or already
+  workspace-fixture/`pytest.skip`-guarded.
+- Verified packaging: `url_lint`/`config_lint`/`config_manifest`/
+  `assemble_scaffold` (and every other `stapel_tools/*.py` module) land in
+  the built wheel — `stapel_tools` is a flat package with no subpackages, so
+  `[tool.setuptools.packages.find]`'s package-level discovery isn't exposed
+  to the explicit-subpackage-list-lags-behind class of bug that hit
+  `stapel-core`'s `projections`.
+
 ## [0.10.1] - 2026-07-14
 
 ### Fixed — CI: `v0.10.0` tagged but never published (pre-existing gap)

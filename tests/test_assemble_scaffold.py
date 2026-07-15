@@ -11,10 +11,12 @@ shared workspace venv; skipped in a bare stapel-tools-only checkout, same
 pattern as test_create_project's TestModuleConfigValidation sibling checks).
 """
 import importlib.util
+import json
 import sys
 
 import pytest
 
+import stapel_tools._module_config as _module_config
 from stapel_tools.assemble_scaffold import assemble_scaffold, main
 from stapel_tools.create_project import STAPEL_LIBS
 
@@ -265,10 +267,20 @@ class TestAuthSubfeatureAxes:
     (totp), sso, passkey, ...) are toggled by STAPEL_AUTH axes
     (stapel-auth/docs/capabilities.json), not installed/uninstalled as
     separate extras. assemble_scaffold's ``config`` param already renders
-    STAPEL_<MOD> settings blocks (_module_config.py) validated against each
-    module's real capabilities.json — this locks that mechanism in for the
-    exact auth subfeatures a future onboarding wizard (§53) would ask about,
-    and proves an unknown axis is a hard error rather than silently ignored."""
+    STAPEL_<MOD> settings blocks (_module_config.py) validated against a
+    module's capabilities.json — this locks that mechanism in for the exact
+    auth subfeatures a future onboarding wizard (§53) would ask about, and
+    proves an unknown axis is a hard error rather than silently ignored.
+
+    Isolation note: validation reads ``stapel-auth/docs/capabilities.json``
+    from a workspace sibling of this repo — present in the shared workspace
+    checkout, absent in an isolated single-repo CI checkout (this repo's own
+    publish-workflow), where it would silently fall back to
+    _module_config's warn-and-pass-through path and the hard-error test below
+    would never raise. The autouse fixture below points the validator at a
+    tmp fixture mini-registry carrying exactly the axes these tests reference
+    instead, so the suite is self-contained (same pattern as
+    test_create_project.py's TestModuleConfigValidation)."""
 
     SUBFEATURE_CONFIG = {
         "auth": {
@@ -278,6 +290,22 @@ class TestAuthSubfeatureAxes:
             "AUTH_PASSKEY_LOGIN": True,
         }
     }
+
+    @pytest.fixture(autouse=True)
+    def _fixture_auth_capabilities(self, tmp_path_factory, monkeypatch):
+        root = tmp_path_factory.mktemp("auth_capabilities_workspace")
+        docs = root / "stapel-auth" / "docs"
+        docs.mkdir(parents=True)
+        axes = [
+            "AUTH_PASSWORD_LOGIN", "AUTH_EMAIL_LOGIN", "AUTH_MAGIC_LINK_LOGIN",
+            "AUTH_TOTP", "AUTH_SSO_LOGIN", "AUTH_PASSKEY_LOGIN",
+        ]
+        (docs / "capabilities.json").write_text(json.dumps({
+            "module": "stapel-auth",
+            "axes": [{"key": k} for k in axes],
+            "extension_points": [],
+        }))
+        monkeypatch.setattr(_module_config, "_default_workspace_root", lambda: root)
 
     def test_selected_auth_subfeature_axes_reach_settings(self, tmp_path):
         result = assemble_scaffold(
