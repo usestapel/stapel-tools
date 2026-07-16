@@ -117,6 +117,8 @@ def test_every_linter_contributes_a_finding(tmp_path):
         "stapel-url-lint",
         "stapel-config-lint",
         "stapel-migration-lint",
+        "stapel-swap-lint",
+        "stapel-doc-lint",
     }
 
     assert by_name["stapel-lint"].errors >= 1
@@ -136,6 +138,17 @@ def test_every_linter_contributes_a_finding(tmp_path):
 
     mig_rules = {f["rule"] for f in by_name["stapel-migration-lint"].findings}
     assert "MIG001" in mig_rules
+
+    # DOC001 (warning): app/models.py's Thing.avatar has no help_text and no
+    # preceding comment.
+    doc_rules = {f["rule"] for f in by_name["stapel-doc-lint"].findings}
+    assert "DOC001" in doc_rules
+    assert by_name["stapel-doc-lint"].errors == 0
+    assert by_name["stapel-doc-lint"].warnings >= 1
+
+    # no get_model/get_presenter or dto.py in this fixture -> swap-lint is clean
+    assert by_name["stapel-swap-lint"].errors == 0
+    assert by_name["stapel-swap-lint"].warnings == 0
 
     total_errors = sum(r.errors for r in reports)
     assert total_errors == 6  # R006, ADO001, ADO002, URL001, CFG001, MIG001
@@ -170,7 +183,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 5 linters." in out
+    assert "All clean across 7 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -180,7 +193,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     assert code == 1
     assert payload["ok"] is False
     assert payload["errors"] == 6
-    assert len(payload["linters"]) == 5
+    assert len(payload["linters"]) == 7
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
@@ -188,6 +201,8 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
         "stapel-url-lint",
         "stapel-config-lint",
         "stapel-migration-lint",
+        "stapel-swap-lint",
+        "stapel-doc-lint",
     }
     for entry in payload["linters"]:
         assert "errors" in entry

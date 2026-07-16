@@ -2,6 +2,48 @@
 
 ## [Unreleased]
 
+### Added — SWAP001/SWAP002 + DOC001: the §55 anti-lock-in lints
+
+- New `stapel-swap-lint` (`stapel_tools/swap_lint.py`), two error-level rules
+  (`docs/pending/extensibility-presenters.md` §1/§6 — the django-oscar #3232
+  bug class):
+  - **SWAP001** — direct import (or import-and-instantiate) of a class that
+    is registered as the `default=` of a `get_model()`/`get_presenter()`
+    call anywhere in the scanned tree (`stapel_core.django.swappable`,
+    STAPEL_SWAP registry). Registry is built statically in one AST pass
+    (every accessor call's dotted `default` string literal), violations
+    found in a second pass over `from X import Y` bindings — no Django
+    execution. A stray direct import silently defeats a host's config-swap
+    for that call site; this makes the discipline machine-checked.
+  - **SWAP002** — a `views.py` instantiating a `@dataclass` DTO imported
+    from a `dto.py` module directly, bypassing the presenter
+    (`get_presenter(...)` → `.present(...)`). Only cross-module `dto.py`
+    imports are in scope (a local view-only dataclass is not the presenter
+    contract); `tests/` and `test_*.py` are excluded for both rules
+    (fixtures/factories legitimately build concrete classes).
+  - False-positive posture: unresolvable imports (`import pkg.mod` +
+    attribute access) resolve toward NOT flagging — opposite of URL001's
+    default, because a false positive here blocks a legitimate
+    definition/consumer file, not a width choice. `# noqa: SWAP001`/
+    `# noqa: SWAP002` escapes supported.
+- New `stapel-doc-lint` (`stapel_tools/doc_lint.py`):
+  - **DOC001** (warning, the spec's "DOC-FIELD") — a Django model field with
+    neither `help_text=` nor a `#` comment on the line above. Warning, not
+    error: the legacy surface is large (74 findings on stapel-core alone at
+    introduction), same W-before-E rollout as R100. Undocumented fields are
+    a silent gap in the presenter auto-catalog (§4) and generated OpenAPI
+    schema (§2). `@dataclass` DTO docstrings stay R004's job (`lint.py`) —
+    DOC001 never scans `dto.py`. `--strict` flips warnings to exit 1.
+- Both wired into `stapel-verify` as sections 6 and 7 (`run_swap_lint`,
+  `run_doc_lint`); console scripts `stapel-swap-lint` / `stapel-doc-lint`
+  registered.
+- Tests: `tests/test_swap_lint.py` (registry build, direct import, direct
+  instantiation, accessor-path clean, tests-dir exclusion, noqa, SWAP002
+  positive/negative incl. local-dataclass and non-views exclusions),
+  `tests/test_doc_lint.py` (help_text pass, preceding-comment pass, noqa
+  forms, FK/relation fields, manager/constant non-fields, dto.py exclusion,
+  migrations skip), `tests/test_verify.py` extended to 7 linters.
+
 ## [0.10.3] - 2026-07-16
 
 ### Added — `stapel-verify`: one gate running the whole lint arsenal

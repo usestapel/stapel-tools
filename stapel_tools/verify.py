@@ -25,6 +25,10 @@ Linters composed (in this order)
   trap)
 * ``stapel_tools.config_lint``     — CFG-codes (config-in-one-place law)
 * ``stapel_tools.migration_lint``  — MIG-codes (expand/contract discipline)
+* ``stapel_tools.swap_lint``       — SWAP001/SWAP002 (§55 anti-lock-in:
+  swappable model/presenter indirection, DTOs built only through a presenter)
+* ``stapel_tools.doc_lint``        — DOC001 (§55 DOC-FIELD: model field docs,
+  warning-level while the legacy sweep is in progress)
 
 Usage
 -----
@@ -46,7 +50,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from . import adoption_lint, config_lint, lint, migration_lint, url_lint
+from . import adoption_lint, config_lint, doc_lint, lint, migration_lint, swap_lint, url_lint
 
 
 @dataclasses.dataclass
@@ -108,6 +112,18 @@ def run_migration_lint(project: Path, base_sha: Optional[str]) -> LinterReport:
     return LinterReport("stapel-migration-lint", errors, warnings, _to_dicts(violations))
 
 
+def run_swap_lint(project: Path) -> LinterReport:
+    violations = swap_lint.lint_paths([str(project)])
+    errors, warnings = _count(violations)
+    return LinterReport("stapel-swap-lint", errors, warnings, _to_dicts(violations))
+
+
+def run_doc_lint(project: Path) -> LinterReport:
+    violations = doc_lint.lint_paths([str(project)])
+    errors, warnings = _count(violations)
+    return LinterReport("stapel-doc-lint", errors, warnings, _to_dicts(violations))
+
+
 def verify_project(
     project: Path,
     *,
@@ -124,6 +140,8 @@ def verify_project(
         run_url_lint(project),
         run_config_lint(project),
         run_migration_lint(project, base_sha),
+        run_swap_lint(project),
+        run_doc_lint(project),
     ]
 
 
