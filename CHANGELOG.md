@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+## [0.11.1] — 2026-07-17
+
+### Fixed
+- Retried the 0.11.0 PyPI publish: the tag build failed on a resolver
+  conflict (installs `stapel-gdpr`/`stapel-auth` from git main alongside
+  `stapel-core` from git main; `stapel-gdpr`'s pyproject still pinned
+  `stapel-core<0.11` at the time). Cleared now that the 0.11 fleet re-pin
+  has landed on `stapel-gdpr` main (0.3.8) and `stapel-auth` main. No
+  functional change.
+
 ## [0.11.0] — 2026-07-17
 
 ### Added — §57 dev/prod compose + nginx canon, entrypoint canon, AGENTS.md, pre-commit README canon, dev-env canon, CONFIG.MD regeneration hook
