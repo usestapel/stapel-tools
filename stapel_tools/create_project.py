@@ -319,6 +319,69 @@ STAPEL_LIBS = {
         "url_prefix": "video/",
         "requires": [],
     },
+    # ── Composites (projections-and-composition §3/§4) ─────────────────────
+    # A composite writes NO business logic: an INSTALLED_APPS/urls/config
+    # preset over member modules + cross-domain Projection glue. Two flags
+    # matter (grabli §5.8): "http": False — a composite mounts NO urls of its
+    # own — but "django_app": True is REQUIRED anyway: the glue (Projection
+    # declarations in the composite's app) only registers if the composite
+    # itself is in INSTALLED_APPS. http=False does NOT imply django_app=False
+    # here (unlike attributes/vault, which are not apps at all).
+    # Composites sort AFTER their dependencies in this registry (required for
+    # _expand_with_requires' registry-order output — see comment at the top).
+    "shop": {
+        "repo": "https://github.com/usestapel/stapel-shop.git",
+        "dir": "stapel_shop",
+        "required": False,
+        "description": "Composite: shop — categories + attributes + listings + reviews (glue: reviews→listings rating projection); likes wait for stapel-engagement",
+        "default": False,
+        "pin": "0.1.0",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": False,          # mounts no /shop/api/ — glue only
+        "django_app": True,     # app slot REQUIRED: Projection glue lives there
+        "url_prefix": None,
+        "requires": ["categories", "attributes", "listings", "reviews"],
+        # "engagement" joins requires when the module exists (minor bump).
+    },
+    "classified": {
+        "repo": "https://github.com/usestapel/stapel-classified.git",
+        "dir": "stapel_classified",
+        "required": False,
+        "description": "Composite: classified ads — shop + geo (coordinates are listing fields, no extra glue)",
+        "default": False,
+        "pin": "0.1.0",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": False,
+        "django_app": True,     # reserved glue slot (see shop comment)
+        "url_prefix": None,
+        "requires": ["shop", "geo"],
+    },
+    "booking": {
+        "repo": "https://github.com/usestapel/stapel-booking.git",
+        "dir": "stapel_booking",
+        "required": False,
+        "description": "Composite: bookable resources — calendar + listings",
+        "default": False,
+        "pin": "0.1.0",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": False,
+        "django_app": True,     # reserved glue slot (see shop comment)
+        "url_prefix": None,
+        "requires": ["calendar", "listings"],
+    },
+    "social": {
+        "repo": "https://github.com/usestapel/stapel-social.git",
+        "dir": "stapel_social",
+        "required": False,
+        "description": "Composite: social surface — chat + profiles + reviews; likes wait for stapel-engagement",
+        "default": False,
+        "pin": "0.1.0",
+        "ahead_of_pypi": True,  # not published to PyPI yet
+        "http": False,
+        "django_app": True,     # reserved glue slot (see shop comment)
+        "url_prefix": None,
+        "requires": ["chat", "profiles", "reviews"],
+    },
 }
 
 
