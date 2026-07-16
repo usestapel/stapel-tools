@@ -2,6 +2,41 @@
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-07-16
+
+### Added — `stapel-verify`: one gate running the whole lint arsenal
+
+- New `stapel-verify <project_root> [--workspace ROOT ...] [--base-sha SHA]
+  [--json]` CLI (`stapel_tools/verify.py`). Pure composition — reuses each
+  existing linter's own public entrypoint (`lint.scan_paths`,
+  `adoption_lint.lint_project`, `url_lint.lint_paths`,
+  `config_lint.lint_project`, `migration_lint.lint_paths`) and adds no new
+  checking logic of its own.
+- Motivation: a project's CI can be green on a generic linter while R006
+  (`StapelResponse({...})` raw dict, skipping the serializer) and ADO002
+  (a hand-rolled route shadowing an operation the installed module already
+  ships) sit unexercised — not because the rules don't exist, but because
+  nothing wires all the linters into the pipeline that actually runs.
+  `stapel-verify` is the mechanical answer: one command, the entire arsenal,
+  exit 1 if any of them found an error.
+- Output: a summary table (linter → errors/warnings), full findings from
+  every linter, and a machine `--json` form (per-linter errors/warnings/
+  findings) for agents/CI. `--workspace`/`--base-sha` are forwarded to the
+  sub-linters that accept them (adoption-lint, migration-lint).
+- Console script registered in `[project.scripts]`.
+- Tests (`tests/test_verify.py`): a fixture project with a deliberate
+  violation for every composed linter (R006, ADO001/ADO002/ADO004, URL001,
+  CFG001, MIG001) asserting each linter contributes to the aggregate report,
+  a clean-project all-zero case, CLI exit codes (0/1/2), `--json` shape, and
+  `--workspace` forwarding.
+- **Fixed a latent bug found by this integration**: `adoption_lint.py`'s
+  ADO002 findings stored a `Path` object (from the `urlconf_by_route` map)
+  as `.path` while every other rule stores a `str` — `findings.sort()`
+  crashed with `TypeError: '<' not supported between instances of
+  'PosixPath' and 'str'` whenever ADO001 and ADO002 both fired on the same
+  project, a combination its own test suite never exercised together.
+  One-line fix: `str(uf)` at the point of insertion.
+
 ## [0.10.2] - 2026-07-16
 
 ### Fixed — CI: `TestAuthSubfeatureAxes` depended on a workspace sibling not present in an isolated checkout

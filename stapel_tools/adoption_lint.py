@@ -680,12 +680,12 @@ def lint_project(
     # urlconf analysis
     mounts: set[str] = set()
     routes: list[Route] = []
-    urlconf_by_route: dict[int, Path] = {}
+    urlconf_by_route: dict[int, str] = {}
     for uf in urlconf_files:
         m, r = parse_urlconf(uf)
         mounts.update(m)
         for route in r:
-            urlconf_by_route[id(route)] = uf
+            urlconf_by_route[id(route)] = str(uf)
             routes.append(route)
     headless = scan_headless_markers(list(urlconf_files) + settings_files)
 
