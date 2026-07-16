@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.10.4] — 2026-07-16
+
+### Added — v1 canon in the scaffolds (§60, api-versioning.md §2)
+
+- `new-library` (module kind) now scaffolds `urls_v1.py` from day one: the
+  root `urls.py` is a thin `api/v1/` mount, the actual URL set lives in
+  `urls_v1.py`, the ping example serves at `/<slug>/api/v1/ping`. No bare
+  `/<mod>/api/...` variant exists — canon, not a choice.
+- `new_module` (service-embedded app) scaffolds the same split:
+  `urls.py` mounts `api/v1/` → `urls_v1.py`.
+- `new-react-lib` default `path_prefix` → `/<module>/api/v1/`
+  (`MANIFEST_TAGPREFIX` follows).
+- (also shipping in this release: the §55 SWAP001/SWAP002 + DOC001 lints and
+  the STAPEL_LIBS composite registry entries listed under their own headings
+  below — committed on main since 0.10.3.)
+
 ### Added — SWAP001/SWAP002 + DOC001: the §55 anti-lock-in lints
 
 - New `stapel-swap-lint` (`stapel_tools/swap_lint.py`), two error-level rules

@@ -227,16 +227,33 @@ class PingView(SerializerSeamMixin, APIView):
         )
 '''
 
-URLS = '''"""URL patterns — no global prefix here, the host project mounts them:
+URLS = '''"""Root URLconf for {{NAME_DASH}} — v1 canon mount (api-versioning.md §2).
 
-    path("{{SLUG}}/", include("{{PKG}}.urls"))
+Canon: ``/<mod>/api/v1/...`` — the version segment sits right after ``api/``;
+bare ``/<mod>/api/...`` paths do not exist. The host project mounts this
+module root:
+
+    path("{{SLUG}}/", include("{{PKG}}.urls"))   # -> /{{SLUG}}/api/v1/...
+
+The actual v1 URL set lives in ``urls_v1.py``; a ``v2`` appears only when a
+classified breaking change forces it (api-versioning.md §3).
+"""
+from django.urls import include, path
+
+urlpatterns = [
+    path("api/v1/", include("{{PKG}}.urls_v1")),
+]
+'''
+
+URLS_V1 = '''"""v1 URL set — paths here are relative to the ``api/v1/`` mount
+contributed by the root ``urls.py`` (api-versioning.md §2).
 """
 from django.urls import path
 
 from .views import PingView
 
 urlpatterns = [
-    path("api/ping", PingView.as_view(), name="{{SLUG_U}}-ping"),
+    path("ping", PingView.as_view(), name="{{SLUG_U}}-ping"),
 ]
 '''
 
@@ -437,13 +454,13 @@ from stapel_core.comm import call
 @pytest.mark.django_db
 class TestPingEndpoint:
     def test_ping(self, api_client):
-        resp = api_client.get("/{{SLUG}}/api/ping")
+        resp = api_client.get("/{{SLUG}}/api/v1/ping")
         assert resp.status_code == 200
         assert resp.json()["greeting"] == "pong"
 
     @override_settings({{NAMESPACE}}={"GREETING": "hi"})
     def test_greeting_is_a_setting(self, api_client):
-        assert api_client.get("/{{SLUG}}/api/ping").json()["greeting"] == "hi"
+        assert api_client.get("/{{SLUG}}/api/v1/ping").json()["greeting"] == "hi"
 
 
 class TestPingFunction:

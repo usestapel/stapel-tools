@@ -103,6 +103,7 @@ def file_plan(kind: str, ctx: dict) -> dict:
                 "serializers.py": render(T.SERIALIZERS, ctx),
                 "views.py": render(T.VIEWS, ctx),
                 "urls.py": render(T.URLS, ctx),
+                "urls_v1.py": render(T.URLS_V1, ctx),
                 "errors.py": render(T.ERRORS, ctx),
                 "checks.py": render(T.CHECKS, ctx),
                 "functions.py": render(T.FUNCTIONS, ctx),

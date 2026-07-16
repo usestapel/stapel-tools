@@ -530,6 +530,16 @@ class {{MODULE_CAP}}ViewSet(GenericViewSet):
 """
 
 MODULE_URLS = """\
+# v1 canon mount (api-versioning.md §2): the version segment sits right
+# after api/; the actual URL set lives in urls_v1.py.
+from django.urls import include, path
+
+urlpatterns = [
+    path("api/v1/", include("{{APP_PATH}}.urls_v1")),
+]
+"""
+
+MODULE_URLS_V1 = """\
 from django.urls import path
 from .views import {{MODULE_CAP}}ViewSet
 

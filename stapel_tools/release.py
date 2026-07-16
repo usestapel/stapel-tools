@@ -383,7 +383,7 @@ def _verify_git_sha(project_dir: Path, git_sha: str) -> None:
 def _resolve_created_at(created_at: Optional[str]) -> str:
     if created_at:
         return created_at
-    epoch = os.environ.get("SOURCE_DATE_EPOCH")
+    epoch = os.environ.get("SOURCE_DATE_EPOCH")  # noqa: CFG001
     if epoch:
         moment = datetime.fromtimestamp(int(epoch), tz=timezone.utc)
     else:

@@ -27,6 +27,7 @@ from ._templates import (
     MODULE_TEST_MODELS,
     MODULE_TESTS_INIT,
     MODULE_URLS,
+    MODULE_URLS_V1,
     MODULE_VIEWS,
 )
 
@@ -88,6 +89,7 @@ def scaffold_module(
         target / "errors.py": render(MODULE_ERRORS, ctx),
         target / "views.py": render(MODULE_VIEWS, ctx),
         target / "urls.py": render(MODULE_URLS, ctx),
+        target / "urls_v1.py": render(MODULE_URLS_V1, ctx),
         target / "tests" / "__init__.py": MODULE_TESTS_INIT,
         target / "tests" / "test_models.py": render(MODULE_TEST_MODELS, ctx),
     }

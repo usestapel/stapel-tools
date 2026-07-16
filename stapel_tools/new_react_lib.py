@@ -359,7 +359,7 @@ def scaffold_react_lib(
     desc: str | None = None,
 ) -> Path:
     backend = backend or f"stapel-{module}"
-    path_prefix = path_prefix or f"/{module}/api/"
+    path_prefix = path_prefix or f"/{module}/api/v1/"  # v1 canon (api-versioning.md §2)
     ctx = build_context(
         module, title, backend, path_prefix, desc,
         core_peer=core_peer_range(react_dir),
