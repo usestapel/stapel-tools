@@ -33,6 +33,18 @@ fi
 
 # Mounted at /etc/nginx/conf.d/nginx.conf. stapel-new-service appends a
 # location block per service before the closing brace.
+#
+# Reserved namespace (§57 owner directive — monolith static/media collision
+# check): /staticfiles/ and /media/ are BARE, PROJECT-WIDE prefixes, but each
+# service's own STATIC_URL/MEDIA_URL is namespaced under them per slug
+# (/staticfiles/<slug>/, /media/<slug>/ — see _templates.BASE_SETTINGS), and
+# every backend service's API/admin/health routes live under their own
+# /<slug>/ prefix (see stapel-new-service's per-service location block,
+# _update_nginx). A frontend app must never define a client route starting
+# with /staticfiles/, /media/ or /<any-backend-slug>/ — nginx enforces the
+# split by prefix-match SPECIFICITY (longest prefix wins), independent of the
+# order location blocks appear in this file. Documented again in the
+# project's AGENTS.md §3.
 NGINX_CONF = """\
 server {
     listen 80;
@@ -46,6 +58,75 @@ server {
 
     location /media/ {
         alias /media/;
+    }
+
+    # stapel-new-service appends one location block per backend service
+    # above this line (each under its own reserved /<slug>/ prefix).
+
+    # Prod canon (§57): the built frontend, populated into this volume by
+    # the one-shot frontend-build service (see docker-compose.yml). SPA
+    # fallback so client-side routes resolve on a hard refresh. Kept last
+    # for readability only — prefix-match specificity (not file order) is
+    # what actually keeps this from shadowing the reserved blocks above.
+    location / {
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ /index.html;
+    }
+}
+"""
+
+# Dev-canon (§57): mounted via the nginx image's OWN envsubst-on-templates
+# entrypoint (https://hub.docker.com/_/nginx — "Using environment variables
+# in nginx configuration"; any *.template under /etc/nginx/templates/ is
+# rendered to /etc/nginx/conf.d/ at container start). Proxy targets are ENV
+# VARS with compose-network defaults (never hardcoded) — see
+# docker-compose.dev.yml's `nginx` service `environment:` block; override
+# BACKEND_UPSTREAM / FRONTEND_DEV_UPSTREAM in .env for a native run (backend
+# and/or frontend on the host, e.g. localhost:8000 / localhost:5173).
+#
+# Safe alongside nginx's OWN lowercase config variables ($host, $scheme, ...)
+# — envsubst only replaces names that exist as environment variables, and
+# none of those lowercase nginx variable names collide with real env vars
+# (the same convention the official nginx image's own docs example uses).
+NGINX_DEV_CONF_TEMPLATE = """\
+server {
+    listen 80;
+    server_name _;
+    client_max_body_size 50m;
+    resolver 127.0.0.11 valid=10s;
+
+    # Reserved namespace, checked BEFORE the Vite catch-all below (see
+    # NGINX_CONF's prod twin + the project's AGENTS.md §3). Static/media
+    # aren't collected in dev — Django's runserver serves them itself — so
+    # they proxy to the backend like the API does, instead of the
+    # alias-to-volume prod uses.
+    location /staticfiles/ {
+        proxy_pass http://${BACKEND_UPSTREAM};
+        proxy_set_header Host $host;
+    }
+
+    location /media/ {
+        proxy_pass http://${BACKEND_UPSTREAM};
+        proxy_set_header Host $host;
+    }
+
+    location /{{SLUG}}/ {
+        proxy_pass http://${BACKEND_UPSTREAM};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect off;
+    }
+
+    # Everything else — the Vite dev server (HMR websocket included).
+    location / {
+        proxy_pass http://${FRONTEND_DEV_UPSTREAM};
+        proxy_set_header Host $host;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 """
@@ -115,6 +196,17 @@ _BROKER_URL_LINES = {
     "nats": "NATS_URL=nats://nats:4222\n",
     "kafka": "KAFKA_BOOTSTRAP_SERVERS=kafka:9092\n",
 }
+
+
+def render_tokens(template: str, ctx: dict) -> str:
+    """Replace ``{{KEY}}`` tokens by simple string substitution — NOT
+    ``str.format()``, which would choke on the literal ``${VAR:-default}``
+    compose/nginx-envsubst syntax these templates are full of (single braces,
+    used pervasively — see e.g. ``${POSTGRES_USER:-stapel}`` above)."""
+    result = template
+    for key, value in ctx.items():
+        result = result.replace(f"{{{{{key}}}}}", str(value))
+    return result
 
 
 def render_compose_base(template: str, broker: str, task_broker: str = "none") -> str:
@@ -200,6 +292,7 @@ services:
       - ./service-configs/nginx:/etc/nginx/conf.d:ro
       - static-content:/staticfiles:ro
       - media-content:/media:ro
+      - frontend-dist:/usr/share/nginx/html:ro
     depends_on: []
 
 volumes:
@@ -207,6 +300,7 @@ volumes:
   redis-data:
 {{BROKER_VOLUMES}}  static-content:
   media-content:
+  frontend-dist:
 """
 
 MONOLITH_COMPOSE_LOCAL = """\
@@ -214,7 +308,19 @@ include:
   - docker-compose.base.yml
 
 services:
-  # Add services from their individual .yml files:
+  # Prod canon (§57): one-shot build — populates the frontend-dist volume
+  # nginx serves from (see docker-compose.base.yml's nginx `frontend-dist`
+  # mount + service-configs/nginx/nginx.conf's `location /`). Not a
+  # long-lived service: `restart: "no"`, runs once per `docker compose up`
+  # and again on demand via `docker compose run --rm frontend-build`.
+  frontend-build:
+    build:
+      context: ./frontend
+    restart: "no"
+    volumes:
+      - frontend-dist:/output
+
+  # Add backend services from their individual .yml files:
   # svc-app:
   #   extends:
   #     file: svc-app.yml
@@ -228,8 +334,49 @@ MONOLITH_COMPOSE_DEV = """\
 include:
   - docker-compose.base.yml
 
+# NOTE: `volumes:` is declared BEFORE `services:` on purpose — `services:`
+# must stay the LAST top-level section in this file: stapel-new-service's
+# _update_compose_file() appends each backend service by raw text at EOF,
+# assuming whatever comes last is the services mapping. A top-level key
+# after `services:` would make an appended service block parse as a nested
+# key under THAT section instead (a real compose-breaking class of bug).
+volumes:
+  frontend-node-modules:
+
 services:
-  # Add services from their individual .yml files:
+  # Dev canon (§57): plain node image — no bespoke Dockerfile to go stale —
+  # runs the Vite dev server with hot reload; logs via
+  # `docker compose -f docker-compose.dev.yml logs -f frontend`.
+  frontend:
+    image: node:22-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    environment:
+      VITE_BACKEND_TARGET: "http://${BACKEND_UPSTREAM:-{{BACKEND_UPSTREAM_DEFAULT}}}"
+    volumes:
+      - ./frontend:/app
+      - frontend-node-modules:/app/node_modules
+    restart: unless-stopped
+
+  # dev-nginx canon: same `nginx` service as prod, but its conf.d/templates
+  # source is swapped to service-configs/nginx-dev/ (envsubst template that
+  # proxies the reserved backend namespace + everything else to Vite,
+  # instead of serving the (unbuilt, in dev) frontend-dist volume) —
+  # compose merges service overrides by mount TARGET, so only the changed
+  # targets need repeating here (static-content/media-content stay from the
+  # base's nginx service). Proxy targets are env vars with compose-network
+  # defaults — override in .env for a native run.
+  nginx:
+    volumes:
+      - ./service-configs/nginx-dev:/etc/nginx/conf.d:ro
+      - ./service-configs/nginx-dev:/etc/nginx/templates:ro
+    environment:
+      BACKEND_UPSTREAM: "${BACKEND_UPSTREAM:-{{BACKEND_UPSTREAM_DEFAULT}}}"
+      FRONTEND_DEV_UPSTREAM: "${FRONTEND_DEV_UPSTREAM:-frontend:5173}"
+    depends_on:
+      - frontend
+
+  # Add backend services from their individual .yml files:
   # svc-app:
   #   extends:
   #     file: svc-app.yml
@@ -277,6 +424,7 @@ RUN_CMD=gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
 
 MONOLITH_GITIGNORE = """\
 .env
+.env.dev
 *.pyc
 __pycache__/
 .venv/

@@ -91,6 +91,12 @@ def file_plan(kind: str, ctx: dict) -> dict:
         ".githooks/pre-push": T.PRE_PUSH,
         "setup-hooks.sh": T.SETUP_HOOKS,
         ".gitignore": T.GITIGNORE,
+        # README-canon pre-commit hooks (§57 owner directive item 5): the
+        # standard `pre-commit` framework, running the REAL stapel gate
+        # (stapel-verify) — not a generic linter. Separate from the
+        # .githooks/setup-hooks.sh mechanism above (which stays, ruff-only,
+        # for repos that don't want the pre-commit framework dependency).
+        ".pre-commit-config.yaml": T.PRE_COMMIT_CONFIG,
     }
 
     if module_only:

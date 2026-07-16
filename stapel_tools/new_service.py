@@ -89,6 +89,10 @@ def make_context(
     url_includes = "".join(
         f'\n    path(f"{{url_prefix}}api/", include("{app}.urls")),' for app in apps
     )
+    dev_mock_providers = ""
+    if "stapel_auth" in apps:
+        from ._dev_env_templates import DEV_MOCK_OTP_BLOCK
+        dev_mock_providers = DEV_MOCK_OTP_BLOCK
     return {
         "TITLE": title,
         "SLUG": slug,
@@ -105,6 +109,7 @@ def make_context(
         "ACTION_TRANSPORT": action_transport,
         "FUNCTION_TRANSPORT": function_transport,
         "TASK_DISPATCH": task_dispatch,
+        "DEV_MOCK_PROVIDERS": dev_mock_providers,
     }
 
 
@@ -308,14 +313,45 @@ def _update_compose_base(root: Path, slug: str, dir_name: str):
     print("  updated docker-compose.base.yml")
 
 
-def _update_compose_file(root: Path, filename: str, slug: str, dir_name: str, debug_port: int = 0):
+def _update_compose_file(
+    root: Path, filename: str, slug: str, dir_name: str, debug_port: int = 0,
+    dev_mode: bool = False,
+):
     path = root / filename
     if not path.exists():
         return
     text = path.read_text()
-    if f"{dir_name}:" in text:
+    # A real service key line, not a substring match — the monolith/micro
+    # compose templates ship a COMMENTED example ("  # svc-app:") that a bare
+    # `f"{dir_name}:" in text` check false-positives against for a project's
+    # first/default service (e.g. "app" -> "svc-app"), silently leaving the
+    # backend never actually wired into docker-compose.yml/docker-compose.dev.yml
+    # (found live, §57 dev-compose audit: a fresh "app" monolith's dev/prod
+    # compose never started the backend at all).
+    if re.search(rf"^  {re.escape(dir_name)}:\s*$", text, re.MULTILINE):
         return
-    if debug_port:
+    if dev_mode:
+        # Dev canon (§57 items 1/7): the backend's baked image defaults to
+        # config.settings.prod (see _templates.DOCKERFILE) — that boots with
+        # DEBUG=False and SECURE_SSL_REDIRECT on, which breaks plain-HTTP
+        # local dev outright. Override to config.settings.dev (DEBUG=True,
+        # file-mailtrap, debug toolbar, dev-only mock providers), bind-mount
+        # the source for hot reload, and point env_file at .env.dev (real
+        # generated secrets + DJANGO_SUPERUSER_*/VITE_* dev defaults) instead
+        # of the base service's own env_file: ".env" (prod).
+        block = (
+            f"\n  {dir_name}:\n"
+            f"    extends:\n"
+            f"      file: {dir_name}.yml\n"
+            f"      service: {dir_name}\n"
+            f"    env_file: \".env.dev\"\n"
+            f"    environment:\n"
+            f"      DJANGO_SETTINGS_MODULE: config.settings.dev\n"
+            f"    volumes:\n"
+            f"      - ./{dir_name}:/app\n"
+            f"      - ./stapel_core:/app/stapel_core:ro\n"
+        )
+    elif debug_port:
         block = (
             f"\n  {dir_name}:\n"
             f"    extends:\n"
@@ -589,7 +625,7 @@ def scaffold_service(
 
     debug_port = _get_next_debug_port(root)
     _update_compose_file(root, "docker-compose.yml", slug, dir_name, debug_port)
-    _update_compose_file(root, "docker-compose.dev.yml", slug, dir_name)
+    _update_compose_file(root, "docker-compose.dev.yml", slug, dir_name, dev_mode=True)
     _update_nginx(root, slug, dir_name)
     _update_prometheus(root, slug, dir_name)
     _update_vscode(root, slug, dir_name, title, debug_port)

@@ -125,13 +125,36 @@ def _run_config_lint(project_dir: Path) -> GateResult:
     return GateResult("config-lint", passed=not findings, output=output)
 
 
+def _load_dotenv(project_dir: Path) -> dict[str, str]:
+    """Parse the generated project's own ``.env`` (KEY=VALUE, ``#`` comments)
+    so the static gates below boot against the SAME config a real run would
+    — not just ``os.environ``. Needed since stapel_core's config.E001 system
+    check (added after this gate runner was first written) resolves
+    ``required`` CONFIG.MD keys via ``get_config()`` against the actual
+    process environment, independent of any settings.py fallback value —
+    a required key (SECRET_KEY) that only exists in the project's own .env
+    file, never exported to the calling shell, must still reach the
+    subprocess or the gate false-fails on every project this tool generates."""
+    env_path = project_dir / ".env"
+    if not env_path.is_file():
+        return {}
+    values: dict[str, str] = {}
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip()
+    return values
+
+
 def _run_manage_check(project_dir: Path, python: str, *, settings_module: str, gate_name: str) -> GateResult:
     proc = subprocess.run(
         [python, "manage.py", "check"],
         cwd=project_dir,
         capture_output=True,
         text=True,
-        env={**os.environ, "DJANGO_SETTINGS_MODULE": settings_module},
+        env={**os.environ, **_load_dotenv(project_dir), "DJANGO_SETTINGS_MODULE": settings_module},
     )
     return GateResult(gate_name, proc.returncode == 0, proc.stdout + proc.stderr)
 
@@ -149,6 +172,7 @@ def assemble_scaffold(
     company_email: str | None = None,
     python: str | None = None,
     verify: bool = True,
+    env_preset: str = "standalone",
 ) -> AssembleResult:
     """Assemble a project from a slug + a flat list of Stapel lib keys, then
     statically verify it. See module docstring for the full contract.
@@ -217,6 +241,7 @@ def assemble_scaffold(
         use_submodules=False,
         init_git=False,
         module_config=config,
+        env_preset=env_preset,
     )
 
     # Aggregate the connected libs' CONFIG.MD registries into the project's own
@@ -318,6 +343,13 @@ def main(argv: list[str] | None = None) -> int:
         "--no-verify", action="store_true",
         help="Skip the check/boot-smoke gates (assembly only).",
     )
+    parser.add_argument(
+        "--env-preset", choices=["standalone", "studio"], default="standalone",
+        help="Dev-env channel origin (§57 item 7): 'standalone' (default) or "
+        "'studio' (documented email/OAuth STUBS for a stapel-studio-spun-up "
+        "project — no real sender/studio-OAuth infra exists yet). Monolith "
+        "only today (--type monolith).",
+    )
     args = parser.parse_args(argv)
 
     config = None
@@ -338,6 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         company_email=args.company_email,
         python=args.python,
         verify=not args.no_verify,
+        env_preset=args.env_preset,
     )
 
     print(

@@ -33,6 +33,13 @@ if __name__ == "__main__":
 
 BOOTSTRAP_SH = """\
 #!/bin/sh
+# Entrypoint canon (§57 owner directive, live-run postmortem): migrate +
+# createsuperuser through Django's OWN --noinput flow (env DJANGO_SUPERUSER_*,
+# stdlib since Django 3.0) + collectstatic. NO project-specific Python here —
+# a live run found a hand-rolled entrypoint.sh that imported a model deleted
+# in a later migration to build a superuser by hand, breaking on every
+# rebuild. This script never imports a model; it only shells out to
+# manage.py, so it can never go stale against the schema.
 set -e
 DB_HOST_DIRECT="${POSTGRES_HOST_DIRECT:-db}"
 DB_PORT_DIRECT="${POSTGRES_PORT_DIRECT:-5432}"
@@ -40,6 +47,17 @@ echo "Waiting for database..."
 until pg_isready -h "$DB_HOST_DIRECT" -p "$DB_PORT_DIRECT" -U "$POSTGRES_USER"; do sleep 1; done
 echo "Applying migrations..."
 POSTGRES_HOST="$DB_HOST_DIRECT" POSTGRES_PORT="$DB_PORT_DIRECT" python manage.py migrate --noinput
+
+# Optional, idempotent: only runs when the standard Django superuser env vars
+# are set (DJANGO_SUPERUSER_USERNAME/EMAIL/PASSWORD — read natively by
+# `createsuperuser --noinput`, no custom flag plumbing here). `|| true`
+# because Django's own command exits non-zero when the username already
+# exists — that is "nothing to do", not a bootstrap failure.
+if [ -n "${DJANGO_SUPERUSER_USERNAME:-}" ] && [ -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]; then
+    echo "Ensuring Django superuser '$DJANGO_SUPERUSER_USERNAME' exists..."
+    python manage.py createsuperuser --noinput || echo "  (already exists — skipping)"
+fi
+
 echo "Collecting static..."
 python manage.py collectstatic --noinput --clear --verbosity 0
 echo "Bootstrap done."
@@ -239,7 +257,7 @@ if os.environ.get("RUN_MAIN") or os.environ.get("WERKZEUG_RUN_MAIN"):
         print("debugpy listening on 5678")
     except Exception:
         pass
-"""
+{{DEV_MOCK_PROVIDERS}}"""
 
 LOCAL_SETTINGS = """\
 from .dev import *  # noqa

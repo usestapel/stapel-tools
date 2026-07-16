@@ -580,6 +580,19 @@ pip install -e . && pip install pytest pytest-django ruff
 pytest tests/
 ```
 
+## Checks
+
+Install the pre-commit hooks once:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Every commit then runs `stapel-verify .` — R001-R007, SWAP001-002,
+CFG001-003, URL001, ADO-codes, MIG-codes, DOC001. Run the full suite on
+demand with `pre-commit run --all-files`.
+
 ## License
 
 MIT
@@ -856,6 +869,23 @@ echo "Lint check passed."
 SETUP_HOOKS = '''#!/usr/bin/env bash
 git config core.hooksPath .githooks
 echo "Git hooks configured. Hooks directory: .githooks/"
+'''
+
+# README-canon pre-commit hooks (§57 owner directive item 5) — the standard
+# `pre-commit` framework, not the bespoke .githooks/ mechanism above. Runs
+# stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC codes) — the same real gate a
+# generated project's own .pre-commit-config.yaml runs, not a generic linter.
+PRE_COMMIT_CONFIG = '''# Install: pip install pre-commit && pre-commit install
+# Run on demand: pre-commit run --all-files
+repos:
+  - repo: local
+    hooks:
+      - id: stapel-verify
+        name: stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC codes)
+        entry: stapel-verify .
+        language: system
+        pass_filenames: false
+        always_run: true
 '''
 
 GITIGNORE = '''__pycache__/

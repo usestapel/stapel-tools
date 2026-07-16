@@ -28,8 +28,10 @@ stapel-core ships one. A lib without a CONFIG.MD is a reported gap
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
@@ -275,3 +277,138 @@ def aggregate_config_md(
             entries.append(extra)
             covered.add(extra.key)
     return render_config_md(entries, title=title), missing
+
+
+# --- regeneration (pre-commit hook, §57 owner directive item 8) ------------
+
+
+def libs_from_existing_config_md(project_dir: Path) -> list[str]:
+    """Recover the lib list a project's CONFIG.MD was generated against, from
+    its own ``## stapel-<lib>`` section headers — self-describing, works
+    regardless of whether the project wires libs via git submodules or pip
+    (only the pip path leaves a trace in requirements.txt, submodules don't).
+    ``"core"`` sorts first (cosmetic; matches create_project's own ordering
+    convention of "core always first")."""
+    path = project_dir / CONFIG_MD
+    if not path.is_file():
+        return []
+    entries = parse_config_md(path)
+    libs = {
+        e.owner.removeprefix("stapel-")
+        for e in entries
+        if e.owner and e.owner.startswith("stapel-")
+    }
+    ordered = sorted(libs - {"core"})
+    return (["core"] if "core" in libs else []) + ordered
+
+
+def regenerate_config_md(
+    project_dir: Path,
+    libs: list[str] | None = None,
+    workspace_root: Path | None = None,
+) -> tuple[str, list[str]]:
+    """Re-run the SAME aggregation ``assemble_scaffold`` used at generation
+    time, against a project that already exists — the pre-commit
+    regeneration hook's engine (§57 owner directive item 8), also reusable
+    standalone (``stapel-config-manifest``).
+
+    ``libs`` defaults to whatever :func:`libs_from_existing_config_md` finds
+    in the project's own committed CONFIG.MD (self-describing — no need to
+    re-pass ``--libs`` on every run). Any row NOT owned by a ``stapel-<lib>``
+    section (i.e. hand-authored "project"-owned rows — a human's CFG002 fix,
+    or a project-specific key) is preserved VERBATIM from the currently
+    committed file, not re-derived from an AST scan — so a human's purpose
+    text for a project-local key survives regeneration; only the
+    lib-sourced sections get refreshed against each lib's current CONFIG.MD.
+    """
+    project_dir = Path(project_dir).resolve()
+    existing_path = project_dir / CONFIG_MD
+    existing_entries = parse_config_md(existing_path) if existing_path.is_file() else []
+    if libs is None:
+        libs = libs_from_existing_config_md(project_dir)
+    project_entries = [
+        e for e in existing_entries if not (e.owner or "").startswith("stapel-")
+    ]
+    return aggregate_config_md(
+        libs,
+        workspace_root,
+        title=f"CONFIG.MD — {project_dir.name}",
+        extra_entries=project_entries,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="stapel-config-manifest",
+        description=(
+            "Regenerate a project's root CONFIG.MD from its libs' own "
+            "CONFIG.MD registries (the same aggregation stapel-assemble runs "
+            "at generation time) — the engine behind the pre-commit "
+            "config-manifest-check hook (§57 owner directive item 8)."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "project_dir", nargs="?", default=".",
+        help="Project directory (default: .) — must already have a CONFIG.MD, "
+             "unless --libs is given explicitly.",
+    )
+    parser.add_argument(
+        "--libs", nargs="*", default=None, metavar="LIB",
+        help="Libs to aggregate (default: recovered from the project's own "
+             "CONFIG.MD '## stapel-<lib>' section headers).",
+    )
+    parser.add_argument(
+        "--check", action="store_true",
+        help="Do not write — exit 1 if regenerating would change the file "
+             "(drift: a lib's CONFIG.MD changed since this project was "
+             "generated/last regenerated). Exit 0 when already up to date.",
+    )
+    args = parser.parse_args(argv)
+
+    project = Path(args.project_dir)
+    if not project.is_dir():
+        print(f"Error: not a directory: {project}", file=sys.stderr)
+        return 2
+
+    existing_path = project / CONFIG_MD
+    if not existing_path.is_file() and args.libs is None:
+        print(
+            f"Error: no {CONFIG_MD} at {project} and no --libs given — "
+            "nothing to regenerate against",
+            file=sys.stderr,
+        )
+        return 2
+
+    text, missing = regenerate_config_md(project, args.libs)
+    if missing:
+        print(
+            f"stapel-config-manifest: gap — no {CONFIG_MD} yet for: "
+            f"{', '.join(missing)} (per-module sweep in progress)",
+            file=sys.stderr,
+        )
+
+    existing_text = existing_path.read_text(encoding="utf-8") if existing_path.is_file() else None
+
+    if args.check:
+        if existing_text == text:
+            print(f"{CONFIG_MD} is up to date.")
+            return 0
+        print(
+            f"{CONFIG_MD} is STALE — a lib's CONFIG.MD changed since this "
+            f"project last regenerated. Run 'stapel-config-manifest {project}' "
+            "(no --check) to refresh, then commit the result.",
+            file=sys.stderr,
+        )
+        return 1
+
+    if existing_text == text:
+        print(f"{CONFIG_MD} already up to date — nothing to write.")
+        return 0
+    existing_path.write_text(text, encoding="utf-8")
+    print(f"Regenerated {existing_path} — review and commit.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

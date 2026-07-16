@@ -2,6 +2,87 @@
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-07-17
+
+### Added — §57 dev/prod compose + nginx canon, entrypoint canon, AGENTS.md, pre-commit README canon, dev-env canon, CONFIG.MD regeneration hook
+
+Live-run postmortem, owner directive package. New generator surfaces for
+`stapel-create-project --type monolith` (the "recommended" preset — scope
+for this pass; microservices/minimal frontend wiring is a tracked follow-up).
+
+- **Dev/prod compose + nginx (§57 item 1).** `frontend/` — a real Vite +
+  React + TypeScript scaffold (`stapel_tools/_frontend_templates.py`) — is
+  now generated alongside the backend. `docker-compose.dev.yml` starts the
+  Vite dev server (`frontend`, hot reload, logs visible) + the Django
+  backend (now actually booting `config.settings.dev`, not the baked-image
+  prod default — see the entrypoint-canon fix below) + a dev-nginx that
+  proxies the reserved backend namespace (`/<slug>/`, `/staticfiles/`,
+  `/media/`) to Django and everything else to Vite. `docker-compose.yml`
+  (prod) gains a one-shot `frontend-build` service that populates a
+  `frontend-dist` volume the main nginx serves as static files (SPA
+  fallback). Proxy targets are env vars with compose-network defaults
+  (`BACKEND_UPSTREAM`, `FRONTEND_DEV_UPSTREAM`), overridable via `.env`/
+  `.env.dev` for a native run — nginx's own envsubst-on-templates feature
+  renders `service-configs/nginx-dev/nginx-dev.conf.template`.
+- **Static/media collision check (§57 item 2, answered).** No collision:
+  monolith already namespaces `STATIC_URL`/`MEDIA_URL` per service slug
+  (`/staticfiles/<slug>/`, `/media/<slug>/`), and every backend route lives
+  under its own `/<slug>/` prefix — a frontend router must simply not claim
+  those reserved prefixes, which nginx enforces by prefix-match specificity
+  (documented in `NGINX_CONF`'s comments and the generated `AGENTS.md` §3).
+- **Entrypoint canon (§57 item 3).** `bootstrap.sh` now runs
+  `createsuperuser --noinput` (Django's own env-driven flow —
+  `DJANGO_SUPERUSER_USERNAME/EMAIL/PASSWORD`) between migrate and
+  collectstatic — no project-specific Python, no model imports (closes the
+  live-run defect: a hand-rolled entrypoint importing a since-deleted model).
+- **`AGENTS.md` (§57 item 4).** `create_project` emits a base OSS
+  coding-rules file at every project root (`_agents_template.py`):
+  StapelResponse/ERR_*/@flow_step (R001-R007), get_model/get_presenter
+  indirection (SWAP001/002), config-in-one-place + purpose (CFG001-004),
+  URLField max_length (URL001), and — for a monolith's `frontend/` — the
+  `@stapel/eslint-plugin` rule set (no raw colours/fetch/storage, typed
+  events, i18n-key existence).
+- **Pre-commit README canon (§57 item 5).** Every project type (plus
+  `new-library`) gets a `.pre-commit-config.yaml` (`_precommit_templates.py`)
+  running `stapel-verify` (+ `eslint` for a monolith's frontend) and a root
+  README "Checks" section documenting `pip install pre-commit && pre-commit
+  install`.
+- **Dev-env canon (§57 item 7 — owner follow-up).** `.env.dev` is generated
+  with real secrets (not placeholders): DB/comm-bus (inline by default, never
+  assumes Kafka), `DJANGO_SUPERUSER_*` for the entrypoint canon, Vite/backend
+  proxy targets. On a local stand, **mock providers are on by default**:
+  stapel-notifications already defaults `EMAIL_PROVIDER`/`SMS_PROVIDER` to
+  `"mock"`; when stapel-auth is selected, `config/settings/dev.py` now also
+  sets `STAPEL_AUTH["USE_MOCK_SMS_OTP"/"USE_MOCK_EMAIL_OTP"] = True` (booleans
+  in stapel-auth's `no_env` list — only settable this way), so OTP codes are
+  logged, never sent — registration/login is completable by reading the
+  service log. A new `--env-preset` (`standalone` default, `studio`) picks
+  the channel-origin preset; `studio` adds DOCUMENTED STUB keys (generic
+  email sender, "Login via Stapel Studio" OAuth) with `TODO(§57 studio
+  preset)` markers — no sender/studio-OAuth infrastructure exists yet, this
+  is only the shape of the future preset. Threaded through
+  `create_project`/`assemble_scaffold`.
+- **CONFIG.MD regeneration hook (§57 item 8 — owner follow-up).**
+  `stapel-config-manifest` (new CLI, `config_manifest.py`) regenerates a
+  project's root `CONFIG.MD` from its libs' own registries — `--check` fails
+  (drift) without writing, no flag regenerates + exits 0 for `git add`.
+  Wired into every generated `.pre-commit-config.yaml` as
+  `config-manifest-check`. New **CFG004** (warning, `config_lint.py`): a
+  `CONFIG.MD` row with an empty Purpose column — closes the "documented in
+  name only" gap CFG001-003 didn't cover; promotes to error once the
+  per-lib CONFIG.MD sweep completes (DOC001's posture).
+- Bug fix found auditing the above: `stapel-new-service`'s compose-file
+  containment check false-positived against the monolith/microservices
+  templates' own commented example (`"  # svc-app:"`), silently leaving a
+  project's first/default backend service never actually wired into
+  `docker-compose.yml`/`docker-compose.dev.yml`. Fixed to match a real
+  service key line, not a substring.
+- Bug fix: `assemble_scaffold`'s static gates (`manage.py check`/boot-smoke)
+  now load the generated project's own `.env` into the subprocess
+  environment — needed since stapel_core's newer `config.E001` system check
+  resolves `required` CONFIG.MD keys (e.g. `SECRET_KEY`) against the actual
+  process environment, independent of any settings.py fallback.
+
 ## [0.10.4] — 2026-07-16
 
 ### Added — v1 canon in the scaffolds (§60, api-versioning.md §2)

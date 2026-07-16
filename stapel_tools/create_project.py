@@ -533,6 +533,48 @@ def _expand_with_requires(modules: list[str]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+ROOT_README_MD = """\
+# {title}
+
+A Stapel project — Docker Compose, {compose_summary}.
+
+## Dev
+
+```bash
+docker compose -f docker-compose.dev.yml --env-file .env.dev up
+```
+
+{dev_note}
+
+## Prod
+
+```bash
+docker compose up -d
+```
+
+{prod_note}
+{checks_section}"""
+
+
+def _write_agents_and_checks(project_dir: Path, slug: str, has_frontend: bool):
+    """AGENTS.md (base OSS coding rules, §57 item 4) + `.pre-commit-config.yaml`
+    (§57 item 5) — every project type."""
+    from ._agents_template import AGENTS_MD, FRONTEND_SECTION
+    from ._compose_templates import render_tokens
+    from ._precommit_templates import (
+        PRE_COMMIT_CONFIG_BACKEND_ONLY,
+        PRE_COMMIT_CONFIG_WITH_FRONTEND,
+    )
+
+    frontend_section = render_tokens(FRONTEND_SECTION, {"SLUG": slug}) if has_frontend else ""
+    agents_md = render_tokens(AGENTS_MD, {"FRONTEND_SECTION": frontend_section})
+    _write(project_dir / "AGENTS.md", agents_md)
+    _write(
+        project_dir / ".pre-commit-config.yaml",
+        PRE_COMMIT_CONFIG_WITH_FRONTEND if has_frontend else PRE_COMMIT_CONFIG_BACKEND_ONLY,
+    )
+
+
 def _write_shared_infra(project_dir: Path):
     """Configs referenced by the compose templates: nginx vhost and the
     postgres script that creates POSTGRES_MULTIPLE_DATABASES on startup."""
@@ -544,19 +586,90 @@ def _write_shared_infra(project_dir: Path):
     ensure_script.chmod(0o755)
 
 
-def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None):
+ENV_PRESETS = ("standalone", "studio")
+
+
+def _write_env_dev(
+    project_dir: Path, ctx: dict, broker: str, task_broker: str,
+    backend_upstream: str, env_preset: str = "standalone",
+):
+    """``.env.dev`` — a real, generated dev environment (§57 owner directive
+    item 7), NOT the placeholder ``.env.example``: fresh secrets, DB/comm-bus
+    defaults, DJANGO_SUPERUSER_* for the entrypoint canon, Vite/backend proxy
+    targets. ``env_preset`` picks standalone (default) vs studio (email/oauth
+    STUBS only — see _dev_env_templates.py's module docstring)."""
+    from ._compose_templates import _broker_env
+    from ._dev_env_templates import ENV_DEV_PRESETS
+
+    if env_preset not in ENV_PRESETS:
+        print(
+            f"Error: env-preset '{env_preset}' is not valid (allowed: "
+            f"{', '.join(ENV_PRESETS)})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    template = ENV_DEV_PRESETS[env_preset]
+    text = template.format(
+        postgres_password=_random_secret(24),
+        secret_key=_random_secret(),
+        jwt_secret_key=_random_secret(),
+        superuser_password=_random_secret(20),
+        backend_upstream=backend_upstream,
+        company_name=ctx["company_name"],
+        company_email=ctx["company_email"],
+        broker_env=_broker_env(broker, task_broker),
+    )
+    _write(project_dir / ".env.dev", text)
+
+
+def _write_frontend_scaffold(project_dir: Path, ctx: dict, backend_upstream_default: str):
+    """``frontend/`` — Vite + React + TypeScript, wired into the dev/prod
+    compose + nginx canon (§57 owner directive). See
+    _frontend_templates.py's module docstring for the full picture."""
+    from . import _frontend_templates as F
+    from ._compose_templates import render_tokens
+
+    render_ctx = {
+        "SLUG": ctx["slug"],
+        "TITLE": ctx["title"],
+        "BACKEND_UPSTREAM_DEFAULT": backend_upstream_default,
+    }
+
+    def r(template: str) -> str:
+        return render_tokens(template, render_ctx)
+
+    frontend = project_dir / "frontend"
+    _write(frontend / "package.json", r(F.PACKAGE_JSON))
+    _write(frontend / "tsconfig.json", F.TSCONFIG_JSON)
+    _write(frontend / "tsconfig.node.json", F.TSCONFIG_NODE_JSON)
+    _write(frontend / "vite.config.ts", r(F.VITE_CONFIG_TS))
+    _write(frontend / "index.html", r(F.INDEX_HTML))
+    _write(frontend / "src" / "main.tsx", F.MAIN_TSX)
+    _write(frontend / "src" / "App.tsx", r(F.APP_TSX))
+    _write(frontend / "src" / "vite-env.d.ts", F.VITE_ENV_D_TS)
+    _write(frontend / ".gitignore", F.GITIGNORE)
+    _write(frontend / "Dockerfile", F.DOCKERFILE)
+    _write(frontend / "README.md", r(F.README_MD))
+
+
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone"):
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
         MONOLITH_COMPOSE_DEV,
         MONOLITH_COMPOSE_LOCAL,
         MONOLITH_ENV_TEMPLATE,
         MONOLITH_GITIGNORE,
+        NGINX_DEV_CONF_TEMPLATE,
         render_compose_base,
         render_env,
+        render_tokens,
     )
     from .new_service import scaffold_service
 
     slug = ctx["slug"]
+    dir_name = ctx["service_dir_name"]  # "svc-<slug>" — the backend's own dir
+    backend_upstream_default = f"{dir_name}:8000"
     action_transport, function_transport = _transports_for(broker)
     # A task broker in a broker-less monolith flips only the Task dispatch:
     # Actions stay in-process, task.* events travel through the broker.
@@ -564,14 +677,51 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     if task_broker == broker:
         task_broker = "none"  # same broker — nothing extra to wire
 
+    compose_ctx = {"SLUG": slug, "BACKEND_UPSTREAM_DEFAULT": backend_upstream_default}
+
     # docker-compose files
     _write(project_dir / "docker-compose.base.yml", render_compose_base(MONOLITH_COMPOSE_BASE, broker, task_broker))
-    _write(project_dir / "docker-compose.yml", MONOLITH_COMPOSE_LOCAL)
-    _write(project_dir / "docker-compose.dev.yml", MONOLITH_COMPOSE_DEV)
+    _write(project_dir / "docker-compose.yml", render_tokens(MONOLITH_COMPOSE_LOCAL, compose_ctx))
+    _write(project_dir / "docker-compose.dev.yml", render_tokens(MONOLITH_COMPOSE_DEV, compose_ctx))
     _write(project_dir / ".env.example", render_env(MONOLITH_ENV_TEMPLATE, broker, ctx, task_broker))
+    _write_env_dev(project_dir, ctx, broker, task_broker, backend_upstream_default, env_preset)
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", f"{slug}\n")
     _write_shared_infra(project_dir)
+    # Dev-nginx canon (§57): a SEPARATE directory from service-configs/nginx/
+    # (prod) — docker-compose.dev.yml's `nginx` service override points its
+    # conf.d AND templates mounts here instead. Contains only a *.template
+    # (no bare *.conf), so mounting it at conf.d too stays inert until
+    # nginx's own envsubst-on-templates step renders it (see the template's
+    # docstring in _compose_templates.py).
+    _write(
+        project_dir / "service-configs" / "nginx-dev" / "nginx-dev.conf.template",
+        render_tokens(NGINX_DEV_CONF_TEMPLATE, compose_ctx),
+    )
+    _write_frontend_scaffold(project_dir, ctx, backend_upstream_default)
+    _write_agents_and_checks(project_dir, slug, has_frontend=True)
+    from ._precommit_templates import README_CHECKS_SECTION_WITH_FRONTEND
+    _write(project_dir / "README.md", ROOT_README_MD.format(
+        title=ctx["title"],
+        compose_summary="a Django backend (svc-{}/) and a Vite/React frontend (frontend/)".format(slug),
+        dev_note=(
+            "`.env.dev` is generated with real secrets + working defaults "
+            "(§57 item 7) — nothing to fill in by hand. Dev-nginx routes the "
+            "reserved backend namespace "
+            f"(`/{slug}/`, `/staticfiles/`, `/media/`) to Django and "
+            "everything else to the Vite dev server (hot reload; logs via "
+            "`docker compose -f docker-compose.dev.yml logs -f frontend`). "
+            "If auth is installed, OTP codes are logged, not sent — see "
+            "the backend's own log."
+        ),
+        prod_note=(
+            "nginx serves the built frontend (populated by the one-shot "
+            "`frontend-build` service) as static files with an SPA fallback, "
+            f"and proxies `/{slug}/` (api/admin/health), `/staticfiles/` and "
+            "`/media/` to Django — see `service-configs/nginx/nginx.conf`."
+        ),
+        checks_section="\n" + README_CHECKS_SECTION_WITH_FRONTEND,
+    ))
 
     # Scaffold the main service with the selected feature modules wired in
     scaffold_service(
@@ -634,6 +784,15 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
         if STAPEL_LIBS[key].get("http", True)
     )
 
+    # NOTE: the dev-only mock-OTP default (§57 item 2) is monolith-only for
+    # now (see _create_monolith / new_service.make_context's
+    # DEV_MOCK_PROVIDERS) — it hangs off the dev/prod settings-module split
+    # (config/settings/dev.py vs prod.py) that the docker compose dev canon
+    # (§57 items 1/3/7) is built around. minimal has one settings.py with a
+    # DJANGO_ENV runtime branch, not a dev/prod module split, and injecting
+    # STAPEL_AUTH here unconditionally would also collide with the
+    # module_config-rendered STAPEL_AUTH block (A5) — left as a follow-up
+    # gap, not silently wired.
     render_ctx = {
         **ctx,
         "MODULE": module,
@@ -652,7 +811,9 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     _write(project_dir / "requirements.txt", r(MINIMAL_REQUIREMENTS))
     _write(project_dir / "requirements-dev.txt", MINIMAL_REQUIREMENTS_DEV)
     _write(project_dir / ".gitignore", MINIMAL_GITIGNORE)
-    _write(project_dir / "README.md", r(MINIMAL_README))
+    from ._precommit_templates import README_CHECKS_SECTION_BACKEND_ONLY
+    _write(project_dir / "README.md", r(MINIMAL_README) + "\n" + README_CHECKS_SECTION_BACKEND_ONLY)
+    _write_agents_and_checks(project_dir, slug, has_frontend=False)
     # .env.example keeps a placeholder SECRET_KEY (committed); the shared
     # _write_env_from_ctx() call in create_project() turns it into a real
     # .env with a freshly generated secret (SEC-6), same as monolith/
@@ -708,6 +869,20 @@ def _create_microservices(project_dir: Path, ctx: dict, broker: str, task_broker
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", "")
     _write_shared_infra(project_dir)
+    _write_agents_and_checks(project_dir, ctx["slug"], has_frontend=False)
+    from ._precommit_templates import README_CHECKS_SECTION_BACKEND_ONLY
+    _write(project_dir / "README.md", ROOT_README_MD.format(
+        title=ctx["title"],
+        compose_summary="multiple Django backend services behind nginx",
+        dev_note=(
+            "Add services with `stapel-new-service <name> --prefix svc-`, "
+            "then wire them into `docker-compose.dev.yml`. Per-service "
+            "frontend scaffolding is not built yet (§57 follow-up — "
+            "monolith is the supported target today)."
+        ),
+        prod_note="nginx proxies each service's own `/<slug>/` prefix — see `service-configs/nginx/nginx.conf`.",
+        checks_section="\n" + README_CHECKS_SECTION_BACKEND_ONLY,
+    ))
     print("  Created microservices base. Use 'stapel-new-service' to add services.")
 
 
@@ -896,6 +1071,7 @@ def create_project(
     broker: str | None = None,
     task_broker: str | None = None,
     module_config: dict[str, dict] | None = None,
+    env_preset: str = "standalone",
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
@@ -917,6 +1093,14 @@ def create_project(
         print(
             f"Error: task broker '{task_broker}' is not valid for {project_type} "
             f"projects (allowed: {allowed})",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if env_preset not in ENV_PRESETS:
+        print(
+            f"Error: env-preset '{env_preset}' is not valid (allowed: "
+            f"{', '.join(ENV_PRESETS)})",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -979,7 +1163,7 @@ def create_project(
 
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset)
     elif project_type == "minimal":
         _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"], module_config=module_config)
         use_submodules = False  # minimal uses pip
@@ -1156,6 +1340,13 @@ def main():
              "keys validated against the module's docs/capabilities.json "
              "when a sibling checkout has one). Monolith/minimal only.",
     )
+    parser.add_argument(
+        "--env-preset", choices=list(ENV_PRESETS), default="standalone",
+        help="Dev-env channel origin (§57 item 7): 'standalone' (default, "
+             "mock providers only) or 'studio' (for projects spun up from "
+             "stapel-studio — adds documented email/OAuth STUBS, no real "
+             "sender/studio-OAuth infra exists yet). Monolith only today.",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path.cwd(), help="Parent directory for the project")
     parser.add_argument("--no-submodules", action="store_true", help="Use pip install instead of git submodules")
     parser.add_argument("--no-git", action="store_true", help="Skip git init")
@@ -1231,6 +1422,7 @@ def main():
         broker=params.get("broker"),
         task_broker=params.get("task_broker"),
         module_config=module_config,
+        env_preset=args.env_preset,
     )
 
 
