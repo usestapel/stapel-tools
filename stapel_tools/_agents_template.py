@@ -130,6 +130,7 @@ never patch the output file directly.
 | `PRESENTERS.MD` | `manage.py presenter_catalog` | live presenter/swap registries | `presenter-catalog-check` |
 | `docs/api.en.md` + `docs/api.ru.md` | `stapel-docs .` | `schema.json`/`flows.json`/`errors.json` (+ ru translations, where a module ships them) | `api-docs-check` |
 | `frontend/src/api/generated-override/<mod>/schema.ts` (frontend only, only once this project overrides a default) | `stapel-gen-client .` | THIS project's own `schema.json` | `gen-client-check` |
+| `frontend/src/stapel-tokens/` (frontend only) | `npm run gen:tokens` (in `frontend/`) | `frontend/stapel.theme.json` (§68 neutral colour roles) | `tokens-check` |
 
 `stapel-docs` and `stapel-gen-client` are both no-ops (exit 0, nothing
 written) when their source doesn't exist yet — `stapel-docs` until
@@ -162,6 +163,22 @@ FRONTEND_SECTION = """
   rule `no-raw-colors`) — `cssVar("...")`, never a literal hex/rgb.
   Tokens are imported from the generated tokens package, never re-declared
   (`no-raw-token-import`).
+- Colours are defined in ONE place, `frontend/stapel.theme.json` — a
+  neutral role dictionary (§68: `surface*`/`text*`/`border*`/`brand*`/
+  `link*` + `success`/`warning`/`error`/`info` × `{base, -bg, -border,
+  -on}`), never a design-system-specific name. **The colour of every
+  default button in this project is the `brand` role** — whatever design
+  system renders it (antd's `colorPrimary`, a Tailwind `bg-brand` utility,
+  a raw `var(--stapel-brand)`) reads the SAME `brand` entry, never a
+  hardcoded blue. To re-theme, edit `stapel.theme.json`'s `ramps`/`core`
+  entries (e.g. swap the `brand` ramp's hex, or repoint a role to a
+  different ramp step) and regenerate — `npm run gen:tokens` in
+  `frontend/`, or just commit: the `tokens-check` pre-commit hook
+  regenerates `frontend/src/stapel-tokens/` and fails the commit on drift
+  (§5's table). Never hand-edit the generated output, and never fork the
+  generator itself — `stapel-tokens` ships INSIDE `@stapel/tokens` as its
+  own bin (`package.json`'s `gen:tokens`/`gen:tokens:check` scripts call it
+  directly).
 - No hardcoded user-facing text (`no-hardcoded-text`) — every label goes
   through the i18n engine (`t("key")`), and every key used must exist in a
   registered bundle (`i18n-key-exists`).

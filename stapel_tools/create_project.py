@@ -889,6 +889,7 @@ def _write_frontend_scaffold(
     _write(frontend / "src" / "main.tsx", F.MAIN_TSX)
     _write(frontend / "src" / "App.tsx", r(F.APP_TSX))
     _write(frontend / "src" / "vite-env.d.ts", F.VITE_ENV_D_TS)
+    _write(frontend / "stapel.theme.json", r(F.THEME_JSON))
     _write(frontend / "eslint.config.js", F.ESLINT_CONFIG_JS)
     _write(frontend / ".gitignore", F.GITIGNORE)
     _write(frontend / "Dockerfile", F.DOCKERFILE)

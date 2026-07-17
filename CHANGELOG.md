@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-07-18
+
+### Added — scaffold `stapel.theme.json` + `stapel-tokens`-bin pre-commit hook (§68 Ф5, color-token-matrix)
+
+§68's neutral colour-role dictionary now reaches the `stapel-create-project`
+monolith scaffold, so a freshly generated frontend starts with a real,
+themeable colour source instead of hardcodes — and the generator is called
+through `@stapel/tokens`' own published bin, never vendored:
+
+- `frontend/stapel.theme.json` — the neutral role dictionary (`surface*`/
+  `text*`/`border*`/`brand*`/`link*` + `success`/`warning`/`error`/`info` ×
+  `{base, -bg, -border, -on}`), seeded with a sensible bluish `brand` and
+  standard status colours, light+dark, in `_frontend_templates.THEME_JSON`.
+- `frontend/package.json` gains the `@stapel/tokens` devDependency and
+  `gen:tokens`/`gen:tokens:check` scripts calling the published
+  `stapel-tokens` bin directly (`--targets core` by default — the default
+  studio delivery is antd, self-sufficient; Tailwind stays opt-in, and if a
+  project does add it the bin's `tailwind@4` `@theme` adapter is the target,
+  never the legacy v3 RGB-triplet one).
+- New `.pre-commit-config.yaml` hook `tokens-check` (frontend projects
+  only) — `npm run gen:tokens:check` in `frontend/`, same
+  regenerator-of-everything-that-can-be-regenerated shape as
+  `config-manifest-check`/`reserved-paths-check`/`gen-client-check`; fails
+  the commit on drift, auto-fix is `npm run gen:tokens` (no `:check`).
+- `AGENTS.md`'s generated §5 (generated-artifacts table) and §6 (frontend
+  rules) now spell out, in the generated project's own AGENTS.md, that
+  colours live in `stapel.theme.json` → semantic roles, that **the default
+  button colour is the `brand` role**, and how to re-theme (edit
+  `ramps`/`core` → `npm run gen:tokens` or just commit — the pre-commit
+  hook regenerates and gates drift).
+- No forked/vendored copy of the generator anywhere in the scaffold
+  templates — the exact `gen-tokens.mjs`/`tokens-lib.mjs` failure mode the
+  color-token-matrix spec diagnosed in a live host is closed by
+  construction (regression-tested: `TestThemeJsonScaffold::
+  test_no_forked_generator_vendored_into_scaffold_templates`).
+
 ## [0.12.0] — 2026-07-17
 
 ### Added — `stapel-gen-client` + `stapel-docs`: the regenerator-of-everything pre-commit surface (owner directive)

@@ -16,10 +16,14 @@ config-manifest-check (CONFIG.MD), reserved-paths-check
 (docs/api.en.md + api.ru.md, every project — `stapel-docs`), gen-client-
 check (frontend/src/api/generated-override/, frontend projects only,
 no-op unless the project actually overrides a default — `stapel-gen-
-client`), and presenter-catalog-check (PRESENTERS.MD, wired in separately
-by `presenter_catalog_hook` where a manage.py exists). Every one of these
-hooks runs `<command> . --check` and fails the commit on drift; the fix is
-always the SAME command without `--check`, review the diff, commit.
+client`), tokens-check (frontend/src/stapel-tokens/, frontend projects
+only — §68 neutral colour-role dictionary compiled from `stapel.theme.json`
+by @stapel/tokens' OWN published generator, the `stapel-tokens` bin; never
+a vendored/forked copy of the engine), and presenter-catalog-check
+(PRESENTERS.MD, wired in separately by `presenter_catalog_hook` where a
+manage.py exists). Every one of these hooks runs `<command> . --check` and
+fails the commit on drift; the fix is always the SAME command without
+`--check`, review the diff, commit.
 """
 
 # config-manifest-check (§57 owner directive item 8): regenerates CONFIG.MD
@@ -93,6 +97,26 @@ _GEN_CLIENT_HOOK = """\
         always_run: true
 """
 
+# tokens-check (§68 color-token-matrix, Ф5): regenerates
+# frontend/src/stapel-tokens/ (the CSS custom-property core, §68 neutral
+# colour-role dictionary) from this project's OWN frontend/stapel.theme.json
+# and fails the commit on drift. Runs THROUGH the frontend's own npm script
+# (package.json's `gen:tokens:check`), which in turn calls @stapel/tokens'
+# published `stapel-tokens` bin — the generator ships AS the npm package
+# (0.5.0+), so this hook never shells out to a vendored/forked copy of the
+# engine (the exact failure mode §68 closes; see
+# docs/pending/color-token-matrix.md). Auto-fix: `npm run gen:tokens` (no
+# `:check`) inside `frontend/`, review the diff, commit. Frontend-only, same
+# reasoning as reserved-paths-check/gen-client-check above.
+_TOKENS_HOOK = """\
+      - id: tokens-check
+        name: stapel-tokens --check (frontend/src/stapel-tokens drift; Sec.68 neutral colour dictionary)
+        entry: sh -c "cd frontend && npm run gen:tokens:check"
+        language: system
+        pass_filenames: false
+        always_run: true
+"""
+
 PRE_COMMIT_CONFIG_BACKEND_ONLY = """\
 # Install: pip install pre-commit && pre-commit install
 # Run on demand: pre-commit run --all-files
@@ -129,7 +153,7 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-""" + _CONFIG_MANIFEST_HOOK + _RESERVED_PATHS_HOOK + _API_DOCS_HOOK + _GEN_CLIENT_HOOK
+""" + _CONFIG_MANIFEST_HOOK + _RESERVED_PATHS_HOOK + _API_DOCS_HOOK + _GEN_CLIENT_HOOK + _TOKENS_HOOK
 
 # ── README "Checks" section (dropped in verbatim, no tokens) ───────────────
 README_CHECKS_SECTION_BACKEND_ONLY = """\
@@ -168,11 +192,15 @@ flat config — no raw colours/fetch/storage, typed events, i18n-key
 existence), plus the regenerator/drift gates: `stapel-config-manifest .
 --check` (CONFIG.MD), `stapel-reserved-paths . --check`
 (reserved-paths.json), `stapel-docs . --check` (bilingual
-`docs/api.en.md`/`api.ru.md`) and `stapel-gen-client . --check`
+`docs/api.en.md`/`api.ru.md`), `stapel-gen-client . --check`
 (`frontend/src/api/generated-override/` — a no-op unless this project has
-actually overridden a stapel default; see AGENTS.md §6). Run the full
-suite on demand with `pre-commit run --all-files`; a drifted gate's fix is
-always the same command without `--check`, reviewed and committed.
+actually overridden a stapel default; see AGENTS.md §6) and `npm run
+gen:tokens:check` in `frontend/` (`frontend/src/stapel-tokens/` — the §68
+neutral colour-role dictionary compiled from `frontend/stapel.theme.json`
+by `@stapel/tokens`' own `stapel-tokens` bin, never a vendored generator).
+Run the full suite on demand with `pre-commit run --all-files`; a drifted
+gate's fix is always the same command without `--check`, reviewed and
+committed.
 """
 
 

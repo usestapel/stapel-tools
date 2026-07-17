@@ -163,12 +163,104 @@ class TestFrontendScaffold:
         for rel in (
             "package.json", "vite.config.ts", "index.html",
             "src/main.tsx", "src/App.tsx", "Dockerfile", ".gitignore",
+            "stapel.theme.json",
         ):
             assert (frontend / rel).exists(), rel
 
         pkg = (frontend / "package.json").read_text()
         assert '"name": "app-frontend"' in pkg
         assert '"vite"' in pkg
+
+
+class TestThemeJsonScaffold:
+    """§68 Ф5 — the scaffold's `frontend/stapel.theme.json` is the neutral
+    colour-role dictionary (not a design-system-specific vocabulary), and the
+    generator is called via @stapel/tokens' own published `stapel-tokens`
+    bin — never a vendored/forked copy of the engine (the exact failure mode
+    the color-token-matrix spec closes)."""
+
+    def test_theme_json_is_valid_json_with_neutral_roles(self, tmp_path):
+        import json
+
+        proj = _create(tmp_path, "app", "monolith")
+        theme = json.loads((proj / "frontend" / "stapel.theme.json").read_text())
+        core = theme["core"]
+        for role in (
+            "surface", "surface-raised", "surface-sunken", "surface-overlay",
+            "text", "text-muted", "text-subtle", "text-on-accent",
+            "border", "border-subtle", "focus-ring",
+            "brand", "brand-hover", "brand-active", "brand-subtle",
+            "link", "link-hover",
+        ):
+            assert role in core, role
+            assert set(core[role]) == {"light", "dark"}
+        for kind in ("success", "warning", "error", "info"):
+            for suffix in ("", "-bg", "-border", "-on"):
+                assert f"{kind}{suffix}" in core, f"{kind}{suffix}"
+        # no design-system-specific / legacy ad-hoc vocabulary as a ROLE KEY
+        # (e.g. "text-on-accent" legitimately contains "accent" as a
+        # substring — check keys, not a raw substring search).
+        for banned in (
+            "colorPrimary", "colorBgLayout", "palette", "accent",
+            "upperground-primary", "background-primary-subtle",
+        ):
+            assert banned not in core, banned
+
+    def test_theme_json_ramps_are_private_hex_source(self, tmp_path):
+        import json
+
+        proj = _create(tmp_path, "app", "monolith")
+        theme = json.loads((proj / "frontend" / "stapel.theme.json").read_text())
+        assert "ramps" in theme
+        assert "brand" in theme["ramps"]
+        # core roles reference ramp.step, never a raw hex directly
+        for role, pair in theme["core"].items():
+            for shade in ("light", "dark"):
+                ref = pair[shade]
+                assert not ref.startswith("#"), (role, shade, ref)
+                assert "." in ref, (role, shade, ref)
+
+    def test_package_json_depends_on_stapel_tokens_and_wires_gen_scripts(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        pkg = (proj / "frontend" / "package.json").read_text()
+        assert '"@stapel/tokens"' in pkg
+        assert '"gen:tokens"' in pkg
+        assert '"gen:tokens:check"' in pkg
+        assert "stapel-tokens --theme ./stapel.theme.json" in pkg
+
+    def test_precommit_has_tokens_check_hook_only_for_monolith(self, tmp_path):
+        mono = _create(tmp_path / "a", "app", "monolith")
+        mini = _create(tmp_path / "b", "app", "minimal")
+        mono_cfg = (mono / ".pre-commit-config.yaml").read_text()
+        assert "tokens-check" in mono_cfg
+        assert "gen:tokens:check" in mono_cfg
+        assert "tokens-check" not in (mini / ".pre-commit-config.yaml").read_text()
+
+    def test_no_forked_generator_vendored_into_scaffold_templates(self):
+        """Numeric gate: the scaffold must call @stapel/tokens' own
+        `stapel-tokens` bin, never vendor a copy of its generator internals
+        (`gen-tokens.mjs`/`tokens-lib.mjs` — the exact forked-generator
+        failure mode §68 closes)."""
+        import stapel_tools._frontend_templates as F
+        import stapel_tools._precommit_templates as P
+
+        for name in dir(F):
+            if name.isupper():
+                assert "tokens-lib.mjs" not in getattr(F, name)
+                assert "gen-tokens.mjs" not in getattr(F, name)
+        for name in dir(P):
+            if name.isupper() or name.startswith("_"):
+                val = getattr(P, name)
+                if isinstance(val, str):
+                    assert "tokens-lib.mjs" not in val
+                    assert "gen-tokens.mjs" not in val
+
+    def test_agents_md_describes_brand_role_for_default_button(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        agents = (proj / "AGENTS.md").read_text()
+        assert "stapel.theme.json" in agents
+        assert "`brand`" in agents
+        assert "gen:tokens" in agents
 
     def test_vite_config_reads_backend_target_from_env(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")

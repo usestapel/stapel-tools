@@ -22,6 +22,18 @@ Placeholders (``{{KEY}}``), filled by ``create_project._create_monolith``:
                          the real dev path (nginx-local) reads the same
                          default from docker-compose.local.yml's env, not
                          from this file.
+
+Colour tokens (§68 color-token-matrix, Ф5): ``THEME_JSON`` is this project's
+OWN ``stapel.theme.json`` — the neutral role dictionary (surface*/text*/
+border*/brand*/link + success/warning/error/info x {base,-bg,-border,-on}),
+seeded with a sensible bluish ``brand`` ramp and standard status colours,
+light+dark. It is compiled by ``@stapel/tokens``' OWN published generator —
+the ``stapel-tokens`` bin (``npm run gen:tokens`` / ``gen:tokens:check`` in
+``PACKAGE_JSON`` below) — never a vendored/forked copy of the engine (the
+exact forked-generator failure mode §68 closes; see
+``docs/pending/color-token-matrix.md``). Editing ``stapel.theme.json``
+(ramps or roles) and re-running the generator is the ONLY way to re-theme —
+never hand-edit the generated ``frontend/src/stapel-tokens/`` output.
 """
 
 PACKAGE_JSON = """\
@@ -33,7 +45,9 @@ PACKAGE_JSON = """\
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "gen:tokens": "stapel-tokens --theme ./stapel.theme.json --out ./src/stapel-tokens --targets core",
+    "gen:tokens:check": "stapel-tokens --theme ./stapel.theme.json --out ./src/stapel-tokens --targets core --check"
   },
   "dependencies": {
     "react": "^19.1.0",
@@ -41,6 +55,7 @@ PACKAGE_JSON = """\
   },
   "devDependencies": {
     "@stapel/eslint-plugin": "^0.3.0",
+    "@stapel/tokens": "^0.5.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
@@ -186,6 +201,78 @@ export default function App() {
 
 VITE_ENV_D_TS = """\
 /// <reference types="vite/client" />
+"""
+
+# §68 neutral colour-role dictionary — this project's OWN copy of
+# @stapel/tokens' `theme.default.json` (a host deep-merges its file OVER the
+# package default; touching only e.g. `ramps.brand` still gets every other
+# role). Neutral on purpose: roles are named for MEANING (surface/text/
+# border/brand/link + success/warning/error/info), never for one particular
+# design system's own vocabulary — antd, MUI and Tailwind bridges each
+# translate the SAME roles into their own theme fields (see
+# docs/pending/color-token-matrix.md). Hex is legal ONLY inside `ramps`;
+# every `core` role is exactly a {light,dark} pair of `<ramp>.<step>` refs.
+# `brand` is this project's default action colour (e.g. antd's
+# colorPrimary / a primary button's background) — re-theme by editing the
+# `ramps`/`core` entries below and regenerating (`npm run gen:tokens` in
+# frontend/, or the `tokens-check` pre-commit hook on the next commit).
+THEME_JSON = """\
+{
+  "_comment": "{{TITLE}}'s colour tokens (Sec.68 neutral colour-role dictionary). SOURCE OF TRUTH for every colour this project uses -- code never hardcodes hex/rgb (no-raw-colors). Compiled by @stapel/tokens' own `stapel-tokens` bin (never a vendored copy -- see package.json's gen:tokens scripts + the tokens-check pre-commit hook). Edit `ramps`/`core` below to re-theme; nothing else needs to change.",
+  "ramps": {
+    "brand": {
+      "100": "#eef0fd",
+      "300": "#98a5fa",
+      "400": "#7c8cf8",
+      "500": "#4657d9",
+      "700": "#3948b8",
+      "900": "#232b4d"
+    }
+  },
+  "core": {
+    "surface": { "light": "gray.25", "dark": "gray.950" },
+    "surface-raised": { "light": "gray.25", "dark": "gray.850" },
+    "surface-sunken": { "light": "gray.100", "dark": "gray.900" },
+    "surface-overlay": { "light": "gray.25", "dark": "gray.850" },
+
+    "text": { "light": "gray.900", "dark": "gray.100" },
+    "text-muted": { "light": "gray.600", "dark": "gray.400" },
+    "text-subtle": { "light": "gray.500", "dark": "gray.500" },
+    "text-on-accent": { "light": "gray.25", "dark": "gray.25" },
+
+    "border": { "light": "gray.400", "dark": "gray.700" },
+    "border-subtle": { "light": "gray.300", "dark": "gray.800" },
+    "focus-ring": { "light": "brand.500", "dark": "brand.300" },
+
+    "brand": { "light": "brand.500", "dark": "brand.300" },
+    "brand-hover": { "light": "brand.700", "dark": "brand.100" },
+    "brand-active": { "light": "brand.900", "dark": "brand.100" },
+    "brand-subtle": { "light": "brand.100", "dark": "brand.900" },
+
+    "link": { "light": "brand.500", "dark": "brand.300" },
+    "link-hover": { "light": "brand.700", "dark": "brand.100" },
+
+    "success": { "light": "green.500", "dark": "green.300" },
+    "success-bg": { "light": "green.100", "dark": "green.900" },
+    "success-border": { "light": "green.300", "dark": "green.700" },
+    "success-on": { "light": "gray.25", "dark": "gray.25" },
+
+    "warning": { "light": "amber.500", "dark": "amber.300" },
+    "warning-bg": { "light": "amber.100", "dark": "amber.900" },
+    "warning-border": { "light": "amber.300", "dark": "amber.700" },
+    "warning-on": { "light": "gray.25", "dark": "gray.25" },
+
+    "error": { "light": "red.500", "dark": "red.300" },
+    "error-bg": { "light": "red.100", "dark": "red.900" },
+    "error-border": { "light": "red.300", "dark": "red.700" },
+    "error-on": { "light": "gray.25", "dark": "gray.25" },
+
+    "info": { "light": "blue.500", "dark": "blue.300" },
+    "info-bg": { "light": "blue.100", "dark": "blue.900" },
+    "info-border": { "light": "blue.300", "dark": "blue.700" },
+    "info-on": { "light": "gray.25", "dark": "gray.25" }
+  }
+}
 """
 
 # `reserved-paths.json` lives at the PROJECT root (one level up from
