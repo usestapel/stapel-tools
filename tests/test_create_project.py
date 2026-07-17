@@ -731,3 +731,33 @@ class TestMinimalAdminNav:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "OK" in result.stdout
+
+
+class TestGeneratedMonolithPassesAdoptionLint:
+    """Regression (release-blocking): three v0.11.x tags in a row shipped a
+    generated monolith that immediately failed its OWN e2e-generated-project
+    CI gate with ADO001 ("installed and ships a urlconf but is not mounted")
+    for every HTTP-capable feature lib — even though config/urls.py DOES
+    mount each one (``path(f"{url_prefix}api/", include("stapel_auth.urls"))``
+    — see _templates.URLS_PY / new_service.make_context). The root cause was
+    in stapel-adoption-lint's parser, not the generator: a route written as
+    an f-string (this canon's OWN mount idiom, needed because the prefix is a
+    runtime settings value) parsed as neither ast.Constant nor anything
+    ``_route_literal`` recognized, so the include() one argument over was
+    never reached — the mount silently vanished from ADO001's ``mounts`` set.
+    This drives ``create_project`` for real (not a hand-built fixture urls.py
+    like test_adoption_lint.py's) so a future change to either side (the
+    generator's mount idiom, or the linter's route parser) cannot silently
+    reintroduce the false positive — "auth" only (not e.g. notifications):
+    the only feature lib installed in this repo's own CI "test" job matrix
+    (see .github/workflows/publish.yml), matching the e2e job's --libs auth
+    (+ notifications, covered live by the e2e job itself, not this unit
+    test)."""
+
+    def test_monolith_with_auth_reports_no_ado001(self, tmp_path):
+        from stapel_tools.adoption_lint import lint_project
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "auth"])
+        findings = lint_project(proj / "svc-app", search_roots=[tmp_path])
+        ado001 = [f for f in findings if f.rule == "ADO001"]
+        assert ado001 == [], ado001

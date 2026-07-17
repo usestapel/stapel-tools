@@ -2,6 +2,43 @@
 
 ## [Unreleased]
 
+## [0.11.4] — 2026-07-17
+
+### Fixed — ADO001 false positive on stapel-tools' OWN generated monolith
+
+Three v0.11.x tags in a row (0.11.1/0.11.2/0.11.3) failed their own release-
+gating `e2e-generated-project` CI job at the `stapel-verify` step:
+`stapel-adoption-lint` reported `ADO001` ("module 'stapel_auth' is installed
+and ships a urlconf but is not mounted") for every HTTP-capable feature lib
+in a freshly generated monolith — even though `config/urls.py` genuinely
+mounts each one (`path(f"{url_prefix}api/", include("stapel_auth.urls"))`,
+this canon's own mount idiom — see `_templates.URLS_PY` /
+`new_service.make_context`; the prefix is a runtime `settings.URL_PREFIX`
+value, so the route is written as an f-string, not a plain string literal).
+
+Root cause was in the linter, not the generator: `adoption_lint._route_literal`
+only recognized `ast.Constant` route arguments, so an f-string route parsed as
+neither a constant nor anything else it handled — `_walk_patterns` bailed via
+its `raw_route is None` guard *before* ever inspecting the `include(...)`
+target one argument over, silently dropping the mount from `ADO001`'s
+`mounts` set.
+
+- **`_route_literal` now also renders `ast.JoinedStr`** (f-string) routes:
+  literal segments kept verbatim, each dynamic `FormattedValue` replaced with
+  a `"{}"` placeholder (same normalization `re_path` regex groups already
+  get) — enough for `ADO001`'s mount detection, and a reasonable
+  best-effort route for `ADO002`'s duplicate-route check too.
+- New regression coverage: `tests/test_adoption_lint.py` (mount via an
+  f-string route) and `tests/test_create_project.py`
+  (`TestGeneratedMonolithPassesAdoptionLint`) — the latter drives
+  `create_project()` for real (monolith + `auth`) and asserts
+  `stapel-adoption-lint` reports zero `ADO001` findings, so this specific
+  generator/linter interaction can't silently regress again.
+
+Verified locally end to end (assemble → `stapel-verify` 0 errors → live OTP
+circle → frontend build → nginx circuit), including inside a clean
+`python:3.12-slim` container mirroring the CI job, before retagging.
+
 ## [0.11.3] — 2026-07-17
 
 ### Fixed — reserved-prefix canon: a module's bare root belongs to the frontend

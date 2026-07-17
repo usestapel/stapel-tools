@@ -389,9 +389,37 @@ def _call_name(func: ast.AST) -> str:
     return ""
 
 
+def _fstring_to_route(node: ast.JoinedStr) -> str:
+    """Best-effort literal rendering of an f-string route, e.g.
+    ``f"{url_prefix}api/"`` -> ``"{}api/"``: each dynamic ``FormattedValue``
+    becomes a ``"{}"`` placeholder (the same normalization ``re_path`` regex
+    groups already get below), each literal string segment is kept verbatim.
+
+    Without this, a route written as an f-string parses as neither a Constant
+    nor anything ``_route_literal`` recognized, so ``_walk_patterns`` bailed
+    out via its ``raw_route is None`` guard BEFORE ever looking at the
+    ``include(...)`` target — silently dropping the mount from ADO001's
+    ``mounts`` set even though the include is a plain string literal one
+    argument over. This is exactly the shape stapel-tools' OWN generated
+    ``config/urls.py`` uses for every stapel-module mount
+    (``path(f"{url_prefix}api/", include("stapel_auth.urls"))`` — see
+    ``_templates.URLS_PY`` / ``new_service.make_context``), so every
+    freshly-generated monolith with an HTTP-capable lib false-positived
+    ADO001 on itself (found via the e2e-generated-project CI gate)."""
+    parts = []
+    for value in node.values:
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            parts.append(value.value)
+        else:
+            parts.append("{}")
+    return "".join(parts)
+
+
 def _route_literal(node: ast.AST) -> Optional[str]:
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
+    if isinstance(node, ast.JoinedStr):
+        return _fstring_to_route(node)
     return None
 
 

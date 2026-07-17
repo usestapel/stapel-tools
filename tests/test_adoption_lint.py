@@ -107,6 +107,27 @@ class TestNotMounted:
         findings = lint_project(proj)
         assert rules(findings) == []
 
+    def test_mounted_via_fstring_route_passes(self, tmp_path):
+        """Regression: stapel-tools' OWN generated config/urls.py mounts every
+        stapel module at a COMPUTED prefix — ``path(f"{url_prefix}api/",
+        include("stapel_widget.urls"))`` (see _templates.URLS_PY /
+        new_service.make_context) — not a plain string literal route. A
+        freshly generated monolith with e.g. auth+notifications false-
+        positived ADO001 on itself under the e2e-generated-project CI gate
+        because the f-string route parsed as neither ast.Constant nor
+        anything _route_literal recognized, so the include() one argument
+        over was never reached and the mount was silently dropped."""
+        make_module(tmp_path, "widget")
+        proj = make_project(
+            tmp_path,
+            requirements=["stapel-widget"],
+            installed_apps=["stapel_widget"],
+            urlpatterns=[
+                'path(f"{url_prefix}api/", include("stapel_widget.urls"))'
+            ],
+        )
+        assert rules(lint_project(proj)) == []
+
     def test_headless_marker_suppresses(self, tmp_path):
         make_module(tmp_path, "widget")
         proj = make_project(
