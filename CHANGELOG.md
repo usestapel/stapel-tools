@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+## [0.11.5] — 2026-07-17
+
+### Added — `stapel-catalog --index`: the full machine index (agent-knowledge-base.md §64 "Волна 1")
+
+`docs/pending/agent-knowledge-base.md` §64 found the catalog aggregator's
+mechanism complete but its artifact never materialized on disk, and flagged
+it as the cheapest unblock for the ADVISOR exact-layer (stapel-studio's
+`studio_cto.advisor_index`, which already documented the consumer shape it
+expects — this release is the producer side.
+
+- `build_index()` extends `build_catalog()`'s per-module aggregate with,
+  per module: `flows` (verbatim `docs/flows.json`, `[]` if the module hasn't
+  documented any — an honest gap, not fabricated narrative), `errors`
+  (verbatim `docs/errors.json`), `config_md` (CONFIG.MD table rows, key
+  omitted for a module without one yet), `stapel_libs` (the
+  `STAPEL_LIBS` registry's `url_prefix`/`requires`/`pin` for that module,
+  omitted for an unregistered module) and, when a matching `-react` sibling
+  package exists, `components` (operations/hooks/demos projected from its
+  `manifest.json`).
+- New CLI surface: `stapel-catalog --index -o catalog.json [--workspace W]
+  [--react-root R]` emits the single-file full index; `--check` drift-gates
+  either mode (index or the classic catalog.json+catalog.md pair) without
+  writing.
+- `catalog.json`/`catalog.md` are materialized at the repo root as a real
+  snapshot of the current workspace (10 modules with a swept
+  `capabilities.json` today) — the artifact existed only as an unrun
+  mechanism before this release.
+
 ## [0.11.4] — 2026-07-17
 
 ### Fixed — ADO001 false positive on stapel-tools' OWN generated monolith

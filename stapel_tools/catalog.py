@@ -52,6 +52,11 @@ from typing import Any
 
 CATALOG_SCHEMA_VERSION = 1
 
+#: Markdown table separator row (``|---|---|`` etc.) — only dashes/colons per
+#: cell once split on ``|``. Used to filter CONFIG.MD table rows down to real
+#: data rows (agent-knowledge-base.md §64 "Волна 1").
+_TABLE_SEP_CHARS = set("-: ")
+
 
 # ---------------------------------------------------------------------------
 # stable serialization (same pinning as stapel_tools.codegen / .capabilities)
@@ -88,17 +93,19 @@ def discover_workspace(workspace: Path) -> list[Path]:
     )
 
 
-def load_documents(
+def load_documents_with_roots(
     sources: list[Path],
     *,
     warn=lambda msg: print(msg, file=sys.stderr),
-) -> tuple[list[dict], list[str]]:
-    """Load capabilities documents from sources; return (docs, skipped labels).
-
-    A source without the artifact, or with malformed JSON, is skipped with a
-    warning (never a crash) — a partial catalog is more useful than none.
+) -> tuple[list[tuple[dict, Path]], list[str]]:
+    """Like :func:`load_documents`, but also pairs each loaded document with
+    its module repo root (``<repo>/docs/capabilities.json``'s grandparent) —
+    needed by :func:`build_index` to find that module's sibling
+    ``flows.json``/``errors.json``/``CONFIG.MD``. Returns
+    ``([(doc, repo_root), ...], skipped_labels)``; skip semantics are
+    identical to :func:`load_documents` (never a crash).
     """
-    docs: list[dict] = []
+    pairs: list[tuple[dict, Path]] = []
     skipped: list[str] = []
     for source in sources:
         path = capabilities_path(source)
@@ -120,8 +127,25 @@ def load_documents(
                  "— not a capabilities document, skipped")
             skipped.append(label)
             continue
-        docs.append(doc)
-    return docs, skipped
+        # path is always "<repo>/docs/capabilities.json", whether `source` was
+        # the repo dir or the file itself (capabilities_path returns a file
+        # source unchanged) — so the grandparent is always the repo root.
+        pairs.append((doc, path.parent.parent))
+    return pairs, skipped
+
+
+def load_documents(
+    sources: list[Path],
+    *,
+    warn=lambda msg: print(msg, file=sys.stderr),
+) -> tuple[list[dict], list[str]]:
+    """Load capabilities documents from sources; return (docs, skipped labels).
+
+    A source without the artifact, or with malformed JSON, is skipped with a
+    warning (never a crash) — a partial catalog is more useful than none.
+    """
+    pairs, skipped = load_documents_with_roots(sources, warn=warn)
+    return [doc for doc, _root in pairs], skipped
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +325,177 @@ def build_catalog(docs: list[dict], recipes: list[dict] | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# full machine index (agent-knowledge-base.md §64 "Волна 1") — extends the
+# capabilities aggregate above with the other per-module artifacts an ADVISOR
+# exact-layer query needs, per module: flows.json (verbatim), errors.json
+# (verbatim), CONFIG.MD table rows, the STAPEL_LIBS registry projection
+# (url_prefix/requires/pin) and, for modules with a published `-react`
+# sibling, a components projection (operations/hooks/demos) of its
+# manifest.json. This is the CONSUMER-FACING shape `studio_cto.advisor_index`
+# already documents and reads (see that module's docstring + build_advisor_
+# fixture.py in stapel-studio) — every field name/shape here is load-bearing,
+# not cosmetic.
+# ---------------------------------------------------------------------------
+
+
+def _load_json_list(
+    path: Path, *, warn=lambda msg: print(msg, file=sys.stderr)
+) -> list:
+    """A sibling JSON-list artifact (flows.json/errors.json), or ``[]`` for an
+    absent/malformed one — an honest gap, never a crash (matches
+    :func:`load_documents`'s degrade discipline)."""
+    if not path.is_file():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        warn(f"stapel-catalog: warning: {path} is not valid JSON ({exc}) "
+             "— treated as empty")
+        return []
+    if not isinstance(data, list):
+        warn(f"stapel-catalog: warning: {path} does not contain a JSON list "
+             "— treated as empty")
+        return []
+    return data
+
+
+def _is_table_separator_row(cells: list[str]) -> bool:
+    return all(not cell or set(cell) <= _TABLE_SEP_CHARS for cell in cells)
+
+
+def load_config_lines(repo_root: Path) -> list[str]:
+    """Raw ``| ... |`` table-row lines from a module's ``CONFIG.MD`` (its
+    config-key registry, static-scaffold-and-config.md §2) — the header row
+    and the ``|---|---|`` separator are dropped, every real data row is kept
+    verbatim (source/purpose/required/default all live in the row text; no
+    need to re-parse columns for a prompt-ready projection). ``[]`` for a
+    module with no CONFIG.MD yet (a real, common gap on today's disk)."""
+    path = repo_root / "CONFIG.MD"
+    if not path.is_file():
+        return []
+    lines: list[str] = []
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line.startswith("|") or not line.endswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip("|").split("|")]
+        if not cells:
+            continue
+        if cells[0].lower() == "key":  # header row
+            continue
+        if _is_table_separator_row(cells):
+            continue
+        lines.append(line)
+    return lines
+
+
+def stapel_libs_entry(module_name: str) -> dict | None:
+    """Project a ``STAPEL_LIBS`` registry entry (``create_project.py``) for a
+    capabilities-doc module name (``stapel-auth`` -> registry key ``auth``).
+    ``None`` for a module the registry doesn't (yet) carry — an honest gap,
+    never a ``KeyError``; the caller omits the key entirely in that case."""
+    from stapel_tools.create_project import STAPEL_LIBS
+
+    entry = STAPEL_LIBS.get(module_name.removeprefix("stapel-"))
+    if entry is None:
+        return None
+    return {
+        "url_prefix": entry.get("url_prefix"),
+        "requires": list(entry.get("requires") or []),
+        "pin": entry.get("pin"),
+    }
+
+
+def load_components(module_name: str, react_root: Path) -> dict | None:
+    """Slim projection of the matching ``-react`` sibling package's
+    ``manifest.json`` (operations/hooks/demos) — ``None`` when the workspace
+    has no such package (most modules today; only 7/19 have shipped a
+    ``-react`` pair as of §64's audit) so the caller omits ``components``
+    entirely rather than emit a fabricated empty shell."""
+    bare = module_name.removeprefix("stapel-")
+    manifest_path = react_root / "packages" / f"{bare}-react" / "manifest.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+
+    operations = manifest.get("operations")
+    hooks = manifest.get("hooks")
+    demos = [d for d in (manifest.get("demos") or []) if isinstance(d, dict)]
+    return {
+        "package": manifest.get("package"),
+        "version": manifest.get("version"),
+        "operations": sorted(operations.keys()) if isinstance(operations, dict)
+        else sorted(operations or []),
+        "hooks": sorted(hooks.keys()) if isinstance(hooks, dict) else sorted(hooks or []),
+        "demos": sorted(
+            (
+                {
+                    "id": d.get("id"),
+                    "title": d.get("title"),
+                    "component": d.get("component"),
+                    "flow": d.get("flow"),
+                    "source": d.get("source"),
+                }
+                for d in demos
+            ),
+            key=lambda d: d["id"] or "",
+        ),
+    }
+
+
+def build_index(
+    sources: list[Path],
+    *,
+    recipes: list[dict] | None = None,
+    react_root: Path | None = None,
+    warn=lambda msg: print(msg, file=sys.stderr),
+) -> tuple[dict, list[str]]:
+    """Assemble the FULL machine index (agent-knowledge-base.md §64 "Волна
+    1"): :func:`build_catalog`'s aggregate, with every module extended by
+    ``flows`` (verbatim ``docs/flows.json``, ``[]`` if undocumented — an
+    honest gap, e.g. billing/recordings ship an empty file today), ``errors``
+    (verbatim ``docs/errors.json``), ``config_md`` (CONFIG.MD table rows,
+    key omitted if the module has none yet), ``stapel_libs`` (the
+    url_prefix/requires/pin registry projection, key omitted for a module the
+    registry doesn't carry) and, when ``react_root`` locates a matching
+    ``-react`` sibling, ``components`` (operations/hooks/demos).
+
+    Returns ``(index, skipped_labels)`` — same skip semantics as
+    :func:`load_documents`.
+    """
+    pairs, skipped = load_documents_with_roots(sources, warn=warn)
+    docs = [doc for doc, _root in pairs]
+    root_by_module = {doc.get("module"): root for doc, root in pairs}
+
+    index = build_catalog(docs, recipes=recipes)
+    for doc in index["modules"]:
+        name = doc.get("module")
+        root = root_by_module.get(name)
+
+        doc["flows"] = _load_json_list(root / "docs" / "flows.json", warn=warn) if root else []
+        doc["errors"] = _load_json_list(root / "docs" / "errors.json", warn=warn) if root else []
+
+        config_lines = load_config_lines(root) if root else []
+        if config_lines:
+            doc["config_md"] = config_lines
+
+        libs_entry = stapel_libs_entry(name) if name else None
+        if libs_entry is not None:
+            doc["stapel_libs"] = libs_entry
+
+        components = load_components(name, react_root) if name and react_root else None
+        if components is not None:
+            doc["components"] = components
+
+    return index, skipped
+
+
+# ---------------------------------------------------------------------------
 # markdown rendering (compact, prompt-ready, deterministic)
 # ---------------------------------------------------------------------------
 
@@ -352,6 +547,31 @@ def render_module_section(doc: dict) -> list[str]:
     lines.append("")
     lines.append(f"**Requires:** {_md_requires(doc.get('requires') or [])}")
     lines.append("")
+
+    # §64 index-mode extensions (absent entirely in plain-catalog mode, so
+    # these lines only appear when build_index populated the keys — plain
+    # catalog.md stays byte-identical to before this projection existed).
+    if "flows" in doc:
+        flows = doc.get("flows") or []
+        if flows:
+            titles = [f.get("title") or f.get("id", "?") for f in flows if isinstance(f, dict)]
+            lines.append(f"**Flows:** {', '.join(titles)}")
+        else:
+            lines.append("**Flows:** — (not documented)")
+        lines.append("")
+
+    components = doc.get("components")
+    if components:
+        pkg = components.get("package", "?")
+        cver = components.get("version", "?")
+        hooks = components.get("hooks") or []
+        demos = components.get("demos") or []
+        lines.append(
+            f"**React components:** {pkg}@{cver} — {len(hooks)} hooks, "
+            f"{len(demos)} demos"
+        )
+        lines.append("")
+
     return lines
 
 
@@ -407,7 +627,10 @@ def main(argv: list[str] | None = None) -> int:
         prog="stapel-catalog",
         description="Aggregate the module catalog from every module's "
         "docs/capabilities.json into catalog.json + a compact, prompt-ready "
-        "catalog.md.",
+        "catalog.md. --index emits the FULL machine index (agent-knowledge-"
+        "base.md §64) instead: capabilities + flows.json + errors.json + "
+        "CONFIG.MD + STAPEL_LIBS + react manifest.json projections, per "
+        "module, into one JSON file.",
     )
     parser.add_argument(
         "paths",
@@ -418,17 +641,42 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--workspace",
         help="Scan <workspace>/stapel-*/docs/capabilities.json; repos without "
-        "the artifact are skipped with a warning.",
+        "the artifact are skipped with a warning. Also the default source "
+        "for --react-root (<workspace>/stapel-react) in --index mode.",
     )
     parser.add_argument(
         "--recipes",
         help="Curated recipes YAML (composite projections) — rendered as its "
-        "own catalog.md section.",
+        "own catalog.md section / index 'recipes' key.",
     )
     parser.add_argument(
         "--out-dir",
         default=".",
-        help="Directory to write catalog.json + catalog.md (default: cwd).",
+        help="Directory to write catalog.json + catalog.md (default: cwd). "
+        "Ignored by --index when -o/--output is given.",
+    )
+    parser.add_argument(
+        "--index",
+        action="store_true",
+        help="Emit the full machine index (see above) to a single JSON file "
+        "instead of the compact capabilities-only catalog.json + catalog.md.",
+    )
+    parser.add_argument(
+        "-o", "--output",
+        help="Output file path for --index mode (default: <out-dir>/catalog.json).",
+    )
+    parser.add_argument(
+        "--react-root",
+        help="Root containing packages/<mod>-react/manifest.json for the "
+        "--index 'components' projection (default: <workspace>/stapel-react "
+        "when --workspace is given and that directory exists).",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Drift-check: build fresh in memory and compare against the "
+        "already-committed artifact(s) byte-for-byte; nonzero exit and no "
+        "write on any mismatch or missing file.",
     )
     args = parser.parse_args(argv)
 
@@ -445,15 +693,72 @@ def main(argv: list[str] | None = None) -> int:
     if not sources:
         parser.error("no inputs: pass module repo paths and/or --workspace")
 
-    docs, skipped = load_documents(sources)
     recipes = load_recipes(Path(args.recipes)) if args.recipes else None
 
-    catalog = build_catalog(docs, recipes=recipes)
+    if args.index:
+        react_root = Path(args.react_root) if args.react_root else None
+        if react_root is None and args.workspace:
+            candidate = Path(args.workspace) / "stapel-react"
+            if candidate.is_dir():
+                react_root = candidate
 
+        index, skipped = build_index(sources, recipes=recipes, react_root=react_root)
+        out_path = Path(args.output) if args.output else Path(args.out_dir) / "catalog.json"
+        rendered = _stable_json(index)
+
+        if args.check:
+            if not out_path.is_file():
+                print(
+                    f"stapel-catalog: --check: {out_path} does not exist — "
+                    "run without --check to materialize it first",
+                    file=sys.stderr,
+                )
+                return 1
+            if out_path.read_text() != rendered:
+                print(
+                    f"stapel-catalog: --check: {out_path} is stale (drift "
+                    "detected) — re-run `stapel-catalog --index` to refresh",
+                    file=sys.stderr,
+                )
+                return 1
+            print(f"stapel-catalog: --check: {out_path} is up to date", file=sys.stderr)
+            return 0
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(rendered)
+        print(
+            f"stapel-catalog: --index: {index['totals']['modules']} modules "
+            f"covered ({len(skipped)} skipped) → {out_path}",
+            file=sys.stderr,
+        )
+        return 0
+
+    docs, skipped = load_documents(sources)
+    catalog = build_catalog(docs, recipes=recipes)
+    catalog_json = _stable_json(catalog)
+    catalog_md = render_markdown(catalog)
     out_dir = Path(args.out_dir)
+
+    if args.check:
+        stale = [
+            p for p, rendered in (
+                (out_dir / "catalog.json", catalog_json),
+                (out_dir / "catalog.md", catalog_md),
+            )
+            if not p.is_file() or p.read_text() != rendered
+        ]
+        if stale:
+            for p in stale:
+                print(f"stapel-catalog: --check: {p} is missing or stale (drift detected)",
+                      file=sys.stderr)
+            return 1
+        print(f"stapel-catalog: --check: catalog.json/catalog.md up to date in {out_dir}",
+              file=sys.stderr)
+        return 0
+
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "catalog.json").write_text(_stable_json(catalog))
-    (out_dir / "catalog.md").write_text(render_markdown(catalog))
+    (out_dir / "catalog.json").write_text(catalog_json)
+    (out_dir / "catalog.md").write_text(catalog_md)
 
     print(
         f"stapel-catalog: {catalog['totals']['modules']} modules covered "

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "demo.checkout",
+    "title": "Demo checkout",
+    "description": "A fixture flow so the index-builder has something real to project verbatim.",
+    "actors": ["Anonymous user"],
+    "steps": [
+      {"kind": "human", "order": 0, "note": "The user picks an item."},
+      {"kind": "api", "order": 1, "operationId": "demo_api_z_one"}
+    ]
+  }
+]

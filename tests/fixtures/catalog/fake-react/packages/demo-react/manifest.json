@@ -1,0 +1,21 @@
+{
+  "package": "@stapel/demo-react",
+  "version": "0.9.0",
+  "operations": {
+    "demo_api_z_one": {},
+    "demo_api_z_two": {}
+  },
+  "hooks": {
+    "useDemo": {},
+    "useDemoAlpha": {}
+  },
+  "demos": [
+    {
+      "id": "demo.zebra-panel",
+      "title": "Zebra panel",
+      "component": "ZebraPanel",
+      "flow": "demo.checkout",
+      "source": "demo/ZebraPanel.demo.tsx"
+    }
+  ]
+}

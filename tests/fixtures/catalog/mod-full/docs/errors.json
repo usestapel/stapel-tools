@@ -1,0 +1,9 @@
+[
+  {
+    "code": "error.400.demo_bad_request",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Bad request (fixture)."
+  }
+]
