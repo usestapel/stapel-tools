@@ -152,8 +152,35 @@ jobs:
           echo "$response"
           echo "$response" | grep -q "^HTTP/1.1 301"
           echo "$response" | grep -q "^Location: /e2e/$"
-          # a generated module prefix answers through nginx too
-          curl -sI http://localhost:8080/auth | tr -d '\r' | grep -q "^Location: /auth/$"
+          # Owner postmortem ("/calendar page vs backend" collision): a
+          # generated lib reservation must NEVER swallow the module's BARE
+          # root — that's the frontend router's page space. /auth is the
+          # stand-in module here (already installed on this project; no
+          # extra pip dep to add just for this nginx-only check). Wait for
+          # the frontend's real upstream (Vite, nginx's only dependency) to
+          # actually be ready — unlike the /e2e redirect above (answered by
+          # nginx itself, pre-upstream), a 200 here proves the catch-all
+          # served it.
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/auth)
+            [ "$code" = "200" ] && break
+            sleep 1
+          done
+          bare_response=$(curl -sI http://localhost:8080/auth | tr -d '\r')
+          echo "$bare_response"
+          echo "$bare_response" | grep -q "^HTTP/1.1 200"
+          if echo "$bare_response" | grep -q "^Location: /auth/$"; then
+            echo "REGRESSION: /auth (bare module root) redirected into the backend reservation — it must stay the frontend's"
+            exit 1
+          fi
+          # ...and the module's reserved API sub-path still resolves into the
+          # backend reservation: svc-e2e is NOT running in this nginx-only
+          # circuit, so a 502 from nginx's own failed upstream attempt PROVES
+          # routing went there — the frontend catch-all would otherwise
+          # happily 200 an unknown SPA route instead.
+          api_code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/auth/api/v1/x)
+          echo "auth/api/v1/x -> $api_code"
+          [ "$api_code" = "502" ]
           docker compose -f docker-compose.local.yml --env-file .env.local down -v
 
   build:

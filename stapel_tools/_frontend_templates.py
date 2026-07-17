@@ -40,9 +40,11 @@ PACKAGE_JSON = """\
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@stapel/eslint-plugin": "^0.3.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "eslint": "^9.0.0",
     "typescript": "^5.8.3",
     "vite": "^6.0.0"
   }
@@ -93,7 +95,9 @@ import react from "@vitejs/plugin-react";
  * Dev-canon (§57 owner directive): the PRIMARY dev path is
  * docker-compose.local.yml's local-nginx, which already splits traffic between
  * this server and the Django backend (reserved namespace: /{{SLUG}}/,
- * /staticfiles/, /media/ — see the project's AGENTS.md §3). The proxy
+ * /staticfiles/, /media/, plus each lib's own /<mod>/api|swagger|schema.json|
+ * admin (never its bare root — see reserved-paths.json and the project's
+ * AGENTS.md §5). The proxy
  * config below is a FALLBACK for running `npm run dev` standalone, without
  * local-nginx in front — e.g. hitting a dockerized backend from a natively
  * run Vite. Either way the backend target is an ENV VAR with a
@@ -182,6 +186,31 @@ export default function App() {
 
 VITE_ENV_D_TS = """\
 /// <reference types="vite/client" />
+"""
+
+# `reserved-paths.json` lives at the PROJECT root (one level up from
+# frontend/) — stapel/no-reserved-backend-route's zero-config discovery only
+# walks up looking for a pnpm-workspace.yaml/pnpm-lock.yaml marker, which a
+# stapel monolith isn't, so it never finds it without this override
+# (AGENTS.md's `cd frontend && npx eslint .` always runs with frontend/ as
+# cwd — the relative path below resolves against THAT, per the plugin's own
+# readFileSync(settings.reservedPathsFile) contract, not against this file's
+# location). See create_project._write_reserved_paths_json and
+# stapel-react/packages/eslint-plugin's README "reserved-paths.json" section
+# for the schema both sides agree on.
+ESLINT_CONFIG_JS = """\
+import stapel from "@stapel/eslint-plugin";
+
+export default [
+  ...stapel.configs.recommended,
+  {
+    settings: {
+      stapel: {
+        reservedPathsFile: "../reserved-paths.json",
+      },
+    },
+  },
+];
 """
 
 GITIGNORE = """\

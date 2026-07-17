@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+## [0.11.3] — 2026-07-17
+
+### Fixed — reserved-prefix canon: a module's bare root belongs to the frontend
+
+Live-run collision (owner report): a generated nginx/Vite rule reserved a
+selected lib's ENTIRE prefix (`location /calendar/ { proxy_pass ...; }`),
+silently swallowing an identically-named frontend SPA page (`/calendar` —
+the calendar view). Root cause: `_reserved_backend_prefixes` reserved a
+module's bare root defensively ("so a future root-mount lands already
+proxied"), which is exactly what a frontend router also needs.
+
+- **Reservation narrowed to named sub-surfaces**: `/<mod>/api/`,
+  `/<mod>/swagger/`, `/<mod>/schema.json`, `/<mod>/admin/` — the sub-surfaces
+  our canon's generic per-service URLconf (`URLS_PY`) would mount if that lib
+  became its own service — never the bare root or an arbitrary sub-path
+  (both stay the frontend catch-all's). `admin`/`staticfiles`/`media`/the
+  project's own slug keep their full-subtree reservation (unchanged — those
+  genuinely own their whole namespace today). Applies to all three
+  consumers: local-nginx (`^~`/`=` locations on the sub-surface), prod-nginx
+  (same), and the Vite dev proxy.
+- **New `reserved-paths.json`** at the generated project root — the single
+  source every consumer above renders from, schema agreed with
+  `@stapel/eslint-plugin`'s `no-reserved-backend-route` rule:
+  `{"reservedPathPrefixes": [...]}`, a flat array of `/`-leading prefixes.
+  The generated `frontend/eslint.config.js` points
+  `settings.stapel.reservedPathsFile` at it; `@stapel/eslint-plugin` +
+  `eslint` are now frontend devDependencies.
+- **New `stapel-reserved-paths` CLI** (`--check` for the pre-commit drift
+  gate, no-flag to regenerate) — wired into a monolith's
+  `.pre-commit-config.yaml` as `reserved-paths-check`, next to
+  `config-manifest-check`/`presenter-catalog-check`.
+- **AGENTS.md**'s reserved-namespace rule reworded: a lib's bare `/<mod>`
+  root is the frontend router's; only its named sub-surfaces are the
+  backend's.
+- **CI**: the live nginx circuit (`ci.yml`/`publish.yml`) now asserts a
+  module's bare root resolves to the frontend (200, not a redirect into the
+  backend reservation) and its `/api/` sub-path still resolves into the
+  (down, in this nginx-only circuit) backend reservation (502 — proves
+  routing, not content).
+
 ## [0.11.2] — 2026-07-17
 
 ### Changed — env/deploy canon revision (owner decisions after the live run)

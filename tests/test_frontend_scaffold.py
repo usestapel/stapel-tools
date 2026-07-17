@@ -298,7 +298,13 @@ class TestGenerativeBackendPrefixes:
     selection (STAPEL_LIBS url_prefixes + slug + admin + static/media) —
     never a hand-maintained list. Add a lib -> its rule appears in ALL
     THREE surfaces (local nginx, prod nginx, vite proxy) by construction;
-    the live-run "forgot /calendar in the proxy" bug is unrepresentable."""
+    the live-run "forgot /calendar in the proxy" bug is unrepresentable.
+
+    Revised after a SECOND live-run collision this same mechanism then
+    caused: reserving a lib's BARE root (`/calendar/`) shadowed the
+    identically-named frontend SPA page. Each lib now reserves only its
+    named sub-surfaces (api/swagger/schema.json/admin) — see
+    TestModuleRootStaysFrontends below for the exact regression."""
 
     def _create_with(self, tmp_path, modules):
         create_project(
@@ -317,12 +323,29 @@ class TestGenerativeBackendPrefixes:
         prod = (proj / "service-configs" / "nginx" / "nginx.conf").read_text()
         vite = (proj / "frontend" / "vite.config.ts").read_text()
 
-        for prefix in ("app", "admin", "auth", "calendar"):
+        # The slug/admin fixed reservations still reserve their WHOLE subtree.
+        for prefix in ("app", "admin"):
             assert f"location /{prefix}/ " in local, (prefix, "local nginx")
             assert (
                 f"location /{prefix}/ " in prod or f"location /{prefix} " in prod
             ), (prefix, "prod nginx")
             assert f'"/{prefix}/"' in vite, (prefix, "vite proxy")
+
+        # Each selected lib reserves only its named sub-surfaces — never the
+        # bare root (see reserved-paths.json / TestModuleRootStaysFrontends).
+        for mod in ("auth", "calendar"):
+            for sub, modifier in (
+                (f"{mod}/api", "^~"),
+                (f"{mod}/swagger", "^~"),
+                (f"{mod}/admin", "^~"),
+            ):
+                assert f"location {modifier} /{sub}/ " in local, (sub, "local nginx")
+                assert f"location {modifier} /{sub}/ " in prod, (sub, "prod nginx")
+                assert f'"/{sub}/"' in vite, (sub, "vite proxy")
+            schema = f"{mod}/schema.json"
+            assert f"location = /{schema} " in local, (schema, "local nginx")
+            assert f"location = /{schema} " in prod, (schema, "prod nginx")
+            assert f'"/{schema}"' in vite, (schema, "vite proxy")
 
     def test_unselected_lib_prefix_absent(self, tmp_path):
         proj = self._create_with(tmp_path, ["core", "auth"])
@@ -330,15 +353,122 @@ class TestGenerativeBackendPrefixes:
         local = (
             proj / "service-configs" / "nginx-local" / "default.conf.template"
         ).read_text()
-        assert '"/calendar/"' not in vite
-        assert "location /calendar/" not in local
+        assert '"/calendar/api/"' not in vite
+        assert "location ^~ /calendar/api/" not in local
 
     def test_headless_lib_reserves_no_prefix(self, tmp_path):
         # attributes is http=False (pure library, mounts nowhere) — it must
         # not claim a URL prefix anywhere.
         proj = self._create_with(tmp_path, ["core", "attributes"])
         vite = (proj / "frontend" / "vite.config.ts").read_text()
-        assert '"/attributes/"' not in vite
+        assert '"/attributes/' not in vite
+
+
+class TestModuleRootStaysFrontends:
+    """Regression (owner postmortem): a generated nginx/Vite rule used to
+    reserve a lib's BARE root (`location /calendar/`), shadowing the
+    identically-named frontend SPA page ("/calendar" — the calendar view).
+    The fix: only the module's named sub-surfaces are reserved; the bare
+    root and any other sub-path are the frontend catch-all's. Verified by
+    PARSING the generated configs (not string search) so a location's shape
+    (prefix vs sub-path vs exact) can't silently regress."""
+
+    def _create_with(self, tmp_path, modules):
+        create_project(
+            name="app", project_type="monolith", title="App",
+            url="https://x.dev", company_name="X", company_email="x@x.dev",
+            modules=modules, output_dir=tmp_path,
+            use_submodules=False, init_git=False,
+        )
+        return tmp_path / "app"
+
+    @staticmethod
+    def _location_paths(conf_text: str) -> list[str]:
+        """Every ``location <modifier> <path> {`` path this generated conf
+        declares (modifier-agnostic — ``^~``/``=``/bare all parse the same
+        way here), by simple line-oriented parsing (no third-party nginx
+        config parser dependency; the generated shape is fixed and simple
+        enough that this is exact, not approximate)."""
+        paths = []
+        for line in conf_text.splitlines():
+            line = line.strip()
+            if not line.startswith("location") or not line.endswith("{"):
+                continue
+            body = line[len("location"):-1].strip()
+            parts = body.split()
+            path = parts[-1] if parts else ""
+            paths.append(path)
+        return paths
+
+    def test_no_bare_calendar_location_in_local_nginx(self, tmp_path):
+        proj = self._create_with(tmp_path, ["core", "calendar"])
+        local = (
+            proj / "service-configs" / "nginx-local" / "default.conf.template"
+        ).read_text()
+        paths = self._location_paths(local)
+        assert "/calendar/" not in paths
+        assert "/calendar/api/" in paths
+
+    def test_no_bare_calendar_location_in_prod_nginx(self, tmp_path):
+        proj = self._create_with(tmp_path, ["core", "calendar"])
+        prod = (proj / "service-configs" / "nginx" / "nginx.conf").read_text()
+        paths = self._location_paths(prod)
+        assert "/calendar/" not in paths
+        assert "/calendar/api/" in paths
+
+    def test_no_bare_calendar_key_in_vite_proxy(self, tmp_path):
+        proj = self._create_with(tmp_path, ["core", "calendar"])
+        vite = (proj / "frontend" / "vite.config.ts").read_text()
+        assert '"/calendar/":' not in vite
+        assert '"/calendar/api/":' in vite
+
+    def test_reserved_paths_json_never_lists_a_bare_module_root(self, tmp_path):
+        import json
+
+        proj = self._create_with(tmp_path, ["core", "auth", "calendar"])
+        manifest = json.loads((proj / "reserved-paths.json").read_text())
+        prefixes = manifest["reservedPathPrefixes"]
+        assert "/calendar" not in prefixes
+        assert "/auth" not in prefixes
+        assert "/calendar/api" in prefixes
+        assert "/auth/api" in prefixes
+
+    def test_eslint_rule_frees_bare_root_but_catches_api_subpath(self, tmp_path):
+        """End-to-end against the REAL @stapel/eslint-plugin data layer (not
+        a reimplementation) — the owner's exact collision report: routing
+        "/calendar" must miss every reserved prefix (the frontend page
+        survives), routing "/calendar/api/v1/x" must hit one (the backend
+        surface is still guarded). Skips if the sibling stapel-react
+        checkout isn't present (this repo doesn't depend on it)."""
+        import json
+        import shutil
+        import subprocess
+        from pathlib import Path
+
+        data_js = (
+            Path(__file__).resolve().parents[2]
+            / "stapel-react" / "packages" / "eslint-plugin" / "lib" / "data.js"
+        )
+        if not data_js.is_file() or not shutil.which("node"):
+            pytest.skip("sibling stapel-react/packages/eslint-plugin checkout or node not available")
+
+        proj = self._create_with(tmp_path, ["core", "calendar"])
+        reserved = proj / "reserved-paths.json"
+        script = f"""
+import {{ loadReservedPathCatalog }} from {json.dumps(str(data_js))};
+const catalog = loadReservedPathCatalog({{ reservedPathsFile: {json.dumps(str(reserved))} }});
+console.log(JSON.stringify({{
+  bareRoot: catalog.matches("/calendar"),
+  apiSubpath: catalog.matches("/calendar/api/v1/x"),
+}}));
+"""
+        result = subprocess.run(
+            ["node", "--input-type=module", "-e", script],
+            capture_output=True, text=True, check=True,
+        )
+        out = json.loads(result.stdout.strip().splitlines()[-1])
+        assert out["bareRoot"] is None, "bare /calendar must stay the frontend's"
+        assert out["apiSubpath"] == "/calendar/api", "the API sub-path must still be guarded"
 
     def test_local_nginx_starts_without_backend_deferred_resolution(self, tmp_path):
         """proxy_pass must go through a VARIABLE ($stapel_backend) — a

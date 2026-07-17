@@ -23,6 +23,24 @@ _CONFIG_MANIFEST_HOOK = """\
         always_run: true
 """
 
+# reserved-paths-check (owner directive, "/calendar page vs backend"
+# postmortem): regenerates reserved-paths.json — the flat backend-path
+# projection nginx-local/prod-nginx/Vite AND @stapel/eslint-plugin's
+# no-reserved-backend-route rule all read — and fails the commit on drift
+# (stapel-tools' module-sub-surface definition changed since this project
+# was generated/last regenerated); auto-fix by running
+# `stapel-reserved-paths .` (no --check) and committing the result. Only
+# wired into the frontend pre-commit config — reserved-paths.json only
+# exists where there's a frontend router that could collide with it.
+_RESERVED_PATHS_HOOK = """\
+      - id: reserved-paths-check
+        name: stapel-reserved-paths --check (reserved-paths.json drift)
+        entry: stapel-reserved-paths . --check
+        language: system
+        pass_filenames: false
+        always_run: true
+"""
+
 PRE_COMMIT_CONFIG_BACKEND_ONLY = """\
 # Install: pip install pre-commit && pre-commit install
 # Run on demand: pre-commit run --all-files
@@ -59,7 +77,7 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
-""" + _CONFIG_MANIFEST_HOOK
+""" + _CONFIG_MANIFEST_HOOK + _RESERVED_PATHS_HOOK
 
 # ── README "Checks" section (dropped in verbatim, no tokens) ───────────────
 README_CHECKS_SECTION_BACKEND_ONLY = """\

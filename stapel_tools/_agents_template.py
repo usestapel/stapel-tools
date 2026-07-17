@@ -152,8 +152,16 @@ FRONTEND_SECTION = """
 - No raw `localStorage`/`sessionStorage`/cookie access (`no-raw-storage`)
   — go through this project's repository layer, never touch browser
   storage directly from a component.
-- Reserved backend namespace (see this project's nginx canon): never
-  define a client-side route under `/{{SLUG}}/`, `/staticfiles/` or
-  `/media/` — those are proxied to Django by nginx/local-nginx, not
-  rendered by this app.
+- Reserved backend namespace (see `reserved-paths.json` at the project
+  root, and this project's nginx canon): never define a client-side route
+  matching an entry in `reserved-paths.json`'s `"prefixes"` array — always
+  `/{{SLUG}}/`, `/staticfiles/`, `/media/` in full, plus, per installed lib,
+  ONLY its `/<mod>/api/`, `/<mod>/swagger/`, `/<mod>/schema.json` and
+  `/<mod>/admin/` — those are proxied to Django by nginx/local-nginx, not
+  rendered by this app. The frontend router OWNS a lib's bare `/<mod>` root
+  and any other sub-path under it (e.g. `/calendar` the page, distinct from
+  `/calendar/api/` the backend) — never reserve more than
+  `reserved-paths.json` actually lists; regenerate it with
+  `stapel-reserved-paths .` if it looks stale (the
+  `reserved-paths-check` pre-commit hook fails the commit on drift).
 """

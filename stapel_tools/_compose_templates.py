@@ -1,4 +1,5 @@
 """Docker Compose templates for project scaffolding."""
+import re
 
 # Runs on EVERY postgres startup (via the db service's command wrapper),
 # creating any database listed in POSTGRES_MULTIPLE_DATABASES that does not
@@ -41,10 +42,13 @@ fi
 # every backend service's API/admin/health routes live under their own
 # /<slug>/ prefix (see stapel-new-service's per-service location block,
 # _update_nginx). A frontend app must never define a client route starting
-# with /staticfiles/, /media/ or /<any-backend-slug>/ — nginx enforces the
-# split by prefix-match SPECIFICITY (longest prefix wins), independent of the
-# order location blocks appear in this file. Documented again in the
-# project's AGENTS.md §3.
+# with /staticfiles/, /media/, /<any-backend-slug>/, or one of a feature
+# lib's own reserved sub-surfaces (/<mod>/api|swagger|schema.json|admin —
+# never a lib's bare root, which the frontend router owns; see
+# create_project._reserved_paths_manifest / the project's own
+# reserved-paths.json) — nginx enforces the split by prefix-match
+# SPECIFICITY (longest prefix wins), independent of the order location
+# blocks appear in this file. Documented again in the project's AGENTS.md §5.
 NGINX_CONF = """\
 server {
     listen 80;
@@ -134,7 +138,7 @@ server {
     # redirects the backend builds would silently lose the port).
     #
     # Reserved namespace, checked BEFORE the Vite catch-all below (see
-    # NGINX_CONF's prod twin + the project's AGENTS.md §3). Static/media
+    # NGINX_CONF's prod twin + the project's AGENTS.md §5). Static/media
     # aren't collected in dev — Django's runserver serves them itself — so
     # they proxy to the backend like the API does, instead of the
     # alias-to-volume prod uses.
@@ -632,13 +636,35 @@ RUN_CMD=gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
 # for the selected modules + the service slug + admin), so a new lib's rule
 # appears by construction, not by remembering to edit a template.
 
+def _nginx_location_path(prefix: str) -> tuple[str, str]:
+    """Classify one reserved-prefix entry into (location-modifier, path).
+
+    A bare entry (no ``/`` — the project's own slug, ``admin``) reserves its
+    WHOLE subtree: a plain prefix location on ``/<prefix>/``. A module
+    sub-surface entry (``"<mod>/api"``, ``"<mod>/swagger"``, ``"<mod>/admin"``)
+    reserves only that named path: ``^~`` (a non-regex prefix location that
+    wins over any later regex location, owner directive) on ``/<mod>/api/``.
+    The one dotted, extension-terminated surface (``"<mod>/schema.json"``) is
+    a single file, matched EXACTLY (``=``) rather than as a directory prefix —
+    together these never reserve a module's bare root or an arbitrary
+    sub-path (the "/calendar page vs backend" collision this fixes; see
+    create_project._reserved_paths_manifest)."""
+    if "/" not in prefix:
+        return "", f"/{prefix}/"
+    if prefix.endswith(".json"):
+        return "=", f"/{prefix}"
+    return "^~", f"/{prefix}/"
+
+
 def nginx_local_backend_locations(prefixes: list[str]) -> str:
     """location blocks for the local-nginx envsubst template — one per
-    reserved backend prefix, proxying to ${BACKEND_UPSTREAM}."""
+    reserved backend prefix/sub-surface, proxying to ${BACKEND_UPSTREAM}."""
     blocks = []
     for prefix in prefixes:
+        modifier, path = _nginx_location_path(prefix)
+        head = f"location {modifier} {path} {{" if modifier else f"location {path} {{"
         blocks.append(
-            f"    location /{prefix}/ {{\n"
+            f"    {head}\n"
             "        proxy_pass $stapel_backend;\n"
             "        proxy_set_header Host $http_host;\n"
             "        proxy_set_header X-Real-IP $remote_addr;\n"
@@ -651,11 +677,18 @@ def nginx_local_backend_locations(prefixes: list[str]) -> str:
 
 
 def nginx_prod_backend_location(prefix: str, upstream_service: str) -> str:
-    """One prod-nginx location block proxying a reserved backend prefix to a
-    compose service (same shape stapel-new-service appends per service)."""
-    var = f"$upstream_{prefix.replace('-', '_')}"
+    """One prod-nginx location block proxying a reserved backend
+    prefix/sub-surface to a compose service (same shape stapel-new-service
+    appends per service)."""
+    modifier, path = _nginx_location_path(prefix)
+    head = f"location {modifier} {path} {{" if modifier else f"location {path} {{"
+    # nginx variable names allow only [A-Za-z0-9_] — sanitize every
+    # separator a prefix/sub-surface entry can carry ("-", "/", the "."
+    # in "schema.json").
+    var_name = re.sub(r"[^A-Za-z0-9_]", "_", prefix)
+    var = f"$upstream_{var_name}"
     return (
-        f"\n  location /{prefix}/ {{\n"
+        f"\n  {head}\n"
         f"    set {var} {upstream_service}:8000;\n"
         f"    proxy_pass http://{var};\n"
         f"    proxy_set_header Host $http_host;\n"

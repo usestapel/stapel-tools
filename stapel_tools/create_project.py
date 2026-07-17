@@ -24,6 +24,7 @@ Usage (non-interactive):
 """
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -704,14 +705,16 @@ def _append_prod_nginx_locations(project_dir: Path, upstream_service: str, prefi
     """Append generated backend location blocks (admin + selected libs'
     canonical prefixes) to the prod nginx conf, same insertion discipline as
     stapel-new-service's per-service block (idempotent per prefix)."""
-    from ._compose_templates import nginx_prod_backend_location
+    from ._compose_templates import _nginx_location_path, nginx_prod_backend_location
 
     conf = project_dir / "service-configs" / "nginx" / "nginx.conf"
     if not conf.exists():
         return
     text = conf.read_text()
     for prefix in prefixes:
-        if f"location /{prefix}/ " in text or f"location /{prefix} " in text:
+        modifier, path = _nginx_location_path(prefix)
+        marker = f"location {modifier} {path} " if modifier else f"location {path} "
+        if marker in text:
             continue
         insert_pos = text.rfind("}")
         if insert_pos == -1:
@@ -721,38 +724,140 @@ def _append_prod_nginx_locations(project_dir: Path, upstream_service: str, prefi
     conf.write_text(text)
 
 
-def _reserved_backend_prefixes(slug: str, feature_libs: list[str]) -> list[str]:
-    """The reserved backend URL prefixes for a project — GENERATED from the
-    actual lib selection, never a hand-maintained list (owner directive: the
-    live-run "forgot /calendar in the proxy" bug must be impossible by
-    construction — add a lib, its rule appears).
+# Sub-surfaces our canon's generic per-service URLconf (URLS_PY: health+api,
+# admin.site.urls, get_dev_urls -> swagger/schema) would mount under a lib's
+# OWN prefix if that lib became its own service tomorrow (a microservices
+# split, or a future root-mount) — see URLS_PY in _templates.py. Deliberately
+# NOT the bare module root: that belongs to the frontend router (a page can
+# be named after its module, e.g. "/calendar" — the live-run collision this
+# list exists to make impossible, in EITHER direction: forgetting a lib's
+# backend surface, or over-reserving into the frontend's own namespace).
+_MODULE_SUB_SURFACES = ("api/", "swagger/", "schema.json", "admin/")
 
-    Fixed part: the service slug (every monolith module is mounted under
-    /<slug>/api/ today) + ``admin``. Generated part: the first URL segment of
-    each selected HTTP lib's canonical mount (STAPEL_LIBS ``url_prefix``,
-    api-versioning §2 canon ``/<mod>/api/v1/``) — reserved in nginx/Vite even
-    where the monolith currently serves the module under the slug namespace,
-    so the frontend router can never claim a module's canonical prefix and a
-    future root-mount lands already proxied. Headless libs (http=False)
-    reserve nothing. static/media are handled separately (alias vs proxy)."""
-    prefixes = [slug, "admin"]
+
+def _reserved_paths_manifest(slug: str, feature_libs: list[str]) -> dict:
+    """Single generated source of truth for every reserved backend path
+    surface (owner directive, live-run "forgot /calendar in the proxy" bug,
+    revised after the "/calendar page vs /calendar backend" collision it
+    then caused by over-reserving a module's BARE root).
+
+    nginx-local, prod-nginx and the Vite proxy all render off the
+    ``"prefixes"`` list this returns — never re-derive it separately, or the
+    three surfaces can drift apart again. The same dict is written verbatim
+    to the generated project's own ``reserved-paths.json`` so a frontend
+    lint rule can check route names against ``"prefixes"`` without
+    re-encoding this logic in a second language.
+
+    Fixed part: the service's own slug (today's actual, whole surface —
+    health/api/admin/swagger genuinely all live under ``/<slug>/`` in the
+    monolith) plus ``admin``/``staticfiles``/``media`` (framework-wide,
+    independent of any lib selection). These reserve their ENTIRE subtree —
+    unlike a lib's own prefix below, nothing under ``/<slug>/`` or
+    ``/admin/`` is ever a legitimate frontend route today.
+
+    Generated part, per selected HTTP lib: ONLY the named sub-surfaces in
+    ``_MODULE_SUB_SURFACES`` (cross-checked against URLS_PY: api/, admin/,
+    and get_dev_urls' swagger/schema) — never the module's bare root, and
+    never an arbitrary sub-path (both are the frontend catch-all's).
+    Headless libs (http=False) reserve nothing."""
+    fixed = [f"{slug}/", "admin/", "staticfiles/", "media/"]
+    modules: dict[str, list[str]] = {}
     for key in feature_libs:
         info = STAPEL_LIBS.get(key)
         if not info or not info.get("http", True):
             continue
         first_segment = (info.get("url_prefix") or f"{key}/").split("/", 1)[0]
-        if first_segment and first_segment not in prefixes:
-            prefixes.append(first_segment)
+        if not first_segment:
+            continue
+        modules[first_segment] = [
+            f"{first_segment}/{sub}" for sub in _MODULE_SUB_SURFACES
+        ]
+    prefixes = list(fixed)
+    for subs in modules.values():
+        for sub in subs:
+            if sub not in prefixes:
+                prefixes.append(sub)
+    return {"slug": slug, "fixed": fixed, "modules": modules, "prefixes": prefixes}
+
+
+def _reserved_backend_prefixes(slug: str, feature_libs: list[str]) -> list[str]:
+    """The reserved backend URL entries for a project — GENERATED from the
+    actual lib selection via ``_reserved_paths_manifest`` (never a
+    hand-maintained list). Bare entries (the slug, ``admin``) reserve their
+    whole subtree; module entries (``"<mod>/api"`` etc.) reserve only that
+    named sub-surface — see ``_reserved_paths_manifest``'s docstring.
+
+    ``staticfiles``/``media`` are in the manifest's ``"fixed"`` list (for
+    ``reserved-paths.json``/eslint) but NOT returned here: all three
+    consumers already carry their OWN literal static/media block (``alias``
+    in prod, a distinct proxy block in local-nginx/Vite) predating this
+    generative list — appending them again here would duplicate/conflict
+    with those, not complement them."""
+    manifest = _reserved_paths_manifest(slug, feature_libs)
+    # Trim the trailing slash the manifest carries for JSON/eslint
+    # readability — the nginx/vite renderers below re-append it themselves
+    # (and special-case the one dotted, extension-terminated entry).
+    return [
+        p[:-1] if p.endswith("/") else p
+        for p in manifest["prefixes"]
+        if p not in ("staticfiles/", "media/")
+    ]
+
+
+def _eslint_reserved_path_prefixes(slug: str, feature_libs: list[str]) -> list[str]:
+    """The ``reservedPathPrefixes`` array for ``reserved-paths.json`` —
+    schema agreed with ``@stapel/eslint-plugin``'s ``no-reserved-backend-
+    route`` rule (stapel-react/packages/eslint-plugin/lib/data.js
+    ``loadReservedPathCatalog``): a FLAT array of ``/``-leading,
+    non-``/``-trailing path prefixes, admin/staticfiles/media plus each
+    module's named sub-surfaces — deliberately NOT including the project's
+    own slug (the eslint side's contract only covers the module/global
+    surfaces a frontend route could plausibly guess at; the slug's own
+    whole-subtree reservation is nginx/vite-only, enforced server-side
+    regardless of what the frontend router defines). Never a bare module
+    root — the rule's segment-boundary match already treats one as the
+    frontend's, and the generator must not contradict that by listing one."""
+    manifest = _reserved_paths_manifest(slug, feature_libs)
+    prefixes = ["/admin", "/staticfiles", "/media"]
+    for subs in manifest["modules"].values():
+        for sub in subs:
+            entry = f"/{sub[:-1] if sub.endswith('/') else sub}"
+            if entry not in prefixes:
+                prefixes.append(entry)
     return prefixes
+
+
+def _write_reserved_paths_json(project_dir: Path, slug: str, feature_libs: list[str]):
+    """``reserved-paths.json`` at the project root — schema
+    ``{"reservedPathPrefixes": [...]}``, the exact projection
+    ``@stapel/eslint-plugin``'s ``no-reserved-backend-route`` rule reads
+    (agreed with that plugin's own README/tests — do not add/rename keys
+    without updating both sides). ``stapel-reserved-paths --check`` is the
+    pre-commit drift gate that keeps this file in sync with stapel-tools'
+    current module-sub-surface definition."""
+    payload = {"reservedPathPrefixes": _eslint_reserved_path_prefixes(slug, feature_libs)}
+    _write(project_dir / "reserved-paths.json", json.dumps(payload, indent=2) + "\n")
 
 
 def _vite_proxy_rules(prefixes: list[str]) -> str:
     """The generated proxy table for vite.config.ts — backend prefixes +
-    static/media, all pointed at the env-driven backendTarget."""
-    return "\n".join(
-        f'        "/{prefix}/": {{ target: backendTarget, changeOrigin: true }},'
-        for prefix in [*prefixes, "staticfiles", "media"]
-    )
+    static/media, all pointed at the env-driven backendTarget.
+
+    A bare entry (no ``/``, e.g. the slug or ``admin``) reserves its whole
+    subtree (``"/x/"``, prefix-matched by Vite's proxy). A module entry
+    (``"<mod>/api"`` etc.) reserves only that named sub-surface — appended
+    with a trailing slash for a directory-style surface, or matched as-is
+    for the one dotted, extension-terminated surface (``schema.json``) so a
+    frontend route can never be shadowed by the rest of that module's
+    namespace (the "/calendar page vs backend" collision this fixes)."""
+    lines = []
+    for prefix in [*prefixes, "staticfiles", "media"]:
+        # Every entry is a directory-style whole-or-sub-surface reservation
+        # EXCEPT the one dotted, extension-terminated surface (schema.json),
+        # which is a single file and must not carry a trailing slash.
+        key = prefix if prefix.endswith(".json") else f"{prefix}/"
+        lines.append(f'        "/{key}": {{ target: backendTarget, changeOrigin: true }},')
+    return "\n".join(lines)
 
 
 def _write_frontend_scaffold(
@@ -784,6 +889,7 @@ def _write_frontend_scaffold(
     _write(frontend / "src" / "main.tsx", F.MAIN_TSX)
     _write(frontend / "src" / "App.tsx", r(F.APP_TSX))
     _write(frontend / "src" / "vite-env.d.ts", F.VITE_ENV_D_TS)
+    _write(frontend / "eslint.config.js", F.ESLINT_CONFIG_JS)
     _write(frontend / ".gitignore", F.GITIGNORE)
     _write(frontend / "Dockerfile", F.DOCKERFILE)
     _write(frontend / "README.md", r(F.README_MD))
@@ -809,8 +915,12 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     backend_upstream_default = f"{dir_name}:8000"
     # Reserved backend prefixes — generated from the actual lib selection
     # (owner directive), rendered into local-nginx, prod-nginx AND the Vite
-    # proxy from the same list so they can never drift apart.
+    # proxy from the same list so they can never drift apart. Also written
+    # verbatim as reserved-paths.json (below) — the project's own copy of
+    # this same manifest, for a frontend eslint rule and for the
+    # stapel-reserved-paths --check drift gate.
     backend_prefixes = _reserved_backend_prefixes(slug, feature_libs or [])
+    _write_reserved_paths_json(project_dir, slug, feature_libs or [])
     action_transport, function_transport = _transports_for(broker)
     # A task broker in a broker-less monolith flips only the Task dispatch:
     # Actions stay in-process, task.* events travel through the broker.
@@ -874,8 +984,11 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
             "dev-marker values, no secrets): clone and the command above "
             "just works, nothing to fill in by hand. Local-nginx routes the "
             "reserved backend namespace "
-            f"(`/{slug}/`, `/staticfiles/`, `/media/`) to Django and "
-            "everything else to the Vite dev server (hot reload; logs via "
+            f"(`/{slug}/`, `/staticfiles/`, `/media/`, plus each installed "
+            "lib's own `/<mod>/api|swagger|schema.json|admin` — never its "
+            "bare root, which stays free for a frontend page of the same "
+            "name; see `reserved-paths.json`) to Django and everything else "
+            "to the Vite dev server (hot reload; logs via "
             "`docker compose -f docker-compose.local.yml logs -f frontend`). "
             "If auth is installed, OTP codes are logged, not sent — see "
             "the backend's own log."
