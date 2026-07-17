@@ -107,6 +107,9 @@ def file_plan(kind: str, ctx: dict) -> dict:
                 "migrations/__init__.py": "",
                 "dto.py": render(T.DTO, ctx),
                 "serializers.py": render(T.SERIALIZERS, ctx),
+                # Presenter-canonical from birth (§55): views resolve the
+                # presenter via get_presenter; the DTO is only built here.
+                "presenters.py": render(T.PRESENTERS, ctx),
                 "views.py": render(T.VIEWS, ctx),
                 "urls.py": render(T.URLS, ctx),
                 "urls_v1.py": render(T.URLS_V1, ctx),

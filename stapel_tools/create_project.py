@@ -538,41 +538,97 @@ ROOT_README_MD = """\
 
 A Stapel project — Docker Compose, {compose_summary}.
 
-## Dev
+## Dev — clone and go
 
 ```bash
-docker compose -f docker-compose.dev.yml --env-file .env.dev up
+git clone <this repo> && cd {slug_dir}
+{dev_cmd}
 ```
 
 {dev_note}
 
-## Prod
+## Prod / stage
 
 ```bash
-docker compose up -d
+deploy/deploy.sh <env-file>   # refuses a dev/default env — see deploy/check-env.sh
 ```
 
 {prod_note}
 {checks_section}"""
 
 
-def _write_agents_and_checks(project_dir: Path, slug: str, has_frontend: bool):
+def _write_agents_and_checks(
+    project_dir: Path, slug: str, has_frontend: bool,
+    presenter_manage_dir: str | None = None,
+):
     """AGENTS.md (base OSS coding rules, §57 item 4) + `.pre-commit-config.yaml`
-    (§57 item 5) — every project type."""
+    (§57 item 5) — every project type. ``presenter_manage_dir`` (relative to
+    the project root, "." for minimal, "svc-<slug>" for monolith) wires the
+    PRESENTERS.MD freshness hook (§55; ``manage.py presenter_catalog
+    --check``); None (microservices — per-service manage.py, follow-up)
+    omits it."""
     from ._agents_template import AGENTS_MD, FRONTEND_SECTION
     from ._compose_templates import render_tokens
     from ._precommit_templates import (
         PRE_COMMIT_CONFIG_BACKEND_ONLY,
         PRE_COMMIT_CONFIG_WITH_FRONTEND,
+        presenter_catalog_hook,
     )
 
     frontend_section = render_tokens(FRONTEND_SECTION, {"SLUG": slug}) if has_frontend else ""
     agents_md = render_tokens(AGENTS_MD, {"FRONTEND_SECTION": frontend_section})
     _write(project_dir / "AGENTS.md", agents_md)
-    _write(
-        project_dir / ".pre-commit-config.yaml",
-        PRE_COMMIT_CONFIG_WITH_FRONTEND if has_frontend else PRE_COMMIT_CONFIG_BACKEND_ONLY,
+    config = (
+        PRE_COMMIT_CONFIG_WITH_FRONTEND if has_frontend else PRE_COMMIT_CONFIG_BACKEND_ONLY
     )
+    if presenter_manage_dir is not None:
+        config += presenter_catalog_hook(presenter_manage_dir)
+    _write(project_dir / ".pre-commit-config.yaml", config)
+
+
+def _generate_presenters_md(
+    project_dir: Path, manage_dir: Path, settings_module: str,
+    python: str | None = None,
+) -> bool:
+    """PRESENTERS.MD at the project root, through stapel-core's EXPORTED
+    ``write_presenters_md()`` hook (§55 — the catalog API says explicitly it
+    is the seam the scaffold generator calls; not reimplemented here).
+
+    Best-effort by design: needs Django + stapel-core + the generated apps
+    importable by *python* — true in stapel-assemble's environment and this
+    repo's CI, not necessarily on a user machine that pip-installed
+    stapel-tools alone. Failure prints a note with the manual command and
+    returns False; it never fails the scaffold."""
+    python = python or sys.executable
+    out = (project_dir / "PRESENTERS.MD").resolve()
+    script = (
+        "import os, django\n"
+        f"os.environ.setdefault('DJANGO_SETTINGS_MODULE', {settings_module!r})\n"
+        "django.setup()\n"
+        "from stapel_core.django.api.catalog import write_presenters_md\n"
+        f"write_presenters_md({str(out)!r})\n"
+    )
+    import os as _os
+
+    proc = subprocess.run(
+        [python, "-c", script], cwd=manage_dir, capture_output=True, text=True,
+        # No __pycache__/.pyc droppings inside the freshly generated tree —
+        # they would make two generations of the same project byte-differ
+        # (assemble_scaffold's determinism contract).
+        env={**_os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+    )
+    if proc.returncode != 0:
+        print(
+            "  note: PRESENTERS.MD not generated (stapel-core/Django not "
+            "importable here — run `python manage.py presenter_catalog "
+            "--out PRESENTERS.MD` once the project's requirements are "
+            "installed). The presenter-catalog-check pre-commit hook keeps "
+            "it fresh afterwards.",
+            file=sys.stderr,
+        )
+        return False
+    print("  generated PRESENTERS.MD (stapel-core presenter/swap catalog)")
+    return True
 
 
 def _write_shared_infra(project_dir: Path):
@@ -589,17 +645,21 @@ def _write_shared_infra(project_dir: Path):
 ENV_PRESETS = ("standalone", "studio")
 
 
-def _write_env_dev(
+def _write_env_local(
     project_dir: Path, ctx: dict, broker: str, task_broker: str,
     backend_upstream: str, env_preset: str = "standalone",
 ):
-    """``.env.dev`` — a real, generated dev environment (§57 owner directive
-    item 7), NOT the placeholder ``.env.example``: fresh secrets, DB/comm-bus
-    defaults, DJANGO_SUPERUSER_* for the entrypoint canon, Vite/backend proxy
-    targets. ``env_preset`` picks standalone (default) vs studio (email/oauth
-    STUBS only — see _dev_env_templates.py's module docstring)."""
+    """``.env.local`` — the COMMITTED dev environment (§57 item 7, revised by
+    owner decision: a gitignored .env.local never reaches the next clone).
+    Every value is DETERMINISTIC and recognizably a dev marker, never a
+    secret: ``django-insecure-dev-*`` keys (refused at prod boot by
+    stapel-core's existing prodguard prefix check), the ``stapel`` default
+    DB password (refused by guard_db_password), ``admin`` superuser, and
+    the ``STAPEL_LOCAL_ENV=1`` flag the generated ``deploy/check-env.sh``
+    gate keys on. ``env_preset`` picks standalone (default) vs studio
+    (email/oauth STUBS only — see _local_env_templates.py's docstring)."""
     from ._compose_templates import _broker_env
-    from ._dev_env_templates import ENV_DEV_PRESETS
+    from ._local_env_templates import ENV_LOCAL_PRESETS
 
     if env_preset not in ENV_PRESETS:
         print(
@@ -609,21 +669,96 @@ def _write_env_dev(
         )
         sys.exit(1)
 
-    template = ENV_DEV_PRESETS[env_preset]
+    slug = ctx["slug"]
+    template = ENV_LOCAL_PRESETS[env_preset]
     text = template.format(
-        postgres_password=_random_secret(24),
-        secret_key=_random_secret(),
-        jwt_secret_key=_random_secret(),
-        superuser_password=_random_secret(20),
+        # Deterministic on purpose — this file is committed; a random value
+        # here would masquerade as a secret and churn every re-generation.
+        postgres_password="stapel",
+        secret_key=f"django-insecure-dev-{slug}-committed-local-only-never-deploy",
+        jwt_secret_key=f"django-insecure-dev-{slug}-jwt-committed-local-only",
+        superuser_password="admin",
         backend_upstream=backend_upstream,
         company_name=ctx["company_name"],
         company_email=ctx["company_email"],
         broker_env=_broker_env(broker, task_broker),
     )
-    _write(project_dir / ".env.dev", text)
+    _write(project_dir / ".env.local", text)
 
 
-def _write_frontend_scaffold(project_dir: Path, ctx: dict, backend_upstream_default: str):
+def _write_deploy_scripts(project_dir: Path):
+    """``deploy/`` — prod/stage deploy scripts with the hard dev-env gate
+    (owner decision, §57 revision — see _deploy_templates.py). Emitted for
+    every project type that ships a prod compose (monolith/microservices)."""
+    from ._deploy_templates import CHECK_ENV_SH, DEPLOY_SH
+
+    check_env = project_dir / "deploy" / "check-env.sh"
+    deploy = project_dir / "deploy" / "deploy.sh"
+    _write(check_env, CHECK_ENV_SH)
+    _write(deploy, DEPLOY_SH)
+    check_env.chmod(0o755)
+    deploy.chmod(0o755)
+
+
+def _append_prod_nginx_locations(project_dir: Path, upstream_service: str, prefixes: list[str]):
+    """Append generated backend location blocks (admin + selected libs'
+    canonical prefixes) to the prod nginx conf, same insertion discipline as
+    stapel-new-service's per-service block (idempotent per prefix)."""
+    from ._compose_templates import nginx_prod_backend_location
+
+    conf = project_dir / "service-configs" / "nginx" / "nginx.conf"
+    if not conf.exists():
+        return
+    text = conf.read_text()
+    for prefix in prefixes:
+        if f"location /{prefix}/ " in text or f"location /{prefix} " in text:
+            continue
+        insert_pos = text.rfind("}")
+        if insert_pos == -1:
+            return
+        block = nginx_prod_backend_location(prefix, upstream_service)
+        text = text[:insert_pos] + block + text[insert_pos:]
+    conf.write_text(text)
+
+
+def _reserved_backend_prefixes(slug: str, feature_libs: list[str]) -> list[str]:
+    """The reserved backend URL prefixes for a project — GENERATED from the
+    actual lib selection, never a hand-maintained list (owner directive: the
+    live-run "forgot /calendar in the proxy" bug must be impossible by
+    construction — add a lib, its rule appears).
+
+    Fixed part: the service slug (every monolith module is mounted under
+    /<slug>/api/ today) + ``admin``. Generated part: the first URL segment of
+    each selected HTTP lib's canonical mount (STAPEL_LIBS ``url_prefix``,
+    api-versioning §2 canon ``/<mod>/api/v1/``) — reserved in nginx/Vite even
+    where the monolith currently serves the module under the slug namespace,
+    so the frontend router can never claim a module's canonical prefix and a
+    future root-mount lands already proxied. Headless libs (http=False)
+    reserve nothing. static/media are handled separately (alias vs proxy)."""
+    prefixes = [slug, "admin"]
+    for key in feature_libs:
+        info = STAPEL_LIBS.get(key)
+        if not info or not info.get("http", True):
+            continue
+        first_segment = (info.get("url_prefix") or f"{key}/").split("/", 1)[0]
+        if first_segment and first_segment not in prefixes:
+            prefixes.append(first_segment)
+    return prefixes
+
+
+def _vite_proxy_rules(prefixes: list[str]) -> str:
+    """The generated proxy table for vite.config.ts — backend prefixes +
+    static/media, all pointed at the env-driven backendTarget."""
+    return "\n".join(
+        f'        "/{prefix}/": {{ target: backendTarget, changeOrigin: true }},'
+        for prefix in [*prefixes, "staticfiles", "media"]
+    )
+
+
+def _write_frontend_scaffold(
+    project_dir: Path, ctx: dict, backend_upstream_default: str,
+    backend_prefixes: list[str] | None = None,
+):
     """``frontend/`` — Vite + React + TypeScript, wired into the dev/prod
     compose + nginx canon (§57 owner directive). See
     _frontend_templates.py's module docstring for the full picture."""
@@ -634,6 +769,7 @@ def _write_frontend_scaffold(project_dir: Path, ctx: dict, backend_upstream_defa
         "SLUG": ctx["slug"],
         "TITLE": ctx["title"],
         "BACKEND_UPSTREAM_DEFAULT": backend_upstream_default,
+        "VITE_PROXY_RULES": _vite_proxy_rules(backend_prefixes or [ctx["slug"], "admin"]),
     }
 
     def r(template: str) -> str:
@@ -653,14 +789,15 @@ def _write_frontend_scaffold(project_dir: Path, ctx: dict, backend_upstream_defa
     _write(frontend / "README.md", r(F.README_MD))
 
 
-def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone"):
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None):
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
-        MONOLITH_COMPOSE_DEV,
         MONOLITH_COMPOSE_LOCAL,
+        MONOLITH_COMPOSE_PROD,
         MONOLITH_ENV_TEMPLATE,
         MONOLITH_GITIGNORE,
-        NGINX_DEV_CONF_TEMPLATE,
+        NGINX_LOCAL_CONF_TEMPLATE,
+        nginx_local_backend_locations,
         render_compose_base,
         render_env,
         render_tokens,
@@ -670,6 +807,10 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     slug = ctx["slug"]
     dir_name = ctx["service_dir_name"]  # "svc-<slug>" — the backend's own dir
     backend_upstream_default = f"{dir_name}:8000"
+    # Reserved backend prefixes — generated from the actual lib selection
+    # (owner directive), rendered into local-nginx, prod-nginx AND the Vite
+    # proxy from the same list so they can never drift apart.
+    backend_prefixes = _reserved_backend_prefixes(slug, feature_libs or [])
     action_transport, function_transport = _transports_for(broker)
     # A task broker in a broker-less monolith flips only the Task dispatch:
     # Actions stay in-process, task.* events travel through the broker.
@@ -679,46 +820,76 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
 
     compose_ctx = {"SLUG": slug, "BACKEND_UPSTREAM_DEFAULT": backend_upstream_default}
 
-    # docker-compose files
+    # docker-compose files. The local stack is SELF-CONTAINED (no include —
+    # see MONOLITH_COMPOSE_LOCAL's own docstring), so it needs the broker
+    # blocks spliced in too, plus the service DB name for its own postgres.
     _write(project_dir / "docker-compose.base.yml", render_compose_base(MONOLITH_COMPOSE_BASE, broker, task_broker))
-    _write(project_dir / "docker-compose.yml", render_tokens(MONOLITH_COMPOSE_LOCAL, compose_ctx))
-    _write(project_dir / "docker-compose.dev.yml", render_tokens(MONOLITH_COMPOSE_DEV, compose_ctx))
+    _write(project_dir / "docker-compose.yml", render_tokens(MONOLITH_COMPOSE_PROD, compose_ctx))
+    _write(
+        project_dir / "docker-compose.local.yml",
+        render_tokens(
+            render_compose_base(MONOLITH_COMPOSE_LOCAL, broker, task_broker),
+            {**compose_ctx, "DB_NAME": f"stapel_{slug.replace('-', '_')}"},
+        ),
+    )
     _write(project_dir / ".env.example", render_env(MONOLITH_ENV_TEMPLATE, broker, ctx, task_broker))
-    _write_env_dev(project_dir, ctx, broker, task_broker, backend_upstream_default, env_preset)
+    _write_env_local(project_dir, ctx, broker, task_broker, backend_upstream_default, env_preset)
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", f"{slug}\n")
     _write_shared_infra(project_dir)
-    # Dev-nginx canon (§57): a SEPARATE directory from service-configs/nginx/
-    # (prod) — docker-compose.dev.yml's `nginx` service override points its
+    # Local-nginx canon (§57): a SEPARATE directory from service-configs/nginx/
+    # (prod) — docker-compose.local.yml's `nginx` service override points its
     # conf.d AND templates mounts here instead. Contains only a *.template
     # (no bare *.conf), so mounting it at conf.d too stays inert until
     # nginx's own envsubst-on-templates step renders it (see the template's
     # docstring in _compose_templates.py).
+    # MUST be named default.conf.template: the nginx image's envsubst step
+    # renders templates/*.template into conf.d/, and only this exact name
+    # OVERWRITES the image's shipped default.conf (see the local compose
+    # nginx service's comment).
     _write(
-        project_dir / "service-configs" / "nginx-dev" / "nginx-dev.conf.template",
-        render_tokens(NGINX_DEV_CONF_TEMPLATE, compose_ctx),
+        project_dir / "service-configs" / "nginx-local" / "default.conf.template",
+        render_tokens(NGINX_LOCAL_CONF_TEMPLATE, {
+            **compose_ctx,
+            "BACKEND_LOCATIONS": nginx_local_backend_locations(backend_prefixes),
+        }),
     )
-    _write_frontend_scaffold(project_dir, ctx, backend_upstream_default)
-    _write_agents_and_checks(project_dir, slug, has_frontend=True)
+    _write_frontend_scaffold(
+        project_dir, ctx, backend_upstream_default,
+        backend_prefixes=backend_prefixes,
+    )
+    _write_deploy_scripts(project_dir)
+    _write_agents_and_checks(
+        project_dir, slug, has_frontend=True,
+        presenter_manage_dir=ctx["service_dir_name"],
+    )
     from ._precommit_templates import README_CHECKS_SECTION_WITH_FRONTEND
     _write(project_dir / "README.md", ROOT_README_MD.format(
         title=ctx["title"],
+        slug_dir=ctx["name"],
+        dev_cmd="docker compose -f docker-compose.local.yml --env-file .env.local up",
         compose_summary="a Django backend (svc-{}/) and a Vite/React frontend (frontend/)".format(slug),
         dev_note=(
-            "`.env.dev` is generated with real secrets + working defaults "
-            "(§57 item 7) — nothing to fill in by hand. Dev-nginx routes the "
+            "`.env.local` is COMMITTED (local dev only — recognizable "
+            "dev-marker values, no secrets): clone and the command above "
+            "just works, nothing to fill in by hand. Local-nginx routes the "
             "reserved backend namespace "
             f"(`/{slug}/`, `/staticfiles/`, `/media/`) to Django and "
             "everything else to the Vite dev server (hot reload; logs via "
-            "`docker compose -f docker-compose.dev.yml logs -f frontend`). "
+            "`docker compose -f docker-compose.local.yml logs -f frontend`). "
             "If auth is installed, OTP codes are logged, not sent — see "
             "the backend's own log."
         ),
         prod_note=(
-            "nginx serves the built frontend (populated by the one-shot "
-            "`frontend-build` service) as static files with an SPA fallback, "
-            f"and proxies `/{slug}/` (api/admin/health), `/staticfiles/` and "
-            "`/media/` to Django — see `service-configs/nginx/nginx.conf`."
+            "Deploy ONLY via `deploy/deploy.sh [env-file]` — it hard-refuses "
+            "a default/dev env (the committed `.env.local`, placeholder "
+            "secrets, `DEBUG=true`, mock providers; see "
+            "`deploy/check-env.sh`). Generate a real env per stand "
+            "(`.env.example` is the shape). nginx serves the built frontend "
+            "(populated by the one-shot `frontend-build` service) as static "
+            f"files with an SPA fallback, and proxies `/{slug}/` "
+            "(api/admin/health), `/staticfiles/` and `/media/` to Django — "
+            "see `service-configs/nginx/nginx.conf`."
         ),
         checks_section="\n" + README_CHECKS_SECTION_WITH_FRONTEND,
     ))
@@ -736,6 +907,23 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         function_transport=function_transport,
         task_dispatch=task_dispatch,
         module_config=module_config,
+    )
+
+    # Prod nginx: scaffold_service just appended the /{slug} location; append
+    # the GENERATED remainder (admin + each selected lib's canonical prefix)
+    # from the same backend_prefixes list local-nginx and Vite were rendered
+    # from — one source, three surfaces, zero drift.
+    _append_prod_nginx_locations(
+        project_dir, dir_name,
+        [p for p in backend_prefixes if p != slug],
+    )
+
+    # PRESENTERS.MD (§55) — through core's exported write_presenters_md()
+    # hook, against the service's base settings tier (dev.py would pull
+    # debug_toolbar, which the generating environment need not have).
+    _generate_presenters_md(
+        project_dir, project_dir / ctx["service_dir_name"],
+        settings_module="config.settings.base",
     )
 
 
@@ -813,13 +1001,23 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     _write(project_dir / ".gitignore", MINIMAL_GITIGNORE)
     from ._precommit_templates import README_CHECKS_SECTION_BACKEND_ONLY
     _write(project_dir / "README.md", r(MINIMAL_README) + "\n" + README_CHECKS_SECTION_BACKEND_ONLY)
-    _write_agents_and_checks(project_dir, slug, has_frontend=False)
+    _write_agents_and_checks(
+        project_dir, slug, has_frontend=False, presenter_manage_dir=".",
+    )
     # .env.example keeps a placeholder SECRET_KEY (committed); the shared
     # _write_env_from_ctx() call in create_project() turns it into a real
     # .env with a freshly generated secret (SEC-6), same as monolith/
     # microservices.
     _write(project_dir / ".env.example", MINIMAL_ENV_EXAMPLE)
-    _write(project_dir / "config" / "__init__.py", "")
+    from ._templates import CELERY_APP_PY, CONFIG_INIT_PY
+    _write(project_dir / "config" / "__init__.py", CONFIG_INIT_PY)
+    # DJANGO_SETTINGS_MODULE default differs from the service tier layout.
+    _write(
+        project_dir / "config" / "celery.py",
+        CELERY_APP_PY.replace("{{MODULE}}", module).replace(
+            "config.settings.base", "config.settings"
+        ),
+    )
     _write(project_dir / "config" / "settings.py", r(MINIMAL_SETTINGS))
     # boot-smoke gate (R3/§44, `make boot-smoke` — part of `make controls`):
     # dummy-DB overlay over this project's own settings; see its docstring.
@@ -851,11 +1049,14 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     _write(project_dir / "tests" / "conftest.py", r(MINIMAL_CONFTEST))
     _write(project_dir / "tests" / "test_project_smoke.py", MINIMAL_TEST_SMOKE)
 
+    # PRESENTERS.MD (§55) — core's exported write_presenters_md() hook.
+    _generate_presenters_md(project_dir, project_dir, settings_module="config.settings")
+
 
 def _create_microservices(project_dir: Path, ctx: dict, broker: str, task_broker: str = "none"):
     from ._compose_templates import (
         MICRO_COMPOSE_BASE,
-        MICRO_COMPOSE_LOCAL,
+        MICRO_COMPOSE_PROD,
         MICRO_ENV_TEMPLATE,
         MONOLITH_GITIGNORE,
         render_compose_base,
@@ -864,23 +1065,32 @@ def _create_microservices(project_dir: Path, ctx: dict, broker: str, task_broker
     if task_broker == broker:
         task_broker = "none"  # same broker — nothing extra to wire
     _write(project_dir / "docker-compose.base.yml", render_compose_base(MICRO_COMPOSE_BASE, broker, task_broker))
-    _write(project_dir / "docker-compose.yml", MICRO_COMPOSE_LOCAL)
+    _write(project_dir / "docker-compose.yml", MICRO_COMPOSE_PROD)
     _write(project_dir / ".env.example", render_env(MICRO_ENV_TEMPLATE, broker, ctx, task_broker))
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", "")
     _write_shared_infra(project_dir)
+    _write_deploy_scripts(project_dir)
     _write_agents_and_checks(project_dir, ctx["slug"], has_frontend=False)
     from ._precommit_templates import README_CHECKS_SECTION_BACKEND_ONLY
     _write(project_dir / "README.md", ROOT_README_MD.format(
         title=ctx["title"],
+        slug_dir=ctx["name"],
+        dev_cmd="docker compose up",
         compose_summary="multiple Django backend services behind nginx",
         dev_note=(
             "Add services with `stapel-new-service <name> --prefix svc-`, "
-            "then wire them into `docker-compose.dev.yml`. Per-service "
-            "frontend scaffolding is not built yet (§57 follow-up — "
-            "monolith is the supported target today)."
+            "then wire them into the compose files. Per-service frontend "
+            "scaffolding and a committed `.env.local` are not built yet "
+            "(§57 follow-up — monolith is the supported target today)."
         ),
-        prod_note="nginx proxies each service's own `/<slug>/` prefix — see `service-configs/nginx/nginx.conf`.",
+        prod_note=(
+            "Deploy ONLY via `deploy/deploy.sh [env-file]` — it hard-refuses "
+            "a default/dev env (placeholder secrets, `DEBUG=true`, mock "
+            "providers; see `deploy/check-env.sh`). nginx proxies each "
+            "service's own `/<slug>/` prefix — see "
+            "`service-configs/nginx/nginx.conf`."
+        ),
         checks_section="\n" + README_CHECKS_SECTION_BACKEND_ONLY,
     ))
     print("  Created microservices base. Use 'stapel-new-service' to add services.")
@@ -1163,7 +1373,7 @@ def create_project(
 
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only)
     elif project_type == "minimal":
         _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"], module_config=module_config)
         use_submodules = False  # minimal uses pip

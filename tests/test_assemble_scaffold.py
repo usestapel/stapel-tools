@@ -401,3 +401,19 @@ class TestAuthPipExtras:
         reqs = (result.project_dir / "requirements.txt").read_text()
         assert "stapel-auth>=0.5.4,<0.6" in reqs
         assert "stapel-auth[" not in reqs
+
+
+class TestMonolithGates:
+    """Studio-integration finding (root-fixed here): the check gate hardcoded
+    manage.py at the project ROOT — a monolith's manage.py lives in
+    svc-<slug>/, so every --type monolith assembly was result.ok=False by
+    construction. The gate now resolves cwd by project type."""
+
+    def test_monolith_assembly_check_gate_is_green(self, tmp_path):
+        result = assemble_scaffold(
+            "shop", libs=["auth"], output_dir=tmp_path, project_type="monolith",
+        )
+        check = next(g for g in result.gates if g.name == "check")
+        assert not check.skipped
+        assert check.passed, check.output
+        assert result.ok, [(g.name, g.output) for g in result.gates if not g.passed]

@@ -2,6 +2,89 @@
 
 ## [Unreleased]
 
+## [0.11.2] — 2026-07-17
+
+### Changed — env/deploy canon revision (owner decisions after the live run)
+
+- **`.env.local` is COMMITTED** (renamed from `.env.dev` — "dev" reads as the
+  dev STAND; this file is strictly the local machine). Deterministic,
+  recognizably dev-marked values only: `django-insecure-dev-*` SECRET_KEY/JWT
+  (the prefix stapel-core's prodguard already refuses at prod boot — no new
+  core mechanics), `POSTGRES_PASSWORD=stapel` (refused by guard_db_password),
+  admin/admin superuser, and an explicit `STAPEL_LOCAL_ENV=1` flag. Clone →
+  `docker compose -f docker-compose.local.yml --env-file .env.local up` works
+  with zero manual config. The stand names `.env.dev`/`.env.stage`/`.env.prod`
+  are RESERVED and gitignored (generated per stand, never committed).
+- **`deploy/` scripts generated with a hard gate** (`deploy/deploy.sh` +
+  `deploy/check-env.sh`, monolith + microservices): deploy refuses any env
+  carrying dev markers (`STAPEL_LOCAL_ENV`, `django-insecure-*`/
+  `dev-insecure-*`/`change_me*` secrets, `DEBUG=true`, default passwords,
+  `*_PROVIDER=mock`, non-prod `DJANGO_ENV`) with a clear "сгенерируйте боевой
+  env" error. The same values are refused at boot by core's prodguard —
+  script fails BEFORE containers restart, guard covers bypasses.
+- **Compose naming scale**: local stack = `docker-compose.local.yml` (was
+  .dev); dev/stage/prod compose names reserved for stands (prod stays
+  `docker-compose.yml`). nginx-local dir + FRONTEND_LOCAL_UPSTREAM renamed to
+  match.
+- **`docker-compose.local.yml` is SELF-CONTAINED** (no `include:` of base) —
+  root fix for the v0.11.0/0.11.1 CI failures: several compose versions
+  reject overriding an included service ("services.nginx conflicts with
+  imported resource"). Local volumes are `-local`-suffixed; local nginx
+  mounts its envsubst template (`default.conf.template` — must have exactly
+  that name to overwrite the image's default site) at /etc/nginx/templates
+  only, defaults to port 8080.
+- **nginx canon (owner, live-run root-causes)**: `proxy_set_header Host
+  $http_host` (not `$host` — strips the port), `absolute_redirect off;` in
+  every generated server block (nginx's own /admin → /admin/ redirect bakes
+  in the internal port 80 and loses the external mapping; port_in_redirect
+  does not fix it), and deferred upstream resolution (`set $stapel_backend
+  …; proxy_pass $stapel_backend;` — a literal host refuses to START while
+  the backend container is down).
+
+### Added — §55 presenter discipline in the generators
+
+- `new-library`/`new-module` scaffold `presenters.py` (default presenter +
+  `declare_swap()` + `get_<x>_presenter()`; DTO instantiated ONLY there);
+  view templates go through `get_presenter` — a generated project passes
+  stapel-verify (SWAP001/SWAP002 included) from scratch, proven by test.
+- `create_project`/`assemble_scaffold` generate the project-root
+  `PRESENTERS.MD` through stapel-core's exported `write_presenters_md()`
+  hook (best-effort with a manual-command note when core isn't importable);
+  new `presenter-catalog-check` pre-commit hook (`manage.py
+  presenter_catalog --check`) keeps it fresh.
+- AGENTS.md §2: imperative CORRECT/WRONG snippet pair (get_presenter vs
+  direct DTO in a view).
+
+### Added — generative prefixes + the E2E "оно едет" CI gate
+
+- nginx locations (local + prod) and the Vite proxy table are GENERATED from
+  the selected libs (STAPEL_LIBS url_prefixes + slug + admin + static/media)
+  — one list, three surfaces; the "forgot /calendar in the proxy" bug class
+  is unrepresentable.
+- New CI job `e2e-generated-project` (ci.yml + publish.yml, release-gating):
+  stapel-assemble monolith (auth+notifications) with green gates →
+  stapel-verify=0 → live circle via `scripts/e2e_live_circle.py` (migrate →
+  register → OTP code read from the LOG (mock canon) → verify → REGISTERED →
+  authenticated /me 200) → `npm install` + vite build of the generated
+  frontend → compose config validity → live nginx circuit (`/e2e` without a
+  slash → 301 with a RELATIVE Location — the redirect-port regression,
+  pinned forever).
+- Fix found BY the e2e circle: the scaffold never generated
+  `config/celery.py`, so every `@shared_task` in an installed lib bound to
+  Celery's default unconfigured app (amqp://localhost) — stapel-auth's
+  login-notification `.delay()` 500'd the login. Now: standard celery app
+  module + `config/__init__.py` binding (all presets) +
+  `CELERY_TASK_ALWAYS_EAGER` in dev/minimal settings (no broker needed
+  locally).
+- Fix (studio-integration finding, root): `assemble_scaffold`'s check gate
+  hardcoded manage.py at the project root — every `--type monolith` assembly
+  was `result.ok=False` by construction. The gate now resolves cwd by
+  project type (svc-<slug>/, config.settings.base, project .env loaded);
+  studio's local workaround can be removed.
+- CFG004 (warning): CONFIG.MD row with an empty Purpose column;
+  `stapel-config-manifest` CLI (--check/regenerate) + `config-manifest-check`
+  pre-commit hook (both landed with the 0.11.x wave, documented here).
+
 ## [0.11.1] — 2026-07-17
 
 ### Fixed

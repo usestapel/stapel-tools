@@ -93,3 +93,27 @@ full rule list) and `npx eslint .` in `frontend/` (`@stapel/eslint-plugin`'s
 flat config — no raw colours/fetch/storage, typed events, i18n-key
 existence). Run the full suite on demand with `pre-commit run --all-files`.
 """
+
+
+def presenter_catalog_hook(manage_dir: str) -> str:
+    """PRESENTERS.MD freshness hook (§55) — `manage.py presenter_catalog
+    --check` (stapel-core's own command; the catalog is generated through
+    core's exported write_presenters_md() at scaffold time). ``manage_dir``
+    is the directory holding manage.py, relative to the project root ("."
+    for minimal, "svc-<slug>" for a monolith)."""
+    if manage_dir in (".", ""):
+        entry = "python manage.py presenter_catalog --check"
+    else:
+        # PRESENTERS.MD lives at the PROJECT root, not the service dir.
+        entry = (
+            f'sh -c "cd {manage_dir} && python manage.py presenter_catalog '
+            f'--check --out ../PRESENTERS.MD"'
+        )
+    return f"""\
+      - id: presenter-catalog-check
+        name: manage.py presenter_catalog --check (PRESENTERS.MD drift)
+        entry: {entry}
+        language: system
+        pass_filenames: false
+        always_run: true
+"""

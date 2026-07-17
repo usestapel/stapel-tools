@@ -43,8 +43,35 @@ descriptive — violations are caught by `make controls` / `stapel-verify` /
   defeats a host's config-swap for that call site (django-oscar #3232
   class of bug).
 - Never build a response straight from a `dto.py` dataclass in a view
-  (SWAP002). Go through the presenter: `get_presenter(key,
-  default=X)().present(dto)`.
+  (SWAP002). The DTO is instantiated in ONE place — the presenter.
+
+CORRECT (the only shape a view may have):
+
+```python
+from .presenters import get_thing_presenter
+from .serializers import ThingResponseSerializer
+
+def get(self, request):
+    dto = get_thing_presenter()().present(obj)
+    return StapelResponse(ThingResponseSerializer(dto))
+```
+
+WRONG (SWAP002 — bypasses the presenter, kills the host's swap seam):
+
+```python
+from .dto import ThingResponse                       # in a view: forbidden
+
+def get(self, request):
+    return StapelResponse(
+        ThingResponseSerializer(ThingResponse(id=obj.id))
+    )
+```
+
+Every scaffolded module ships `presenters.py` (default presenter +
+`declare_swap()` + `get_<module>_presenter()`) — extend it, don't route
+around it. The project-root `PRESENTERS.MD` is the generated swap/presenter
+catalog (`manage.py presenter_catalog`; the `presenter-catalog-check`
+pre-commit hook fails the commit when it drifts).
 
 ## 3. Config — one place, one registry, one purpose per key
 
@@ -71,6 +98,22 @@ descriptive — violations are caught by `make controls` / `stapel-verify` /
   and turn into a `StringDataRightTruncation` 500 on insert, not a
   validation error (URL001). Always pass an explicit `max_length` (500+
   unless you have a specific reason for less).
+
+## 4b. Dev env vs stands — the committed `.env.local` is LOCAL-ONLY
+
+- `.env.local` IS committed by design (clone → compose up must just work). It
+  contains ONLY recognizable dev markers (`django-insecure-dev-*` keys, the
+  default postgres password, admin/admin superuser, `STAPEL_LOCAL_ENV=1`) —
+  never put a real secret into it, and never "fix" its values to make a
+  deploy pass.
+- Stands/prod deploy ONLY through `deploy/deploy.sh <env-file>`; its gate
+  (`deploy/check-env.sh`) refuses any env carrying a dev marker
+  (`STAPEL_LOCAL_ENV`, `django-insecure-*`/`dev-insecure-`/`change_me*`
+  secrets, `DEBUG=true`, default passwords, `*_PROVIDER=mock`). Do not
+  bypass or weaken the gate — stapel-core's prodguard refuses the same
+  secrets/password at prod boot anyway (`ImproperlyConfigured`).
+- A stand env is generated fresh per stand (shape: `.env.example`, real
+  random secrets), never copied from `.env.local`.
 {{FRONTEND_SECTION}}
 ## Verify before you claim done
 
@@ -111,6 +154,6 @@ FRONTEND_SECTION = """
   storage directly from a component.
 - Reserved backend namespace (see this project's nginx canon): never
   define a client-side route under `/{{SLUG}}/`, `/staticfiles/` or
-  `/media/` — those are proxied to Django by nginx/dev-nginx, not
+  `/media/` — those are proxied to Django by nginx/local-nginx, not
   rendered by this app.
 """

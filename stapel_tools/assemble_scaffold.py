@@ -148,13 +148,24 @@ def _load_dotenv(project_dir: Path) -> dict[str, str]:
     return values
 
 
-def _run_manage_check(project_dir: Path, python: str, *, settings_module: str, gate_name: str) -> GateResult:
+def _run_manage_check(
+    project_dir: Path, python: str, *, settings_module: str, gate_name: str,
+    manage_dir: Path | None = None,
+) -> GateResult:
+    """``manage_dir`` — where manage.py lives; defaults to the project root
+    (minimal). A monolith's manage.py sits inside the service dir
+    (svc-<slug>/) — running from the root silently failed the gate with
+    "can't open file manage.py" before the monolith e2e wave used it."""
     proc = subprocess.run(
         [python, "manage.py", "check"],
-        cwd=project_dir,
+        cwd=manage_dir or project_dir,
         capture_output=True,
         text=True,
-        env={**os.environ, **_load_dotenv(project_dir), "DJANGO_SETTINGS_MODULE": settings_module},
+        env={
+            **os.environ, **_load_dotenv(project_dir),
+            "DJANGO_SETTINGS_MODULE": settings_module,
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
     )
     return GateResult(gate_name, proc.returncode == 0, proc.stdout + proc.stderr)
 
@@ -259,8 +270,19 @@ def assemble_scaffold(
     )
 
     if verify:
+        # Monolith: manage.py lives inside the service dir and settings are
+        # the tiered package (base) — not the minimal single-module layout.
+        if project_type == "monolith":
+            check_manage_dir = project_dir / f"svc-{slug}"
+            check_settings = "config.settings.base"
+        else:
+            check_manage_dir = project_dir
+            check_settings = "config.settings"
         result.gates.append(
-            _run_manage_check(project_dir, python, settings_module="config.settings", gate_name="check")
+            _run_manage_check(
+                project_dir, python, settings_module=check_settings,
+                gate_name="check", manage_dir=check_manage_dir,
+            )
         )
         if project_type == "minimal":
             result.gates.append(_run_config_lint(project_dir))

@@ -47,13 +47,13 @@ def _docker_compose_config(project_dir, *files):
 
 class TestMonolithDevProdComposeCanon:
     """Item 1: dev compose starts frontend (Vite) + backend (Django) + a
-    dev-nginx that routes the reserved backend namespace to Django and
+    local-nginx that routes the reserved backend namespace to Django and
     everything else to Vite; prod compose's nginx serves the built frontend
     + proxies api/admin/static/media to Django."""
 
     def test_dev_compose_starts_frontend_and_backend_and_is_valid(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
-        data = _docker_compose_config(proj, "docker-compose.dev.yml")
+        data = _docker_compose_config(proj, "docker-compose.local.yml")
         if data is None:
             return
         services = data["services"]
@@ -61,13 +61,16 @@ class TestMonolithDevProdComposeCanon:
         assert "svc-app" in services  # the backend actually got wired in
         assert "nginx" in services
         assert services["nginx"]["environment"]["BACKEND_UPSTREAM"] == "svc-app:8000"
-        assert services["nginx"]["environment"]["FRONTEND_DEV_UPSTREAM"] == "frontend:5173"
-        # dev-nginx conf.d source is overridden away from prod's — merge by
-        # mount TARGET, not appended alongside it.
-        conf_sources = [
-            v["source"] for v in services["nginx"]["volumes"] if v["target"] == "/etc/nginx/conf.d"
-        ]
-        assert conf_sources == [str(proj / "service-configs" / "nginx-dev")]
+        assert services["nginx"]["environment"]["FRONTEND_LOCAL_UPSTREAM"] == "frontend:5173"
+        # Self-contained local stack (no include: — several compose versions
+        # reject overriding an included service): nginx mounts the local
+        # template dir at /etc/nginx/templates ONLY; conf.d stays writable
+        # inside the container for the image's envsubst render step.
+        mounts = {v["target"]: v["source"] for v in services["nginx"]["volumes"]}
+        assert mounts["/etc/nginx/templates"] == str(proj / "service-configs" / "nginx-local")
+        assert "/etc/nginx/conf.d" not in mounts
+        # local stack never shares db state with a prod compose run
+        assert "db-data-local" in data["volumes"]
 
     def test_prod_compose_builds_frontend_and_is_valid(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
@@ -87,10 +90,10 @@ class TestMonolithDevProdComposeCanon:
         """Regression: `_update_compose_file`'s containment check used to
         false-positive against the commented example ("  # svc-app:") that
         ships in the monolith compose templates, silently leaving the
-        backend never wired into docker-compose.yml/docker-compose.dev.yml
+        backend never wired into docker-compose.yml/docker-compose.local.yml
         for a project's first/default service — found auditing this task."""
         proj = _create(tmp_path, "app", "monolith")
-        dev = (proj / "docker-compose.dev.yml").read_text()
+        dev = (proj / "docker-compose.local.yml").read_text()
         prod = (proj / "docker-compose.yml").read_text()
         for text in (dev, prod):
             assert "\n  svc-app:\n    extends:\n" in text
@@ -108,11 +111,30 @@ class TestMonolithDevProdComposeCanon:
         assert conf.index("/staticfiles/") < conf.index("location / {")
         assert conf.index("/media/") < conf.index("location / {")
 
+    def test_nginx_port_safety_canon(self, tmp_path):
+        """Owner nginx canon: Host forwarded as $http_host (keeps the port;
+        $host strips it) + absolute_redirect off (nginx's own /admin ->
+        /admin/ redirect otherwise bakes in the internal port 80 and drops
+        the external mapping) — in BOTH generated server blocks."""
+        proj = _create(tmp_path, "app", "monolith")
+        prod = (proj / "service-configs" / "nginx" / "nginx.conf").read_text()
+        local = (
+            proj / "service-configs" / "nginx-local" / "default.conf.template"
+        ).read_text()
+        for conf in (prod, local):
+            assert "absolute_redirect off;" in conf
+            assert "proxy_set_header Host $host;" not in conf
+        assert "proxy_set_header Host $http_host;" in local
+        # per-service block appended into the prod conf by stapel-new-service
+        assert "proxy_set_header Host $http_host;" in prod
+
     def test_nginx_dev_template_env_driven_proxy_targets(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
-        tmpl = (proj / "service-configs" / "nginx-dev" / "nginx-dev.conf.template").read_text()
-        assert "proxy_pass http://${BACKEND_UPSTREAM}" in tmpl
-        assert "proxy_pass http://${FRONTEND_DEV_UPSTREAM}" in tmpl
+        tmpl = (proj / "service-configs" / "nginx-local" / "default.conf.template").read_text()
+        # env-driven, but through nginx VARIABLES (deferred resolution —
+        # see TestGenerativeBackendPrefixes below)
+        assert "set $stapel_backend http://${BACKEND_UPSTREAM};" in tmpl
+        assert "set $stapel_frontend http://${FRONTEND_LOCAL_UPSTREAM};" in tmpl
         assert "location /app/ {" in tmpl  # the project's own slug, reserved
         assert "location /staticfiles/" in tmpl
         assert "location /media/" in tmpl
@@ -121,15 +143,17 @@ class TestMonolithDevProdComposeCanon:
         assert "frontend:5173" not in tmpl
 
     def test_only_a_single_bare_conf_file_in_nginx_dev_dir(self, tmp_path):
-        """The dev nginx-dev directory is mounted at BOTH /etc/nginx/conf.d
-        and /etc/nginx/templates (see docker-compose.dev.yml) — safe only
-        because it contains no bare *.conf that conf.d's `include *.conf`
-        would double-load; only the *.template envsubst source."""
+        """The nginx-local directory is mounted at /etc/nginx/templates and
+        rendered into the container's own conf.d by the nginx image's
+        envsubst step — the template MUST be named default.conf.template so
+        the render OVERWRITES the image's shipped default site (any other
+        name would leave two competing :80 server blocks), and no bare
+        *.conf may sit beside it."""
         proj = _create(tmp_path, "app", "monolith")
-        nginx_dev_dir = proj / "service-configs" / "nginx-dev"
+        nginx_dev_dir = proj / "service-configs" / "nginx-local"
         conf_files = list(nginx_dev_dir.glob("*.conf"))
         assert conf_files == []
-        assert (nginx_dev_dir / "nginx-dev.conf.template").exists()
+        assert (nginx_dev_dir / "default.conf.template").exists()
 
 
 class TestFrontendScaffold:
@@ -267,3 +291,94 @@ class TestStaticMediaNamespaceReservation:
         assert "location /staticfiles/" in conf
         assert "location /media/" in conf
         assert "location /app" in conf  # per-service block, appended live
+
+
+class TestGenerativeBackendPrefixes:
+    """Owner directive: proxy rules are GENERATED from the actual lib
+    selection (STAPEL_LIBS url_prefixes + slug + admin + static/media) —
+    never a hand-maintained list. Add a lib -> its rule appears in ALL
+    THREE surfaces (local nginx, prod nginx, vite proxy) by construction;
+    the live-run "forgot /calendar in the proxy" bug is unrepresentable."""
+
+    def _create_with(self, tmp_path, modules):
+        create_project(
+            name="app", project_type="monolith", title="App",
+            url="https://x.dev", company_name="X", company_email="x@x.dev",
+            modules=modules, output_dir=tmp_path,
+            use_submodules=False, init_git=False,
+        )
+        return tmp_path / "app"
+
+    def test_selected_lib_prefixes_present_in_all_three_surfaces(self, tmp_path):
+        proj = self._create_with(tmp_path, ["core", "auth", "calendar"])
+        local = (
+            proj / "service-configs" / "nginx-local" / "default.conf.template"
+        ).read_text()
+        prod = (proj / "service-configs" / "nginx" / "nginx.conf").read_text()
+        vite = (proj / "frontend" / "vite.config.ts").read_text()
+
+        for prefix in ("app", "admin", "auth", "calendar"):
+            assert f"location /{prefix}/ " in local, (prefix, "local nginx")
+            assert (
+                f"location /{prefix}/ " in prod or f"location /{prefix} " in prod
+            ), (prefix, "prod nginx")
+            assert f'"/{prefix}/"' in vite, (prefix, "vite proxy")
+
+    def test_unselected_lib_prefix_absent(self, tmp_path):
+        proj = self._create_with(tmp_path, ["core", "auth"])
+        vite = (proj / "frontend" / "vite.config.ts").read_text()
+        local = (
+            proj / "service-configs" / "nginx-local" / "default.conf.template"
+        ).read_text()
+        assert '"/calendar/"' not in vite
+        assert "location /calendar/" not in local
+
+    def test_headless_lib_reserves_no_prefix(self, tmp_path):
+        # attributes is http=False (pure library, mounts nowhere) — it must
+        # not claim a URL prefix anywhere.
+        proj = self._create_with(tmp_path, ["core", "attributes"])
+        vite = (proj / "frontend" / "vite.config.ts").read_text()
+        assert '"/attributes/"' not in vite
+
+    def test_local_nginx_starts_without_backend_deferred_resolution(self, tmp_path):
+        """proxy_pass must go through a VARIABLE ($stapel_backend) — a
+        literal host makes nginx refuse to start while the backend container
+        is down, deadlocking compose up ordering (found live)."""
+        proj = self._create_with(tmp_path, ["core"])
+        local = (
+            proj / "service-configs" / "nginx-local" / "default.conf.template"
+        ).read_text()
+        assert "set $stapel_backend http://${BACKEND_UPSTREAM};" in local
+        assert "proxy_pass $stapel_backend;" in local
+        assert "proxy_pass http://${BACKEND_UPSTREAM};" not in local
+
+
+class TestGeneratedCeleryWiring:
+    """Found by the e2e live circle: without config/celery.py every
+    @shared_task in an installed lib binds to Celery's default UNCONFIGURED
+    app (amqp://localhost) — stapel-auth's login-notification .delay() then
+    500s the login. The scaffold now wires the standard app + eager local
+    execution."""
+
+    def test_service_gets_celery_app_and_config_init_import(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        celery_py = (proj / "svc-app" / "config" / "celery.py").read_text()
+        assert 'Celery("app")' in celery_py
+        assert 'config_from_object("django.conf:settings", namespace="CELERY")' in celery_py
+        init = (proj / "svc-app" / "config" / "__init__.py").read_text()
+        assert "from .celery import app as celery_app" in init
+
+    def test_dev_settings_run_tasks_eagerly(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        dev = (proj / "svc-app" / "config" / "settings" / "dev.py").read_text()
+        assert "CELERY_TASK_ALWAYS_EAGER = True" in dev
+        assert "CELERY_TASK_EAGER_PROPAGATES = False" in dev
+
+    def test_minimal_gets_the_same_wiring_brokerless(self, tmp_path):
+        proj = _create(tmp_path, "app", "minimal")
+        assert (proj / "config" / "celery.py").exists()
+        celery_py = (proj / "config" / "celery.py").read_text()
+        assert "config.settings" in celery_py
+        assert "config.settings.base" not in celery_py
+        settings = (proj / "config" / "settings.py").read_text()
+        assert "CELERY_TASK_ALWAYS_EAGER = True" in settings

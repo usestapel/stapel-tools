@@ -23,6 +23,7 @@ from ._templates import (
     MODULE_ERRORS,
     MODULE_INIT,
     MODULE_MODELS,
+    MODULE_PRESENTERS,
     MODULE_SERIALIZERS,
     MODULE_TEST_MODELS,
     MODULE_TESTS_INIT,
@@ -86,6 +87,9 @@ def scaffold_module(
         target / "admin.py": render(MODULE_ADMIN, ctx),
         target / "dto.py": render(MODULE_DTO, ctx),
         target / "serializers.py": render(MODULE_SERIALIZERS, ctx),
+        # Presenter-canonical from birth (§55): the DTO is only instantiated
+        # in presenters.py; views consume get_<module>_presenter().
+        target / "presenters.py": render(MODULE_PRESENTERS, ctx),
         target / "errors.py": render(MODULE_ERRORS, ctx),
         target / "views.py": render(MODULE_VIEWS, ctx),
         target / "urls.py": render(MODULE_URLS, ctx),

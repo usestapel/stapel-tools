@@ -52,6 +52,19 @@ server {
     client_max_body_size 50m;
     resolver 127.0.0.11 valid=10s;
 
+    # Non-obvious trap (owner postmortem: "/admin loses the port"): nginx
+    # ITSELF redirects /admin -> /admin/ BEFORE proxy_pass, and builds an
+    # ABSOLUTE Location URL from the internal $server_port (80 inside the
+    # container). Port 80 is the http default so it gets omitted — the
+    # browser lands on the host WITHOUT the externally mapped port (:8080
+    # etc). port_in_redirect / server_name_in_redirect do NOT fix this
+    # (both still use the internal port). absolute_redirect off makes
+    # nginx emit a RELATIVE Location, which the browser resolves against
+    # the address bar — correct for any external port mapping. Pairs with
+    # proxy_set_header Host $http_host below (keeps the port for redirects
+    # the BACKEND builds).
+    absolute_redirect off;
+
     location /staticfiles/ {
         alias /staticfiles/;
     }
@@ -80,49 +93,71 @@ server {
 # in nginx configuration"; any *.template under /etc/nginx/templates/ is
 # rendered to /etc/nginx/conf.d/ at container start). Proxy targets are ENV
 # VARS with compose-network defaults (never hardcoded) — see
-# docker-compose.dev.yml's `nginx` service `environment:` block; override
-# BACKEND_UPSTREAM / FRONTEND_DEV_UPSTREAM in .env for a native run (backend
+# docker-compose.local.yml's `nginx` service `environment:` block; override
+# BACKEND_UPSTREAM / FRONTEND_LOCAL_UPSTREAM in .env for a native run (backend
 # and/or frontend on the host, e.g. localhost:8000 / localhost:5173).
 #
 # Safe alongside nginx's OWN lowercase config variables ($host, $scheme, ...)
 # — envsubst only replaces names that exist as environment variables, and
 # none of those lowercase nginx variable names collide with real env vars
 # (the same convention the official nginx image's own docs example uses).
-NGINX_DEV_CONF_TEMPLATE = """\
+NGINX_LOCAL_CONF_TEMPLATE = """\
 server {
     listen 80;
     server_name _;
     client_max_body_size 50m;
     resolver 127.0.0.11 valid=10s;
 
+    # Non-obvious trap (owner postmortem: "/admin loses the port"): nginx
+    # ITSELF redirects /admin -> /admin/ BEFORE proxy_pass, and builds an
+    # ABSOLUTE Location URL from the internal $server_port (80 inside the
+    # container). Port 80 is the http default so it gets omitted — the
+    # browser lands on the host WITHOUT the externally mapped port (:8080
+    # etc). port_in_redirect / server_name_in_redirect do NOT fix this
+    # (both still use the internal port). absolute_redirect off makes
+    # nginx emit a RELATIVE Location, which the browser resolves against
+    # the address bar — correct for any external port mapping. Pairs with
+    # proxy_set_header Host $http_host below (keeps the port for redirects
+    # the BACKEND builds).
+    absolute_redirect off;
+
+    # Deferred upstream resolution: proxy_pass with a VARIABLE makes nginx
+    # resolve the upstream per request (via the resolver above) instead of
+    # at config load — a literal `proxy_pass http://svc:8000` makes nginx
+    # refuse to START at all while that container is down ("host not found
+    # in upstream"), which would deadlock `compose up`'s ordering.
+    set $stapel_backend http://${BACKEND_UPSTREAM};
+    set $stapel_frontend http://${FRONTEND_LOCAL_UPSTREAM};
+
+    # Host is forwarded as $http_host (NOT $host: that strips the port —
+    # on a local stack at :8080, or any non-443 stand, absolute links and
+    # redirects the backend builds would silently lose the port).
+    #
     # Reserved namespace, checked BEFORE the Vite catch-all below (see
     # NGINX_CONF's prod twin + the project's AGENTS.md §3). Static/media
     # aren't collected in dev — Django's runserver serves them itself — so
     # they proxy to the backend like the API does, instead of the
     # alias-to-volume prod uses.
     location /staticfiles/ {
-        proxy_pass http://${BACKEND_UPSTREAM};
-        proxy_set_header Host $host;
+        proxy_pass $stapel_backend;
+        proxy_set_header Host $http_host;
     }
 
     location /media/ {
-        proxy_pass http://${BACKEND_UPSTREAM};
-        proxy_set_header Host $host;
+        proxy_pass $stapel_backend;
+        proxy_set_header Host $http_host;
     }
 
-    location /{{SLUG}}/ {
-        proxy_pass http://${BACKEND_UPSTREAM};
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_redirect off;
-    }
-
+    # Backend locations below are GENERATED from the project's actual lib
+    # selection (STAPEL_LIBS url_prefixes + the service slug + admin) — never
+    # a hand-maintained list: adding a lib to the project regenerates its
+    # rule by construction (owner directive: the "forgot /calendar in the
+    # proxy" class of bug must be impossible).
+{{BACKEND_LOCATIONS}}
     # Everything else — the Vite dev server (HMR websocket included).
     location / {
-        proxy_pass http://${FRONTEND_DEV_UPSTREAM};
-        proxy_set_header Host $host;
+        proxy_pass $stapel_frontend;
+        proxy_set_header Host $http_host;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -303,7 +338,7 @@ volumes:
   frontend-dist:
 """
 
-MONOLITH_COMPOSE_LOCAL = """\
+MONOLITH_COMPOSE_PROD = """\
 include:
   - docker-compose.base.yml
 
@@ -330,23 +365,69 @@ services:
   #     - ./stapel_core:/app/stapel_core:ro
 """
 
-MONOLITH_COMPOSE_DEV = """\
-include:
-  - docker-compose.base.yml
-
+MONOLITH_COMPOSE_LOCAL = """\
+# Local stack (docker-compose.local.yml) — the LOCAL MACHINE's compose file.
+# Naming canon: `local` = this machine; dev/stage/prod compose names are
+# reserved for STANDS (prod = docker-compose.yml, deployed via deploy/).
+#
+# SELF-CONTAINED on purpose — no `include:` of docker-compose.base.yml.
+# Root cause (found live in CI): several docker compose versions reject
+# overriding a service that arrives via include ("services.nginx conflicts
+# with imported resource"), and the local stack NEEDS a differently-wired
+# nginx (envsubst template proxying to Vite instead of serving the built
+# frontend) and backend (dev settings, source bind mounts). So the local
+# stack declares its own copies of the shared infra instead of fighting
+# include semantics. Local volumes are suffixed -local so a prod compose
+# run on the same machine never shares database state with the local stack.
+#
+# Run:  docker compose -f docker-compose.local.yml --env-file .env.local up
+# Then: http://localhost:${HTTP_PORT:-8080}
+#
 # NOTE: `volumes:` is declared BEFORE `services:` on purpose — `services:`
 # must stay the LAST top-level section in this file: stapel-new-service's
-# _update_compose_file() appends each backend service by raw text at EOF,
-# assuming whatever comes last is the services mapping. A top-level key
-# after `services:` would make an appended service block parse as a nested
-# key under THAT section instead (a real compose-breaking class of bug).
+# _update_compose_file() appends each backend service by raw text at EOF.
 volumes:
-  frontend-node-modules:
+  db-data-local:
+  redis-data-local:
+{{BROKER_VOLUMES}}  frontend-node-modules:
+  # named by svc-*.yml (extends brings the refs along); harmless locally —
+  # the dev backend serves static/media itself via runserver.
+  static-content:
+  media-content:
 
 services:
-  # Dev canon (§57): plain node image — no bespoke Dockerfile to go stale —
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-stapel}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-stapel}"
+      POSTGRES_MULTIPLE_DATABASES: "stapel_main,{{DB_NAME}}"
+    volumes:
+      - db-data-local:/var/lib/postgresql/data
+      - ./service-configs/postgres/ensure-databases.sh:/usr/local/bin/ensure-databases.sh:ro
+    command: >
+      bash -c "
+        docker-entrypoint.sh postgres &
+        until pg_isready -U $${POSTGRES_USER:-stapel}; do sleep 1; done
+        /usr/local/bin/ensure-databases.sh
+        wait
+      "
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-stapel}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data-local:/data
+
+{{BROKER_SERVICES}}  # Dev canon (§57): plain node image — no bespoke Dockerfile to go stale —
   # runs the Vite dev server with hot reload; logs via
-  # `docker compose -f docker-compose.dev.yml logs -f frontend`.
+  # `docker compose -f docker-compose.local.yml logs -f frontend`.
   frontend:
     image: node:22-alpine
     working_dir: /app
@@ -358,29 +439,29 @@ services:
       - frontend-node-modules:/app/node_modules
     restart: unless-stopped
 
-  # dev-nginx canon: same `nginx` service as prod, but its conf.d/templates
-  # source is swapped to service-configs/nginx-dev/ (envsubst template that
-  # proxies the reserved backend namespace + everything else to Vite,
-  # instead of serving the (unbuilt, in dev) frontend-dist volume) —
-  # compose merges service overrides by mount TARGET, so only the changed
-  # targets need repeating here (static-content/media-content stay from the
-  # base's nginx service). Proxy targets are env vars with compose-network
-  # defaults — override in .env for a native run.
+  # Local nginx: mounts service-configs/nginx-local at /etc/nginx/templates
+  # ONLY (never conf.d — that stays writable inside the container so the
+  # nginx image's own envsubst step can render
+  # templates/default.conf.template -> conf.d/default.conf, OVERWRITING the
+  # image's shipped default site; the template MUST be named
+  # default.conf.template for that overwrite to happen). Proxy targets are
+  # env vars with compose-network defaults — override in .env.local for a
+  # native run (backend/frontend on the host).
   nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8080}:80"
     volumes:
-      - ./service-configs/nginx-dev:/etc/nginx/conf.d:ro
-      - ./service-configs/nginx-dev:/etc/nginx/templates:ro
+      - ./service-configs/nginx-local:/etc/nginx/templates:ro
     environment:
       BACKEND_UPSTREAM: "${BACKEND_UPSTREAM:-{{BACKEND_UPSTREAM_DEFAULT}}}"
-      FRONTEND_DEV_UPSTREAM: "${FRONTEND_DEV_UPSTREAM:-frontend:5173}"
+      FRONTEND_LOCAL_UPSTREAM: "${FRONTEND_LOCAL_UPSTREAM:-frontend:5173}"
     depends_on:
       - frontend
 
-  # Add backend services from their individual .yml files:
-  # svc-app:
-  #   extends:
-  #     file: svc-app.yml
-  #     service: svc-app
+  # Backend service(s) appended below by stapel-new-service (dev-mode block:
+  # .env.local + config.settings.dev + source bind mounts).
 """
 
 MONOLITH_ENV_TEMPLATE = """\
@@ -424,7 +505,17 @@ RUN_CMD=gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
 
 MONOLITH_GITIGNORE = """\
 .env
+# Stand env files (dev/stage/prod STANDS — the reserved names) are generated
+# per stand by the deploy flow (see deploy/) and MUST NOT be committed:
 .env.dev
+.env.stage
+.env.prod
+# .env.local is deliberately NOT ignored (owner decision, §57 revision): it
+# is COMMITTED — strictly the LOCAL MACHINE env — so `clone → docker compose
+# -f docker-compose.local.yml up` works for every developer. Safe because it
+# carries only recognizable dev markers (django-insecure-dev-* keys, default
+# postgres password) — deploy/check-env.sh and stapel-core's prodguard both
+# refuse it outside local dev.
 *.pyc
 __pycache__/
 .venv/
@@ -490,7 +581,7 @@ volumes:
   media-content:
 """
 
-MICRO_COMPOSE_LOCAL = """\
+MICRO_COMPOSE_PROD = """\
 include:
   - docker-compose.base.yml
 
@@ -533,3 +624,44 @@ EMAIL_HOST_PASSWORD=
 # ─── Run command ────────────────────────────────────────────────────────────
 RUN_CMD=gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
 """
+
+
+# ─── Generative backend route prefixes (owner directive: never a list) ──────
+# One reviewed block shape for every generated backend location — the SET of
+# prefixes comes from the caller (create_project derives it from STAPEL_LIBS
+# for the selected modules + the service slug + admin), so a new lib's rule
+# appears by construction, not by remembering to edit a template.
+
+def nginx_local_backend_locations(prefixes: list[str]) -> str:
+    """location blocks for the local-nginx envsubst template — one per
+    reserved backend prefix, proxying to ${BACKEND_UPSTREAM}."""
+    blocks = []
+    for prefix in prefixes:
+        blocks.append(
+            f"    location /{prefix}/ {{\n"
+            "        proxy_pass $stapel_backend;\n"
+            "        proxy_set_header Host $http_host;\n"
+            "        proxy_set_header X-Real-IP $remote_addr;\n"
+            "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+            "        proxy_set_header X-Forwarded-Proto $scheme;\n"
+            "        proxy_redirect off;\n"
+            "    }\n"
+        )
+    return "\n".join(blocks)
+
+
+def nginx_prod_backend_location(prefix: str, upstream_service: str) -> str:
+    """One prod-nginx location block proxying a reserved backend prefix to a
+    compose service (same shape stapel-new-service appends per service)."""
+    var = f"$upstream_{prefix.replace('-', '_')}"
+    return (
+        f"\n  location /{prefix}/ {{\n"
+        f"    set {var} {upstream_service}:8000;\n"
+        f"    proxy_pass http://{var};\n"
+        f"    proxy_set_header Host $http_host;\n"
+        f"    proxy_set_header X-Real-IP $remote_addr;\n"
+        f"    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        f"    proxy_set_header X-Forwarded-Proto $scheme;\n"
+        f"    proxy_redirect off;\n"
+        f"  }}\n"
+    )

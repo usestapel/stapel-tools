@@ -5,8 +5,8 @@ live-run postmortem).
 A minimal, real Vite + React + TypeScript app — not a placeholder. It is
 wired into:
 
-  - ``docker-compose.dev.yml`` — a plain ``node:22-alpine`` container runs
-    ``npm install && npm run dev`` (hot-reload, logs visible); dev-nginx
+  - ``docker-compose.local.yml`` — a plain ``node:22-alpine`` container runs
+    ``npm install && npm run dev`` (hot-reload, logs visible); local-nginx
     proxies everything that is not the reserved backend namespace to it.
   - ``docker-compose.yml`` (prod) — a one-shot ``frontend-build`` service
     (this dir's own ``Dockerfile``) builds the app and copies ``dist/`` into
@@ -19,8 +19,8 @@ Placeholders (``{{KEY}}``), filled by ``create_project._create_monolith``:
   BACKEND_UPSTREAM_DEFAULT   compose-network default for the backend
                          (e.g. "svc-app:8000") — the *default* baked into
                          vite.config.ts's standalone dev-proxy fallback;
-                         the real dev path (nginx-dev) reads the same
-                         default from docker-compose.dev.yml's env, not
+                         the real dev path (nginx-local) reads the same
+                         default from docker-compose.local.yml's env, not
                          from this file.
 """
 
@@ -91,11 +91,11 @@ import react from "@vitejs/plugin-react";
 
 /**
  * Dev-canon (§57 owner directive): the PRIMARY dev path is
- * docker-compose.dev.yml's dev-nginx, which already splits traffic between
+ * docker-compose.local.yml's local-nginx, which already splits traffic between
  * this server and the Django backend (reserved namespace: /{{SLUG}}/,
  * /staticfiles/, /media/ — see the project's AGENTS.md §3). The proxy
  * config below is a FALLBACK for running `npm run dev` standalone, without
- * dev-nginx in front — e.g. hitting a dockerized backend from a natively
+ * local-nginx in front — e.g. hitting a dockerized backend from a natively
  * run Vite. Either way the backend target is an ENV VAR with a
  * compose-network default, never a hardcoded host: set VITE_BACKEND_TARGET
  * in this dir's .env to override (e.g. to http://localhost:8000 for a
@@ -113,9 +113,10 @@ export default defineConfig(({ mode }) => {
       port: 5173,
       strictPort: true,
       proxy: {
-        "/{{SLUG}}/": { target: backendTarget, changeOrigin: true },
-        "/staticfiles/": { target: backendTarget, changeOrigin: true },
-        "/media/": { target: backendTarget, changeOrigin: true },
+        // GENERATED from the project's actual lib selection (STAPEL_LIBS
+        // url_prefixes + service slug + admin + static/media) — adding a
+        // stapel lib to the project regenerates its rule by construction.
+{{VITE_PROXY_RULES}}
       },
     },
   };
@@ -155,7 +156,7 @@ import { useEffect, useState } from "react";
 /**
  * Starter component — proves the dev/prod wiring end to end by calling the
  * backend's own health endpoint through the SAME path a browser uses (the
- * reserved /{{SLUG}}/ namespace, routed by nginx/dev-nginx to the backend —
+ * reserved /{{SLUG}}/ namespace, routed by nginx/local-nginx to the backend —
  * never a hardcoded backend origin from the browser's side). Replace with
  * your real app; keep hitting relative paths under /{{SLUG}}/api/, not an
  * absolute backend URL, so this keeps working unmodified behind either
@@ -218,12 +219,12 @@ compose + nginx canon).
 
 ## Dev
 
-`docker compose -f docker-compose.dev.yml up` starts this alongside the
-backend and dev-nginx — dev-nginx routes the reserved backend namespace
+`docker compose -f docker-compose.local.yml up` starts this alongside the
+backend and local-nginx — local-nginx routes the reserved backend namespace
 (`/{{SLUG}}/`, `/staticfiles/`, `/media/`) to Django and everything else to
 this Vite dev server (logs visible via `docker compose logs -f frontend`).
 
-Running `npm run dev` standalone (no dev-nginx) also works — see
+Running `npm run dev` standalone (no local-nginx) also works — see
 `vite.config.ts`'s own dev-server proxy, pointed at `VITE_BACKEND_TARGET`
 (env var, compose-network default, override in `.env` for a native backend).
 
@@ -239,7 +240,9 @@ backend's own `/{{SLUG}}/` routes — see the project root README and
 
 ## Reserved namespace — do not claim these routes
 
-The backend owns `/{{SLUG}}/*`, `/staticfiles/*`, `/media/*` (see the project
-root `AGENTS.md` §3). This app's own client-side router must not define a
-route under any of those prefixes.
+The backend owns `/{{SLUG}}/*`, `/admin/*`, `/staticfiles/*`, `/media/*` AND
+every selected stapel module's own prefix — the full generated list is the
+proxy table in `vite.config.ts` (kept in lockstep with nginx; both are
+emitted from the project's lib selection). This app's own client-side router
+must not define a route under any of those prefixes.
 """

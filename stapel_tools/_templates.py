@@ -76,6 +76,41 @@ ENV DJANGO_SETTINGS_MODULE=config.settings.prod
 CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
 """
 
+CELERY_APP_PY = """\
+\"\"\"Project Celery app — standard Django-Celery wiring.
+
+Without this module every ``@shared_task`` in an installed stapel lib binds
+to Celery's DEFAULT, UNCONFIGURED app (broker amqp://localhost) — the first
+code path that calls ``.delay()`` (e.g. stapel-auth's login-notification
+task) then 500s at runtime even though CELERY_* settings exist. Found live
+by the e2e circle; part of the "generated project drives out of the box"
+gate. config/__init__.py imports ``celery_app`` so the binding happens on
+Django startup, and ``celery -A config worker`` (the --celery compose
+blocks) finds the app.
+\"\"\"
+import os
+
+from celery import Celery
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.base")
+
+app = Celery("{{MODULE}}")
+app.config_from_object("django.conf:settings", namespace="CELERY")
+app.autodiscover_tasks()
+"""
+
+CONFIG_INIT_PY = """\
+# Standard Django-Celery wiring: bind every @shared_task to this project's
+# configured app at startup (see config/celery.py). Guarded so a project
+# whose dependency set carries no celery still boots.
+try:
+    from .celery import app as celery_app
+except ModuleNotFoundError:  # celery not installed — nothing uses tasks
+    celery_app = None
+
+__all__ = ("celery_app",)
+"""
+
 ASGI_PY = """\
 import os
 from django.core.asgi import get_asgi_application
@@ -225,6 +260,12 @@ from .base import *  # noqa
 
 DEBUG = True
 ALLOWED_HOSTS += ["dev.{{SLUG}}.local"]
+
+# Local machine: run Celery tasks INLINE (no broker/worker required for the
+# local stack to be complete — a lib's .delay() executes eagerly; errors are
+# recorded on the result, never turned into a request 500).
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = False
 
 # File mailtrap for local/dev + async-consumer tests (see tests/harness):
 # outbound mail is written to var/mailtrap/ as JSON instead of hitting SMTP.
@@ -537,7 +578,67 @@ _ERRORS = {
 register_service_errors(_ERRORS)
 """
 
+MODULE_PRESENTERS = """\
+\"\"\"Presenters for {{MODULE}} — the DTO-building layer (§55 presenter canon).
+
+Views NEVER instantiate a `dto.py` dataclass directly (SWAP002) and never
+import a concrete presenter class registered as a swap default (SWAP001) —
+they call :func:`get_{{MODULE}}_presenter`, so a host project can replace
+the presentation via ``STAPEL_SWAP`` without forking this app.
+
+Once this app has a real DAO model, base the presenter on stapel-core's
+DAO→DTO primitive (``stapel_core.django.api.presenters.Presenter`` — model/
+fields/custom_fields declaration, auto-generated DTO + serializer, listed in
+the auto-catalog PRESENTERS.MD). Etalon:
+stapel_core/django/users/presenters.py.
+\"\"\"
+from stapel_core.django.swappable import declare_swap, get_presenter
+
+from .dto import {{MODULE_CAP}}Response
+
+#: Swap key for the host presenter override (STAPEL_SWAP registry).
+PRESENTER_KEY = "{{MODULE_UPPER}}_PRESENTER"
+
+#: Dotted path of the default presenter — single source for both the
+#: declare_swap() catalog registration and the get_presenter() fallback.
+DEFAULT_PRESENTER = "{{APP_PATH}}.presenters.{{MODULE_CAP}}Presenter"
+
+# Import-time declaration: makes the swap point visible to the auto-catalog
+# (PRESENTERS.MD, `manage.py presenter_catalog`).
+declare_swap(PRESENTER_KEY, DEFAULT_PRESENTER)
+
+
+class {{MODULE_CAP}}Presenter:
+    \"\"\"Builds {{MODULE_CAP}}Response DTOs — the only place they are
+    instantiated. Swap to stapel-core's Presenter base once a DAO model
+    exists (see module docstring).\"\"\"
+
+    def present(self, obj) -> {{MODULE_CAP}}Response:
+        return {{MODULE_CAP}}Response(id=obj.id)
+
+
+def get_{{MODULE}}_presenter() -> type:
+    \"\"\"The active (possibly host-swapped) {{MODULE}} presenter — consume
+    this, never import {{MODULE_CAP}}Presenter directly (SWAP001).\"\"\"
+    return get_presenter(PRESENTER_KEY, default=DEFAULT_PRESENTER)
+"""
+
 MODULE_VIEWS = """\
+\"\"\"Views for {{MODULE}} — presenter-canonical from birth (§55).
+
+The canon for every endpoint you add here:
+
+    from .presenters import get_{{MODULE}}_presenter
+    from .serializers import {{MODULE_CAP}}ResponseSerializer
+
+    dto = get_{{MODULE}}_presenter()().present(obj)
+    return StapelResponse({{MODULE_CAP}}ResponseSerializer(dto))
+
+NEVER this (SWAP002 — bypasses the presenter, kills the host's swap seam):
+
+    from .dto import {{MODULE_CAP}}Response
+    return StapelResponse(serializer({{MODULE_CAP}}Response(id=obj.id)))
+\"\"\"
 from rest_framework.viewsets import GenericViewSet
 from drf_spectacular.utils import extend_schema
 from stapel_core.django.errors import StapelResponse

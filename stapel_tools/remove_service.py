@@ -263,7 +263,7 @@ def remove_service(
     _remove_from_services_conf(root, slug)
     _remove_from_stapel_services(root, slug)
     _remove_from_compose_base(root, slug, dir_name)
-    for compose in ("docker-compose.yml", "docker-compose.dev.yml", "docker-compose.stg.yml"):
+    for compose in ("docker-compose.yml", "docker-compose.local.yml", "docker-compose.dev.yml", "docker-compose.stg.yml"):
         _remove_from_compose_file(root, compose, dir_name)
     _remove_from_nginx(root, slug)
     _remove_from_prometheus(root, dir_name)

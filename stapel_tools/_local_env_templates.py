@@ -20,15 +20,54 @@ Two pieces:
    already default to "mock" (conf.py DEFAULTS) and its own _MockSMSProvider
    / _MockEmailProvider already log to `logger.info`.
 
-2. ``.env.dev`` templates — a real, generated (not placeholder) dev
-   environment file: fresh secrets (same generator as .env), Django
-   superuser defaults for the entrypoint canon (bootstrap.sh), Vite/backend
-   proxy targets, and a preset switch (``env_preset``): "standalone"
-   (default) or "studio" (projects spun up FROM stapel-studio). The studio
-   values are DOCUMENTED STUBS — no stapel-sender / studio-OAuth
-   infrastructure exists yet; inventing a working implementation here would
-   be lying about what this generates. Only the shape of the preset + a
-   TODO trail is real.
+2. ``.env.local`` templates — a COMMITTED dev environment file (owner decision
+   revising the first §57 cut: a gitignored .env.local never reaches the next
+   developer's clone — "до Олега не доедет"; clone → compose up must just
+   work). Committed means every value is DETERMINISTIC and RECOGNIZABLY a
+   dev value, never a real secret:
+
+   - ``SECRET_KEY``/``JWT_SECRET_KEY`` carry the ``django-insecure-dev-``
+     prefix — ``django-insecure-`` is ALREADY in stapel-core's
+     ``prodguard._PLACEHOLDER_PREFIXES``, so a stand/prod boot
+     (``DJANGO_ENV=prod`` / config.settings.prod) refuses these values via
+     the EXISTING core system-gate (``guard_secret`` →
+     ``ImproperlyConfigured``), no new core mechanics needed. (The owner
+     sketch said "dev-insecure-"; ``django-insecure-dev-`` keeps the same
+     recognizability while riding the core guard that already exists —
+     deviation noted in the task report.)
+   - ``POSTGRES_PASSWORD=stapel`` — core's dev default, refused in prod by
+     the existing ``guard_db_password``.
+   - ``DJANGO_SUPERUSER_PASSWORD=admin`` — obviously a dev default.
+   - ``STAPEL_LOCAL_ENV=1`` marker line — the machine-readable "this is the
+     committed dev env" flag the generated ``deploy/check-env.sh`` gate
+     keys on (belt and braces beside the per-value checks).
+
+   The generated ``deploy/`` scripts (``_deploy_templates.py``) refuse an
+   env file carrying ANY of these markers with a clear error — the second
+   half of the same owner decision.
+
+   Preset switch (``env_preset``): "standalone" (default) or "studio"
+   (projects spun up FROM stapel-studio). The studio values are DOCUMENTED
+   STUBS — no stapel-sender / studio-OAuth infrastructure exists yet;
+   inventing a working implementation here would be lying about what this
+   generates. Only the shape of the preset + a TODO trail is real.
+"""
+
+# The committed banner every preset opens with — the human half of the gate.
+ENV_LOCAL_BANNER = """\
+# ─── .env.local — LOCAL DEVELOPMENT ONLY (committed by design) ────────────────
+# This file IS committed: clone → `docker compose -f docker-compose.local.yml
+# --env-file .env.local up` must work with zero manual configuration for every
+# developer. That is safe ONLY because nothing in here is a secret: every
+# value is a deterministic, recognizable dev marker (django-insecure-dev-*
+# keys, default postgres password, admin/admin superuser).
+#
+# СТЕНДЫ/ПРОД — ЗАПРЕЩЕНО. Never point a stage/prod deployment at this file
+# or copy values out of it:
+#   - deploy/deploy.sh refuses any env with these markers (deploy/check-env.sh);
+#   - stapel-core's prodguard refuses django-insecure-* SECRET_KEY and the
+#     default postgres password at prod boot (ImproperlyConfigured).
+# Generate a real prod env instead (fresh random secrets — see .env.example).
 """
 
 DEV_MOCK_OTP_BLOCK = """
@@ -48,16 +87,17 @@ STAPEL_AUTH = {
 }
 """
 
-# ── .env.dev — standalone preset (default) ─────────────────────────────────
-ENV_DEV_STANDALONE = """\
-# ─── .env.dev — local development (§57 owner directive item 7) ─────────────
-# Generated at project creation with REAL secrets (not placeholders) so
-# `docker compose -f docker-compose.dev.yml --env-file .env.dev up` works
-# with zero manual configuration. Gitignored, like .env — never commit it.
+# ── .env.local — standalone preset (default) ─────────────────────────────────
+ENV_LOCAL_STANDALONE = ENV_LOCAL_BANNER + """\
 #
 # Channel-origin preset: standalone (this file) — a project created directly
-# (not spun up from stapel-studio). See ENV_DEV_STUDIO for the studio
+# (not spun up from stapel-studio). See ENV_LOCAL_STUDIO for the studio
 # variant (email/oauth stubs) — chosen via `--env-preset studio`.
+
+# Machine-readable dev-env marker — deploy/check-env.sh refuses any env file
+# carrying this flag. Do not remove it "to make deploy work": generate a
+# real env instead.
+STAPEL_LOCAL_ENV=1
 
 DJANGO_ENV=local
 DEBUG=true
@@ -96,9 +136,9 @@ DJANGO_SUPERUSER_PASSWORD={superuser_password}
 
 # ─── Frontend dev proxy targets (§57 item 1) — compose-network defaults;
 # override here for a native run (e.g. backend/frontend on the host):
-# BACKEND_UPSTREAM=localhost:8000, FRONTEND_DEV_UPSTREAM=localhost:5173.
+# BACKEND_UPSTREAM=localhost:8000, FRONTEND_LOCAL_UPSTREAM=localhost:5173.
 BACKEND_UPSTREAM={backend_upstream}
-FRONTEND_DEV_UPSTREAM=frontend:5173
+FRONTEND_LOCAL_UPSTREAM=frontend:5173
 VITE_BACKEND_TARGET=http://{backend_upstream}
 
 # ─── Run command — Django's own dev server (autoreload, plain HTTP, no
@@ -111,19 +151,20 @@ RUN_CMD=python manage.py runserver 0.0.0.0:8000
 DEFAULT_FROM_EMAIL={company_name} <{company_email}>
 """
 
-# ── .env.dev — studio preset (STUB — infra not built yet) ──────────────────
-ENV_DEV_STUDIO = """\
-# ─── .env.dev — local development (§57 owner directive item 7) ─────────────
-# Generated at project creation with REAL secrets (not placeholders) so
-# `docker compose -f docker-compose.dev.yml --env-file .env.dev up` works
-# with zero manual configuration. Gitignored, like .env — never commit it.
+# ── .env.local — studio preset (STUB — infra not built yet) ──────────────────
+ENV_LOCAL_STUDIO = ENV_LOCAL_BANNER + """\
 #
 # Channel-origin preset: STUDIO — this project was spun up FROM stapel-studio.
 # The two blocks marked STUB below are DOCUMENTED PLACEHOLDERS: neither the
 # generic stapel-sender email transport nor a stapel-studio OAuth app exists
 # yet. Do not treat the keys below as working config — they are the shape a
 # future studio integration will fill in, so a studio-originated project's
-# .env.dev is forward-compatible without a second migration later.
+# .env.local is forward-compatible without a second migration later.
+
+# Machine-readable dev-env marker — deploy/check-env.sh refuses any env file
+# carrying this flag. Do not remove it "to make deploy work": generate a
+# real env instead.
+STAPEL_LOCAL_ENV=1
 
 DJANGO_ENV=local
 DEBUG=true
@@ -154,7 +195,7 @@ DJANGO_SUPERUSER_PASSWORD={superuser_password}
 
 # ─── Frontend dev proxy targets (§57 item 1) ────────────────────────────────
 BACKEND_UPSTREAM={backend_upstream}
-FRONTEND_DEV_UPSTREAM=frontend:5173
+FRONTEND_LOCAL_UPSTREAM=frontend:5173
 VITE_BACKEND_TARGET=http://{backend_upstream}
 
 # ─── STUB — studio sender (TODO §57 studio preset) ──────────────────────────
@@ -181,4 +222,4 @@ RUN_CMD=python manage.py runserver 0.0.0.0:8000
 DEFAULT_FROM_EMAIL={company_name} <{company_email}>
 """
 
-ENV_DEV_PRESETS = {"standalone": ENV_DEV_STANDALONE, "studio": ENV_DEV_STUDIO}
+ENV_LOCAL_PRESETS = {"standalone": ENV_LOCAL_STANDALONE, "studio": ENV_LOCAL_STUDIO}

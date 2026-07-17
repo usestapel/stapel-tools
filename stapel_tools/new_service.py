@@ -25,6 +25,8 @@ from ._templates import (
     ASGI_PY,
     BASE_SETTINGS,
     BOOTSTRAP_SH,
+    CELERY_APP_PY,
+    CONFIG_INIT_PY,
     DEV_SETTINGS,
     DOCKERFILE,
     LOCAL_SETTINGS,
@@ -91,7 +93,7 @@ def make_context(
     )
     dev_mock_providers = ""
     if "stapel_auth" in apps:
-        from ._dev_env_templates import DEV_MOCK_OTP_BLOCK
+        from ._local_env_templates import DEV_MOCK_OTP_BLOCK
         dev_mock_providers = DEV_MOCK_OTP_BLOCK
     return {
         "TITLE": title,
@@ -190,7 +192,8 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / "requirements.txt": REQUIREMENTS_TXT,
         root / d / "bootstrap.sh": render(BOOTSTRAP_SH, ctx),
         root / d / "Dockerfile": render(DOCKERFILE, ctx),
-        root / d / "config" / "__init__.py": "",
+        root / d / "config" / "__init__.py": CONFIG_INIT_PY,
+        root / d / "config" / "celery.py": render(CELERY_APP_PY, ctx),
         root / d / "config" / "asgi.py": render(ASGI_PY, ctx),
         root / d / "config" / "wsgi.py": render(WSGI_PY, ctx),
         root / d / "config" / "urls.py": render(URLS_PY, ctx),
@@ -274,12 +277,34 @@ def _update_stapel_services(root: Path, slug: str, title: str):
             break
 
 
+def _add_db_to_compose(path: Path, db_name: str) -> bool:
+    """Append *db_name* to POSTGRES_MULTIPLE_DATABASES in one compose file
+    (keeping the value one quoted scalar). Returns True when changed."""
+    if not path.exists():
+        return False
+    lines = path.read_text().splitlines()
+    for i, line in enumerate(lines):
+        if "POSTGRES_MULTIPLE_DATABASES" in line and db_name not in line:
+            prefix, value = line.split(":", 1)
+            value = value.strip().strip('"').strip("'")
+            value = f"{value},{db_name}" if value else db_name
+            lines[i] = f'{prefix}: "{value}"'
+            path.write_text("\n".join(lines) + "\n")
+            return True
+    return False
+
+
 def _update_compose_base(root: Path, slug: str, dir_name: str):
+    db_name = f"stapel_{slug.replace('-', '_')}"
+    # The local stack has its OWN db service (self-contained file) — keep its
+    # database list in step with the base's.
+    if _add_db_to_compose(root / "docker-compose.local.yml", db_name):
+        print("  updated docker-compose.local.yml (databases)")
+
     path = root / "docker-compose.base.yml"
     if not path.exists():
         return
     lines = path.read_text().splitlines()
-    db_name = f"stapel_{slug.replace('-', '_')}"
 
     # Update POSTGRES_MULTIPLE_DATABASES, keeping the value one quoted scalar
     for i, line in enumerate(lines):
@@ -325,7 +350,7 @@ def _update_compose_file(
     # compose templates ship a COMMENTED example ("  # svc-app:") that a bare
     # `f"{dir_name}:" in text` check false-positives against for a project's
     # first/default service (e.g. "app" -> "svc-app"), silently leaving the
-    # backend never actually wired into docker-compose.yml/docker-compose.dev.yml
+    # backend never actually wired into docker-compose.yml/docker-compose.local.yml
     # (found live, §57 dev-compose audit: a fresh "app" monolith's dev/prod
     # compose never started the backend at all).
     if re.search(rf"^  {re.escape(dir_name)}:\s*$", text, re.MULTILINE):
@@ -336,20 +361,28 @@ def _update_compose_file(
         # DEBUG=False and SECURE_SSL_REDIRECT on, which breaks plain-HTTP
         # local dev outright. Override to config.settings.dev (DEBUG=True,
         # file-mailtrap, debug toolbar, dev-only mock providers), bind-mount
-        # the source for hot reload, and point env_file at .env.dev (real
+        # the source for hot reload, and point env_file at .env.local (real
         # generated secrets + DJANGO_SUPERUSER_*/VITE_* dev defaults) instead
         # of the base service's own env_file: ".env" (prod).
+        # depends_on is repeated here because compose `extends` deliberately
+        # does NOT inherit it — and docker-compose.local.yml is self-contained
+        # (its own db/redis), so the refs resolve inside the same file.
         block = (
             f"\n  {dir_name}:\n"
             f"    extends:\n"
             f"      file: {dir_name}.yml\n"
             f"      service: {dir_name}\n"
-            f"    env_file: \".env.dev\"\n"
+            f"    env_file: \".env.local\"\n"
             f"    environment:\n"
             f"      DJANGO_SETTINGS_MODULE: config.settings.dev\n"
             f"    volumes:\n"
             f"      - ./{dir_name}:/app\n"
             f"      - ./stapel_core:/app/stapel_core:ro\n"
+            f"    depends_on:\n"
+            f"      db:\n"
+            f"        condition: service_healthy\n"
+            f"      redis:\n"
+            f"        condition: service_started\n"
         )
     elif debug_port:
         block = (
@@ -394,7 +427,7 @@ def _update_nginx(root: Path, slug: str, dir_name: str):
         f"\n  location /{slug} {{\n"
         f"    set $upstream_{slug.replace('-', '_')} {dir_name}:8000;\n"
         f"    proxy_pass http://$upstream_{slug.replace('-', '_')};\n"
-        f"    proxy_set_header Host $host;\n"
+        f"    proxy_set_header Host $http_host;\n"
         f"    proxy_set_header X-Real-IP $remote_addr;\n"
         f"    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
         f"    proxy_set_header X-Forwarded-Proto $scheme;\n"
@@ -625,7 +658,7 @@ def scaffold_service(
 
     debug_port = _get_next_debug_port(root)
     _update_compose_file(root, "docker-compose.yml", slug, dir_name, debug_port)
-    _update_compose_file(root, "docker-compose.dev.yml", slug, dir_name, dev_mode=True)
+    _update_compose_file(root, "docker-compose.local.yml", slug, dir_name, dev_mode=True)
     _update_nginx(root, slug, dir_name)
     _update_prometheus(root, slug, dir_name)
     _update_vscode(root, slug, dir_name, title, debug_port)

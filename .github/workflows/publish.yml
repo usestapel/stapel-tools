@@ -63,8 +63,101 @@ jobs:
               print("OK", name)
           PY
 
+  # ─── E2E: "оно едет" — the generated project must DRIVE, live, every run ──
+  # (owner directive). Every live-run shishka is pinned here forever:
+  # entrypoint model imports, kafka silence (inline bus default), a missing
+  # proxy rule (generated prefixes), the port lost in redirects
+  # (absolute_redirect off + $http_host). Release-gating: publish.yml runs
+  # the same job before build.
+  e2e-generated-project:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stapel
+          POSTGRES_PASSWORD: stapel
+          POSTGRES_DB: stapel_e2e
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stapel"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install tools + generated-project runtime deps
+        run: |
+          pip install -e . --quiet
+          pip install pytest pytest-django django djangorestframework "psycopg[binary]" pyyaml \
+            django-debug-toolbar debugpy celery redis django-redis \
+            "stapel-core @ git+https://github.com/usestapel/stapel-core.git" \
+            "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" \
+            "stapel-notifications @ git+https://github.com/usestapel/stapel-notifications.git" \
+            "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" --quiet
+
+      - name: Generate (stapel-assemble, gates must be green)
+        run: stapel-assemble e2e --type monolith --libs auth notifications --output-dir "$RUNNER_TEMP"
+
+      - name: stapel-verify on the generated project (0 required)
+        run: stapel-verify "$RUNNER_TEMP/e2e"
+
+      - name: Live circle — migrate, register, OTP from the LOG, verify, login
+        working-directory: ${{ runner.temp }}/e2e/svc-e2e
+        env:
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: stapel
+          POSTGRES_PASSWORD: stapel
+          POSTGRES_DB: stapel_e2e
+          REDIS_URL: redis://127.0.0.1:6379/0
+        run: python "$GITHUB_WORKSPACE/scripts/e2e_live_circle.py" e2e
+
+      - name: Frontend builds (npm install + vite build; npm ci needs a lockfile the scaffold doesn't ship yet)
+        working-directory: ${{ runner.temp }}/e2e/frontend
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
+      - name: Compose validity + live nginx circuit (redirect-port regression)
+        working-directory: ${{ runner.temp }}/e2e
+        run: |
+          docker compose -f docker-compose.local.yml --env-file .env.local config -q
+          docker compose --env-file .env config -q
+          # Lightest live circuit: nginx (+ its only dependency, the Vite
+          # container). Proves the envsubst template renders, nginx STARTS
+          # without the backend (deferred upstream resolution), and the
+          # owner-canon redirect: /e2e (no slash) -> 301 with a RELATIVE
+          # Location (absolute_redirect off + $http_host — the ":8080 loses
+          # the port" regression, permanently).
+          docker compose -f docker-compose.local.yml --env-file .env.local up -d nginx
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null http://localhost:8080/e2e && break
+            sleep 1
+          done
+          response=$(curl -sI http://localhost:8080/e2e | tr -d '\r')
+          echo "$response"
+          echo "$response" | grep -q "^HTTP/1.1 301"
+          echo "$response" | grep -q "^Location: /e2e/$"
+          # a generated module prefix answers through nginx too
+          curl -sI http://localhost:8080/auth | tr -d '\r' | grep -q "^Location: /auth/$"
+          docker compose -f docker-compose.local.yml --env-file .env.local down -v
+
   build:
-    needs: test
+    needs: [test, e2e-generated-project]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

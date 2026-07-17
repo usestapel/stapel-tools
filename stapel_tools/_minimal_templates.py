@@ -165,6 +165,13 @@ STAPEL_COMM = {
     "ACTION_TRANSPORT": "inprocess",
 }
 
+# Celery (relevant only when an installed lib ships @shared_task, e.g.
+# stapel-auth's login-notification task): minimal has no broker BY DESIGN,
+# so tasks run inline — a lib's .delay() must never 500 for lack of one.
+# config/celery.py binds the app; these two keep it broker-less.
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = False
+
 # Cross-service admin nav (admin-suite AS-4/§37, stapel_core.django.nav): a
 # minimal project is always a single service, so this is the one-row form of
 # the same STAPEL_SERVICES registry the monolith/microservices presets seed

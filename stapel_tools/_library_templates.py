@@ -182,14 +182,83 @@ class PingResponseSerializer(StapelDataclassSerializer):
         dataclass = PingResponse
 '''
 
-VIEWS = '''"""DRF views for {{NAME_DASH}}."""
+PRESENTERS = '''"""Presenters for {{NAME_DASH}} — the DTO-building layer (§55).
+
+Presenter discipline (docs/pending/extensibility-presenters.md; enforced by
+SWAP001/SWAP002 in `stapel-verify`): views NEVER instantiate a `dto.py`
+dataclass directly — every DTO is built by a presenter resolved through
+`get_presenter(KEY, default=...)`, so a host project can swap the
+presentation of any endpoint via `STAPEL_SWAP` without forking this module.
+
+The scaffold ships a working example over the ping endpoint. It has no DAO
+model yet (`models.py` is empty at scaffold time), so `PingPresenter` is a
+plain presenter class with a `present()` method. The moment you add a real
+model, base its presenter on stapel-core's DAO→DTO primitive instead —
+`stapel_core.django.api.presenters.Presenter` (declares `model`/`fields`/
+`custom_fields`, generates the DTO dataclass AND the serializer, lands in
+the auto-catalog PRESENTERS.MD) — and keep the same declare_swap/
+get_presenter plumbing shown here. Etalon:
+stapel_core/django/users/presenters.py.
+"""
+from stapel_core.django.swappable import declare_swap, get_presenter
+
+from .conf import {{SLUG_U}}_settings
+from .dto import PingResponse
+
+#: Swap key for the host presenter override (STAPEL_SWAP registry).
+PING_PRESENTER_KEY = "{{NAMESPACE}}_PING_PRESENTER"
+
+#: Dotted path of the default presenter — single source for both the
+#: declare_swap() catalog registration and the get_presenter() fallback.
+DEFAULT_PING_PRESENTER = "{{PKG}}.presenters.PingPresenter"
+
+# Import-time declaration: makes the swap point visible to the auto-catalog
+# (PRESENTERS.MD, `manage.py presenter_catalog`) even before the first
+# get_ping_presenter() call.
+declare_swap(PING_PRESENTER_KEY, DEFAULT_PING_PRESENTER)
+
+
+class PingPresenter:
+    """Builds the ping response DTO — the only place PingResponse is
+    instantiated (SWAP002: views go through a presenter, never the DTO)."""
+
+    def present(self) -> PingResponse:
+        return PingResponse(greeting={{SLUG_U}}_settings.GREETING)
+
+
+def get_ping_presenter() -> type:
+    """The active (possibly host-swapped) ping presenter.
+
+    Consumers call this instead of importing :class:`PingPresenter`
+    directly — a direct import is exactly what a
+    ``STAPEL_SWAP["{{NAMESPACE}}_PING_PRESENTER"]`` override would silently
+    fail to reach (SWAP001, ``stapel_tools.swap_lint``).
+    """
+    return get_presenter(PING_PRESENTER_KEY, default=DEFAULT_PING_PRESENTER)
+
+
+__all__ = [
+    "PING_PRESENTER_KEY",
+    "DEFAULT_PING_PRESENTER",
+    "PingPresenter",
+    "get_ping_presenter",
+]
+'''
+
+VIEWS = '''"""DRF views for {{NAME_DASH}}.
+
+Presenter-canonical from birth (§55): a view resolves its presenter through
+``get_presenter`` (see ``presenters.py``) and returns
+``StapelResponse(Serializer(presenter.present(...)))`` — it never
+instantiates a ``dto.py`` dataclass itself (SWAP002) and never imports the
+concrete presenter class (SWAP001).
+"""
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions
 from rest_framework.views import APIView
 from stapel_core.django.api.errors import StapelResponse
 
-from .conf import {{SLUG_U}}_settings
-from .dto import PingResponse
+from .presenters import get_ping_presenter
 from .serializers import PingResponseSerializer
 
 
@@ -214,7 +283,8 @@ class SerializerSeamMixin:
 
 @extend_schema(tags=["{{TITLE}}"])
 class PingView(SerializerSeamMixin, APIView):
-    """Scaffold example — replace with real views, keep the seam."""
+    """Scaffold example — replace with real views, keep both seams
+    (serializer mixin + presenter indirection)."""
 
     permission_classes = [permissions.AllowAny]
     response_serializer_class = PingResponseSerializer
@@ -222,9 +292,8 @@ class PingView(SerializerSeamMixin, APIView):
     @extend_schema(responses={200: PingResponseSerializer})
     def get(self, request):
         response_cls = self.get_response_serializer_class()
-        return StapelResponse(
-            response_cls(PingResponse(greeting={{SLUG_U}}_settings.GREETING))
-        )
+        dto = get_ping_presenter()().present()
+        return StapelResponse(response_cls(dto))
 '''
 
 URLS = '''"""Root URLconf for {{NAME_DASH}} — v1 canon mount (api-versioning.md §2).
