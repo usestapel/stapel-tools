@@ -1,0 +1,5 @@
+{
+  "flow.demo.create_widget.title": "Создание виджета",
+  "flow.demo.create_widget.description": "Пользователь создаёт новый виджет.",
+  "flow.demo.create_widget.step.0.note": "Пользователь заполняет форму виджета."
+}

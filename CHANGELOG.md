@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-07-17
+
+### Added — `stapel-gen-client` + `stapel-docs`: the regenerator-of-everything pre-commit surface (owner directive)
+
+Owner directive: "в pre-commit должен быть регенератор ВСЕГО, что можно:
+клиентов (если был оверрайд), CONFIG.MD с полной сводкой энвов, документация
+по api/флоу — в идеале двуязычная." CONFIG.MD/reserved-paths/PRESENTERS.MD
+regeneration already existed (§57); this release closes the other two:
+
+- **`stapel-gen-client`** — tier 2 of the two-tier answer to "our profile
+  is overridden, its frontend pair needs to handle that"
+  (`docs/pending/profile-fields.md` "Дополнение владельца" §17.07): a
+  universal, non-library-specific command that regenerates a typed TS
+  client from a PROJECT's OWN `schema.json` into
+  `frontend/src/api/generated-override/<module>/schema.ts`, reusing
+  openapi-typescript (the exact engine stapel-react's own
+  `scripts/gen-api.mjs` already uses) via `npx` rather than reimplementing
+  it. Gated on `override_active()` — a non-empty `STAPEL_SWAP = {...}`
+  anywhere in the project, or an explicit `stapel.override.json`
+  `"clientOverride"` flag — so the `gen-client-check` pre-commit hook is a
+  silent no-op on every project that hasn't overridden anything yet, and
+  comes alive automatically the day one does. `--check` is the drift gate,
+  `--force` bypasses the gate for manual runs.
+- **`stapel-docs`** — bilingual `docs/api.en.md` + `docs/api.ru.md`
+  generation from a project's `schema.json`/`flows.json`/`errors.json`
+  (endpoints + DTO fields sourced from backend docstrings, R004 canon; flow
+  user-stories; error catalog). Where a module already ships a Russian
+  translation (`translations/flows.ru.json`/`translations/errors.ru.json`
+  — the stapel-translate precedent) it's used verbatim; otherwise the
+  English text is shown with an honest `(en)` marker, never fabricated.
+  Supports the monolith `codegen/generated/` aggregate (re-split into
+  per-module sections by path prefix), per-service/vendored `docs/`
+  checkouts, and the literal `<mod>/api/v1/schema.json` shape. `--check`
+  is the `api-docs-check` pre-commit drift gate; a project with no
+  `schema.json` yet is a graceful no-op.
+- New shared discovery module `_docgen_scan.discover_modules()` — the one
+  scanner both commands key off, so a project's doc sections and its
+  client-override folders always agree on module names.
+- `.pre-commit-config.yaml` template gains `api-docs-check` (every project
+  type) and `gen-client-check` (frontend-carrying project types); AGENTS.md
+  template gains a "Generated artifacts" table naming every regenerator and
+  its source, plus a frontend bullet on the generated-override seam;
+  README "Checks" section templates and this repo's own README document
+  both new commands.
+
 ## [0.11.5] — 2026-07-17
 
 ### Added — `stapel-catalog --index`: the full machine index (agent-knowledge-base.md §64 "Волна 1")

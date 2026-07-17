@@ -1,0 +1,27 @@
+[
+  {
+    "id": "demo.create_widget",
+    "title": "Create a widget",
+    "title_key": "flow.demo.create_widget.title",
+    "description": "The user creates a new widget.",
+    "description_key": "flow.demo.create_widget.description",
+    "actors": ["Authenticated user"],
+    "steps": [
+      {
+        "kind": "human",
+        "order": 0,
+        "note": "The user fills in the widget form.",
+        "note_key": "flow.demo.create_widget.step.0.note",
+        "ref": ""
+      },
+      {
+        "kind": "http",
+        "order": 1,
+        "note": "Create the widget.",
+        "note_key": "flow.demo.create_widget.step.1.note",
+        "ref": "demo.views.WidgetViewSet.create",
+        "endpoints": [{"method": "POST", "path": "/demo/api/v1/widgets/"}]
+      }
+    ]
+  }
+]

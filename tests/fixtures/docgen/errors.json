@@ -1,0 +1,16 @@
+[
+  {
+    "code": "error.400.widget_name_taken",
+    "status": 400,
+    "params": [],
+    "remediation": "fix_input",
+    "en": "Widget name already taken."
+  },
+  {
+    "code": "error.404.widget_not_found",
+    "status": 404,
+    "params": [],
+    "remediation": "retry",
+    "en": "Widget not found."
+  }
+]

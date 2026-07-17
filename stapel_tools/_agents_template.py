@@ -114,6 +114,30 @@ pre-commit hook fails the commit when it drifts).
   secrets/password at prod boot anyway (`ImproperlyConfigured`).
 - A stand env is generated fresh per stand (shape: `.env.example`, real
   random secrets), never copied from `.env.local`.
+
+## 5. Generated artifacts — never hand-edit, always regenerate
+
+Everything below is produced by a `stapel-tools` command from a real
+source (schema/registry/lib CONFIG.MD) and re-checked by a pre-commit
+hook; a hand-edit is silently overwritten (or fails the drift gate) the
+next time someone runs the generator. Fix the SOURCE, then regenerate —
+never patch the output file directly.
+
+| Generated | Command | Source | Pre-commit gate |
+|---|---|---|---|
+| `CONFIG.MD` | `stapel-config-manifest .` | selected libs' own CONFIG.MD | `config-manifest-check` |
+| `reserved-paths.json` (frontend only) | `stapel-reserved-paths .` | this project's lib selection | `reserved-paths-check` |
+| `PRESENTERS.MD` | `manage.py presenter_catalog` | live presenter/swap registries | `presenter-catalog-check` |
+| `docs/api.en.md` + `docs/api.ru.md` | `stapel-docs .` | `schema.json`/`flows.json`/`errors.json` (+ ru translations, where a module ships them) | `api-docs-check` |
+| `frontend/src/api/generated-override/<mod>/schema.ts` (frontend only, only once this project overrides a default) | `stapel-gen-client .` | THIS project's own `schema.json` | `gen-client-check` |
+
+`stapel-docs` and `stapel-gen-client` are both no-ops (exit 0, nothing
+written) when their source doesn't exist yet — `stapel-docs` until
+`schema.json` has been generated (`stapel-codegen` / the codegen pipeline),
+`stapel-gen-client` until this project actually overrides a stapel default
+(a non-empty `STAPEL_SWAP = {...}` anywhere, or an explicit
+`stapel.override.json` with `"clientOverride": true`). Neither command
+invents output from nothing.
 {{FRONTEND_SECTION}}
 ## Verify before you claim done
 
@@ -132,7 +156,7 @@ work done.
 
 # Appended when the project has a frontend/ dir (monolith today — §57).
 FRONTEND_SECTION = """
-## 5. Frontend — no hardcodes, typed events, repositories not raw storage
+## 6. Frontend — no hardcodes, typed events, repositories not raw storage
 
 - No raw colours: every colour is a design token (`@stapel/eslint-plugin`
   rule `no-raw-colors`) — `cssVar("...")`, never a literal hex/rgb.
@@ -164,4 +188,10 @@ FRONTEND_SECTION = """
   `reserved-paths.json` actually lists; regenerate it with
   `stapel-reserved-paths .` if it looks stale (the
   `reserved-paths-check` pre-commit hook fails the commit on drift).
+- If this project has overridden a stapel default (a `STAPEL_SWAP` entry, or
+  extra profile/attribute fields), point the affected pair's api layer at
+  `frontend/src/api/generated-override/<mod>/schema.ts` instead of the
+  pair's own bundled types — regenerate it with `stapel-gen-client .`, never
+  hand-edit (§5's table; `gen-client-check` gates drift, and is a silent
+  no-op until an override actually exists).
 """

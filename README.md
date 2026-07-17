@@ -193,6 +193,51 @@ recipes:
     notes: reviews live in a separate target-generic module
 ```
 
+### `stapel-docs` — bilingual API/flow documentation
+
+Renders `docs/api.en.md` + `docs/api.ru.md` at a generated project's root
+from artifacts it already ships: `schema.json` (endpoints, DTO fields —
+descriptions sourced straight from backend docstrings, R004 canon),
+`flows.json` (flow/step user stories) and `errors.json` (every
+`error.<status>.<name>` code). Where a module has already shipped a
+Russian translation (`translations/flows.ru.json` /
+`translations/errors.ru.json` — the stapel-translate precedent), the
+Russian doc uses it verbatim; where it hasn't (yet), the English text is
+shown with an honest `(en)` marker instead of a fabricated translation.
+Supports three schema layouts: a monolith's `codegen/generated/schema.json`
+aggregate (grouped back into per-module sections by path prefix), a
+per-service/vendored-lib `<service>/docs/schema.json`, or a literal
+`<mod>/api/v1/schema.json`.
+
+```bash
+stapel-docs .              # write docs/api.en.md + docs/api.ru.md
+stapel-docs . --check      # drift gate (pre-commit's api-docs-check)
+```
+
+A project with no `schema.json` generated yet is a graceful no-op, exit 0.
+
+### `stapel-gen-client` — project-owned typed API-client override
+
+Tier 2 of the answer to "if we override a module's backend, its frontend
+pair must handle that" (`docs/pending/profile-fields.md` "Дополнение
+владельца"): regenerates a typed TS client from the PROJECT'S OWN
+`schema.json` (not the library's upstream one) into
+`frontend/src/api/generated-override/<module>/schema.ts` — reusing
+openapi-typescript (the same generation core stapel-react's own
+`scripts/gen-api.mjs` uses) via `npx`, not a reimplementation. A pair's api
+layer can point at this file instead of its own bundled types once a host
+has overridden that module.
+
+Only does anything once the project actually HAS an override — a
+non-empty `STAPEL_SWAP = {...}` anywhere in the project, or an explicit
+`stapel.override.json` with `"clientOverride": true`:
+
+```bash
+stapel-gen-client .              # no-op without an override signal
+stapel-gen-client . --check      # drift gate (pre-commit's gen-client-check)
+stapel-gen-client . --force      # generate even without a detected override
+```
+
 ### `stapel-lint` — project-specific static linter
 
 ```bash
