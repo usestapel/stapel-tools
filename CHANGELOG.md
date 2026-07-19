@@ -2,7 +2,48 @@
 
 ## [Unreleased]
 
-## [0.13.0] — 2026-07-18
+## [0.14.0] — 2026-07-19
+
+### Added — frontend wiring: scaffold the selected `@stapel/<module>-react` pairs (owner directive, frontend-wiring gap)
+
+The generated `frontend/` used to be a generic Vite+React shell that never
+wired a project's selected feature libs' React counterparts, even when a
+published `@stapel/<module>-react` pair existed for one. Closed, data-driven:
+
+- New `FRONTEND_REACT_LIBS` registry (`create_project.py`) maps each
+  `STAPEL_LIBS` key with a published pair (`auth`, `billing`, `calendar`,
+  `notifications`, `profiles`, `recordings`, `workspaces` — versions pinned
+  against both the sibling `stapel-react` checkout AND live
+  `npm view @stapel/<name>-react version`, identical for all seven) to that
+  pair's `create<Module>Runtime`/`<Module>Provider`/`register<Module>I18n`
+  exports and, where genuinely zero-required-prop, its `/default` antd-skin
+  top-level component (`AuthPanel`, `NotificationFeedList`,
+  `ProfileSettings` — read off each pair's own prop interfaces, not
+  guessed; `workspaces`' `/default` components all require a `workspaceId`
+  the scaffold can't fabricate, so it stays provider-only).
+- `frontend/package.json` gains the selected pairs' deps + `@stapel/core` +
+  `@tanstack/react-query`, plus `antd`/`@stapel/tokens-antd` IFF a selected
+  pair mounts a `/default` skin — never for a headless-only selection
+  (billing/calendar/recordings ship no antd peer dep at all).
+- New generated `frontend/src/modules.tsx` — the data-driven registry: one
+  shared `<StapelProvider>` (first selected pair as the default client,
+  every other pair via `clients={{ "<mod>": ... }}`, the exact multi-pair
+  composition `@stapel/core`'s own README documents) wrapping one
+  `<XProvider>` per selected pair (`ModulesProvider`), plus `ModulesPanel`
+  mounting every selected pair's zero-config default component wrapped once
+  in antd's `<ConfigProvider theme={toAntdThemeConfig("light")}>` (§68
+  bridge). Regenerating this file is "change the module selection", never a
+  hand-edit — adding a pair later is data, not code.
+- `frontend/src/App.tsx` switches to a second, still-STATIC template
+  (`APP_TSX_WITH_MODULES`) that imports `ModulesProvider`/`ModulesPanel`
+  from `./modules.js` whenever the selection has >=1 react-paired module;
+  a selection with none gets the byte-identical prior clean shell (no
+  `modules.tsx`, no package.json churn — regression-tested).
+- `tests/test_frontend_scaffold.py::TestFrontendReactWiring` — exact
+  dependency-set assertions, version pins, provider/runtime wiring per
+  selected pair, the zero-config-vs-provider-only default-component split,
+  the import-resolves-to-a-declared-dep "compiles conceptually" gate, and
+  the clean-shell regression for a selection with no react-paired module.
 
 ### Added — scaffold `stapel.theme.json` + `stapel-tokens`-bin pre-commit hook (§68 Ф5, color-token-matrix)
 

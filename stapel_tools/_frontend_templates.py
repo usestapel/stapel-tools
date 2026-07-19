@@ -36,6 +36,8 @@ exact forked-generator failure mode §68 closes; see
 never hand-edit the generated ``frontend/src/stapel-tokens/`` output.
 """
 
+import json
+
 PACKAGE_JSON = """\
 {
   "name": "{{SLUG}}-frontend",
@@ -198,6 +200,196 @@ export default function App() {
   );
 }
 """
+
+# Used INSTEAD of APP_TSX whenever the project's lib selection includes at
+# least one FRONTEND_REACT_LIBS-registered module (create_project.py). This
+# template itself is STATIC — identical regardless of WHICH modules were
+# selected — because the actual per-module wiring lives entirely in the
+# generated src/modules.tsx (render_modules_tsx below); adding/dropping a
+# module changes that data file, never this one. See that function's
+# docstring for the composition it emits.
+APP_TSX_WITH_MODULES = """\
+import { useEffect, useState } from "react";
+import { ModulesPanel, ModulesProvider } from "./modules.js";
+
+/**
+ * Starter component — proves the dev/prod wiring end to end by calling the
+ * backend's own health endpoint through the SAME path a browser uses (the
+ * reserved /{{SLUG}}/ namespace, routed by nginx/local-nginx to the backend —
+ * never a hardcoded backend origin from the browser's side), AND mounts the
+ * project's selected @stapel/<module>-react pairs via the generated
+ * `./modules` registry (`ModulesProvider` wires one runtime + provider per
+ * selected pair; `ModulesPanel` mounts whichever pairs shipped a genuinely
+ * zero-config `/default` top-level component — see modules.tsx's own
+ * comments for exactly which and why). Replace with your real app; keep
+ * hitting relative paths under /{{SLUG}}/api/, not an absolute backend URL,
+ * so this keeps working unmodified behind either nginx (dev or prod).
+ */
+export default function App() {
+  const [status, setStatus] = useState<string>("checking backend...");
+
+  useEffect(() => {
+    fetch("/{{SLUG}}/api/health/")
+      .then((res) => setStatus(res.ok ? "backend OK" : `backend HTTP ${res.status}`))
+      .catch(() => setStatus("backend unreachable"));
+  }, []);
+
+  return (
+    <ModulesProvider>
+      <main style={{ fontFamily: "system-ui, sans-serif", padding: "2rem" }}>
+        <h1>{{TITLE}}</h1>
+        <p>Vite dev server is up. Backend check: {status}</p>
+        <ModulesPanel />
+      </main>
+    </ModulesProvider>
+  );
+}
+"""
+
+
+def render_modules_tsx(entries: list[dict]) -> str:
+    """Generates ``frontend/src/modules.tsx`` — the DATA-DRIVEN registry of
+    every selected ``@stapel/<module>-react`` pair (create_project.py's
+    ``FRONTEND_REACT_LIBS``, filtered to the project's actual ``--modules``
+    selection, in registry order). Only called when that filtered list is
+    non-empty; App.tsx then switches to ``APP_TSX_WITH_MODULES`` instead of
+    the plain ``APP_TSX``.
+
+    Each ``entries[i]`` dict: ``key`` (STAPEL_LIBS/FRONTEND_REACT_LIBS key),
+    ``package`` (npm name), ``provider``/``create_runtime``/
+    ``register_i18n`` (the pair's own exports — see its README's "Wire the
+    app once" section, reproduced here mechanically), and an optional
+    ``default_component`` — the ONE ``/default`` (antd skin) export that pair
+    ships with zero required props (verified by reading each pair's own
+    ``src/default/*.tsx`` prop interfaces, not guessed).
+
+    Two things this emits:
+
+    - ``ModulesProvider`` — one shared ``<StapelProvider>`` (the first
+      selected pair's client as the default, every other pair's client
+      passed via the ``clients={{ "<mod>": ... }}`` per-module override —
+      exactly the multi-pair composition `@stapel/core`'s own README
+      documents) wrapping one ``<XProvider runtime={...}>`` per selected
+      pair, nested.
+    - ``ModulesPanel`` — mounts every selected pair's zero-config
+      ``default_component`` (if any), wrapped once in antd's
+      ``<ConfigProvider theme={toAntdThemeConfig("light")}>`` themed via
+      ``@stapel/tokens-antd`` (§68 bridge — the same pattern
+      ``@stapel/tokens-antd``'s own README shows, and the one `AuthPanel`
+      itself uses internally; nesting a second ConfigProvider inside is
+      harmless). Renders nothing (but stays a valid no-arg component App.tsx
+      can always import) when no selected pair has a zero-config default —
+      workspaces-react's `/default` components all require a `workspaceId`
+      the scaffold has no way to fabricate, so it (and every headless-only
+      pair — billing/calendar/recordings, which ship no `/default` subpath
+      at all) is wired provider-only here, never guessed into a broken
+      mount.
+    """
+    needs_antd = any(e.get("default_component") for e in entries)
+
+    lines: list[str] = [
+        "/**",
+        " * GENERATED — do not hand-edit the provider nesting below. This file",
+        " * is the data-driven registry of this project's selected",
+        " * @stapel/<module>-react pairs (stapel-create-project's",
+        " * FRONTEND_REACT_LIBS, filtered to --modules). Add or drop a pair by",
+        " * changing the project's module selection and re-scaffolding — never",
+        " * by editing this file's shape.",
+        " */",
+        'import type { ReactElement, ReactNode } from "react";',
+        'import { createI18n, createStapelQueryClient, StapelProvider } from "@stapel/core";',
+    ]
+    if needs_antd:
+        lines.append('import { ConfigProvider } from "antd";')
+        lines.append('import { toAntdThemeConfig } from "@stapel/tokens-antd";')
+    for e in entries:
+        lines.append(
+            f'import {{ {e["create_runtime"]}, {e["provider"]}, {e["register_i18n"]} }} '
+            f'from "{e["package"]}";'
+        )
+        if e.get("default_component"):
+            lines.append(f'import {{ {e["default_component"]} }} from "{e["package"]}/default";')
+    lines.append("")
+    lines.append('const query = createStapelQueryClient({ cacheVersion: "0.0.0" });')
+    lines.append('const i18n = createI18n({ locale: "en" });')
+    lines.append("")
+    for e in entries:
+        key = e["key"]
+        lines.append(
+            f'const {key}Runtime = {e["create_runtime"]}({{ baseUrl: "/{key}/api/v1/" }});'
+        )
+        lines.append(f"{e['register_i18n']}(i18n);")
+    lines.append("")
+    lines.append(f"export const INSTALLED_REACT_MODULES = {_ts_string_array([e['key'] for e in entries])} as const;")
+    lines.append("")
+
+    primary = entries[0]
+    rest = entries[1:]
+    lines.append("/**")
+    lines.append(" * One shared `<StapelProvider>` (core config + query + i18n) plus one")
+    lines.append(" * `<XProvider>` per selected pair, nested — the \"Wire the app once\"")
+    lines.append(" * composition every pair's own README documents, generated once per")
+    lines.append(" * module selection instead of hand-edited per pair.")
+    lines.append(" */")
+    lines.append("export function ModulesProvider({ children }: { children: ReactNode }): ReactElement {")
+    lines.append("  return (")
+    if rest:
+        lines.append('    <StapelProvider')
+        lines.append(f'      client={{{primary["key"]}Runtime.client}}')
+        lines.append("      clients={{")
+        for e in rest:
+            lines.append(f'        {e["key"]}: {e["key"]}Runtime.client,')
+        lines.append("      }}")
+        lines.append("      queryRuntime={query}")
+        lines.append("      i18n={i18n}")
+        lines.append("    >")
+    else:
+        lines.append(f'    <StapelProvider client={{{primary["key"]}Runtime.client}} queryRuntime={{query}} i18n={{i18n}}>')
+
+    indent = "      "
+    for e in entries:
+        lines.append(f'{indent}<{e["provider"]} runtime={{{e["key"]}Runtime}}>')
+        indent += "  "
+    lines.append(f"{indent}{{children}}")
+    for e in reversed(entries):
+        indent = indent[:-2]
+        lines.append(f'{indent}</{e["provider"]}>')
+    lines.append("    </StapelProvider>")
+    lines.append("  );")
+    lines.append("}")
+    lines.append("")
+
+    defaults = [e for e in entries if e.get("default_component")]
+    lines.append("/**")
+    lines.append(" * Mounts every selected pair's zero-required-prop `/default` top-level")
+    lines.append(" * component (none guessed into existence — see this file's own module")
+    lines.append(" * docstring for exactly which pairs qualify and why). Must render below")
+    lines.append(" * `<ModulesProvider>` (needs each pair's runtime + core's i18n).")
+    lines.append(" */")
+    lines.append("export function ModulesPanel(): ReactElement | null {")
+    if not defaults:
+        lines.append("  return null;")
+        lines.append("}")
+    else:
+        lines.append("  return (")
+        if needs_antd:
+            lines.append('    <ConfigProvider theme={toAntdThemeConfig("light")}>')
+            for e in defaults:
+                lines.append(f'      <{e["default_component"]} />')
+            lines.append("    </ConfigProvider>")
+        else:
+            for e in defaults:
+                lines.append(f'    <{e["default_component"]} />')
+        lines.append("  );")
+        lines.append("}")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def _ts_string_array(values: list[str]) -> str:
+    return "[" + ", ".join(json.dumps(v) for v in values) + "]"
+
 
 VITE_ENV_D_TS = """\
 /// <reference types="vite/client" />

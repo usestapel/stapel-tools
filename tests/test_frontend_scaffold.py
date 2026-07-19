@@ -575,6 +575,188 @@ console.log(JSON.stringify({{
         assert "proxy_pass http://${BACKEND_UPSTREAM};" not in local
 
 
+class TestFrontendReactWiring:
+    """Frontend wiring gap (owner directive): a project scaffolded with
+    feature libs that have a published ``@stapel/<module>-react`` pair gets
+    that pair's dep + provider wiring generated for free — never a generic
+    shell that silently drops the frontend counterpart of a selected
+    backend module. Selections with no react-paired module stay the exact
+    prior clean shell (regression)."""
+
+    REACT_PACKAGES = {
+        "auth": "@stapel/auth-react",
+        "billing": "@stapel/billing-react",
+        "calendar": "@stapel/calendar-react",
+        "notifications": "@stapel/notifications-react",
+        "profiles": "@stapel/profiles-react",
+        "recordings": "@stapel/recordings-react",
+        "workspaces": "@stapel/workspaces-react",
+    }
+
+    @staticmethod
+    def _imported_packages(*sources: str) -> set[str]:
+        """Every non-relative package name imported across the given source
+        texts — scoped packages collapse a `/default` (or any other)
+        subpath back to the bare package name (`@stapel/auth-react/default`
+        -> `@stapel/auth-react`) so a dep-presence check lines up with
+        package.json keys."""
+        import re
+
+        packages: set[str] = set()
+        for src in sources:
+            for m in re.finditer(r'from\s+"([^"]+)"', src):
+                spec = m.group(1)
+                if spec.startswith("."):
+                    continue  # relative import — not an npm dep
+                if spec.startswith("@"):
+                    parts = spec.split("/", 2)
+                    packages.add("/".join(parts[:2]))
+                else:
+                    packages.add(spec.split("/", 1)[0])
+        return packages
+
+    def test_monolith_with_two_react_paired_modules_wires_exactly_those_react_deps(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "billing", "calendar"])
+        import json
+
+        pkg = json.loads((proj / "frontend" / "package.json").read_text())
+        deps = pkg["dependencies"]
+        react_deps = {k for k in deps if k.endswith("-react")}
+        assert react_deps == {"@stapel/billing-react", "@stapel/calendar-react"}
+        # headless-only pairs (no `/default` skin) never pull antd in
+        assert "antd" not in deps
+        assert "@stapel/tokens-antd" not in deps
+        # support deps every react pair needs are present
+        assert "@stapel/core" in deps
+        assert "@tanstack/react-query" in deps
+
+    def test_monolith_with_antd_skinned_module_pulls_antd_bridge(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "auth"])
+        import json
+
+        pkg = json.loads((proj / "frontend" / "package.json").read_text())
+        deps = pkg["dependencies"]
+        assert deps["@stapel/auth-react"] == "^0.5.2"
+        assert "antd" in deps
+        assert "@stapel/tokens-antd" in deps
+
+    def test_generated_app_imports_resolve_to_deps_present_in_package_json(self, tmp_path):
+        """The numeric compile-conceptually gate: parse every import in the
+        generated App.tsx + modules.tsx and assert each non-relative spec's
+        package is declared in package.json (dependencies or
+        devDependencies) — proof the generated app wouldn't 501 on
+        `npm install` with a missing/undeclared package."""
+        import json
+
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["core", "auth", "billing", "notifications", "workspaces"],
+        )
+        frontend = proj / "frontend"
+        app_tsx = (frontend / "src" / "App.tsx").read_text()
+        modules_tsx = (frontend / "src" / "modules.tsx").read_text()
+        pkg = json.loads((frontend / "package.json").read_text())
+        declared = {*pkg.get("dependencies", {}), *pkg.get("devDependencies", {})}
+
+        imported = self._imported_packages(app_tsx, modules_tsx)
+        # "react" itself + every @stapel/*-react + support deps must resolve
+        assert imported, "expected at least one non-relative import"
+        missing = imported - declared
+        assert not missing, f"imported but not declared: {missing}"
+
+    def test_react_module_dep_versions_match_published_stapel_react_pins(self, tmp_path):
+        """Exact version pins (§ verify against npm) — no invented packages,
+        no stale/mismatched version strings."""
+        import json
+
+        expected = {
+            "auth": "0.5.2", "billing": "0.5.0", "calendar": "0.5.0",
+            "notifications": "0.5.0", "profiles": "0.6.0",
+            "recordings": "0.4.0", "workspaces": "0.6.0",
+        }
+        proj = _create(tmp_path, "app", "monolith", modules=["core", *expected.keys()])
+        pkg = json.loads((proj / "frontend" / "package.json").read_text())
+        deps = pkg["dependencies"]
+        for key, version in expected.items():
+            assert deps[self.REACT_PACKAGES[key]] == f"^{version}", key
+
+    def test_modules_tsx_wires_provider_and_runtime_per_selected_pair(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "billing", "recordings"])
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert "createBillingRuntime({ baseUrl: \"/billing/api/v1/\" })" in modules_tsx
+        assert "createRecordingsRuntime({ baseUrl: \"/recordings/api/v1/\" })" in modules_tsx
+        assert "<BillingProvider runtime={billingRuntime}>" in modules_tsx
+        assert "<RecordingsProvider runtime={recordingsRuntime}>" in modules_tsx
+        assert "registerBillingI18n(i18n)" in modules_tsx
+        assert "registerRecordingsI18n(i18n)" in modules_tsx
+        assert "export function ModulesProvider" in modules_tsx
+        assert "export function ModulesPanel" in modules_tsx
+        # no default skin for either pair -> ModulesPanel mounts nothing
+        assert "return null;" in modules_tsx
+
+    def test_modules_tsx_mounts_only_the_zero_config_default_components(self, tmp_path):
+        """auth's AuthPanel and notifications' NotificationFeedList are
+        genuinely zero-required-prop `/default` components and get mounted;
+        workspaces ships a `/default` subpath too but every one of its
+        components requires a `workspaceId` the scaffold cannot fabricate —
+        it must stay provider-only, never a guessed mount."""
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["core", "auth", "notifications", "workspaces"],
+        )
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert "<AuthPanel />" in modules_tsx
+        assert "<NotificationFeedList />" in modules_tsx
+        assert "WorkspaceSettings" not in modules_tsx
+        assert "MembersManager" not in modules_tsx
+        assert '@stapel/workspaces-react/default"' not in modules_tsx
+
+    def test_app_tsx_switches_to_module_aware_template_and_mounts_modules_provider(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles"])
+        app_tsx = (proj / "frontend" / "src" / "App.tsx").read_text()
+        assert 'from "./modules.js"' in app_tsx
+        assert "<ModulesProvider>" in app_tsx
+        assert "<ModulesPanel />" in app_tsx
+        # still hits the reserved backend prefix, never an absolute origin
+        assert 'fetch("/app/api/health/")' in app_tsx
+        assert "http://" not in app_tsx
+
+    def test_first_selected_pair_is_the_default_stapel_provider_client(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "billing", "auth"])
+        # registry order (STAPEL_LIBS order), not CLI arg order: auth sorts
+        # before billing in STAPEL_LIBS, so auth is the primary client.
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert "client={authRuntime.client}" in modules_tsx
+        assert "billing: billingRuntime.client," in modules_tsx
+
+    def test_only_non_react_paired_libs_produce_the_prior_clean_shell(self, tmp_path):
+        """Regression: a selection with zero react-paired modules must not
+        gain modules.tsx, must not switch App.tsx templates, and
+        package.json's dependencies stay exactly {react, react-dom}."""
+        import json
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "gdpr", "translate"])
+        frontend = proj / "frontend"
+        assert not (frontend / "src" / "modules.tsx").exists()
+        app_tsx = (frontend / "src" / "App.tsx").read_text()
+        assert "./modules" not in app_tsx
+        assert "ModulesProvider" not in app_tsx
+
+        pkg = json.loads((frontend / "package.json").read_text())
+        assert pkg["dependencies"] == {"react": "^19.1.0", "react-dom": "^19.1.0"}
+
+    def test_headless_lib_with_no_react_pair_scaffolds_with_zero_frontend_wiring(self, tmp_path):
+        """attributes (http=False, no @stapel/attributes-react package
+        exists) must not appear anywhere in the frontend wiring surface."""
+        import json
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "attributes", "billing"])
+        pkg = json.loads((proj / "frontend" / "package.json").read_text())
+        assert not any("attributes" in dep for dep in pkg["dependencies"])
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert "attributes" not in modules_tsx.lower()
+
+
 class TestGeneratedCeleryWiring:
     """Found by the e2e live circle: without config/celery.py every
     @shared_task in an installed lib binds to Celery's default UNCONFIGURED

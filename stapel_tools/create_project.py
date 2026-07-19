@@ -386,6 +386,116 @@ STAPEL_LIBS = {
 }
 
 
+# Frontend wiring registry — the published `@stapel/<key>-react` headless
+# pairs (stapel-react/packages/*-react), keyed by the SAME STAPEL_LIBS key so
+# a project's `--modules` selection drives BOTH sides by construction. Only
+# modules with an actual published pair are listed here; any other selected
+# lib (e.g. "gdpr", "tasks") scaffolds a plain frontend with zero wiring —
+# see `_write_frontend_scaffold`.
+#
+# Pins verified 2026-07-19 against BOTH the sibling stapel-react checkout's
+# `packages/<key>-react/package.json` `version` AND the live
+# `npm view @stapel/<key>-react version` (identical for all seven — the
+# workspace checkout is not ahead of its own last publish for these
+# packages). `@stapel/core`/`@tanstack/react-query`/`antd`/
+# `@stapel/tokens-antd` pins come from the live npm registry (the ACTUAL
+# resolution a fresh `npm install` gets), not the sibling checkout's
+# workspace-protocol devDependency pins (those can trail npm — e.g.
+# stapel-react's own local `@stapel/core` was 0.6.1 while npm already had
+# 0.6.2 at pin time).
+#
+# Every pair's `create<Module>Runtime` takes the SAME generic
+# `CreateModuleRuntimeOptions` shape from `@stapel/core` (just `baseUrl` —
+# confirmed by reading each pair's `src/model/runtime.ts`) EXCEPT auth's,
+# which accepts extra optional session-lifecycle callbacks the generated
+# scaffold deliberately leaves unset (no invented routes) — so the
+# `baseUrl: "/<key>/api/v1/"` call shape below is uniform across all seven,
+# never module-specific codegen.
+#
+# `default_component` names the ONE headless pair's `./default` (antd skin)
+# export that is genuinely mountable with **zero required props** (read off
+# each pair's own `src/default/*.tsx` prop interfaces — the actual gate, not
+# a guess): `AuthPanel` (auth), `NotificationFeedList` (notifications),
+# `ProfileSettings` (profiles). Pairs that ship a `/default` subpath but
+# whose every component needs an app-supplied id the scaffold cannot
+# fabricate (`workspaces`: `WorkspaceSettings`/`MembersManager` both require
+# `workspaceId`) are wired provider-only, same as pairs with no `/default`
+# subpath at all (billing, calendar, recordings — genuinely headless, no
+# antd peer dep). Absent key = no default component to mount.
+FRONTEND_REACT_LIBS = {
+    "auth": {
+        "package": "@stapel/auth-react",
+        "version": "0.5.2",
+        "provider": "AuthProvider",
+        "create_runtime": "createAuthRuntime",
+        "register_i18n": "registerAuthI18n",
+        "default_component": "AuthPanel",
+    },
+    "billing": {
+        "package": "@stapel/billing-react",
+        "version": "0.5.0",
+        "provider": "BillingProvider",
+        "create_runtime": "createBillingRuntime",
+        "register_i18n": "registerBillingI18n",
+    },
+    "calendar": {
+        "package": "@stapel/calendar-react",
+        "version": "0.5.0",
+        "provider": "CalendarProvider",
+        "create_runtime": "createCalendarRuntime",
+        "register_i18n": "registerCalendarI18n",
+    },
+    "notifications": {
+        "package": "@stapel/notifications-react",
+        "version": "0.5.0",
+        "provider": "NotificationsProvider",
+        "create_runtime": "createNotificationsRuntime",
+        "register_i18n": "registerNotificationsI18n",
+        "default_component": "NotificationFeedList",
+    },
+    "profiles": {
+        "package": "@stapel/profiles-react",
+        "version": "0.6.0",
+        "provider": "ProfilesProvider",
+        "create_runtime": "createProfilesRuntime",
+        "register_i18n": "registerProfilesI18n",
+        "default_component": "ProfileSettings",
+    },
+    "recordings": {
+        "package": "@stapel/recordings-react",
+        "version": "0.4.0",
+        "provider": "RecordingsProvider",
+        "create_runtime": "createRecordingsRuntime",
+        "register_i18n": "registerRecordingsI18n",
+    },
+    "workspaces": {
+        "package": "@stapel/workspaces-react",
+        "version": "0.6.0",
+        "provider": "WorkspacesProvider",
+        "create_runtime": "createWorkspacesRuntime",
+        "register_i18n": "registerWorkspacesI18n",
+    },
+}
+
+# Support packages the generated app needs alongside any FRONTEND_REACT_LIBS
+# selection — pins from the live npm registry (2026-07-19), see the
+# FRONTEND_REACT_LIBS docstring above for why npm (not the sibling
+# checkout's workspace pin) is the source of truth here.
+FRONTEND_REACT_CORE_DEPS = {
+    "@stapel/core": "0.6.2",
+    "@tanstack/react-query": "5.101.2",
+}
+# Only pulled in when >=1 selected module's registry entry has
+# "default_component" set (i.e. the scaffold actually imports a `/default`
+# antd-skinned component) — antd is a peer dep of those pairs, never of the
+# headless-only ones (billing/calendar/recordings), so a project selecting
+# only those stays antd-free.
+FRONTEND_REACT_ANTD_DEPS = {
+    "antd": "6.5.1",
+    "@stapel/tokens-antd": "0.4.0",
+}
+
+
 # Broker per project type: minimal never gets one, microservices requires one
 # (services exchange events), monolith defaults to in-process + outbox — the
 # outbox table already gives at-least-once without extra infra; NATS is the
@@ -860,13 +970,57 @@ def _vite_proxy_rules(prefixes: list[str]) -> str:
     return "\n".join(lines)
 
 
+def _frontend_react_entries(feature_libs: list[str]) -> list[dict]:
+    """The project's selected libs, filtered to FRONTEND_REACT_LIBS and
+    projected into the shape ``_frontend_templates.render_modules_tsx``
+    consumes — registry order (same order STAPEL_LIBS/feature_libs already
+    carries), never re-sorted, so the FIRST selected pair is deterministically
+    the ``ModulesProvider`` default client."""
+    return [
+        {"key": key, **FRONTEND_REACT_LIBS[key]}
+        for key in feature_libs
+        if key in FRONTEND_REACT_LIBS
+    ]
+
+
+def _render_frontend_package_json(rendered_base: str, react_entries: list[dict]) -> str:
+    """Injects the react-pair deps (+ their shared support deps, + antd/
+    tokens-antd IFF at least one selected pair mounts a `/default` skin)
+    into the already SLUG-rendered ``PACKAGE_JSON`` template — via
+    json.loads/dumps (not string tokens) so the result stays valid JSON
+    regardless of key order or how many deps are added. Returns the input
+    UNCHANGED (no parse round-trip at all) when ``react_entries`` is empty —
+    the exact current clean-shell output, byte for byte."""
+    if not react_entries:
+        return rendered_base
+    pkg = json.loads(rendered_base)
+    deps = pkg.setdefault("dependencies", {})
+    for entry in react_entries:
+        deps[entry["package"]] = f'^{entry["version"]}'
+    for name, version in FRONTEND_REACT_CORE_DEPS.items():
+        deps[name] = f"^{version}"
+    if any(entry.get("default_component") for entry in react_entries):
+        for name, version in FRONTEND_REACT_ANTD_DEPS.items():
+            deps[name] = f"^{version}"
+    return json.dumps(pkg, indent=2) + "\n"
+
+
 def _write_frontend_scaffold(
     project_dir: Path, ctx: dict, backend_upstream_default: str,
     backend_prefixes: list[str] | None = None,
+    feature_libs: list[str] | None = None,
 ):
     """``frontend/`` — Vite + React + TypeScript, wired into the dev/prod
     compose + nginx canon (§57 owner directive). See
-    _frontend_templates.py's module docstring for the full picture."""
+    _frontend_templates.py's module docstring for the full picture.
+
+    Frontend wiring (owner directive, this task): when the project's
+    selected ``feature_libs`` include a module with a published
+    ``@stapel/<key>-react`` pair (FRONTEND_REACT_LIBS), that pair's dep +
+    provider wiring is generated into ``package.json``/``src/modules.tsx``
+    and ``src/App.tsx`` switches to the module-aware template. A selection
+    with NO react-paired module gets the exact previous clean shell —
+    unconditionally, no react_entries branch touched at all."""
     from . import _frontend_templates as F
     from ._compose_templates import render_tokens
 
@@ -880,14 +1034,20 @@ def _write_frontend_scaffold(
     def r(template: str) -> str:
         return render_tokens(template, render_ctx)
 
+    react_entries = _frontend_react_entries(feature_libs or [])
+
     frontend = project_dir / "frontend"
-    _write(frontend / "package.json", r(F.PACKAGE_JSON))
+    _write(frontend / "package.json", _render_frontend_package_json(r(F.PACKAGE_JSON), react_entries))
     _write(frontend / "tsconfig.json", F.TSCONFIG_JSON)
     _write(frontend / "tsconfig.node.json", F.TSCONFIG_NODE_JSON)
     _write(frontend / "vite.config.ts", r(F.VITE_CONFIG_TS))
     _write(frontend / "index.html", r(F.INDEX_HTML))
     _write(frontend / "src" / "main.tsx", F.MAIN_TSX)
-    _write(frontend / "src" / "App.tsx", r(F.APP_TSX))
+    if react_entries:
+        _write(frontend / "src" / "modules.tsx", F.render_modules_tsx(react_entries))
+        _write(frontend / "src" / "App.tsx", r(F.APP_TSX_WITH_MODULES))
+    else:
+        _write(frontend / "src" / "App.tsx", r(F.APP_TSX))
     _write(frontend / "src" / "vite-env.d.ts", F.VITE_ENV_D_TS)
     _write(frontend / "stapel.theme.json", r(F.THEME_JSON))
     _write(frontend / "eslint.config.js", F.ESLINT_CONFIG_JS)
@@ -968,6 +1128,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     _write_frontend_scaffold(
         project_dir, ctx, backend_upstream_default,
         backend_prefixes=backend_prefixes,
+        feature_libs=feature_libs,
     )
     _write_deploy_scripts(project_dir)
     _write_agents_and_checks(
