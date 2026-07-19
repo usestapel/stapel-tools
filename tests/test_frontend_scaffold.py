@@ -369,9 +369,12 @@ class TestStaticMediaNamespaceReservation:
     def test_backend_static_media_are_namespaced_per_slug(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
         settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
-        assert 'STATIC_URL = f"/staticfiles/{{SLUG}}/"'.replace("{{SLUG}}", "app") in settings or \
-            'STATIC_URL = f"/staticfiles/app/"' in settings
-        assert 'MEDIA_URL = f"/media/app/"' in settings
+        # Plain string literals, not f-strings — {{SLUG}} is substituted at
+        # render time textually, so an f-prefix here would just be an
+        # extraneous-prefix lint violation (ruff F541) with no interpolation
+        # of its own.
+        assert 'STATIC_URL = "/staticfiles/app/"' in settings
+        assert 'MEDIA_URL = "/media/app/"' in settings
 
     def test_nginx_reserves_bare_prefixes_before_any_backend_or_frontend_route(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")

@@ -507,6 +507,37 @@ GOOGLE_OAUTH2_SECRET=
 RUN_CMD=gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
 """
 
+# Project-root Makefile (studio controls contract, R3/§44 follow-up): the
+# generated backend lives in {{DIR_NAME}}/, not at the root, so the root
+# targets delegate into {{DIR_NAME}}/Makefile (SVC_MAKEFILE in _templates.py)
+# rather than reimplementing lint/test/boot-smoke here. Target names and
+# `controls: lint boot-smoke test` semantics match the minimal preset's
+# Makefile (_minimal_templates.MINIMAL_MAKEFILE) 1:1, so a studio contract
+# that runs `make -C <root> controls` behaves identically regardless of which
+# preset generated the project. frontend/ lint/test is a separate stage (its
+# own `npx eslint .` — see AGENTS.md's frontend section / pre-commit config)
+# not wired into these targets yet — that is a follow-up, not a silent gap:
+# these targets cover the backend, which MUST be controls-green from a fresh
+# checkout.
+MONOLITH_MAKEFILE = """\
+# {{TITLE}} — project controls (backend). See frontend/README.md for the
+# frontend's own lint/build — not yet wired into these targets (follow-up).
+PYTHON ?= python
+
+.PHONY: controls lint test boot-smoke
+
+controls: lint boot-smoke test
+
+lint:
+\t$(MAKE) -C {{DIR_NAME}} lint PYTHON=$(PYTHON)
+
+boot-smoke:
+\t$(MAKE) -C {{DIR_NAME}} boot-smoke PYTHON=$(PYTHON)
+
+test:
+\t$(MAKE) -C {{DIR_NAME}} test PYTHON=$(PYTHON)
+"""
+
 MONOLITH_GITIGNORE = """\
 .env
 # Stand env files (dev/stage/prod STANDS — the reserved names) are generated

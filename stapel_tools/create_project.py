@@ -1063,6 +1063,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         MONOLITH_COMPOSE_PROD,
         MONOLITH_ENV_TEMPLATE,
         MONOLITH_GITIGNORE,
+        MONOLITH_MAKEFILE,
         NGINX_LOCAL_CONF_TEMPLATE,
         nginx_local_backend_locations,
         render_compose_base,
@@ -1107,6 +1108,14 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     _write_env_local(project_dir, ctx, broker, task_broker, backend_upstream_default, env_preset)
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", f"{slug}\n")
+    # Root controls surface (R3/§44 follow-up — studio controls contract runs
+    # `make -C <root> lint/controls/test/boot-smoke` regardless of preset):
+    # delegates into dir_name/Makefile (SVC_MAKEFILE, written by
+    # scaffold_service below) with the exact same target names/semantics as
+    # the minimal preset's own Makefile.
+    _write(project_dir / "Makefile", render_tokens(MONOLITH_MAKEFILE, {
+        "TITLE": ctx["title"], "DIR_NAME": dir_name,
+    }))
     _write_shared_infra(project_dir)
     # Local-nginx canon (§57): a SEPARATE directory from service-configs/nginx/
     # (prod) — docker-compose.local.yml's `nginx` service override points its

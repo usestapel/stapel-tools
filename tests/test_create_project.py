@@ -349,6 +349,108 @@ class TestBootSmoke:
         assert "ImproperlyConfigured" in result.stdout + result.stderr
 
 
+class TestMonolithControls:
+    """R3/§44 follow-up (studio controls contract, live e2e postmortem
+    e2e-3f018cc3): the studio's controls gate runs `make -C <root>
+    lint/controls/test/boot-smoke` at the ASSEMBLED PROJECT ROOT regardless
+    of preset. The minimal preset always wrote a root Makefile with these
+    targets (MINIMAL_MAKEFILE); the monolith preset's backend lives inside
+    svc-<slug>/ instead, and never got a root Makefile at all — so every
+    live monolith run failed the architect's lint gate unfixably (the
+    architect can't create root build files). Fixed deletion-driven: a root
+    Makefile that delegates into svc-<slug>/Makefile, target names/semantics
+    matching MINIMAL_MAKEFILE 1:1 so the contract is preset-agnostic."""
+
+    def test_monolith_root_makefile_delegates_to_service(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        makefile = (proj / "Makefile").read_text()
+        assert "boot-smoke" in makefile
+        controls_line = next(
+            line for line in makefile.splitlines() if line.startswith("controls:")
+        )
+        assert "lint" in controls_line and "boot-smoke" in controls_line and "test" in controls_line
+        for target in ("lint", "boot-smoke", "test"):
+            target_line = next(
+                line for line in makefile.splitlines()
+                if line.startswith(f"{target}:")
+            )
+            assert target_line == f"{target}:"
+        assert "-C svc-app lint" in makefile
+        assert "-C svc-app boot-smoke" in makefile
+        assert "-C svc-app test" in makefile
+
+    def test_monolith_service_has_its_own_makefile_and_ruff_config(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        svc = proj / "svc-app"
+        svc_makefile = (svc / "Makefile").read_text()
+        assert "controls: lint boot-smoke test" in svc_makefile
+        assert "ruff check ." in svc_makefile
+        assert "config.settings.boot_smoke" in svc_makefile
+        assert "pytest" in svc_makefile
+
+        pyproject = (svc / "pyproject.toml").read_text()
+        assert "[tool.ruff]" in pyproject
+        # Django settings tiers star-import the layer below by design — the
+        # linter must not flag every name a lower tier defines as undefined.
+        assert '"config/settings/*.py" = ["F403", "F405"]' in pyproject
+
+    def test_monolith_service_generates_boot_smoke_settings(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        smoke = proj / "svc-app" / "config" / "settings" / "boot_smoke.py"
+        assert smoke.exists()
+        content = smoke.read_text()
+        # Deliberately .base, not .dev/.local — the dev tier drags in
+        # django-debug-toolbar, whose SQL panel unconditionally probes
+        # django.contrib.gis at ready()-time (observed OSError crash on a
+        # host with a broken/partial GDAL native lib — an environment
+        # fragility this gate must not inherit).
+        assert "from .base import *" in content
+        assert "django.db.backends.dummy" in content
+        # base.py's SECRET_KEY has no fallback (only dev.py's does) and
+        # stapel_core's config.E001 check resolves it via os.environ, not
+        # django.conf.settings — so the gate must seed os.environ itself to
+        # run standalone (no shell-sourced .env).
+        assert 'os.environ.setdefault("SECRET_KEY"' in content
+
+    def test_monolith_requirements_include_ruff(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        reqs = (proj / "svc-app" / "requirements.txt").read_text()
+        assert "ruff" in reqs
+
+    def test_monolith_lint_is_green_and_actually_runs_ruff(self, tmp_path):
+        """Numeric proof, not a self-report: `make -C <root> lint` must exit
+        0 AND actually invoke ruff over the generated backend."""
+        proj = _create(tmp_path, "app", "monolith")
+        result = subprocess.run(
+            ["make", "lint", f"PYTHON={sys.executable}"],
+            cwd=proj, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "ruff check ." in result.stdout + result.stderr
+
+    def test_monolith_boot_smoke_is_green_on_the_clean_skeleton(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        result = subprocess.run(
+            ["make", "boot-smoke", f"PYTHON={sys.executable}"],
+            cwd=proj, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    def test_monolith_controls_target_runs_lint_then_boot_smoke_then_test(self, tmp_path):
+        """Confirms the chain order (not just that each target works in
+        isolation) — `test` legitimately needs a live Postgres (docker
+        compose), so this only asserts lint+boot-smoke ran before the
+        expected test-stage failure, not a full green `make controls`."""
+        proj = _create(tmp_path, "app", "monolith")
+        result = subprocess.run(
+            ["make", "controls", f"PYTHON={sys.executable}"],
+            cwd=proj, capture_output=True, text=True,
+        )
+        out = result.stdout + result.stderr
+        assert "ruff check ." in out
+        assert "config.settings.boot_smoke" in out
+
+
 class TestMountConventions:
     """Follow-up to the arch-monolith-mounting P0: a scaffolded service must
     never hardcode a root-relative admin URL, and its "is there a dedicated

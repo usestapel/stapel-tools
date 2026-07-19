@@ -24,6 +24,7 @@ from ._templates import (
     APP_PY,
     ASGI_PY,
     BASE_SETTINGS,
+    BOOT_SMOKE_SETTINGS,
     BOOTSTRAP_SH,
     CELERY_APP_PY,
     CONFIG_INIT_PY,
@@ -36,6 +37,8 @@ from ._templates import (
     PYTEST_INI,
     REQUIREMENTS_TXT,
     SERVICE_YML,
+    SVC_MAKEFILE,
+    SVC_PYPROJECT,
     TEST_MODELS_PY,
     URLS_PY,
     VERSION_TXT,
@@ -202,6 +205,14 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / "config" / "settings" / "dev.py": render(DEV_SETTINGS, ctx),
         root / d / "config" / "settings" / "local.py": render(LOCAL_SETTINGS, ctx),
         root / d / "config" / "settings" / "prod.py": render(PROD_SETTINGS, ctx),
+        # Boot-smoke gate (R3/§44, `make boot-smoke` — part of `make
+        # controls`): the service-dir counterpart of the minimal preset's
+        # config/settings_boot_smoke.py.
+        root / d / "config" / "settings" / "boot_smoke.py": BOOT_SMOKE_SETTINGS,
+        # Ruff config (this service's own controls surface — svc-<slug>/Makefile
+        # below, delegated into from the project root Makefile for monolith).
+        root / d / "pyproject.toml": SVC_PYPROJECT,
+        root / d / "Makefile": render(SVC_MAKEFILE, ctx),
         # The service's own app lives under apps/ (regular package) just like
         # every stapel-new-module app, so INSTALLED_APPS carries "apps.<module>"
         # uniformly (Django ticket #24801).

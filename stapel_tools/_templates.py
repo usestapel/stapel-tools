@@ -113,6 +113,7 @@ __all__ = ("celery_app",)
 
 ASGI_PY = """\
 import os
+
 from django.core.asgi import get_asgi_application
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.base")
@@ -121,6 +122,7 @@ application = get_asgi_application()
 
 WSGI_PY = """\
 import os
+
 from django.core.wsgi import get_wsgi_application
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.base")
@@ -128,14 +130,14 @@ application = get_wsgi_application()
 """
 
 URLS_PY = """\
-from django.contrib import admin
-from django.urls import path
 from django.conf import settings
 from django.conf.urls import include
+from django.contrib import admin
+from django.urls import path
+from stapel_core.django import get_admin_logout_urlpattern, get_health_urls, setup_centralized_admin_login
 from stapel_core.django.api.routers import OptionalSlashRouter
-from stapel_core.django import setup_centralized_admin_login, get_admin_logout_urlpattern, get_health_urls
-from stapel_core.django.openapi.swagger import get_dev_urls
 from stapel_core.django.openapi.mcp import build_mcp_schema_view
+from stapel_core.django.openapi.swagger import get_dev_urls
 
 url_prefix = settings.URL_PREFIX
 service_name = settings.SERVICE_NAME
@@ -171,6 +173,8 @@ from stapel_core.django.settings import *  # type: ignore  # noqa
 import os
 from pathlib import Path
 
+from stapel_core.django.openapi.swagger import get_spectacular_settings
+
 SERVICE_NAME = "{{TITLE}}"
 URL_PREFIX = "{{URL_PREFIX}}"
 CSRF_COOKIE_NAME = "csrftoken_{{SLUG}}"
@@ -180,11 +184,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 with open(BASE_DIR / "version.txt") as v_file:
     APP_VERSION_NUMBER = v_file.read().strip()
 
-STATIC_ROOT = f"/app/staticfiles/{{SLUG}}/"
-STATIC_URL = f"/staticfiles/{{SLUG}}/"
+STATIC_ROOT = "/app/staticfiles/{{SLUG}}/"
+STATIC_URL = "/staticfiles/{{SLUG}}/"
 STATICFILES_DIRS = get_staticfiles_dirs(BASE_DIR)
-MEDIA_ROOT = f"/app/media/{{SLUG}}/"
-MEDIA_URL = f"/media/{{SLUG}}/"
+MEDIA_ROOT = "/app/media/{{SLUG}}/"
+MEDIA_URL = "/media/{{SLUG}}/"
 
 # Dev fallbacks live in dev.py; prod.py refuses to start without real values.
 SECRET_KEY = os.getenv("SECRET_KEY", "")
@@ -247,7 +251,6 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = "UTC"
 CELERY_TASK_DEFAULT_QUEUE = "{{SLUG}}"
 
-from stapel_core.django.openapi.swagger import get_spectacular_settings
 SPECTACULAR_SETTINGS = get_spectacular_settings(
     title="{{TITLE}} API",
     description="{{TITLE}} service API",
@@ -256,6 +259,8 @@ SPECTACULAR_SETTINGS = get_spectacular_settings(
 """
 
 DEV_SETTINGS = """\
+import os
+
 from .base import *  # noqa
 
 DEBUG = True
@@ -290,7 +295,6 @@ DEBUG_TOOLBAR_CONFIG = {
     "INTERCEPT_REDIRECTS": False,
 }
 
-import os
 if os.environ.get("RUN_MAIN") or os.environ.get("WERKZEUG_RUN_MAIN"):
     try:
         import debugpy
@@ -312,8 +316,9 @@ INTERNAL_IPS = ["127.0.0.1", "localhost"]
 PROD_SETTINGS = """\
 import os
 
-from .base import *  # noqa
 from stapel_core.django.prodguard import guard_db_password, guard_secret
+
+from .base import *  # noqa
 
 DEBUG = False
 
@@ -393,13 +398,13 @@ class {{MODULE_CAP}}Config(AppConfig):
 """
 
 MODELS_PY = """\
-from django.db import models
+from django.db import models  # noqa: F401 — import kept ready for the first model
 
 # Add service-specific models here
 """
 
 ADMIN_PY = """\
-from django.contrib import admin
+from django.contrib import admin  # noqa: F401 — import kept ready for the first registration
 
 # Register service models here
 """
@@ -411,6 +416,100 @@ python_files = tests.py test_*.py *_test.py
 python_classes = Test* *Tests
 python_functions = test_*
 testpaths = apps tests
+"""
+
+SVC_PYPROJECT = """\
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+exclude = ["migrations"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# Django settings tiers star-import the layer below by design (base ->
+# dev -> local, base -> prod — Django's own convention): every name a lower
+# tier defines looks "undefined" to a linter reading a higher tier's file in
+# isolation. Not a bug — silence F403/F405 for this directory only.
+"config/settings/*.py" = ["F403", "F405"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["config", "apps", "tests"]
+"""
+
+# Boot-smoke settings (R3/§44) — the service-dir counterpart of the minimal
+# preset's config/settings_boot_smoke.py (_minimal_templates.MINIMAL_BOOT_SMOKE_SETTINGS).
+# Layers over config.settings.base — the SAME tier assemble_scaffold's own
+# "check" gate already runs monolith against — rather than .dev/.local:
+# those add django-debug-toolbar to INSTALLED_APPS, and the toolbar's SQL
+# panel unconditionally imports django.contrib.gis at ready()-time (a real,
+# observed crash on hosts with a broken/missing GDAL native lib) — an
+# environment fragility this gate must not inherit. base's INSTALLED_APPS is
+# also the closer analogue of what a client's first prod boot actually
+# loads (prod.py layers over base too, not dev). Same dummy-DATABASES
+# contract either way: `manage.py check` under this module must never touch
+# a live database, proving app-loading (INSTALLED_APPS import + every
+# AppConfig.ready()) is safe before a single request lands.
+BOOT_SMOKE_SETTINGS = """\
+\"\"\"Boot-smoke settings (R3/§44) — `make boot-smoke`, part of `make controls`.
+
+Layers over this service's own config.settings.base (deliberately NOT
+.dev/.local — see BOOT_SMOKE_SETTINGS's comment in stapel-tools) and swaps
+DATABASES for Django's `dummy` backend, which raises loudly on the first
+real connection attempt. `manage.py check` under this module exercises
+exactly the phase a generated project's client would hit on first boot —
+INSTALLED_APPS import plus every AppConfig.ready() — with no live database
+reachable, proving that phase never needs one. Mirrors the minimal preset's
+own config/settings_boot_smoke.py (same contract, different settings-tier
+shape).
+
+base.py's own SECRET_KEY has no fallback (only dev.py's does — "Dev
+fallbacks live in dev.py; prod.py refuses to start without real values", per
+base.py's own comment) and stapel_core's config.E001 system check refuses to
+boot without one — resolved via ``os.environ`` directly (get_config()'s own
+contract), NOT via django.conf.settings, so a plain Python assignment here
+would not satisfy it. This gate must run standalone (no shell-sourced .env,
+no docker) straight after `stapel-assemble`/`create-project`, so it seeds
+``os.environ`` with its OWN insecure dev-only fallback (only when unset —
+never overrides a real secret already exported) rather than depending on
+dev.py's (which would also pull in django-debug-toolbar's INSTALLED_APPS
+entry — see above).
+
+Never point real traffic at this module — it has no usable database.
+\"\"\"
+import os
+
+os.environ.setdefault("SECRET_KEY", "django-insecure-boot-smoke-only")
+os.environ.setdefault("JWT_SECRET_KEY", os.environ["SECRET_KEY"])
+
+from .base import *  # noqa: E402,F401,F403
+
+DATABASES = {"default": {"ENGINE": "django.db.backends.dummy"}}
+"""
+
+# svc-<slug>/Makefile — this service's own controls, runnable standalone from
+# inside the directory OR delegated into from the project-root Makefile
+# (`make -C {{DIR}} <target>` — see MONOLITH_MAKEFILE in _compose_templates.py).
+# Target names/semantics match the minimal preset's Makefile 1:1 (controls:
+# lint boot-smoke test) so the studio controls contract is preset-agnostic.
+SVC_MAKEFILE = """\
+# {{TITLE}} service ({{DIR}}) — controls.
+PYTHON ?= python
+
+.PHONY: controls lint test boot-smoke
+
+controls: lint boot-smoke test
+
+lint:
+\t$(PYTHON) -m ruff check .
+
+# boot-smoke (R3/§44) — see config/settings/boot_smoke.py's own docstring.
+boot-smoke:
+\tDJANGO_SETTINGS_MODULE=config.settings.boot_smoke $(PYTHON) manage.py check
+
+test:
+\t$(PYTHON) -m pytest -q
 """
 
 CONFTEST_PY = """\
@@ -494,11 +593,12 @@ psycopg[binary]>=3.1
 gunicorn>=21.2
 celery>=5.3
 
-# Dev / test (used by config.settings.dev and pytest)
+# Dev / test / controls (used by config.settings.dev, pytest, `make lint`)
 django-debug-toolbar>=4.2
 debugpy>=1.8
 pytest>=7.4
 pytest-django>=4.7
+ruff>=0.4
 
 # Add service-specific dependencies below.
 """
@@ -529,14 +629,14 @@ class {{MODULE_CAP}}Config(AppConfig):
 """
 
 MODULE_MODELS = """\
-from django.db import models
+from django.db import models  # noqa: F401 — import kept ready for the first model
 
 
 # Add {{MODULE}} models here
 """
 
 MODULE_ADMIN = """\
-from django.contrib import admin
+from django.contrib import admin  # noqa: F401 — import kept ready for the first registration
 
 # from .models import MyModel
 # admin.site.register(MyModel)

@@ -2,6 +2,72 @@
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-07-19
+
+### Fixed — monolith preset shipped no root controls surface (studio e2e-3f018cc3, R3/§44 follow-up)
+
+Live studio runs run `make -C <assembled_root> lint/controls/test/boot-smoke`
+at the generated project's ROOT regardless of preset. The minimal preset
+always wrote a root `Makefile` with those targets; the monolith preset's
+Django backend lives inside `svc-<slug>/` instead and never got a root
+`Makefile` at all — every live monolith run failed the architect's lint gate
+unfixably (the architect can't create root build files), blocking the
+fullstack pipeline entirely. Closed, deletion-driven:
+
+- New root `Makefile` for monolith (`MONOLITH_MAKEFILE`,
+  `_compose_templates.py`) — `.PHONY: controls lint test boot-smoke`,
+  `controls: lint boot-smoke test`, each target delegating into
+  `svc-<slug>/`. Target names and `controls` semantics match the minimal
+  preset's own Makefile 1:1, so the studio contract is preset-agnostic.
+  Backend-only for now (a comment says so); `frontend/`'s own `npx eslint .`
+  is a separate stage, not silently dropped.
+- New `svc-<slug>/Makefile` (`SVC_MAKEFILE`, written by `scaffold_service` —
+  also reaches every `stapel-new-service`-created service, monolith or
+  microservices) exposing the same four targets standalone: `lint` runs
+  `ruff check .`, `test` runs `pytest -q`, `boot-smoke` runs `manage.py
+  check` under a new `config/settings/boot_smoke.py` tier.
+- New `svc-<slug>/pyproject.toml` (`SVC_PYPROJECT`) — the service had NO
+  ruff config before, so `ruff check .` (once the Makefile existed) would
+  have run under bare defaults and flagged the Django settings tiers'
+  intentional star-imports (`from .base import *`) as 25 false-positive
+  F405/F403/E402/I001 errors. Selects the same rule set as the minimal
+  preset (`E,F,W,I,B,UP`) with one addition: `config/settings/*.py` is
+  exempted from F403/F405 (the star-import pattern is Django's own
+  convention across settings tiers, not a bug).
+- New `svc-<slug>/config/settings/boot_smoke.py` (`BOOT_SMOKE_SETTINGS`) —
+  the monolith counterpart of the minimal preset's
+  `config/settings_boot_smoke.py` (R3/§44 was minimal-only until now).
+  Layers over `.base`, not `.dev`/`.local`: the dev tier adds
+  django-debug-toolbar to `INSTALLED_APPS`, whose SQL panel unconditionally
+  probes `django.contrib.gis` at `AppConfig.ready()` time — an environment
+  fragility (observed as a raw `OSError` crash on a host with a
+  broken/partial GDAL native lib, uncaught by the toolbar's own
+  `except ImportError` guard) this gate must not inherit. Also seeds
+  `os.environ["SECRET_KEY"]` with an insecure dev-only fallback when unset:
+  `base.py` carries no fallback of its own (only `dev.py`'s does), and
+  stapel_core's `config.E001` system check resolves required keys via
+  `os.environ` directly — independent of any `django.conf.settings` value —
+  so this gate must run standalone (no shell-sourced `.env`, no docker)
+  straight after generation.
+- `ruff>=0.4` added to the service's `requirements.txt` dev/test section
+  (it was entirely absent — `make lint` had nothing to run against).
+- Second generator defect found and fixed while getting the assembled
+  monolith controls-green from birth: `BASE_SETTINGS`/`DEV_SETTINGS`
+  (`_templates.py`) carried 4 extraneous f-string prefixes (F541) and 2
+  import-order violations (E402); `ASGI_PY`/`WSGI_PY`/`URLS_PY`/
+  `PROD_SETTINGS` carried unsorted import blocks (I001); `MODELS_PY`/
+  `ADMIN_PY`/`MODULE_MODELS`/`MODULE_ADMIN` carried an always-unused import
+  on a fresh scaffold (F401, silenced with an explanatory `# noqa`). All
+  fixed at the template source, verified via a real `ruff check .` run
+  (`All checks passed!`) against a freshly assembled monolith.
+- Known residual gap: `make test`/`make controls` need a live Postgres
+  (`docker compose -f docker-compose.local.yml up db` — same as any
+  monolith dev workflow, not new) — not exercised by this fix's own test
+  suite for that reason. microservices shares the missing-root-Makefile gap
+  (confirmed: a fresh `stapel-example-microservices`-shaped assembly has no
+  root Makefile either) but starts with zero services to lint until
+  `stapel-new-service` is run, so it is not closed here — follow-up.
+
 ## [0.14.0] — 2026-07-19
 
 ### Added — frontend wiring: scaffold the selected `@stapel/<module>-react` pairs (owner directive, frontend-wiring gap)
