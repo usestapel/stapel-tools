@@ -527,7 +527,9 @@ class TestModuleConfig:
 
     def test_multiple_modules_sorted_with_per_module_comments(self, tmp_path):
         config = {
-            "gdpr": {"GDPR_EXPORT_ENABLED": True},
+            # A real axis from stapel-gdpr's capabilities.json — the module
+            # gained one (2026-07-19), so unknown keys now fail the seam.
+            "gdpr": {"REMOTE_DELETION_SERVICES": ["profiles"]},
             "auth": {"AUTH_PASSWORD_LOGIN": True},
         }
         proj = self._create(
