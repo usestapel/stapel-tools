@@ -430,6 +430,40 @@ FRONTEND_REACT_LIBS = {
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
         "default_component": "AuthPanel",
+        # Scripted-fullstack navigation (Ф1) — a MANUALLY PINNED MIRROR of
+        # this pair's own `nav-manifest.json` (verified 2026-07-20 against
+        # the sibling stapel-react checkout's
+        # packages/auth-react/nav-manifest.json — not yet on npm, see the
+        # FRONTEND_SHELL_REACT_VERSION comment below). Drift between this
+        # mirror and the real file is caught by
+        # scripts/check_nav_manifest_sync.py, never silently. auth.login is
+        # `menuVisibleDefault: false` (a sign-in screen is never a menu
+        # tab); auth.security nests under profiles.settings (dropped by
+        # resolveNav's own orphan rule when profiles isn't installed).
+        "nav": [
+            {
+                "id": "auth.login",
+                "labelKey": "auth.nav.login",
+                "icon": "LoginOutlined",
+                "route": {"path": "/login"},
+                "component": {"export": "AuthPanel", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "order": 0,
+            },
+            {
+                "id": "auth.security",
+                "labelKey": "auth.nav.security",
+                "icon": "SafetyCertificateOutlined",
+                "route": {"path": "security"},
+                "component": {"export": "SecuritySettings", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "profiles.settings"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "order": 10,
+            },
+        ],
     },
     "billing": {
         "package": "@stapel/billing-react",
@@ -452,6 +486,22 @@ FRONTEND_REACT_LIBS = {
         "create_runtime": "createNotificationsRuntime",
         "register_i18n": "registerNotificationsI18n",
         "default_component": "NotificationFeedList",
+        # Mirror of packages/notifications-react/nav-manifest.json (verified
+        # 2026-07-20) — see the auth entry's comment above for the mirror
+        # discipline this follows.
+        "nav": [
+            {
+                "id": "notifications.feed",
+                "labelKey": "notifications.nav.feed",
+                "icon": "BellOutlined",
+                "route": {"path": "notifications"},
+                "component": {"export": "NotificationFeedList", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "order": 20,
+            },
+        ],
     },
     "profiles": {
         "package": "@stapel/profiles-react",
@@ -460,6 +510,22 @@ FRONTEND_REACT_LIBS = {
         "create_runtime": "createProfilesRuntime",
         "register_i18n": "registerProfilesI18n",
         "default_component": "ProfileSettings",
+        # Mirror of packages/profiles-react/nav-manifest.json (verified
+        # 2026-07-20) — see the auth entry's comment above for the mirror
+        # discipline this follows.
+        "nav": [
+            {
+                "id": "profiles.settings",
+                "labelKey": "profiles.nav.settings",
+                "icon": "UserOutlined",
+                "route": {"path": "settings"},
+                "component": {"export": "ProfileSettings", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "order": 90,
+            },
+        ],
     },
     "recordings": {
         "package": "@stapel/recordings-react",
@@ -494,6 +560,32 @@ FRONTEND_REACT_ANTD_DEPS = {
     "antd": "6.5.1",
     "@stapel/tokens-antd": "0.4.0",
 }
+
+# Scripted-fullstack navigation (Ф1) — router deps for the generated
+# frontend, added whenever routing is active (any of: `--auth`,
+# `--landing`, or a selected pair's FRONTEND_REACT_LIBS entry carries a
+# "nav" mirror — see `_write_frontend_scaffold`). `@stapel/shell-react`'s
+# own peerDependencies pin `"react-router": ">=7.0.0 <8"` — the PLAIN `npm
+# view react-router version` dist-tag is a v8 major (verified 2026-07-20:
+# `8.2.0`), which would silently pull an incompatible major; the pin below
+# is the latest v7 release instead (`npm view "react-router@^7" version` ->
+# `7.18.1`, matching stapel-react's own shell-react devDependency pin).
+FRONTEND_ROUTER_DEPS = {
+    "react-router": "7.18.1",
+}
+
+# `@stapel/shell-react` is NOT YET published to npm (`npm view
+# @stapel/shell-react version` 404s, verified 2026-07-20) — the pin below is
+# taken from the sibling stapel-react checkout's own
+# packages/shell-react/package.json `version` ONLY (ahead-of-npm, the same
+# discipline STAPEL_LIBS' `ahead_of_pypi` flag documents on the backend
+# side — see that dict's module docstring). Replace with the live npm pin
+# the day this package publishes. Added to deps whenever any selected pair
+# contributes nav entries (`nav_wired_pairs` in `_write_frontend_scaffold`)
+# — never for a project with routing active but no nav-bearing module
+# (e.g. `--landing` alone never needs the shell).
+FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
+FRONTEND_SHELL_REACT_VERSION = "0.1.0"
 
 
 # Broker per project type: minimal never gets one, microservices requires one
@@ -983,23 +1075,43 @@ def _frontend_react_entries(feature_libs: list[str]) -> list[dict]:
     ]
 
 
-def _render_frontend_package_json(rendered_base: str, react_entries: list[dict]) -> str:
+def _render_frontend_package_json(
+    rendered_base: str, react_entries: list[dict],
+    *, routing_active: bool = False, shell_react_needed: bool = False,
+) -> str:
     """Injects the react-pair deps (+ their shared support deps, + antd/
-    tokens-antd IFF at least one selected pair mounts a `/default` skin)
-    into the already SLUG-rendered ``PACKAGE_JSON`` template — via
-    json.loads/dumps (not string tokens) so the result stays valid JSON
-    regardless of key order or how many deps are added. Returns the input
-    UNCHANGED (no parse round-trip at all) when ``react_entries`` is empty —
-    the exact current clean-shell output, byte for byte."""
-    if not react_entries:
+    tokens-antd IFF at least one selected pair mounts a `/default` skin OR
+    the scripted nav shell needs `<AppShell/>`), the router deps
+    (``routing_active`` — Ф1, ``FRONTEND_ROUTER_DEPS``) and
+    ``@stapel/shell-react`` (``shell_react_needed``) into the already
+    SLUG-rendered ``PACKAGE_JSON`` template — via json.loads/dumps (not
+    string tokens) so the result stays valid JSON regardless of key order or
+    how many deps are added. Returns the input UNCHANGED (no parse
+    round-trip at all) when there is nothing to inject — the exact current
+    clean-shell output, byte for byte."""
+    if not react_entries and not routing_active:
         return rendered_base
     pkg = json.loads(rendered_base)
     deps = pkg.setdefault("dependencies", {})
     for entry in react_entries:
         deps[entry["package"]] = f'^{entry["version"]}'
-    for name, version in FRONTEND_REACT_CORE_DEPS.items():
-        deps[name] = f"^{version}"
-    if any(entry.get("default_component") for entry in react_entries):
+    if react_entries:
+        for name, version in FRONTEND_REACT_CORE_DEPS.items():
+            deps[name] = f"^{version}"
+    if routing_active:
+        for name, version in FRONTEND_ROUTER_DEPS.items():
+            deps[name] = f"^{version}"
+    if shell_react_needed:
+        deps[FRONTEND_SHELL_REACT_PACKAGE] = f"^{FRONTEND_SHELL_REACT_VERSION}"
+        # @stapel/core is a peer of shell-react too — ensure it's present
+        # even for a nav-bearing selection with no OTHER react pair wired
+        # (can't happen with today's registry, since every nav-bearing pair
+        # also has a `default_component`/needs @stapel/core itself, but
+        # this keeps the invariant explicit rather than incidental).
+        for name, version in FRONTEND_REACT_CORE_DEPS.items():
+            deps.setdefault(name, f"^{version}")
+    needs_antd = any(entry.get("default_component") for entry in react_entries) or shell_react_needed
+    if needs_antd:
         for name, version in FRONTEND_REACT_ANTD_DEPS.items():
             deps[name] = f"^{version}"
     return json.dumps(pkg, indent=2) + "\n"
@@ -1009,18 +1121,28 @@ def _write_frontend_scaffold(
     project_dir: Path, ctx: dict, backend_upstream_default: str,
     backend_prefixes: list[str] | None = None,
     feature_libs: list[str] | None = None,
+    want_auth: bool | None = None,
+    want_landing: bool = False,
 ):
     """``frontend/`` — Vite + React + TypeScript, wired into the dev/prod
     compose + nginx canon (§57 owner directive). See
     _frontend_templates.py's module docstring for the full picture.
 
-    Frontend wiring (owner directive, this task): when the project's
+    Frontend wiring (owner directive, §57 task): when the project's
     selected ``feature_libs`` include a module with a published
     ``@stapel/<key>-react`` pair (FRONTEND_REACT_LIBS), that pair's dep +
-    provider wiring is generated into ``package.json``/``src/modules.tsx``
-    and ``src/App.tsx`` switches to the module-aware template. A selection
-    with NO react-paired module gets the exact previous clean shell —
-    unconditionally, no react_entries branch touched at all."""
+    provider wiring is generated into ``package.json``/``src/modules.tsx``.
+
+    Scripted-fullstack navigation (Ф1, this task): ``want_auth`` (default —
+    derived by the caller from whether "auth" was selected) and
+    ``want_landing`` (``--landing``) drive react-router v7 wiring —
+    ``routing_active`` is true when either flag is set OR at least one
+    selected pair's FRONTEND_REACT_LIBS entry carries a ``"nav"`` mirror.
+    Only THEN does ``src/main.tsx`` switch to mounting the generated
+    ``router`` (``src/routes.tsx``) instead of the bare ``<App/>`` — a
+    selection with none of the three collapses to the EXACT prior output,
+    byte for byte (``App.tsx``/``main.tsx`` untouched; the regression this
+    task's own test guards)."""
     from . import _frontend_templates as F
     from ._compose_templates import render_tokens
 
@@ -1034,20 +1156,61 @@ def _write_frontend_scaffold(
     def r(template: str) -> str:
         return render_tokens(template, render_ctx)
 
-    react_entries = _frontend_react_entries(feature_libs or [])
+    feature_libs = feature_libs or []
+    react_entries = _frontend_react_entries(feature_libs)
+    if want_auth is None:
+        want_auth = "auth" in feature_libs
+    auth_wired = bool(want_auth) and any(e["key"] == "auth" for e in react_entries)
+    any_nav_entries = any(e.get("nav") for e in react_entries)
+    routing_active = bool(want_auth) or bool(want_landing) or any_nav_entries
+
+    nav_pairs = F.nav_wired_pairs(react_entries, auth_wired=auth_wired)
+    route_plan = F.build_nav_route_plan(nav_pairs) if nav_pairs else {"absolute_routes": [], "app_children": []}
+    app_route_present = auth_wired or bool(route_plan["app_children"])
+    shell_react_needed = bool(nav_pairs) or app_route_present
 
     frontend = project_dir / "frontend"
-    _write(frontend / "package.json", _render_frontend_package_json(r(F.PACKAGE_JSON), react_entries))
-    _write(frontend / "tsconfig.json", F.TSCONFIG_JSON)
+    package_json = _render_frontend_package_json(
+        r(F.PACKAGE_JSON), react_entries,
+        routing_active=routing_active, shell_react_needed=shell_react_needed,
+    )
+    _write(frontend / "package.json", package_json)
+    _write(
+        frontend / "tsconfig.json",
+        F.TSCONFIG_JSON_WITH_JSON_MODULE if routing_active else F.TSCONFIG_JSON,
+    )
     _write(frontend / "tsconfig.node.json", F.TSCONFIG_NODE_JSON)
     _write(frontend / "vite.config.ts", r(F.VITE_CONFIG_TS))
     _write(frontend / "index.html", r(F.INDEX_HTML))
-    _write(frontend / "src" / "main.tsx", F.MAIN_TSX)
+
     if react_entries:
         _write(frontend / "src" / "modules.tsx", F.render_modules_tsx(react_entries))
-        _write(frontend / "src" / "App.tsx", r(F.APP_TSX_WITH_MODULES))
+
+    if routing_active:
+        _write(frontend / "src" / "main.tsx", F.render_main_tsx(
+            routing_active=True, has_modules=bool(react_entries),
+        ))
+        if shell_react_needed:
+            _write(frontend / "src" / "nav.generated.ts", F.render_nav_generated_ts(nav_pairs))
+            _write(frontend / "stapel.nav.json", F.STAPEL_NAV_JSON)
+        _write(frontend / "src" / "routes.tsx", F.render_routes_tsx(
+            route_plan, auth_wired=auth_wired, want_landing=bool(want_landing),
+            app_route_present=app_route_present,
+        ))
+        if auth_wired:
+            _write(frontend / "src" / "ProtectedRoute.tsx", F.PROTECTED_ROUTE_TSX)
+        if want_landing:
+            cta_href = "/login" if auth_wired else "/app"
+            _write(frontend / "src" / "LandingPage.tsx", render_tokens(
+                F.LANDING_PAGE_TSX, {**render_ctx, "CTA_HREF": cta_href},
+            ))
     else:
-        _write(frontend / "src" / "App.tsx", r(F.APP_TSX))
+        _write(frontend / "src" / "main.tsx", F.MAIN_TSX)
+        if react_entries:
+            _write(frontend / "src" / "App.tsx", r(F.APP_TSX_WITH_MODULES))
+        else:
+            _write(frontend / "src" / "App.tsx", r(F.APP_TSX))
+
     _write(frontend / "src" / "vite-env.d.ts", F.VITE_ENV_D_TS)
     _write(frontend / "stapel.theme.json", r(F.THEME_JSON))
     _write(frontend / "eslint.config.js", F.ESLINT_CONFIG_JS)
@@ -1056,7 +1219,7 @@ def _write_frontend_scaffold(
     _write(frontend / "README.md", r(F.README_MD))
 
 
-def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None):
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False):
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
         MONOLITH_COMPOSE_LOCAL,
@@ -1138,6 +1301,8 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         project_dir, ctx, backend_upstream_default,
         backend_prefixes=backend_prefixes,
         feature_libs=feature_libs,
+        want_auth=want_auth,
+        want_landing=want_landing,
     )
     _write_deploy_scripts(project_dir)
     _write_agents_and_checks(
@@ -1566,6 +1731,8 @@ def create_project(
     task_broker: str | None = None,
     module_config: dict[str, dict] | None = None,
     env_preset: str = "standalone",
+    want_auth: bool | None = None,
+    want_landing: bool = False,
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
@@ -1657,7 +1824,7 @@ def create_project(
 
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only, want_auth=want_auth, want_landing=want_landing)
     elif project_type == "minimal":
         _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"], module_config=module_config)
         use_submodules = False  # minimal uses pip
@@ -1844,6 +2011,23 @@ def main():
     parser.add_argument("--output-dir", type=Path, default=Path.cwd(), help="Parent directory for the project")
     parser.add_argument("--no-submodules", action="store_true", help="Use pip install instead of git submodules")
     parser.add_argument("--no-git", action="store_true", help="Skip git init")
+    parser.add_argument(
+        "--landing", action="store_true",
+        help="Scaffold a LandingPage.tsx + \"/\" route (scripted-fullstack "
+             "navigation, Ф1). Monolith only today.",
+    )
+    parser.add_argument(
+        "--auth", dest="auth", action="store_true", default=None,
+        help="Wire \"/login\" + the /app ProtectedRoute gate into the "
+             "generated react-router tree (default: on iff the 'auth' "
+             "module is selected). Monolith only today.",
+    )
+    parser.add_argument(
+        "--no-auth", dest="auth", action="store_false",
+        help="Never wire auth into the generated route tree, even if the "
+             "'auth' module is selected (its runtime still wires into "
+             "modules.tsx as usual — just no /login route/ProtectedRoute).",
+    )
     args = parser.parse_args()
 
     module_config = None
@@ -1917,6 +2101,8 @@ def main():
         task_broker=params.get("task_broker"),
         module_config=module_config,
         env_preset=args.env_preset,
+        want_auth=args.auth,
+        want_landing=args.landing,
     )
 
 

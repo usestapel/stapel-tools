@@ -88,6 +88,35 @@ TSCONFIG_JSON = """\
 }
 """
 
+# Used INSTEAD of TSCONFIG_JSON whenever the scripted-nav route tree is
+# active (Ф1) — ``src/nav.generated.ts`` does ``import stapelNavOverrides
+# from "../stapel.nav.json"`` (the deep-merge-over-default override channel,
+# read again at RUNTIME by the exact same ``resolveNav`` call the shipped
+# app's ``<AppShell/>`` would use — see that file's own docstring), which
+# needs ``resolveJsonModule`` to type-check. A project with no routing keeps
+# the plain ``TSCONFIG_JSON`` above byte-for-byte (no reason to change a
+# setting nothing in the generated source uses).
+TSCONFIG_JSON_WITH_JSON_MODULE = """\
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "resolveJsonModule": true
+  },
+  "include": ["src"]
+}
+"""
+
 TSCONFIG_NODE_JSON = """\
 {
   "compilerOptions": {
@@ -170,6 +199,48 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>
 );
 """
+
+
+def render_main_tsx(*, routing_active: bool, has_modules: bool) -> str:
+    """``frontend/src/main.tsx`` — the collapse rule (owner directive, Ф1):
+    a selection with NO routing feature active (no ``--auth``, no
+    ``--landing``, no selected pair with nav entries) returns ``MAIN_TSX``
+    UNCHANGED, byte for byte — the exact current clean-shell output.
+
+    Once routing is active, ``<App/>`` is retired in favour of mounting the
+    generated ``router`` (``./routes.tsx``, ``RouterProvider``) — every page
+    now comes from the route tree (``LandingPage``/``AuthPanel``/the
+    ``/app`` subtree), so the old single-component starter has nothing left
+    to do. When the project ALSO wired ``@stapel/<module>-react`` pairs
+    (``has_modules`` — ``modules.tsx``'s ``ModulesProvider``), that provider
+    wraps ``<RouterProvider/>`` instead of ``<App/>``'s old content — the
+    runtime/session context every route (``ProtectedRoute``, ``AppShell``,
+    each mounted pair's own hooks) needs has to sit ABOVE the router, not
+    inside one page of it.
+    """
+    if not routing_active:
+        return MAIN_TSX
+    lines = [
+        'import { StrictMode } from "react";',
+        'import { createRoot } from "react-dom/client";',
+        'import { RouterProvider } from "react-router";',
+        'import { router } from "./routes.js";',
+    ]
+    if has_modules:
+        lines.append('import { ModulesProvider } from "./modules.js";')
+    lines.append("")
+    lines.append('createRoot(document.getElementById("root")!).render(')
+    lines.append("  <StrictMode>")
+    if has_modules:
+        lines.append("    <ModulesProvider>")
+        lines.append("      <RouterProvider router={router} />")
+        lines.append("    </ModulesProvider>")
+    else:
+        lines.append("    <RouterProvider router={router} />")
+    lines.append("  </StrictMode>")
+    lines.append(");")
+    lines.append("")
+    return "\n".join(lines)
 
 APP_TSX = """\
 import { useEffect, useState } from "react";
@@ -389,6 +460,333 @@ def render_modules_tsx(entries: list[dict]) -> str:
 
 def _ts_string_array(values: list[str]) -> str:
     return "[" + ", ".join(json.dumps(v) for v in values) + "]"
+
+
+# ---------------------------------------------------------------------------
+# Scripted-fullstack navigation (Ф1) — nav.generated.ts / routes.tsx /
+# ProtectedRoute.tsx / stapel.nav.json / LandingPage.tsx
+#
+# Consumes create_project.FRONTEND_REACT_LIBS[<key>]["nav"] — the manually
+# PINNED MIRROR of that pair's own `nav-manifest.json` (same discipline as
+# the version pins above this file's own comments describe; see
+# create_project.py's FRONTEND_REACT_LIBS docstring and
+# scripts/check_nav_manifest_sync.py, the drift gate against the sibling
+# stapel-react checkout's actual nav-manifest.json files).
+# ---------------------------------------------------------------------------
+
+
+def nav_wired_pairs(react_entries: list[dict], *, auth_wired: bool) -> list[dict]:
+    """The selected react pairs (``create_project._frontend_react_entries``
+    output) that actually join the scripted nav/route tree — every selected
+    pair carrying a ``nav`` mirror, EXCEPT auth's when ``auth_wired`` is
+    False (the ``--no-auth`` escape hatch: a project can still wire the auth
+    RUNTIME via ``modules.tsx`` — e.g. to drive `AuthPanel` by hand
+    somewhere of its own choosing — without any of auth's screens joining
+    "/login"/the nav menu)."""
+    return [e for e in react_entries if e.get("nav") and (e["key"] != "auth" or auth_wired)]
+
+
+def build_nav_route_plan(nav_pairs: list[dict]) -> dict:
+    """Pure, deterministic route-tree plan ``render_routes_tsx`` turns into
+    react-router v7 route objects — the SCRIPTED (no-LLM) decision tree over
+    the selected pairs' mirrored nav entries (registry order).
+
+    Two kinds of entry become a route:
+
+    - a TOP entry whose ``route.path`` is ABSOLUTE (starts with "/", e.g.
+      auth.login's "/login") mounts as its own top-level sibling route —
+      NEVER nested under "/app" (a sign-in screen is reachable regardless of
+      session state, the opposite of what "/app" protects).
+    - a TOP entry with a RELATIVE path, or a SUBMENU entry whose
+      ``placement.parentId`` resolves among the selected TOP entries, nests
+      as a child of "/app" (its full path is ``"<parent-path>/<own-path>"``
+      for a submenu entry — e.g. auth.security under profiles.settings
+      becomes "settings/security"). A submenu entry whose parent isn't
+      among the selected TOP entries is DROPPED — the exact orphan-drop
+      rule ``@stapel/shell-react``'s own ``resolveNav`` documents, mirrored
+      here so routing and the nav menu never disagree about what "installed"
+      means.
+
+    Returns ``{"absolute_routes": [...], "app_children": [...]}``, each a
+    list of ``{"path": <route path>, "entry": <mirrored NavEntry dict>}`` —
+    entries carry a ``"_package"`` key (the pair's npm package name) for
+    ``render_routes_tsx``'s component imports.
+    """
+    all_entries = [{**entry, "_package": pair["package"]} for pair in nav_pairs for entry in pair["nav"]]
+    tops = {e["id"]: e for e in all_entries if e["placement"]["level"] == "top"}
+    children_by_parent: dict[str, list[dict]] = {}
+    for e in all_entries:
+        if e["placement"]["level"] != "submenu":
+            continue
+        parent_id = e["placement"].get("parentId")
+        if parent_id is None or parent_id not in tops:
+            continue  # orphan — dropped, not thrown (mirrors resolveNav)
+        children_by_parent.setdefault(parent_id, []).append(e)
+
+    absolute_routes: list[dict] = []
+    app_children: list[dict] = []
+    for top in sorted(tops.values(), key=lambda e: (e["order"], e["id"])):
+        path = top["route"]["path"]
+        if path.startswith("/"):
+            absolute_routes.append({"path": path, "entry": top})
+            continue
+        app_children.append({"path": path, "entry": top})
+        for child in sorted(children_by_parent.get(top["id"], []), key=lambda e: (e["order"], e["id"])):
+            app_children.append({"path": f'{path}/{child["route"]["path"]}', "entry": child})
+
+    return {"absolute_routes": absolute_routes, "app_children": app_children}
+
+
+def render_nav_generated_ts(nav_pairs: list[dict]) -> str:
+    """``frontend/src/nav.generated.ts`` — bakes ``INSTALLED_NAV_MANIFESTS``
+    (this project's selected pairs' MIRRORED nav-manifest entries, exactly
+    the shape ``PackageNavManifest[]`` from ``@stapel/core`` describes) at
+    Python codegen time, then computes ``RESOLVED_NAV`` by calling
+    ``@stapel/shell-react``'s own ``resolveNav`` against the committed
+    ``../stapel.nav.json`` override file — the SAME pure function
+    ``<AppShell/>`` itself is built on, run once at module-import time so
+    editing ``stapel.nav.json`` and reloading re-resolves with no
+    regeneration needed. ``reresolveNav`` re-exposes that same call for a
+    host that wants to re-resolve against a DIFFERENT (e.g. freshly
+    fetched) overrides object at runtime, without a rebuild.
+    """
+    manifests = [
+        {"package": pair["package"], "version": pair["version"], "entries": pair["nav"]}
+        for pair in nav_pairs
+    ]
+    manifests_json = json.dumps(manifests, indent=2)
+    return f'''\
+/**
+ * GENERATED — do not hand-edit. Mirrored nav-manifest data for this
+ * project's selected @stapel/<module>-react pairs (stapel-create-project's
+ * FRONTEND_REACT_LIBS[<key>]["nav"] — a manually pinned mirror of each
+ * pair's own nav-manifest.json, kept in sync by
+ * scripts/check_nav_manifest_sync.py). Add or drop a pair's nav surface by
+ * changing the project's module/--auth selection and re-scaffolding, never
+ * by editing this file's shape.
+ */
+import type {{ PackageNavManifest }} from "@stapel/core";
+import type {{ NavOverridesFile, ResolvedNavEntry }} from "@stapel/shell-react";
+import {{ resolveNav }} from "@stapel/shell-react";
+import stapelNavOverrides from "../stapel.nav.json";
+
+export const INSTALLED_NAV_MANIFESTS: readonly PackageNavManifest[] = {manifests_json} as const;
+
+/**
+ * Resolved once at import time against the committed stapel.nav.json (the
+ * project's deep-merge-over-default override channel) — the same call
+ * @stapel/shell-react's own <AppShell/> is built on.
+ */
+export const RESOLVED_NAV: readonly ResolvedNavEntry[] = resolveNav(
+  INSTALLED_NAV_MANIFESTS,
+  stapelNavOverrides as NavOverridesFile
+);
+
+/** Re-resolve against a different (e.g. freshly-fetched) overrides object
+ * at runtime — same pure function, without a rebuild. */
+export function reresolveNav(overridesFile?: NavOverridesFile): readonly ResolvedNavEntry[] {{
+  return resolveNav(INSTALLED_NAV_MANIFESTS, overridesFile);
+}}
+'''
+
+
+def render_routes_tsx(
+    route_plan: dict, *, auth_wired: bool, want_landing: bool, app_route_present: bool,
+) -> str:
+    """``frontend/src/routes.tsx`` — react-router v7's ``createBrowserRouter``
+    (v7 ships v6-future behaviour as ITS OWN default; there is no
+    future-flags object to pass here, unlike v6). The decision tree (owner
+    directive, Ф1):
+
+    - ``"/"`` — ``<LandingPage/>`` when ``--landing``, else a redirect to
+      "/app" (only reachable when routing is active at all, which this
+      function assumes — ``_write_frontend_scaffold`` only calls it then).
+    - one sibling route per ``route_plan["absolute_routes"]`` entry (e.g.
+      "/login" -> ``<AuthPanel/>`` when auth is wired).
+    - "/app" — present when ``app_route_present`` (auth wired, or at least
+      one selected pair contributed a nav entry): ``<AppShell nav=
+      {{RESOLVED_NAV}} mode="light"/>`` — AppShell renders its own
+      ``<Outlet/>`` internally (its props carry no ``children`` slot), so
+      this never re-nests one — wrapped in ``<ProtectedRoute>`` only when
+      ``auth_wired`` (an unprotected "/app" is valid too: a nav-bearing
+      module with no auth installed just never gates the shell). Children:
+      one route per ``route_plan["app_children"]`` entry.
+    """
+    absolute_routes = route_plan["absolute_routes"]
+    app_children = route_plan["app_children"]
+
+    component_imports: dict[tuple[str, str], set[str]] = {}
+    for r in (*absolute_routes, *app_children):
+        entry = r["entry"]
+        comp = entry["component"]
+        component_imports.setdefault((entry["_package"], comp["subpath"]), set()).add(comp["export"])
+
+    # "/" redirects to "/app" only when there's an "/app" to redirect TO and
+    # nothing already claimed "/" (LandingPage) — the only place `Navigate`
+    # is used, so only import it then (an unused import would fail
+    # `no-unused-vars` under strict TS/eslint).
+    needs_navigate = app_route_present and not want_landing
+    router_import = (
+        'import { createBrowserRouter, Navigate } from "react-router";'
+        if needs_navigate else
+        'import { createBrowserRouter } from "react-router";'
+    )
+    lines: list[str] = [
+        "/**",
+        " * GENERATED — react-router v7 route tree (scripted-fullstack",
+        " * navigation, Ф1 owner directive: one scripted command produces a",
+        " * working navigated fullstack, no LLM in the loop). react-router v7",
+        " * ships v6-future behaviour as its OWN default — there is no",
+        " * future-flags object to configure here.",
+        " */",
+        router_import,
+    ]
+    if app_route_present:
+        lines.append('import { AppShell } from "@stapel/shell-react/default";')
+        lines.append('import { RESOLVED_NAV } from "./nav.generated.js";')
+    if auth_wired:
+        lines.append('import { ProtectedRoute } from "./ProtectedRoute.js";')
+    if want_landing:
+        lines.append('import { LandingPage } from "./LandingPage.js";')
+    for (package, subpath), exports in component_imports.items():
+        lines.append(f'import {{ {", ".join(sorted(exports))} }} from "{package}/{subpath}";')
+    lines.append("")
+    lines.append("export const router = createBrowserRouter([")
+
+    if want_landing:
+        lines.append('  { path: "/", element: <LandingPage /> },')
+    elif app_route_present:
+        lines.append('  { path: "/", element: <Navigate to="/app" replace /> },')
+
+    for r in absolute_routes:
+        comp = r["entry"]["component"]["export"]
+        lines.append(f'  {{ path: "{r["path"]}", element: <{comp} /> }},')
+
+    if app_route_present:
+        shell_element = 'element: <AppShell nav={RESOLVED_NAV} mode="light" />,'
+        lines.append("  {")
+        lines.append('    path: "/app",')
+        if auth_wired:
+            lines.append("    element: (")
+            lines.append("      <ProtectedRoute>")
+            lines.append('        <AppShell nav={RESOLVED_NAV} mode="light" />')
+            lines.append("      </ProtectedRoute>")
+            lines.append("    ),")
+        else:
+            lines.append(f"    {shell_element}")
+        if app_children:
+            lines.append("    children: [")
+            for c in app_children:
+                comp = c["entry"]["component"]["export"]
+                lines.append(f'      {{ path: "{c["path"]}", element: <{comp} /> }},')
+            lines.append("    ],")
+        lines.append("  },")
+
+    lines.append("]);")
+    lines.append("")
+    return "\n".join(lines)
+
+
+# ``frontend/src/ProtectedRoute.tsx`` — plain project source (like APP_TSX,
+# a small template const, no per-project tokens needed). Gates "/app" behind
+# an authenticated session using ONLY already-published hooks:
+# `useActiveSessionReady` (@stapel/core's framework-level session ready-gate)
+# and `useAuthSessionState` (@stapel/auth-react — its `status` field is
+# hardened to the two-value "anonymous" | "authenticated" invariant,
+# `"authenticated"` is UNREACHABLE while `user` is null). No auth-react
+# change needed for this to be correct.
+PROTECTED_ROUTE_TSX = """\
+import type { ReactElement, ReactNode } from "react";
+import { Navigate } from "react-router";
+import { useActiveSessionReady } from "@stapel/core";
+import { useAuthSessionState } from "@stapel/auth-react";
+
+/**
+ * Gates "/app" behind an authenticated session (scripted-fullstack
+ * navigation, Ф1):
+ *  - not ready yet (session still restoring/probing) -> render nothing, no
+ *    flash of a login redirect before the real answer is known.
+ *  - ready, not authenticated -> redirect to "/login".
+ *  - ready, authenticated -> render children.
+ */
+export function ProtectedRoute({ children }: { children: ReactNode }): ReactElement | null {
+  const ready = useActiveSessionReady();
+  const { status } = useAuthSessionState();
+
+  if (!ready) return null;
+  if (status !== "authenticated") return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+"""
+
+# ``frontend/stapel.nav.json`` — the project-root nav override file
+# (deep-merge-over-default, same convention as `stapel.theme.json`): empty
+# by default, the architect/advisor override channel `resolveNav` (via
+# nav.generated.ts) reads at runtime to flip a menu entry's visibility/order
+# without touching generated code. Schema: `NavOverridesFile` from
+# `@stapel/shell-react` — `{"overrides": {"<entry-id>": {"menuVisible"?:
+# bool, "order"?: number}}}`.
+STAPEL_NAV_JSON = """\
+{
+  "overrides": {}
+}
+"""
+
+# ``frontend/src/LandingPage.tsx`` — plain scaffold template (only emitted
+# with --landing), a simple hero page styled entirely through §68 neutral
+# colour tokens (`cssVar("<role>")` from `@stapel/tokens` — already a
+# devDependency of every generated project; see PACKAGE_JSON above) — NEVER
+# a raw hex/rgb (`no-raw-colors`, AGENTS.md §6). `{{CTA_HREF}}` is "/login"
+# when auth is wired, else "/app" (rendered by ``_write_frontend_scaffold``
+# — never guessed here).
+LANDING_PAGE_TSX = """\
+import type { ReactElement } from "react";
+import { cssVar } from "@stapel/tokens";
+
+/**
+ * Landing page scaffold (--landing) — replace with your real marketing
+ * page; keep reading colours through `cssVar("<role>")`, never a literal
+ * hex/rgb (see AGENTS.md §6 "No raw colours").
+ */
+export function LandingPage(): ReactElement {
+  return (
+    <main
+      style={{
+        fontFamily: "system-ui, sans-serif",
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "1rem",
+        textAlign: "center",
+        padding: "2rem",
+        background: cssVar("surface"),
+        color: cssVar("text"),
+      }}
+    >
+      <h1 style={{ fontSize: "2.5rem", margin: 0 }}>{{TITLE}}</h1>
+      <p style={{ color: cssVar("text-muted"), maxWidth: "32rem" }}>
+        Welcome. This is a scaffolded landing page — replace this copy with
+        your own.
+      </p>
+      <a
+        href="{{CTA_HREF}}"
+        style={{
+          padding: "0.75rem 1.5rem",
+          borderRadius: "0.5rem",
+          textDecoration: "none",
+          fontWeight: 600,
+          background: cssVar("brand"),
+          color: cssVar("text-on-accent"),
+        }}
+      >
+        Get started
+      </a>
+    </main>
+  );
+}
+"""
 
 
 VITE_ENV_D_TS = """\

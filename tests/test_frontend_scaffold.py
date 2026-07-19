@@ -12,7 +12,7 @@ import yaml
 from stapel_tools.create_project import create_project
 
 
-def _create(tmp_path, name, project_type, modules=None):
+def _create(tmp_path, name, project_type, modules=None, **kwargs):
     create_project(
         name=name,
         project_type=project_type,
@@ -24,6 +24,7 @@ def _create(tmp_path, name, project_type, modules=None):
         output_dir=tmp_path,
         use_submodules=False,
         init_git=False,
+        **kwargs,
     )
     return tmp_path / name
 
@@ -648,12 +649,16 @@ class TestFrontendReactWiring:
         generated App.tsx + modules.tsx and assert each non-relative spec's
         package is declared in package.json (dependencies or
         devDependencies) — proof the generated app wouldn't 501 on
-        `npm install` with a missing/undeclared package."""
+        `npm install` with a missing/undeclared package. Modules with no
+        FRONTEND_REACT_LIBS "nav" mirror (billing/calendar/recordings/
+        workspaces) — a nav-bearing selection (auth/profiles/notifications)
+        activates react-router routing instead of App.tsx (Ф1,
+        TestFrontendNavWiring's own equivalent gate covers THAT shape)."""
         import json
 
         proj = _create(
             tmp_path, "app", "monolith",
-            modules=["core", "auth", "billing", "notifications", "workspaces"],
+            modules=["core", "billing", "calendar", "recordings", "workspaces"],
         )
         frontend = proj / "frontend"
         app_tsx = (frontend / "src" / "App.tsx").read_text()
@@ -715,7 +720,11 @@ class TestFrontendReactWiring:
         assert '@stapel/workspaces-react/default"' not in modules_tsx
 
     def test_app_tsx_switches_to_module_aware_template_and_mounts_modules_provider(self, tmp_path):
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles"])
+        """"billing" carries no FRONTEND_REACT_LIBS "nav" mirror, so it
+        stays on the flat single-page App.tsx/ModulesPanel shape — a
+        nav-bearing selection like "profiles" activates react-router
+        routing instead (Ф1, TestFrontendNavWiring)."""
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "billing"])
         app_tsx = (proj / "frontend" / "src" / "App.tsx").read_text()
         assert 'from "./modules.js"' in app_tsx
         assert "<ModulesProvider>" in app_tsx
@@ -758,6 +767,222 @@ class TestFrontendReactWiring:
         assert not any("attributes" in dep for dep in pkg["dependencies"])
         modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
         assert "attributes" not in modules_tsx.lower()
+
+
+class TestFrontendNavWiring:
+    """Ф1 scripted-fullstack navigation — SCAFFOLD half (the lib-side core,
+    ``@stapel/shell-react``'s ``resolveNav``/``<AppShell/>``, already
+    shipped to stapel-react main; not yet published to npm). ``--auth``/
+    ``--landing``/a selected pair with mirrored nav entries turns on
+    react-router v7 wiring; a selection with none of the three stays the
+    exact prior clean shell (regression, mirrored from
+    TestFrontendReactWiring's own byte-identical test)."""
+
+    @staticmethod
+    def _extract_installed_manifests(nav_generated_ts: str) -> list[dict]:
+        import re
+
+        m = re.search(
+            r"INSTALLED_NAV_MANIFESTS: readonly PackageNavManifest\[\] = (\[.*?\]) as const;",
+            nav_generated_ts, re.DOTALL,
+        )
+        assert m, "INSTALLED_NAV_MANIFESTS literal not found in nav.generated.ts"
+        import json
+
+        return json.loads(m.group(1))
+
+    @staticmethod
+    def _resolve_nav_mirror(manifests: list[dict], overrides: dict | None = None) -> list[dict]:
+        """A Python port of ``@stapel/shell-react``'s own ``resolveNav``
+        (``packages/shell-react/src/headless/resolveNav.ts``) — used ONLY to
+        verify the generated ``nav.generated.ts``'s baked
+        ``INSTALLED_NAV_MANIFESTS`` resolves to the expected ``RESOLVED_NAV``
+        shape, without executing JS/TS (this repo can't ``npm ci`` — the
+        package isn't published yet; see this class's own numeric-gate
+        note). Mirrors the algorithm exactly: resolve each entry's
+        menuVisible/order (override ?? default), nest submenu entries under
+        their resolved top (dropping orphans), sort by (order, id), then
+        filter out any entry whose resolved menuVisible is false — a top
+        that resolves invisible drops its WHOLE subtree, same as the real
+        implementation's documented behaviour."""
+        overrides = overrides or {}
+
+        def resolve_one(e: dict) -> dict:
+            o = overrides.get(e["id"], {})
+            return {
+                **e,
+                "order": o.get("order", e["order"]),
+                "menuVisible": o.get("menuVisible", e["menuVisibleDefault"]),
+            }
+
+        all_entries = [e for m in manifests for e in m["entries"]]
+        tops = {e["id"]: resolve_one(e) for e in all_entries if e["placement"]["level"] == "top"}
+        children_by_parent: dict[str, list[dict]] = {}
+        for e in all_entries:
+            if e["placement"]["level"] != "submenu":
+                continue
+            parent_id = e["placement"].get("parentId")
+            if parent_id not in tops:
+                continue
+            children_by_parent.setdefault(parent_id, []).append(resolve_one(e))
+
+        result = []
+        for top in sorted(tops.values(), key=lambda e: (e["order"], e["id"])):
+            if not top["menuVisible"]:
+                continue
+            kids = children_by_parent.get(top["id"])
+            if kids is None:
+                result.append(top)
+                continue
+            visible = sorted((k for k in kids if k["menuVisible"]), key=lambda e: (e["order"], e["id"]))
+            result.append({**top, "children": visible})
+        return result
+
+    def test_no_flags_no_nav_module_scaffold_is_byte_identical_to_app_tsx(self, tmp_path):
+        """Regression (mirrors TestFrontendReactWiring's own byte-identical
+        test): no --auth, no --landing, no selected pair with nav entries
+        -> App.tsx/main.tsx are the EXACT prior clean-shell output, and no
+        routing artifact (routes.tsx/nav.generated.ts/ProtectedRoute.tsx/
+        stapel.nav.json/LandingPage.tsx) exists at all."""
+        import stapel_tools._frontend_templates as F
+        from stapel_tools._compose_templates import render_tokens
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "gdpr", "translate"])
+        frontend = proj / "frontend"
+        app_tsx = (frontend / "src" / "App.tsx").read_text()
+        expected_app_tsx = render_tokens(F.APP_TSX, {"SLUG": "app", "TITLE": "App"})
+        assert app_tsx == expected_app_tsx
+        assert (frontend / "src" / "main.tsx").read_text() == F.MAIN_TSX
+        assert (frontend / "tsconfig.json").read_text() == F.TSCONFIG_JSON
+        for rel in (
+            "src/routes.tsx", "src/nav.generated.ts", "src/ProtectedRoute.tsx",
+            "stapel.nav.json", "src/LandingPage.tsx",
+        ):
+            assert not (frontend / rel).exists(), rel
+
+    def test_auth_profiles_notifications_wires_login_route_and_resolved_nav(self, tmp_path):
+        """``--modules auth,profiles,notifications --auth --landing``:
+        routes.tsx has a "/login" route importing AuthPanel, and
+        nav.generated.ts's baked INSTALLED_NAV_MANIFESTS resolves (via the
+        Python resolveNav port above) to EXACTLY 2 top-level menuVisible
+        entries — notifications.feed and profiles.settings (with
+        auth.security nested as profiles.settings' one child). auth.login is
+        NOT a 3rd top-level entry: its mirrored `menuVisibleDefault` is
+        `false` (a sign-in screen is never a menu tab), so the real
+        resolveNav algorithm filters it out of RESOLVED_NAV entirely — it
+        still gets its own "/login" ROUTE (routing != the menu), just no
+        tab. auth.security is a submenu, never a 4th top-level entry."""
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["core", "auth", "profiles", "notifications"],
+            want_auth=True, want_landing=True,
+        )
+        frontend = proj / "frontend"
+        routes_tsx = (frontend / "src" / "routes.tsx").read_text()
+        assert 'path: "/login"' in routes_tsx
+        assert '{ path: "/login", element: <AuthPanel /> }' in routes_tsx
+        assert 'AuthPanel' in routes_tsx and '"@stapel/auth-react/default"' in routes_tsx
+
+        nav_ts = (frontend / "src" / "nav.generated.ts").read_text()
+        manifests = self._extract_installed_manifests(nav_ts)
+        resolved = self._resolve_nav_mirror(manifests)
+        top_ids = [e["id"] for e in resolved]
+        assert top_ids == ["notifications.feed", "profiles.settings"]
+        assert len(resolved) == 2
+        settings = next(e for e in resolved if e["id"] == "profiles.settings")
+        assert [c["id"] for c in settings["children"]] == ["auth.security"]
+
+    def test_landing_only_scaffold_has_landing_route_and_no_app_protected_tree(self, tmp_path):
+        """``--landing`` with no auth, no nav-bearing module: "/" mounts
+        LandingPage, and there is no "/app" route at all (no ProtectedRoute,
+        no AppShell, no nav.generated.ts/@stapel/shell-react dependency)."""
+        import json
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core"], want_landing=True)
+        frontend = proj / "frontend"
+        routes_tsx = (frontend / "src" / "routes.tsx").read_text()
+        assert 'element: <LandingPage />' in routes_tsx
+        assert '"/app"' not in routes_tsx
+        assert "ProtectedRoute" not in routes_tsx
+        assert "AppShell" not in routes_tsx
+        assert (frontend / "src" / "LandingPage.tsx").exists()
+        assert not (frontend / "src" / "ProtectedRoute.tsx").exists()
+        assert not (frontend / "src" / "nav.generated.ts").exists()
+        assert not (frontend / "stapel.nav.json").exists()
+
+        pkg = json.loads((frontend / "package.json").read_text())
+        deps = pkg["dependencies"]
+        assert "react-router" in deps
+        assert "@stapel/shell-react" not in deps
+
+    def test_generated_router_imports_resolve_to_declared_deps(self, tmp_path):
+        """The numeric compile-conceptually gate (mirrors
+        TestFrontendReactWiring's own): parse every non-relative import
+        across every generated routing source and assert its package is
+        declared in package.json. The ONE gate this can't cover — an actual
+        `npm ci && npm run build` — is deferred to post-publish (see this
+        class's own module docstring): @stapel/shell-react isn't on npm yet,
+        and auth-react/profiles-react/notifications-react's shipped
+        `nav-manifest.json`/`NavEntry` core types aren't in their last
+        PUBLISHED release either."""
+        import json
+
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["core", "auth", "profiles", "notifications"],
+            want_auth=True, want_landing=True,
+        )
+        frontend = proj / "frontend"
+        sources = [
+            (frontend / "src" / f).read_text()
+            for f in (
+                "routes.tsx", "nav.generated.ts", "ProtectedRoute.tsx",
+                "LandingPage.tsx", "main.tsx",
+            )
+        ]
+        pkg = json.loads((frontend / "package.json").read_text())
+        declared = {*pkg.get("dependencies", {}), *pkg.get("devDependencies", {})}
+
+        imported = TestFrontendReactWiring._imported_packages(*sources)
+        assert imported, "expected at least one non-relative import"
+        missing = imported - declared
+        assert not missing, f"imported but not declared: {missing}"
+
+    def test_no_auth_flag_excludes_auth_from_route_tree_but_keeps_runtime_wiring(self, tmp_path):
+        """``--no-auth`` with "auth" still selected as a module: the auth
+        RUNTIME still wires into modules.tsx (ModulesProvider/AuthProvider),
+        but none of its screens join the route/nav tree — no "/login"
+        route, no ProtectedRoute, no auth entries in nav.generated.ts."""
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["core", "auth", "profiles"], want_auth=False,
+        )
+        frontend = proj / "frontend"
+        # profiles alone still activates routing (it carries nav entries).
+        routes_tsx = (frontend / "src" / "routes.tsx").read_text()
+        assert '"/login"' not in routes_tsx
+        assert "AuthPanel" not in routes_tsx
+        assert not (frontend / "src" / "ProtectedRoute.tsx").exists()
+        nav_ts = (frontend / "src" / "nav.generated.ts").read_text()
+        assert "auth.login" not in nav_ts
+        assert "auth.security" not in nav_ts
+        # the runtime is still wired (unrelated to routing) — existing
+        # modules.tsx behavior, untouched by this task.
+        modules_tsx = (frontend / "src" / "modules.tsx").read_text()
+        assert "AuthProvider" in modules_tsx
+
+    def test_router_deps_pinned_from_live_npm_v7_range(self, tmp_path):
+        """`react-router` is pinned to the latest v7 release (verified via
+        `npm view "react-router@^7" version`, NOT the plain `npm view
+        react-router version` dist-tag — that's a v8 major, incompatible
+        with @stapel/shell-react's own peerDependencies range) — see
+        create_project.FRONTEND_ROUTER_DEPS's own comment."""
+        import json
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core"], want_landing=True)
+        pkg = json.loads((proj / "frontend" / "package.json").read_text())
+        assert pkg["dependencies"]["react-router"] == "^7.18.1"
+        assert not pkg["dependencies"]["react-router"].startswith("^8")
 
 
 class TestGeneratedCeleryWiring:

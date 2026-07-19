@@ -2,6 +2,67 @@
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-07-20
+
+### Added — scripted-fullstack navigation, scaffold half (Ф1)
+
+The lib-side nav foundation (`@stapel/shell-react`'s `resolveNav`/
+`<AppShell/>`, `@stapel/core`'s `NavEntry`/`PackageNavManifest` types, and
+`nav-manifest.json` on auth-react/profiles-react/notifications-react)
+shipped to stapel-react main but isn't published to npm yet. This release
+is the SCAFFOLD half: `stapel-create-project` now generates a real
+react-router v7 navigated app scriptedly (no LLM) instead of a single
+unrouted `<App/>`, whenever `--auth`, `--landing`, or a selected module
+with a mirrored nav surface is in play.
+
+- `FRONTEND_ROUTER_DEPS` (`create_project.py`) — `react-router` pinned to
+  the latest v7 release (`7.18.1`, verified via `npm view "react-router@^7"
+  version` — the PLAIN `npm view react-router version` dist-tag is now a
+  v8 major and would silently pull an incompatible one). Added to the
+  generated `frontend/package.json` whenever routing is active.
+  `FRONTEND_SHELL_REACT_PACKAGE`/`_VERSION` pin `@stapel/shell-react`
+  ahead-of-npm (not published yet — 404s on npm today; pinned from the
+  sibling stapel-react checkout's own package.json, same discipline as
+  `STAPEL_LIBS`' `ahead_of_pypi` flag), added whenever a selected pair
+  contributes nav entries.
+- `FRONTEND_REACT_LIBS["auth"|"profiles"|"notifications"]["nav"]` — a
+  manually PINNED MIRROR of each pair's own `nav-manifest.json` (auth.login
+  + auth.security, profiles.settings, notifications.feed). New
+  `scripts/check_nav_manifest_sync.py` — a drift gate (peer of the
+  pin-verification comments) diffing the Python mirror against the sibling
+  stapel-react checkout's real `nav-manifest.json` files; skips cleanly
+  when that checkout isn't present.
+- New generated files (`_frontend_templates.py`): `src/nav.generated.ts`
+  (bakes `INSTALLED_NAV_MANIFESTS` at codegen time, computes `RESOLVED_NAV`
+  by calling the real `resolveNav` against the committed
+  `stapel.nav.json` at import time — the same call `<AppShell/>` itself is
+  built on), `src/routes.tsx` (`createBrowserRouter` — react-router v7
+  ships v6-future behaviour as its own default, no future-flags object to
+  emit), `src/ProtectedRoute.tsx` (gates `/app` on
+  `useActiveSessionReady`/`useAuthSessionState`, both already-published
+  hooks — no auth-react change needed), `stapel.nav.json` (empty
+  `{"overrides": {}}` override channel, deep-merge-over-default like
+  `stapel.theme.json`), and `src/LandingPage.tsx` (`--landing` only, styled
+  entirely through `cssVar("<role>")` §68 tokens, no raw hex).
+- `main.tsx` mounts `<RouterProvider router={router}/>` (wrapped in
+  `<ModulesProvider>` when any `@stapel/<module>-react` pair is also wired)
+  once routing is active; a selection with none of `--auth`/`--landing`/a
+  nav-bearing module collapses to the EXACT prior `<App/>` output, byte for
+  byte (regression-tested).
+- New CLI flags: `--landing` and `--auth`/`--no-auth` (default: derived
+  from whether the `auth` module is selected).
+- New `TestFrontendNavWiring` (`tests/test_frontend_scaffold.py`, 7 tests)
+  plus 2 pre-existing `TestFrontendReactWiring` tests updated to select a
+  non-nav-bearing module combo (their App.tsx/modules.tsx assertions no
+  longer apply to a nav-bearing selection, which now routes instead).
+
+Deferred to post-publish: an actual `npm ci && npm run build` against a
+generated project — `@stapel/shell-react` isn't on npm yet, and
+auth-react/profiles-react/notifications-react's last PUBLISHED releases
+predate their `nav-manifest.json`/`NavEntry` core types. The import-graph
+gate (every non-relative import resolves to a declared `package.json` dep)
+covers everything short of an actual install today.
+
 ## [0.15.0] — 2026-07-19
 
 ### Fixed — monolith preset shipped no root controls surface (studio e2e-3f018cc3, R3/§44 follow-up)
