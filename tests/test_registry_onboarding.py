@@ -60,11 +60,21 @@ class TestRegistryResolves:
             assert STAPEL_LIBS[key].get("django_app", True) is False, key
             assert "url_prefix" not in STAPEL_LIBS[key], key
 
+    # categories/listings were onboarded assuming the "bakes api/ into its
+    # own urls" bare-mount shape (like calendar/video) but actually read the
+    # SAME as the first-8 libs — their own urls.py's docstring says hosts
+    # mount them under their own ".../api/" prefix (mismount fix,
+    # 2026-07-20; see STAPEL_LIBS["categories"]/["listings"] comments).
+    BARE_MOUNT_EXCEPTIONS = {"categories", "listings"}
+
     def test_http_libs_declare_a_canonical_prefix(self):
         for key in SECOND_WAVE:
             if key in HEADLESS:
                 continue
             assert STAPEL_LIBS[key].get("http", True) is True, key
+            if key in self.BARE_MOUNT_EXCEPTIONS:
+                assert STAPEL_LIBS[key]["url_prefix"] == f"{key}/api/", key
+                continue
             # second-wave http libs bake api/ into their own urls -> bare mount
             assert STAPEL_LIBS[key]["url_prefix"] == f"{key}/", key
 

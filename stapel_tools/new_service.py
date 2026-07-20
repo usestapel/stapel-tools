@@ -93,15 +93,26 @@ def make_context(
     stapel_apps_block = "".join(f'\n    "{app}",' for app in apps)
 
     def _url_include(app: str) -> str:
-        if app == "stapel_cdn":
-            # stapel-cdn auto-wiring (cdn-scaffold-autowire.md): mounted at
-            # its OWN canonical "cdn/api/" prefix, not this service's shared
-            # {url_prefix}api/ — matches nginx's GENERATED ^~ /cdn/api/ proxy
-            # (create_project._reserved_backend_prefixes, STAPEL_LIBS["cdn"]'s
-            # default url_prefix) and the Vite dev proxy built from the same
-            # list. A request routed to /cdn/api/... would otherwise 404:
-            # Django would only know "{url_prefix}api/..." for it.
-            return '\n    path("cdn/api/", include("stapel_cdn.urls")),'
+        # Per-lib mount (mismount fix, 2026-07-20): each Stapel feature lib
+        # mounts at its OWN canonical prefix (stapel_tools._url_mounts,
+        # derived from create_project.STAPEL_LIBS — cross-checked against
+        # each lib's own urls.py) — NOT this service's shared
+        # {url_prefix}api/. Mounting every lib at the shared prefix collided
+        # every lib's routes onto the same path the instant a service (e.g.
+        # a monolith) hosted more than one — cdn used to be the one
+        # hand-special-cased exception; it is now just one entry in the same
+        # map, nothing special about it anymore.
+        from ._url_mounts import known_apps, url_mount_for
+
+        if app in known_apps():
+            mount = url_mount_for(app)
+            if mount is None:
+                return ""  # headless lib (composite glue / pure-pip dep): no url row
+            return f'\n    path("{mount}", include("{app}.urls")),'
+        # Not a registered Stapel lib (a project-local/custom app passed via
+        # --stapel-apps): legacy behavior — mount under the service's own
+        # shared prefix at Django runtime, since we have no data to derive
+        # anything more precise for it.
         return f'\n    path(f"{{url_prefix}}api/", include("{app}.urls")),'
 
     url_includes = "".join(_url_include(app) for app in apps)

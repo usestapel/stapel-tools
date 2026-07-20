@@ -189,7 +189,14 @@ STAPEL_LIBS = {
         "pin": "0.4.1",
         "ahead_of_pypi": False,  # matches PyPI 0.4.1 @ 2026-07-11
         "http": True,
-        "url_prefix": "categories/",
+        # Onboarded 2026-07-11 assuming the "bakes api/ into its own urls"
+        # second-wave shape (like calendar/video) — actually reads the SAME
+        # as the first-8 libs: stapel-categories/urls.py's own docstring
+        # says "Hosts keep mounting include('stapel_categories.urls') under
+        # their .../api/ prefix" (no internal "api/" segment; only
+        # "v1/") — mismount fix, 2026-07-20, verified against the sibling
+        # checkout's actual urls.py, not just this registry's prior entry.
+        "url_prefix": "categories/api/",
         "requires": ["attributes"],  # pyproject dependency, hard
     },
     "chat": {
@@ -240,7 +247,10 @@ STAPEL_LIBS = {
         "pin": "0.3.1",
         "ahead_of_pypi": False,  # matches PyPI 0.3.1 @ 2026-07-11
         "http": True,
-        "url_prefix": "listings/",
+        # Same fix/rationale as "categories" above: stapel-listings/urls.py's
+        # own docstring says hosts mount it under their own ".../api/"
+        # prefix (no internal "api/" segment) — mismount fix, 2026-07-20.
+        "url_prefix": "listings/api/",
         "requires": ["attributes"],  # pyproject dependency, hard
     },
     "mailtrap": {
@@ -1428,15 +1438,20 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
         f'\n    "{STAPEL_LIBS[key]["dir"]}",' for key in feature_modules
         if STAPEL_LIBS[key].get("django_app", True)
     )
-    # Mount prefix: a lib's own registry entry wins (the newer modules already
-    # bake their canonical "/<mod>/" mount — some with an internal "api/"
-    # segment, some without — see each urls.py docstring); libs with no
-    # "url_prefix" declared keep the legacy "<key>/api/" mount (the first 8
-    # onboarded libs, whose own urls.py has no "api/" segment of its own).
-    # Headless libs ("http": False, e.g. attributes/vault) get no url row at
-    # all — they mount nowhere, not even bare.
+    # Mount prefix: stapel_tools._url_mounts.url_mount_for is the single
+    # source of truth (the same one new_service.scaffold_service's
+    # _url_include uses for monolith/microservice generation) — a lib's own
+    # registry entry wins (the newer modules already bake their canonical
+    # "/<mod>/" mount — some with an internal "api/" segment, some without —
+    # see each urls.py docstring); libs with no "url_prefix" declared keep
+    # the legacy "<key>/api/" mount (the first 8 onboarded libs, whose own
+    # urls.py has no "api/" segment of its own). Headless libs ("http":
+    # False, e.g. attributes/vault) get no url row at all — they mount
+    # nowhere, not even bare.
+    from ._url_mounts import url_mount_for
+
     url_includes = "".join(
-        f'\n    path("{STAPEL_LIBS[key].get("url_prefix", f"{key}/api/")}", '
+        f'\n    path("{url_mount_for(STAPEL_LIBS[key]["dir"])}", '
         f'include("{STAPEL_LIBS[key]["dir"]}.urls")),'
         for key in feature_modules
         if STAPEL_LIBS[key].get("http", True)

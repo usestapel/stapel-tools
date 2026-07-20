@@ -2,6 +2,71 @@
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-07-20
+
+### Fixed — generated monolith mismounted every feature lib (high-priority)
+
+`new_service.py`'s `_url_include` (the function that renders each selected
+Stapel feature lib's `path(..., include(<app>.urls))` row into a generated
+service's `config/urls.py`) mounted EVERY lib under the hosting SERVICE's own
+shared `{url_prefix}api/` (its slug, e.g. `"app/api/"` for a monolith) —
+except `stapel_cdn`, hand-special-cased to its real `"cdn/api/"` mount. A
+monolith combining more than one feature lib collided every one of them onto
+the identical Django path; the generated frontend's api clients (`/<lib>/api/
+v1/...`), the generated nginx proxy (per-lib `/<lib>/api/`) and the §57
+reserved-paths canon all expected each lib at its OWN prefix, so a generated
+fullstack project 404'd on every lib's API. The bug was invisible for a
+dedicated single-lib microservice whenever the service's own slug happened to
+equal the lib's key (the common case) — it only manifested the moment a
+monolith combined libs, or a microservice's slug diverged from its lib's key.
+
+- New `stapel_tools/_url_mounts.py` — the single source of truth for a
+  lib's Django mount prefix, derived from `create_project.STAPEL_LIBS`
+  (cross-checked lib-by-lib against each sibling checkout's actual urls.py/
+  urls_v1.py, not merely trusted from the registry, and against the one
+  hand-wired working reference, meettoday's own `config/urls.py`, for auth/
+  workspaces/profiles/notifications/calendar/recordings/cdn). One documented
+  outlier override (`stapel_translate`, whose own urls_v1.py hardcodes its
+  full `"translate/api/v1/..."` prefix internally — mounts at the bare
+  project root instead of doubling the segment).
+- `new_service.make_context`'s `_url_include` now consults this map for every
+  registered Stapel lib — `stapel_cdn` is no longer a hand-special-case, just
+  one entry in the same general mechanism. A project-local/custom app not in
+  the registry keeps the old shared-service-prefix fallback (no data to do
+  better for it).
+- `create_project._create_minimal`'s url-include rendering now goes through
+  the same helper instead of a second, slightly different ad hoc default —
+  one mechanism for monolith, microservices and minimal generation.
+- Found and fixed while building the per-lib map: `STAPEL_LIBS["categories"]`
+  and `STAPEL_LIBS["listings"]` declared a bare `"<mod>/"` mount (assumed to
+  match calendar/video's "bakes api/ into its own urls" shape at onboarding
+  time) but their own urls.py docstrings actually read like auth/cdn's — no
+  internal `api/` segment, host must supply `"<mod>/api/"`. Fixed to
+  `"categories/api/"` / `"listings/api/"` (this also fixed a latent,
+  independent mismount in the `minimal` preset for these two libs).
+
+### Verification
+
+- `tests/test_create_project.py::TestMultiLibMonolithMountsEachLibUnderItsOwnPrefix`
+  — a monolith with auth+profiles+calendar+cdn mounts each under its own
+  prefix (not the shared service prefix), a real `django.urls.resolve()`
+  reaches a view for a real operation path per lib (CI-safe auth+gdpr
+  variant always runs; the fuller auth/profiles/calendar/cdn variant skips
+  cleanly when those sibling packages aren't importable), and nginx-local/
+  prod-nginx/Vite/`reserved-paths.json` all agree with the Django mounts.
+- `tests/test_create_project.py::TestSingleAndNoLibScaffoldUnaffected` — a
+  monolith with zero or one feature lib, and a standalone
+  `stapel-new-service` microservice, still mount correctly (the shapes the
+  bug was invisible for).
+- `tests/test_registry_onboarding.py` / `tests/test_catalog_index.py` —
+  updated for the categories/listings mount correction.
+
+### Bump rationale
+
+Minor (0.17.0 → 0.18.0): a correctness fix, but it changes generated output
+(every non-cdn feature lib's url mount in a monolith with 2+ libs, plus
+categories'/listings' mount in every preset).
+
 ## [0.17.0] — 2026-07-20
 
 ### Added — cdn auto-wiring

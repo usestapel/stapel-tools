@@ -841,22 +841,25 @@ class TestGeneratedMonolithPassesAdoptionLint:
     """Regression (release-blocking): three v0.11.x tags in a row shipped a
     generated monolith that immediately failed its OWN e2e-generated-project
     CI gate with ADO001 ("installed and ships a urlconf but is not mounted")
-    for every HTTP-capable feature lib — even though config/urls.py DOES
-    mount each one (``path(f"{url_prefix}api/", include("stapel_auth.urls"))``
-    — see _templates.URLS_PY / new_service.make_context). The root cause was
-    in stapel-adoption-lint's parser, not the generator: a route written as
-    an f-string (this canon's OWN mount idiom, needed because the prefix is a
-    runtime settings value) parsed as neither ast.Constant nor anything
-    ``_route_literal`` recognized, so the include() one argument over was
-    never reached — the mount silently vanished from ADO001's ``mounts`` set.
-    This drives ``create_project`` for real (not a hand-built fixture urls.py
-    like test_adoption_lint.py's) so a future change to either side (the
-    generator's mount idiom, or the linter's route parser) cannot silently
-    reintroduce the false positive — "auth" only (not e.g. notifications):
-    the only feature lib installed in this repo's own CI "test" job matrix
-    (see .github/workflows/publish.yml), matching the e2e job's --libs auth
-    (+ notifications, covered live by the e2e job itself, not this unit
-    test)."""
+    for every HTTP-capable feature lib — even though config/urls.py DID mount
+    each one. The root cause was in stapel-adoption-lint's parser, not the
+    generator: a route written as an f-string (the mount idiom this
+    generator used BEFORE the per-lib mismount fix below, needed at the time
+    because the prefix was a runtime settings value) parsed as neither
+    ast.Constant nor anything ``_route_literal`` recognized, so the
+    include() one argument over was never reached — the mount silently
+    vanished from ADO001's ``mounts`` set. Every registered Stapel lib now
+    mounts under a literal string path (stapel_tools._url_mounts,
+    mismount fix 2026-07-20) — plain ast.Constant, strictly easier for
+    ADO001's parser than the old f-string idiom, so this regression stays
+    covered a fortiori. This drives ``create_project`` for real (not a
+    hand-built fixture urls.py like test_adoption_lint.py's) so a future
+    change to either side (the generator's mount idiom, or the linter's
+    route parser) cannot silently reintroduce the false positive — "auth"
+    only (not e.g. notifications): the only feature lib installed in this
+    repo's own CI "test" job matrix (see .github/workflows/publish.yml),
+    matching the e2e job's --libs auth (+ notifications, covered live by the
+    e2e job itself, not this unit test)."""
 
     def test_monolith_with_auth_reports_no_ado001(self, tmp_path):
         from stapel_tools.adoption_lint import lint_project
@@ -876,11 +879,14 @@ class TestCdnAutoWiring:
     scaffold (regression)."""
 
     def test_cdn_installed_apps_and_own_url_prefix(self, tmp_path):
-        """Unlike every other feature lib in a monolith (mounted under the
-        SERVICE's own {url_prefix}api/ — see TestGeneratedMonolithPassesAdoptionLint's
-        own comment), cdn mounts at its canonical "cdn/api/" — matching the
+        """cdn mounts at its own canonical "cdn/api/" — matching the
         nginx/vite proxy rules GENERATED from STAPEL_LIBS["cdn"]'s default
-        url_prefix (create_project._reserved_backend_prefixes)."""
+        url_prefix (create_project._reserved_backend_prefixes). Since the
+        per-lib mismount fix (2026-07-20, stapel_tools._url_mounts) this is
+        no longer a hand-special-case: every feature lib in a monolith
+        mounts under its OWN prefix the same way — see
+        TestMultiLibMonolithMountsEachLibUnderItsOwnPrefix below for the
+        general case (cdn used to be the one exception; it no longer is)."""
         proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles", "cdn"])
         settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
         assert '"stapel_cdn",' in settings
@@ -931,10 +937,11 @@ class TestCdnAutoWiring:
         assert "--find-links=/wheels" in dockerfile
 
     def test_cdn_mount_reports_no_ado001(self, tmp_path):
-        """cdn's mount is a plain string literal (not the f-string idiom the
-        other libs use — see TestGeneratedMonolithPassesAdoptionLint), so it
-        was never at risk of the f-string parser gap either way; locked in
-        as its own regression."""
+        """cdn's mount is a plain string literal — since the per-lib mismount
+        fix (2026-07-20) every registered lib's mount is (see
+        TestGeneratedMonolithPassesAdoptionLint) — so it was never at risk of
+        the old f-string parser gap either way; locked in as its own
+        regression."""
         from stapel_tools.adoption_lint import lint_project
 
         proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
@@ -958,3 +965,218 @@ class TestCdnAutoWiring:
         assert "cdn" not in urls
         reqs = (proj / "svc-app" / "requirements.txt").read_text()
         assert "stapel-cdn" not in reqs
+
+
+class TestMultiLibMonolithMountsEachLibUnderItsOwnPrefix:
+    """High-priority mismount fix (2026-07-20, stapel_tools._url_mounts):
+    a monolith hosting several feature libs used to mount every one of them
+    under the SERVICE's own shared ``{url_prefix}api/`` (its slug, e.g.
+    "app/api/") — a request for e.g. "/auth/api/v1/me/" 404'd, because
+    Django only knew about "/app/api/...". Only stapel_cdn was ever
+    hand-special-cased to its real "cdn/api/" mount. This locks in the fix
+    for a monolith combining several libs at once — the bug was invisible
+    with a single lib (its own earlier regression test only ever installed
+    "auth" alone, see TestGeneratedMonolithPassesAdoptionLint)."""
+
+    def test_each_selected_lib_mounts_under_its_own_prefix(self, tmp_path):
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["core", "auth", "profiles", "calendar", "cdn"],
+        )
+        urls = (proj / "svc-app" / "config" / "urls.py").read_text()
+        # auth/profiles: own urls.py has no internal "api/" segment -> host
+        # supplies it.
+        assert 'path("auth/api/", include("stapel_auth.urls")),' in urls
+        assert 'path("profiles/api/", include("stapel_profiles.urls")),' in urls
+        # calendar: own urls.py already nests "api/v1/" -> bare host mount.
+        assert 'path("calendar/", include("stapel_calendar.urls")),' in urls
+        # cdn: same shape as auth/profiles — no longer a hand-special-case,
+        # just another row from the same per-lib map.
+        assert 'path("cdn/api/", include("stapel_cdn.urls")),' in urls
+        # None of the four collide on the service's OWN shared prefix
+        # (the pre-fix bug: every lib mounted at "app/api/").
+        assert 'path(f"{url_prefix}api/", include("stapel_auth.urls"))' not in urls
+        assert 'path(f"{url_prefix}api/", include("stapel_profiles.urls"))' not in urls
+        assert 'path(f"{url_prefix}api/", include("stapel_calendar.urls"))' not in urls
+
+    @staticmethod
+    def _resolve_check(tmp_path, modules, paths, extra_env=None):
+        """Generate a monolith with *modules*, boot real Django under
+        config.settings.boot_smoke (dummy DB backend — see
+        _templates.BOOT_SMOKE_SETTINGS), and resolve() every path in
+        *paths* (real operation paths taken straight from each lib's own
+        urls_v1.py, not invented). Returns the svc dir + the resolve
+        subprocess result so callers can assert on either."""
+        import os as _os
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core", *modules])
+        svc = proj / "svc-app"
+        env = {**_os.environ, "DJANGO_SETTINGS_MODULE": "config.settings.boot_smoke", **(extra_env or {})}
+
+        check = subprocess.run(
+            [sys.executable, "manage.py", "check"],
+            cwd=svc, capture_output=True, text=True, env=env,
+        )
+        assert check.returncode == 0, check.stdout + check.stderr
+
+        script = (
+            "import django\n"
+            "django.setup()\n"
+            "from django.urls import resolve\n"
+            "from django.urls.exceptions import Resolver404\n"
+            f"paths = {paths!r}\n"
+            "for path in paths:\n"
+            "    try:\n"
+            "        match = resolve(path)\n"
+            "    except Resolver404 as exc:\n"
+            "        raise AssertionError(f'{path} did not resolve: {exc}')\n"
+            "    print(f'OK {path} -> {match.func}')\n"
+            "print('ALL_RESOLVED')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=svc, capture_output=True, text=True, env=env,
+        )
+        return result
+
+    def test_resolves_end_to_end_under_django(self, tmp_path):
+        """The load-bearing gate: prove Django's URL resolver actually
+        reaches a view for two libs at once — real operation paths taken
+        straight from each lib's own urls_v1.py, not just that the urlconf
+        source TEXT looks right, and NOT colliding on the pre-fix shared
+        service prefix. auth + gdpr — the two feature libs CI's own "Tests"
+        job actually installs (see .github/workflows/ci.yml's `pip install
+        ... stapel-auth ... stapel-gdpr`), so this runs for real in CI, not
+        just locally against a fuller sibling checkout (see the
+        importorskip'd companion test below for the full auth/profiles/
+        calendar/cdn set, same pattern this repo already uses — see
+        TestMinimalAuthUserModel.test_minimal_with_auth_still_resolves_to_stapel_user)."""
+        result = self._resolve_check(
+            tmp_path, ["auth", "gdpr"],
+            ["/auth/api/v1/me/", "/gdpr/api/v1/user/data-export/request"],
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "ALL_RESOLVED" in result.stdout
+
+    def test_resolves_end_to_end_under_django_full_lib_set(self, tmp_path):
+        """Same proof as above, over the exact auth/profiles/calendar/cdn
+        set the coordinating task named — including a BARE-mounted lib
+        (calendar, whose own urls.py nests "api/v1/" internally) alongside
+        "/api/"-mounted ones, so the fix's two mount shapes both get a real
+        resolve(), not just auth+gdpr's one shape. Skipped (not failed) when
+        stapel_profiles/stapel_calendar/stapel_cdn aren't importable in this
+        interpreter — CI's minimal "Tests" job doesn't install them (see the
+        CI-safe auth+gdpr test above, which always runs); this one is the
+        fuller local/dev-environment proof (verified locally against the
+        actual sibling checkouts for this fix)."""
+        pytest.importorskip("stapel_profiles")
+        pytest.importorskip("stapel_calendar")
+        pytest.importorskip("stapel_cdn")
+        result = self._resolve_check(
+            tmp_path, ["auth", "profiles", "calendar", "cdn"],
+            [
+                "/auth/api/v1/me/",
+                "/profiles/api/v1/me",
+                "/calendar/api/v1/events",
+                "/cdn/api/v1/upload/avatar/",
+            ],
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "ALL_RESOLVED" in result.stdout
+
+    def test_backend_prefixes_agree_with_django_mounts(self, tmp_path):
+        """nginx-local, prod-nginx and the Vite proxy all render off
+        create_project._reserved_backend_prefixes — this proves that GENERATED
+        list still agrees with the actual Django mounts this fix changed
+        (each reserved "<mod>/api" entry must be a real prefix of the mount
+        Django uses for that lib), for every one of local-nginx/prod-nginx/
+        Vite/reserved-paths.json, not just one of the four."""
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["core", "auth", "profiles", "calendar", "cdn"],
+        )
+        urls = (proj / "svc-app" / "config" / "urls.py").read_text()
+        mounts = {
+            "auth": "auth/api/",
+            "profiles": "profiles/api/",
+            "calendar": "calendar/",
+            "cdn": "cdn/api/",
+        }
+        for mod, mount in mounts.items():
+            assert mount in urls, f"{mod}: {mount!r} not actually mounted in urls.py"
+
+        reserved = json.loads((proj / "reserved-paths.json").read_text())
+        local_nginx = (
+            proj / "service-configs" / "nginx-local" / "default.conf.template"
+        ).read_text()
+        prod_nginx = (
+            proj / "service-configs" / "nginx" / "nginx.conf"
+        ).read_text()
+        vite_config = (proj / "frontend" / "vite.config.ts").read_text()
+        for mod, mount in mounts.items():
+            # The reserved sub-surface is always "<first-segment>/api"
+            # (create_project._MODULE_SUB_SURFACES) — a real prefix of the
+            # Django mount (both start with the same first path segment) —
+            # the actual bug class this fix closes: nginx/Vite proxying a
+            # path Django never mounted.
+            assert mount.split("/", 1)[0] == mod
+            reserved_entry = f"/{mod}/api"
+            assert reserved_entry in reserved["reservedPathPrefixes"], (
+                mod, reserved["reservedPathPrefixes"],
+            )
+            assert f"/{mod}/api/" in local_nginx
+            assert f"/{mod}/api/" in prod_nginx
+            assert f'"/{mod}/api/"' in vite_config
+
+
+class TestSingleAndNoLibScaffoldUnaffected:
+    """Regression guard for the mismount fix: a monolith with zero or one
+    feature lib — the shapes the pre-fix bug was invisible for (a single
+    lib's own shared-prefix mount coincidentally looked plausible) — must
+    keep resolving/mounting correctly, not just the new multi-lib case."""
+
+    def test_no_lib_monolith_has_no_feature_url_includes(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core"])
+        urls = (proj / "svc-app" / "config" / "urls.py").read_text()
+        assert "stapel_auth" not in urls
+        assert "stapel_cdn" not in urls
+
+    def test_single_lib_monolith_mounts_under_its_own_prefix(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "auth"])
+        urls = (proj / "svc-app" / "config" / "urls.py").read_text()
+        assert 'path("auth/api/", include("stapel_auth.urls")),' in urls
+
+    def test_single_lib_microservice_mounts_under_its_own_prefix(self, tmp_path):
+        """stapel-new-service used standalone (not via create_project) for a
+        dedicated single-lib microservice — the OTHER call site that reused
+        the same buggy _url_include before this fix."""
+        from stapel_tools.new_service import scaffold_service
+
+        (tmp_path / "docker-compose.yml").write_text("services: {}\n")
+        scaffold_service(
+            slug="auth", title="Auth Service", project_root=tmp_path,
+            stapel_apps=["stapel_auth"],
+        )
+        urls = (tmp_path / "auth" / "config" / "urls.py").read_text()
+        assert 'path("auth/api/", include("stapel_auth.urls")),' in urls
+
+    def test_composite_lib_in_monolith_gets_no_url_row(self, tmp_path):
+        """A composite ("http": False, "django_app": True — e.g. booking:
+        Projection glue over calendar+listings, no urls.py of its own) found
+        while building the per-lib mount map: the OLD _url_include had no
+        http-awareness at all, so selecting a composite in a monolith would
+        have emitted `include("stapel_booking.urls")` — a module that
+        doesn't exist, an ImportError at Django startup. Untested before this
+        fix (no prior test selected a composite lib in a monolith); the new
+        map's ``mount is None`` branch fixes it as a side effect — locked in
+        here so it doesn't regress."""
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["core", "calendar", "listings", "booking"],
+        )
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
+        urls = (proj / "svc-app" / "config" / "urls.py").read_text()
+        assert '"stapel_booking",' in settings  # glue app slot IS installed
+        assert "stapel_booking.urls" not in urls  # but mounts no urls of its own
+        assert 'path("calendar/", include("stapel_calendar.urls")),' in urls
+        assert 'path("listings/api/", include("stapel_listings.urls")),' in urls

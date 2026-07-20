@@ -97,7 +97,9 @@ def test_load_config_lines_absent_file_is_empty_list(tmp_path):
 def test_stapel_libs_entry_real_module_projects_url_prefix_requires_pin():
     entry = stapel_libs_entry("stapel-categories")
     assert entry == {
-        "url_prefix": "categories/",
+        # mismount fix (2026-07-20): categories' own urls.py needs the host
+        # to supply "api/" (no internal segment) — see STAPEL_LIBS["categories"].
+        "url_prefix": "categories/api/",
         "requires": ["attributes"],
         "pin": entry["pin"],  # pin value churns with registry bumps; shape only
     }
