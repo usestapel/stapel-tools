@@ -865,3 +865,96 @@ class TestGeneratedMonolithPassesAdoptionLint:
         findings = lint_project(proj / "svc-app", search_roots=[tmp_path])
         ado001 = [f for f in findings if f.rule == "ADO001"]
         assert ado001 == [], ado001
+
+
+class TestCdnAutoWiring:
+    """cdn auto-wiring (cdn-scaffold-autowire.md): generalizes the
+    hand-applied meettoday avatar fix — the exact 11-file recipe (backend
+    settings/urls, libvips container, nginx, frontend stopgap client) — into
+    the scaffold, gated on "cdn" being among the project's ``--modules``. A
+    monolith without cdn selected must stay byte-identical to the pre-fix
+    scaffold (regression)."""
+
+    def test_cdn_installed_apps_and_own_url_prefix(self, tmp_path):
+        """Unlike every other feature lib in a monolith (mounted under the
+        SERVICE's own {url_prefix}api/ — see TestGeneratedMonolithPassesAdoptionLint's
+        own comment), cdn mounts at its canonical "cdn/api/" — matching the
+        nginx/vite proxy rules GENERATED from STAPEL_LIBS["cdn"]'s default
+        url_prefix (create_project._reserved_backend_prefixes)."""
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles", "cdn"])
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
+        assert '"stapel_cdn",' in settings
+        urls = (proj / "svc-app" / "config" / "urls.py").read_text()
+        assert 'path("cdn/api/", include("stapel_cdn.urls")),' in urls
+
+    def test_cdn_settings_block_self_documents_library_defaults(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles", "cdn"])
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
+        assert "STAPEL_CDN = {" in settings
+        assert '"ASSET_TYPES": (\'avatar\',),' in settings
+        assert '"ENABLED_SUBMODULES": (\'images\',),' in settings
+        # profiles ALSO selected -> the self-documenting comm-check default.
+        assert "STAPEL_PROFILES = {" in settings
+        assert '"PROFILES_AVATAR_CHECK": \'comm\',' in settings
+
+    def test_cdn_without_profiles_renders_no_profiles_block(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
+        assert "STAPEL_CDN = {" in settings
+        assert "STAPEL_PROFILES" not in settings
+
+    def test_explicit_module_config_overrides_the_cdn_default(self, tmp_path):
+        """The auto-injected default must never clobber an explicit
+        --module-config entry for cdn."""
+        create_project(
+            name="app2", project_type="monolith", title="App2",
+            url="https://x.dev", company_name="X", company_email="x@x.dev",
+            modules=["core", "cdn"], output_dir=tmp_path,
+            use_submodules=False, init_git=False,
+            module_config={"cdn": {"ASSET_TYPES": ["avatar", "product"]}},
+        )
+        settings = (tmp_path / "app2" / "svc-app2" / "config" / "settings" / "base.py").read_text()
+        assert '"ASSET_TYPES": [\'avatar\', \'product\'],' in settings
+        assert "'avatar',)" not in settings  # the auto-default tuple form
+
+    def test_cdn_requirements_line_present_with_images_extra(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
+        reqs = (proj / "svc-app" / "requirements.txt").read_text()
+        assert "stapel-cdn[images]>=0.5.1,<0.6" in reqs
+
+    def test_cdn_dockerfile_gets_libvips_multistage_build(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
+        dockerfile = (proj / "svc-app" / "Dockerfile").read_text()
+        assert "AS vips-builder" in dockerfile
+        assert "libvips-dev" in dockerfile
+        assert "pyvips==3.1.1" in dockerfile
+        assert "--find-links=/wheels" in dockerfile
+
+    def test_cdn_mount_reports_no_ado001(self, tmp_path):
+        """cdn's mount is a plain string literal (not the f-string idiom the
+        other libs use — see TestGeneratedMonolithPassesAdoptionLint), so it
+        was never at risk of the f-string parser gap either way; locked in
+        as its own regression."""
+        from stapel_tools.adoption_lint import lint_project
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
+        findings = lint_project(proj / "svc-app", search_roots=[tmp_path])
+        ado001 = [f for f in findings if f.rule == "ADO001"]
+        assert ado001 == [], ado001
+
+    def test_without_cdn_monolith_is_byte_identical_to_pre_autowire_output(self, tmp_path):
+        """Regression: a monolith that does not select cdn must carry none
+        of the auto-wiring — same Dockerfile, no STAPEL_CDN/STAPEL_PROFILES
+        block, no cdn requirements line, no cdn url mount."""
+        from stapel_tools._templates import DOCKERFILE
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles"])
+        dockerfile = (proj / "svc-app" / "Dockerfile").read_text()
+        assert dockerfile == DOCKERFILE.replace("{{DIR}}", "svc-app")
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
+        assert "STAPEL_CDN" not in settings
+        assert "STAPEL_PROFILES" not in settings
+        urls = (proj / "svc-app" / "config" / "urls.py").read_text()
+        assert "cdn" not in urls
+        reqs = (proj / "svc-app" / "requirements.txt").read_text()
+        assert "stapel-cdn" not in reqs

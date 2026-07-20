@@ -318,7 +318,55 @@ export default function App() {
 """
 
 
-def render_modules_tsx(entries: list[dict]) -> str:
+def render_cdn_lib_ts(slug: str) -> str:
+    """``frontend/src/lib/cdn.ts`` — stapel-cdn URL resolution, written only
+    when "cdn" is among the project's selected modules (cdn auto-wiring,
+    cdn-scaffold-autowire.md — generalizes the hand-applied meettoday avatar
+    fix). A DOCUMENTED STOPGAP: no ``@stapel/cdn-react`` client pair exists
+    yet (promoting this file's logic into one is a separate follow-up, not
+    blocking here).
+
+    ``@stapel/profiles-react/default``'s ``ProfileSettings`` stores/reads a
+    raw CDN reference (``Profile.avatar``, ``"<type>/<hash>"`` —
+    stapel-profiles' own ``CdnImageField``) but never resolves it to a
+    displayable URL itself; that is the ``avatarUrlFor(ref)`` prop it takes
+    (wired in by ``render_modules_tsx``/``render_routes_tsx`` below when cdn
+    is selected). The served URL shape mirrors stapel-cdn's own server-side
+    template, ``Image.get_variant_url`` (stapel_cdn/models.py):
+    ``{MEDIA_URL}{type}/{hash}/{tier}{branch}.webp``. This project's
+    ``MEDIA_URL`` is ``"/media/<slug>/"`` (``config/settings/base.py`` —
+    namespaced per service slug), proxied/aliased through nginx exactly
+    like ``/static/`` (``service-configs/nginx*/*``, both unconditionally
+    generated already). 160 is the smallest preview tier (stapel-cdn's
+    default ``PREVIEW_SIZES``) and the rung ``useAvatarUpload``'s own
+    ``uploadedUrl`` resolves to (``variant_160_url``) — kept in sync here by
+    construction, not by convention alone.
+    """
+    return f'''\
+/**
+ * GENERATED — stapel-cdn URL resolution (cdn auto-wiring). See this file's
+ * generator, _frontend_templates.render_cdn_lib_ts, for the full rationale.
+ */
+export function avatarUrlFor(ref: string): string {{
+  // `ref` is format-validated server-side (stapel-profiles'
+  // validate_cdn_reference, "<type>/<hash>") before it is ever stored.
+  const [type, hash] = ref.split("/", 2);
+  return `/media/{slug}/${{type}}/${{hash}}/160w.webp`;
+}}
+'''
+
+
+def _profile_settings_jsx(has_cdn: bool) -> str:
+    """The JSX ``<ProfileSettings .../>`` mount — with the ``avatarUrlFor``
+    stopgap prop (``render_cdn_lib_ts``) wired in when cdn is selected,
+    bare otherwise (regression: no cdn -> byte-identical)."""
+    return (
+        "<ProfileSettings avatarUrlFor={avatarUrlFor} />" if has_cdn
+        else "<ProfileSettings />"
+    )
+
+
+def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
     """Generates ``frontend/src/modules.tsx`` — the DATA-DRIVEN registry of
     every selected ``@stapel/<module>-react`` pair (create_project.py's
     ``FRONTEND_REACT_LIBS``, filtered to the project's actual ``--modules``
@@ -341,7 +389,13 @@ def render_modules_tsx(entries: list[dict]) -> str:
       passed via the ``clients={{ "<mod>": ... }}`` per-module override —
       exactly the multi-pair composition `@stapel/core`'s own README
       documents) wrapping one ``<XProvider runtime={...}>`` per selected
-      pair, nested.
+      pair, nested. ``has_cdn`` (cdn auto-wiring, cdn-scaffold-autowire.md)
+      additionally registers a stopgap ``cdn`` client — the primary pair's
+      client reused verbatim, same as the hand-applied meettoday fix's
+      ``clients: { cdn: stapelClient }`` — so core's
+      ``useStapelClient("cdn")`` seam (called unconditionally by
+      ``ProfileSettings``' own avatar-upload hook) never throws for want of
+      a registered client.
     - ``ModulesPanel`` — mounts every selected pair's zero-config
       ``default_component`` (if any), wrapped once in antd's
       ``<ConfigProvider theme={toAntdThemeConfig("light")}>`` themed via
@@ -357,6 +411,9 @@ def render_modules_tsx(entries: list[dict]) -> str:
       mount.
     """
     needs_antd = any(e.get("default_component") for e in entries)
+    # cdn auto-wiring: the avatarUrlFor stopgap only matters where
+    # ProfileSettings is actually mounted (this file's ModulesPanel).
+    needs_cdn_avatar_helper = has_cdn and any(e["key"] == "profiles" for e in entries)
 
     lines: list[str] = [
         "/**",
@@ -380,6 +437,8 @@ def render_modules_tsx(entries: list[dict]) -> str:
         )
         if e.get("default_component"):
             lines.append(f'import {{ {e["default_component"]} }} from "{e["package"]}/default";')
+    if needs_cdn_avatar_helper:
+        lines.append('import { avatarUrlFor } from "./lib/cdn.js";')
     lines.append("")
     lines.append('const query = createStapelQueryClient({ cacheVersion: "0.0.0" });')
     lines.append('const i18n = createI18n({ locale: "en" });')
@@ -404,12 +463,18 @@ def render_modules_tsx(entries: list[dict]) -> str:
     lines.append(" */")
     lines.append("export function ModulesProvider({ children }: { children: ReactNode }): ReactElement {")
     lines.append("  return (")
-    if rest:
+    if rest or has_cdn:
         lines.append('    <StapelProvider')
         lines.append(f'      client={{{primary["key"]}Runtime.client}}')
         lines.append("      clients={{")
         for e in rest:
             lines.append(f'        {e["key"]}: {e["key"]}Runtime.client,')
+        if has_cdn:
+            # Stopgap (no @stapel/cdn-react pair exists yet — a documented
+            # follow-up, cdn-scaffold-autowire.md): reuse the primary pair's
+            # client verbatim, same as the hand-applied meettoday fix's
+            # `clients: { cdn: stapelClient }`.
+            lines.append(f'        cdn: {primary["key"]}Runtime.client,')
         lines.append("      }}")
         lines.append("      queryRuntime={query}")
         lines.append("      i18n={i18n}")
@@ -446,11 +511,17 @@ def render_modules_tsx(entries: list[dict]) -> str:
         if needs_antd:
             lines.append('    <ConfigProvider theme={toAntdThemeConfig("light")}>')
             for e in defaults:
-                lines.append(f'      <{e["default_component"]} />')
+                if e["key"] == "profiles" and has_cdn:
+                    lines.append(f'      {_profile_settings_jsx(has_cdn)}')
+                else:
+                    lines.append(f'      <{e["default_component"]} />')
             lines.append("    </ConfigProvider>")
         else:
             for e in defaults:
-                lines.append(f'    <{e["default_component"]} />')
+                if e["key"] == "profiles" and has_cdn:
+                    lines.append(f'    {_profile_settings_jsx(has_cdn)}')
+                else:
+                    lines.append(f'    <{e["default_component"]} />')
         lines.append("  );")
         lines.append("}")
     lines.append("")
@@ -592,6 +663,7 @@ export function reresolveNav(overridesFile?: NavOverridesFile): readonly Resolve
 
 def render_routes_tsx(
     route_plan: dict, *, auth_wired: bool, want_landing: bool, app_route_present: bool,
+    has_cdn: bool = False,
 ) -> str:
     """``frontend/src/routes.tsx`` — react-router v7's ``createBrowserRouter``
     (v7 ships v6-future behaviour as ITS OWN default; there is no
@@ -611,6 +683,14 @@ def render_routes_tsx(
       ``auth_wired`` (an unprotected "/app" is valid too: a nav-bearing
       module with no auth installed just never gates the shell). Children:
       one route per ``route_plan["app_children"]`` entry.
+
+    ``has_cdn`` (cdn auto-wiring, cdn-scaffold-autowire.md): profiles' nav
+    entry mounts ``ProfileSettings`` as a route (this is the LIVE path for
+    it, not ``render_modules_tsx``'s ``ModulesPanel`` — profiles always
+    carries a ``"nav"`` mirror, so ``app_route_present`` is always true once
+    profiles is selected) — wired with the ``avatarUrlFor`` stopgap prop the
+    same way ``render_modules_tsx`` wires its own (dead, but kept in sync)
+    copy.
     """
     absolute_routes = route_plan["absolute_routes"]
     app_children = route_plan["app_children"]
@@ -620,6 +700,10 @@ def render_routes_tsx(
         entry = r["entry"]
         comp = entry["component"]
         component_imports.setdefault((entry["_package"], comp["subpath"]), set()).add(comp["export"])
+    uses_profile_settings = any(
+        "ProfileSettings" in exports for exports in component_imports.values()
+    )
+    needs_cdn_avatar_helper = has_cdn and uses_profile_settings
 
     # "/" redirects to "/app" only when there's an "/app" to redirect TO and
     # nothing already claimed "/" (LandingPage) — the only place `Navigate`
@@ -650,6 +734,8 @@ def render_routes_tsx(
         lines.append('import { LandingPage } from "./LandingPage.js";')
     for (package, subpath), exports in component_imports.items():
         lines.append(f'import {{ {", ".join(sorted(exports))} }} from "{package}/{subpath}";')
+    if needs_cdn_avatar_helper:
+        lines.append('import { avatarUrlFor } from "./lib/cdn.js";')
     lines.append("")
     lines.append("export const router = createBrowserRouter([")
 
@@ -660,7 +746,8 @@ def render_routes_tsx(
 
     for r in absolute_routes:
         comp = r["entry"]["component"]["export"]
-        lines.append(f'  {{ path: "{r["path"]}", element: <{comp} /> }},')
+        element = _profile_settings_jsx(has_cdn) if comp == "ProfileSettings" else f'<{comp} />'
+        lines.append(f'  {{ path: "{r["path"]}", element: {element} }},')
 
     if app_route_present:
         shell_element = 'element: <AppShell nav={RESOLVED_NAV} mode="light" />,'
@@ -678,7 +765,8 @@ def render_routes_tsx(
             lines.append("    children: [")
             for c in app_children:
                 comp = c["entry"]["component"]["export"]
-                lines.append(f'      {{ path: "{c["path"]}", element: <{comp} /> }},')
+                element = _profile_settings_jsx(has_cdn) if comp == "ProfileSettings" else f'<{comp} />'
+                lines.append(f'      {{ path: "{c["path"]}", element: {element} }},')
             lines.append("    ],")
         lines.append("  },")
 

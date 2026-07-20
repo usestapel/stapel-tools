@@ -91,9 +91,20 @@ def make_context(
     dir_name = f"{prefix}{slug}" if prefix else slug
     apps = stapel_apps or []
     stapel_apps_block = "".join(f'\n    "{app}",' for app in apps)
-    url_includes = "".join(
-        f'\n    path(f"{{url_prefix}}api/", include("{app}.urls")),' for app in apps
-    )
+
+    def _url_include(app: str) -> str:
+        if app == "stapel_cdn":
+            # stapel-cdn auto-wiring (cdn-scaffold-autowire.md): mounted at
+            # its OWN canonical "cdn/api/" prefix, not this service's shared
+            # {url_prefix}api/ — matches nginx's GENERATED ^~ /cdn/api/ proxy
+            # (create_project._reserved_backend_prefixes, STAPEL_LIBS["cdn"]'s
+            # default url_prefix) and the Vite dev proxy built from the same
+            # list. A request routed to /cdn/api/... would otherwise 404:
+            # Django would only know "{url_prefix}api/..." for it.
+            return '\n    path("cdn/api/", include("stapel_cdn.urls")),'
+        return f'\n    path(f"{{url_prefix}}api/", include("{app}.urls")),'
+
+    url_includes = "".join(_url_include(app) for app in apps)
     dev_mock_providers = ""
     if "stapel_auth" in apps:
         from ._local_env_templates import DEV_MOCK_OTP_BLOCK
@@ -111,6 +122,14 @@ def make_context(
         "STAPEL_APPS": stapel_apps_block,
         "STAPEL_URL_INCLUDES": url_includes,
         "STAPEL_MODULE_CONFIG": render_settings_block(module_config),
+        # Not a render() token (no template spells "{{HAS_CDN}}") — a plain
+        # string flag generate_service_files() branches on to pick the
+        # libvips-enabled Dockerfile variant (cdn-scaffold-autowire.md).
+        # String, not bool: render() blindly .replace()s every ctx value
+        # against every template it's called on; a bool would TypeError the
+        # instant it reached a template with no matching placeholder to
+        # short-circuit on.
+        "HAS_CDN": "true" if "stapel_cdn" in apps else "",
         "ACTION_TRANSPORT": action_transport,
         "FUNCTION_TRANSPORT": function_transport,
         "TASK_DISPATCH": task_dispatch,
@@ -179,9 +198,17 @@ def write_file(path: Path, content: str):
 
 def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
     from ._harness_templates import HARNESS_CONFTEST_FIXTURES, harness_files
+    from ._templates import DOCKERFILE_CDN
 
     d = ctx["DIR"]
     m = ctx["MODULE"]
+    # cdn auto-wiring (cdn-scaffold-autowire.md): a service that installs
+    # stapel_cdn needs pyvips (stapel-cdn's [images] extra) importable at
+    # runtime, which needs the SYSTEM libvips built somewhere — the
+    # multi-stage vips-builder Dockerfile mirrors svc-stapel-studio's own
+    # precedent. Every other service keeps the exact prior single-stage
+    # Dockerfile (regression: no cdn -> byte-identical).
+    dockerfile_template = DOCKERFILE_CDN if ctx.get("HAS_CDN") else DOCKERFILE
     # Service conftest = shared outbox/mailtrap harness fixtures + api_client.
     service_conftest = HARNESS_CONFTEST_FIXTURES + (
         "\n\n@pytest.fixture\n"
@@ -194,7 +221,7 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / "version.txt": VERSION_TXT,
         root / d / "requirements.txt": REQUIREMENTS_TXT,
         root / d / "bootstrap.sh": render(BOOTSTRAP_SH, ctx),
-        root / d / "Dockerfile": render(DOCKERFILE, ctx),
+        root / d / "Dockerfile": render(dockerfile_template, ctx),
         root / d / "config" / "__init__.py": CONFIG_INIT_PY,
         root / d / "config" / "celery.py": render(CELERY_APP_PY, ctx),
         root / d / "config" / "asgi.py": render(ASGI_PY, ctx),

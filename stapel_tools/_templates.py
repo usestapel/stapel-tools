@@ -76,6 +76,38 @@ ENV DJANGO_SETTINGS_MODULE=config.settings.prod
 CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
 """
 
+# cdn auto-wiring (cdn-scaffold-autowire.md) — emitted instead of DOCKERFILE
+# when the service installs stapel_cdn (new_service.generate_service_files's
+# HAS_CDN branch). pyvips ships no binary wheel on PyPI: `pip install
+# pyvips` always compiles a cffi extension against the system libvips
+# headers (pkg-config), which needs a C compiler. Building the wheel in a
+# throwaway `vips-builder` stage keeps gcc/build-essential out of the
+# runtime image — mirrors svc-stapel-studio/Dockerfile (the verified
+# libvips container precedent): *system* libvips-dev bound by the pip
+# `images` extra (requirements.txt's stapel-cdn[images]), never a
+# bundled/vendored libvips (that rules out `pyvips[binary]`, which ships its
+# own separate libvips copy).
+DOCKERFILE_CDN = """\
+FROM python:3.12-slim AS vips-builder
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential libvips-dev pkg-config && rm -rf /var/lib/apt/lists/*
+RUN pip wheel --no-cache-dir --wheel-dir /wheels pyvips==3.1.1
+
+FROM python:3.12-slim
+WORKDIR /app
+# libvips-dev: runtime dependency for stapel-cdn[images] (pyvips) — the
+# image upload/resize pipeline. No compiler needed here — pyvips arrives
+# precompiled from vips-builder above via --find-links.
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client libvips-dev && rm -rf /var/lib/apt/lists/*
+COPY --from=vips-builder /wheels /wheels
+COPY {{DIR}}/requirements.txt .
+RUN pip install --no-cache-dir --find-links=/wheels -r requirements.txt && rm -rf /wheels
+# stapel_core is vendored as a git submodule at the project root
+COPY stapel_core ./stapel_core
+COPY {{DIR}} .
+ENV DJANGO_SETTINGS_MODULE=config.settings.prod
+CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+"""
+
 CELERY_APP_PY = """\
 \"\"\"Project Celery app — standard Django-Celery wiring.
 

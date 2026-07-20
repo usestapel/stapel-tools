@@ -1014,3 +1014,76 @@ class TestGeneratedCeleryWiring:
         assert "config.settings.base" not in celery_py
         settings = (proj / "config" / "settings.py").read_text()
         assert "CELERY_TASK_ALWAYS_EAGER = True" in settings
+
+
+class TestCdnFrontendAutoWiring:
+    """cdn auto-wiring (cdn-scaffold-autowire.md) — the frontend half of the
+    4-point recipe generalized from the hand-applied meettoday avatar fix: a
+    stopgap `cdn`-keyed client registered in the generated
+    `<StapelProvider clients={{...}}>` (no dedicated `@stapel/cdn-react`
+    pair exists yet — promoting this into one is a separate follow-up), and
+    — when profiles-react is ALSO wired — an `avatarUrlFor(ref)` helper
+    (frontend/src/lib/cdn.ts) passed into `ProfileSettings`. nginx's
+    `client_max_body_size`/`/media/`/`/cdn/api/` proxy and the Vite dev
+    proxy are already GENERATED unconditionally per-lib (STAPEL_LIBS'
+    default url_prefix — TestGenerativeBackendPrefixes) — asserted again
+    here as this feature's own numeric gate, not because they needed new
+    code."""
+
+    def test_cdn_client_registered_in_modules_provider(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles", "cdn"])
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert "cdn: profilesRuntime.client," in modules_tsx
+
+    def test_avatar_url_for_helper_written_and_wired_into_profile_settings(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles", "cdn"])
+        cdn_lib = proj / "frontend" / "src" / "lib" / "cdn.ts"
+        assert cdn_lib.exists()
+        content = cdn_lib.read_text()
+        assert "export function avatarUrlFor(ref: string): string {" in content
+        assert '`/media/app/${type}/${hash}/160w.webp`' in content
+        # profiles carries a nav mirror, so this is the LIVE route (not
+        # modules.tsx's ModulesPanel, which is unreachable once routing is
+        # active — see render_routes_tsx's own docstring).
+        routes = (proj / "frontend" / "src" / "routes.tsx").read_text()
+        assert 'import { avatarUrlFor } from "./lib/cdn.js";' in routes
+        assert "<ProfileSettings avatarUrlFor={avatarUrlFor} />" in routes
+
+    def test_cdn_without_profiles_registers_client_but_no_avatar_helper(self, tmp_path):
+        """cdn selected alongside a react-paired module OTHER than profiles:
+        the stopgap client still registers (any future consumer can call
+        useStapelClient("cdn")), but there is no ProfileSettings to wire an
+        avatarUrlFor prop into, so lib/cdn.ts is never written."""
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "billing", "cdn"])
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert "cdn: billingRuntime.client," in modules_tsx
+        assert not (proj / "frontend" / "src" / "lib" / "cdn.ts").exists()
+
+    def test_nginx_and_vite_proxy_cdn_with_raised_body_size(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles", "cdn"])
+        prod_nginx = (proj / "service-configs" / "nginx" / "nginx.conf").read_text()
+        local_nginx = (
+            proj / "service-configs" / "nginx-local" / "default.conf.template"
+        ).read_text()
+        vite = (proj / "frontend" / "vite.config.ts").read_text()
+        for text in (prod_nginx, local_nginx):
+            assert "client_max_body_size 50m;" in text
+            assert "location /media/" in text
+        assert "location ^~ /cdn/api/" in prod_nginx
+        assert "location ^~ /cdn/api/" in local_nginx
+        assert '"/cdn/api/"' in vite
+        assert '"/media/"' in vite
+
+    def test_without_cdn_frontend_is_byte_identical_to_pre_autowire_output(self, tmp_path):
+        """Regression: profiles alone (no cdn) must not register a `cdn`
+        client, must not write lib/cdn.ts, and ProfileSettings mounts bare
+        (no avatarUrlFor prop) — the exact pre-autowire scaffold."""
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles"])
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert "cdn" not in modules_tsx
+        assert not (proj / "frontend" / "src" / "lib").exists()
+        routes = (proj / "frontend" / "src" / "routes.tsx").read_text()
+        assert "avatarUrlFor" not in routes
+        assert "<ProfileSettings />" in routes
+        prod_nginx = (proj / "service-configs" / "nginx" / "nginx.conf").read_text()
+        assert "/cdn/" not in prod_nginx

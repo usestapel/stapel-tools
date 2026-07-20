@@ -1158,6 +1158,15 @@ def _write_frontend_scaffold(
 
     feature_libs = feature_libs or []
     react_entries = _frontend_react_entries(feature_libs)
+    # cdn auto-wiring (cdn-scaffold-autowire.md): registers a stopgap `cdn`
+    # client in ModulesProvider (no @stapel/cdn-react pair exists yet — see
+    # F.render_modules_tsx's own docstring) whenever there is at least one
+    # OTHER react pair's client to reuse; the avatarUrlFor helper (this
+    # project's frontend/src/lib/cdn.ts) is only written/wired into
+    # ProfileSettings when profiles-react is ALSO selected. Absent when cdn
+    # isn't selected — byte-identical regression.
+    has_cdn = "cdn" in feature_libs
+    needs_cdn_avatar_lib = has_cdn and "profiles" in feature_libs
     if want_auth is None:
         want_auth = "auth" in feature_libs
     auth_wired = bool(want_auth) and any(e["key"] == "auth" for e in react_entries)
@@ -1184,7 +1193,10 @@ def _write_frontend_scaffold(
     _write(frontend / "index.html", r(F.INDEX_HTML))
 
     if react_entries:
-        _write(frontend / "src" / "modules.tsx", F.render_modules_tsx(react_entries))
+        _write(frontend / "src" / "modules.tsx", F.render_modules_tsx(react_entries, has_cdn=has_cdn))
+
+    if needs_cdn_avatar_lib:
+        _write(frontend / "src" / "lib" / "cdn.ts", F.render_cdn_lib_ts(ctx["slug"]))
 
     if routing_active:
         _write(frontend / "src" / "main.tsx", F.render_main_tsx(
@@ -1195,7 +1207,7 @@ def _write_frontend_scaffold(
             _write(frontend / "stapel.nav.json", F.STAPEL_NAV_JSON)
         _write(frontend / "src" / "routes.tsx", F.render_routes_tsx(
             route_plan, auth_wired=auth_wired, want_landing=bool(want_landing),
-            app_route_present=app_route_present,
+            app_route_present=app_route_present, has_cdn=has_cdn,
         ))
         if auth_wired:
             _write(frontend / "src" / "ProtectedRoute.tsx", F.PROTECTED_ROUTE_TSX)
@@ -1357,6 +1369,15 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         task_dispatch=task_dispatch,
         module_config=module_config,
     )
+
+    # cdn auto-wiring (cdn-scaffold-autowire.md): the [images] extra (pyvips)
+    # is a REAL pip dependency regardless of whether stapel_cdn itself lands
+    # via git submodule (vendored source only — its own transitive deps are
+    # never pip-resolved) or pip (_setup_pip_deps, further below) — so it is
+    # appended directly here, unconditionally, the one place guaranteed to
+    # run for every monolith that selects cdn.
+    if "cdn" in (feature_libs or []):
+        _append_cdn_pip_requirement(project_dir / dir_name / "requirements.txt")
 
     # Prod nginx: scaffold_service just appended the /{slug} location; append
     # the GENERATED remainder (admin + each selected lib's canonical prefix)
@@ -1636,6 +1657,35 @@ def _extras_for_lib(key: str, module_config: dict[str, dict] | None) -> list[str
     return sorted(extras)
 
 
+def _append_cdn_pip_requirement(reqs_path: Path):
+    """Append ``stapel-cdn[images]`` (pyvips) to an already-written service
+    ``requirements.txt`` — cdn auto-wiring (cdn-scaffold-autowire.md),
+    generalizing the meettoday hand fix. Same pin/ceiling convention as
+    ``_setup_pip_deps``'s own entries (current STAPEL_LIBS["cdn"] registry
+    pin, next-minor exclusive ceiling); called unconditionally whenever
+    "cdn" is selected for a monolith, independent of the submodule-vs-pip
+    choice for stapel_cdn itself — the [images] extra's native dependency
+    (pyvips, needing the Dockerfile's vips-builder stage) is never satisfied
+    by vendoring stapel_cdn's source alone."""
+    if not reqs_path.exists():
+        return
+    info = STAPEL_LIBS["cdn"]
+    pin = info.get("pin")
+    ceiling = _pin_ceiling(pin) if pin else None
+    entry = f"stapel-cdn[images]>={pin},<{ceiling}" if pin and ceiling else "stapel-cdn[images]"
+    text = reqs_path.read_text()
+    if entry in text:
+        return
+    comment = (
+        "\n# stapel-cdn's image pipeline (auto-wired: cdn selected via "
+        "--modules) — the [images]\n# extra pulls pyvips, which needs the "
+        "system libvips-dev runtime lib baked into\n# this service's "
+        "Dockerfile (vips-builder stage, mirrors svc-stapel-studio's).\n"
+    )
+    with reqs_path.open("a", encoding="utf-8") as f:
+        f.write(comment + entry + "\n")
+
+
 def _setup_pip_deps(
     project_dir: Path,
     modules: list[str],
@@ -1816,6 +1866,25 @@ def create_project(
     # install — see _expand_with_requires).
     feature_only = _expand_with_requires([m for m in modules if m != "core"])
     modules = ["core", *feature_only]
+
+    # cdn auto-wiring (cdn-scaffold-autowire.md): self-documenting STAPEL_CDN/
+    # STAPEL_PROFILES defaults — generalizes the hand-applied meettoday
+    # avatar fix. Both values below are already each module's OWN library
+    # default (stapel-cdn's docs/capabilities.json ASSET_TYPES=["avatar"]/
+    # ENABLED_SUBMODULES=["images"]; stapel-profiles' PROFILES_AVATAR_CHECK
+    # default "comm") — rendered explicitly only so a generated project's
+    # settings state its cdn wiring intent instead of silently relying on
+    # upstream defaults, same rationale every other STAPEL_<MOD> block here
+    # follows. Never overwrites an explicit --module-config entry for either
+    # module; absent when cdn isn't selected (byte-identical regression).
+    if "cdn" in feature_only:
+        module_config = {**(module_config or {})}
+        module_config.setdefault("cdn", {
+            "ASSET_TYPES": ("avatar",),
+            "ENABLED_SUBMODULES": ("images",),
+        })
+        if "profiles" in feature_only:
+            module_config.setdefault("profiles", {"PROFILES_AVATAR_CHECK": "comm"})
 
     feature_apps = [
         STAPEL_LIBS[key]["dir"] for key in modules

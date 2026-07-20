@@ -2,6 +2,70 @@
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-07-20
+
+### Added — cdn auto-wiring
+
+Generalizes the hand-applied meettoday avatar fix (11 hand-edited files) into
+`stapel-create-project`'s monolith scaffold: selecting `cdn` in `--modules`
+now auto-wires the FULL stack instead of only installing `stapel_cdn` as a
+dependency — closing the "the cdn module exists, nothing serves it" gap
+(every generated project would otherwise 404 on `/cdn/api/...` and 413 on
+real uploads). Everything below is conditional on `cdn` being selected; a
+project without it is byte-identical to the pre-fix scaffold.
+
+- `new_service.make_context` — `stapel_cdn`'s url mount is now the literal
+  `path("cdn/api/", include("stapel_cdn.urls"))`, not the generic
+  `{url_prefix}api/` pattern every other feature lib shares in a monolith.
+  Matches nginx's own GENERATED `^~ /cdn/api/` proxy (already built from
+  `STAPEL_LIBS["cdn"]`'s default url_prefix) — without this, nginx forwarded
+  `/cdn/api/...` to a Django that only knew `{url_prefix}api/...` for it, a
+  guaranteed 404.
+- `create_project.create_project` — auto-injects a self-documenting
+  `STAPEL_CDN = {"ASSET_TYPES": ("avatar",), "ENABLED_SUBMODULES":
+  ("images",)}` block (both are stapel-cdn's own library defaults; rendered
+  explicitly so the generated settings state intent instead of silently
+  relying on upstream defaults) whenever cdn is selected, plus
+  `STAPEL_PROFILES = {"PROFILES_AVATAR_CHECK": "comm"}` when profiles is
+  ALSO selected. Never overrides an explicit `--module-config` entry.
+- `create_project._append_cdn_pip_requirement` — appends
+  `stapel-cdn[images]>=<pin>,<<ceiling>` to the generated service's
+  `requirements.txt`, independent of whether `stapel_cdn` itself lands via
+  git submodule or pip: the `[images]` extra's native dependency (pyvips)
+  is never satisfied by vendoring stapel_cdn's source alone.
+- `_templates.DOCKERFILE_CDN` — a multi-stage `vips-builder` → runtime
+  Dockerfile (mirrors `svc-stapel-studio/Dockerfile`, the verified libvips
+  container precedent) selected instead of the plain single-stage
+  `DOCKERFILE` whenever the service installs `stapel_cdn`, so `import
+  pyvips` resolves at runtime without a compiler in the final image.
+- `_frontend_templates.render_cdn_lib_ts` — writes
+  `frontend/src/lib/cdn.ts` (a documented STOPGAP — no dedicated
+  `@stapel/cdn-react` client pair exists yet) exporting `avatarUrlFor(ref)`,
+  wired into `ProfileSettings` (`render_routes_tsx` — the LIVE mount path,
+  since profiles always carries a nav mirror — and defensively into
+  `render_modules_tsx`'s `ModulesPanel`) whenever profiles-react is also
+  wired. `render_modules_tsx` additionally registers a stopgap `cdn`-keyed
+  client in the generated `<StapelProvider clients={{...}}>`, reusing the
+  primary pair's client — mirrors the hand-applied meettoday fix's
+  `clients: { cdn: stapelClient }` — so core's `useStapelClient("cdn")` seam
+  (called unconditionally by `ProfileSettings`' avatar-upload hook) never
+  throws for want of a registered client.
+- nginx's `client_max_body_size 50m;`/`location /media/` and the Vite dev
+  proxy's `/media/` rule were ALREADY unconditional/generic (no code
+  change needed) — the `/cdn/api/`+`/cdn/swagger/`+`/cdn/admin/` proxy rows
+  were already GENERATED per-lib too (`_reserved_backend_prefixes`); this
+  release adds explicit regression tests locking both in as this feature's
+  own numeric gate.
+- New tests: `tests/test_create_project.py::TestCdnAutoWiring` (8 cases —
+  INSTALLED_APPS+url mount, settings block, module_config override, pip
+  requirement, Dockerfile, ADO001 lint, byte-identical-without-cdn
+  regression) and `tests/test_frontend_scaffold.py::TestCdnFrontendAutoWiring`
+  (5 cases — client registration, avatarUrlFor wiring, cdn-without-profiles,
+  nginx/vite proxy, byte-identical-without-cdn regression).
+- Known follow-up (not built here): promoting `frontend/src/lib/cdn.ts`'s
+  stopgap logic into a real `@stapel/cdn-react` client pair, which would
+  drop the host-registered `cdn` client override entirely.
+
 ## [0.16.0] — 2026-07-20
 
 ### Added — scripted-fullstack navigation, scaffold half (Ф1)
