@@ -211,4 +211,36 @@ FRONTEND_SECTION = """
   pair's own bundled types — regenerate it with `stapel-gen-client .`, never
   hand-edit (§5's table; `gen-client-check` gates drift, and is a silent
   no-op until an override actually exists).
+{{MEDIA_SECTION}}"""
+
+
+# Injected into the frontend section only when a media source is wired (cdn, or
+# a profiles avatar) — the ONE rule agents keep getting wrong: they see a media
+# ref and render it with a raw <img> (or, worse, hardcode the 16px blur-up on a
+# hero image). The backend already denormalizes the descriptor; the frontend
+# just has to use it.
+MEDIA_RENDER_SECTION = """
+## 7. Rendering images (avatars, CDN media, any image ref)
+
+An image the backend serves for rendering arrives as a **`StapelImage`
+descriptor**, denormalized NEXT TO (or instead of) any bare ref — a `*_image`
+field: `avatar_image` on `/profiles/api/v1/me`, and the same shape wherever a
+lib renders media. It carries `{ source, url, aspect, square, preview_b64,
+variants[] }` (`stapel_core.media` on the backend, `@stapel/image` on the
+front).
+
+- Render it ONLY with `<Image meta={theImage} />` from `@stapel/image` (already
+  a dependency). It measures the actual slot, multiplies by
+  `devicePixelRatio`, and picks the right ladder tier — with a blur-up
+  placeholder while it loads. It works for a CDN ladder, a plain file, or an
+  external OAuth link alike (it degrades to the single `url` when there is no
+  ladder).
+- NEVER render an image ref with a bare `<img src>` / antd `<Avatar src>`, and
+  NEVER hardcode a tier or build a CDN URL by hand. In particular the 16px
+  `preview_b64` is the blur-up placeholder, NOT the image — never show it as the
+  actual picture.
+- No `*_image` descriptor on a payload that carries an image ref? The backend
+  serializer is missing the denormalization — add it there with
+  `stapel_core.media.image(source, ref)` (see stapel-profiles' `avatar_image`
+  for the pattern), do NOT reconstruct a URL on the frontend.
 """

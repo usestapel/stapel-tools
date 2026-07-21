@@ -597,6 +597,12 @@ FRONTEND_ROUTER_DEPS = {
 FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
 FRONTEND_SHELL_REACT_VERSION = "0.1.0"
 
+# The source-agnostic image renderer — added whenever a media source is wired
+# (cdn, or a profiles avatar), so <Image meta={...image}> can render the
+# StapelImage descriptor the backend denormalizes (AGENTS.md §7).
+FRONTEND_IMAGE_PACKAGE = "@stapel/image"
+FRONTEND_IMAGE_VERSION = "0.2.0"
+
 
 # Broker per project type: minimal never gets one, microservices requires one
 # (services exchange events), monolith defaults to in-process + outbox — the
@@ -771,7 +777,7 @@ deploy/deploy.sh <env-file>   # refuses a dev/default env — see deploy/check-e
 
 
 def _write_agents_and_checks(
-    project_dir: Path, slug: str, has_frontend: bool,
+    project_dir: Path, slug: str, has_frontend: bool, has_media: bool = False,
     presenter_manage_dir: str | None = None,
 ):
     """AGENTS.md (base OSS coding rules, §57 item 4) + `.pre-commit-config.yaml`
@@ -780,7 +786,7 @@ def _write_agents_and_checks(
     PRESENTERS.MD freshness hook (§55; ``manage.py presenter_catalog
     --check``); None (microservices — per-service manage.py, follow-up)
     omits it."""
-    from ._agents_template import AGENTS_MD, FRONTEND_SECTION
+    from ._agents_template import AGENTS_MD, FRONTEND_SECTION, MEDIA_RENDER_SECTION
     from ._compose_templates import render_tokens
     from ._precommit_templates import (
         PRE_COMMIT_CONFIG_BACKEND_ONLY,
@@ -788,7 +794,15 @@ def _write_agents_and_checks(
         presenter_catalog_hook,
     )
 
-    frontend_section = render_tokens(FRONTEND_SECTION, {"SLUG": slug}) if has_frontend else ""
+    # The image-rendering rule (§7) only when a media source is actually wired
+    # — cdn, or a profiles avatar (avatar_image). Otherwise there is no
+    # StapelImage on any payload and the rule would be noise.
+    media_section = MEDIA_RENDER_SECTION if (has_frontend and has_media) else ""
+    frontend_section = (
+        render_tokens(FRONTEND_SECTION, {"SLUG": slug, "MEDIA_SECTION": media_section})
+        if has_frontend
+        else ""
+    )
     agents_md = render_tokens(AGENTS_MD, {"FRONTEND_SECTION": frontend_section})
     _write(project_dir / "AGENTS.md", agents_md)
     config = (
@@ -1088,6 +1102,7 @@ def _frontend_react_entries(feature_libs: list[str]) -> list[dict]:
 def _render_frontend_package_json(
     rendered_base: str, react_entries: list[dict],
     *, routing_active: bool = False, shell_react_needed: bool = False,
+    has_media: bool = False,
 ) -> str:
     """Injects the react-pair deps (+ their shared support deps, + antd/
     tokens-antd IFF at least one selected pair mounts a `/default` skin OR
@@ -1099,10 +1114,12 @@ def _render_frontend_package_json(
     how many deps are added. Returns the input UNCHANGED (no parse
     round-trip at all) when there is nothing to inject — the exact current
     clean-shell output, byte for byte."""
-    if not react_entries and not routing_active:
+    if not react_entries and not routing_active and not has_media:
         return rendered_base
     pkg = json.loads(rendered_base)
     deps = pkg.setdefault("dependencies", {})
+    if has_media:
+        deps[FRONTEND_IMAGE_PACKAGE] = f"^{FRONTEND_IMAGE_VERSION}"
     for entry in react_entries:
         deps[entry["package"]] = f'^{entry["version"]}'
     if react_entries:
@@ -1192,6 +1209,7 @@ def _write_frontend_scaffold(
     package_json = _render_frontend_package_json(
         r(F.PACKAGE_JSON), react_entries,
         routing_active=routing_active, shell_react_needed=shell_react_needed,
+        has_media=has_cdn or "profiles" in feature_libs,
     )
     _write(frontend / "package.json", package_json)
     _write(
@@ -1329,6 +1347,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     _write_deploy_scripts(project_dir)
     _write_agents_and_checks(
         project_dir, slug, has_frontend=True,
+        has_media=bool({"cdn", "profiles"} & set(feature_libs or [])),
         presenter_manage_dir=ctx["service_dir_name"],
     )
     from ._precommit_templates import README_CHECKS_SECTION_WITH_FRONTEND

@@ -3,6 +3,7 @@ canon, AGENTS.md, pre-commit README canon. Covers monolith (the "recommended"
 / only-wired-up-so-far project type; microservices/minimal frontend wiring
 is an explicit follow-up, not built here — see AGENTS_MD's FRONTEND_SECTION
 only rendering for has_frontend=True)."""
+import json
 import shutil
 import subprocess
 
@@ -1058,6 +1059,32 @@ class TestCdnFrontendAutoWiring:
         modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
         assert "cdn: billingRuntime.client," in modules_tsx
         assert not (proj / "frontend" / "src" / "lib" / "cdn.ts").exists()
+
+    def test_stapel_image_dep_added_when_media_wired(self, tmp_path):
+        # profiles (avatar_image) OR cdn wires a StapelImage read path → the
+        # <Image> renderer must be a dependency (AGENTS.md §7).
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles"])
+        pkg = json.loads((proj / "frontend" / "package.json").read_text())
+        assert "@stapel/image" in pkg["dependencies"]
+
+    def test_no_stapel_image_dep_without_media(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "billing"])
+        pkg = json.loads((proj / "frontend" / "package.json").read_text())
+        assert "@stapel/image" not in pkg.get("dependencies", {})
+
+    def test_agents_md_carries_media_render_rule_when_media(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles"])
+        agents = (proj / "AGENTS.md").read_text()
+        assert "Rendering images" in agents
+        assert "<Image meta=" in agents
+        assert "never a bare `<img src>`" in agents.replace("NEVER", "never").lower() or \
+            "never render an image ref with a bare" in agents.lower()
+        assert "preview_b64" in agents
+
+    def test_agents_md_omits_media_rule_without_media(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "billing"])
+        agents = (proj / "AGENTS.md").read_text()
+        assert "Rendering images" not in agents
 
     def test_nginx_and_vite_proxy_cdn_with_raised_body_size(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles", "cdn"])

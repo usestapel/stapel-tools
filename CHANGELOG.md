@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-07-22
+
+### Added — media read-path auto-wiring (the frontend half of the descriptor)
+
+When a scaffold wires a media source (`cdn`, or a `profiles` avatar), the
+generated frontend now gets:
+
+- `@stapel/image` as a dependency (`FRONTEND_IMAGE_VERSION`), so `<Image>` can
+  render the `StapelImage` descriptor the backend denormalizes.
+- An `AGENTS.md` §7 "Rendering images" rule — the one agents kept getting
+  wrong: a media ref arrives as a `*_image` `StapelImage` (`avatar_image`, …);
+  render it ONLY with `<Image meta={...}>` (measures the slot × DPR × aspect,
+  blur-up), NEVER a bare `<img src>`/`<Avatar src>`, and never hardcode a tier
+  or the 16px `preview_b64`. If a payload carries an image ref with no
+  descriptor, the backend serializer is missing `stapel_core.media.image(...)`.
+
 ## [0.18.0] — 2026-07-20
 
 ### Fixed — generated monolith mismounted every feature lib (high-priority)
