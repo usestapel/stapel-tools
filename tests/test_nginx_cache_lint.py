@@ -546,6 +546,22 @@ class TestProjectAndCLI:
     def test_cli_missing_target_is_exit_2(self, tmp_path):
         assert ncl.main([str(tmp_path / "nope")]) == 2
 
+    def test_zero_confs_never_reports_clean(self, tmp_path, capsys):
+        """"No issues found" about a target it never read is a lie.
+
+        A directory with no nginx conf printed the note "nothing to check"
+        to stderr and "No SPA cache-canon issues found" to stdout — and a
+        reader (or a CI log scraper) sees the second line. A gate that
+        reports success on zero inputs is the defect class this linter
+        exists to catch, so it must say what it actually did.
+        """
+        (tmp_path / "service-configs").mkdir()
+        assert ncl.main([str(tmp_path)]) == 0  # still not a failure: a
+        # library repo legitimately has no nginx conf at all
+        out = capsys.readouterr().out
+        assert "Checked 0 nginx confs" in out
+        assert "No SPA cache-canon issues found" not in out
+
 
 # ---------------------------------------------------------------------------
 # live mode — the half a static check cannot reach

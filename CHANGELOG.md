@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-07-26
+
+### Fixed
+- **`stapel-nginx-cache-lint` no longer reports "clean" about a target it never
+  read.** A path with no nginx conf printed the note "nothing to check" to
+  stderr and "No SPA cache-canon issues found" to stdout — and the second line
+  is what a reader, or a CI log scraper, sees. It now says "Checked 0 nginx
+  confs … nothing was verified". Exit stays 0 (a library repo legitimately has
+  no nginx conf), but a gate that reports success on zero inputs is the same
+  defect class this linter exists to catch.
+
 ### Added — `stapel-nginx-cache-lint`, the SPA cache canon made machine-checkable
 
 The canon (owner directive, 2026-07-26) is two opposite halves: the thin,

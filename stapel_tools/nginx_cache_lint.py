@@ -985,6 +985,12 @@ def main(argv: Optional[list] = None) -> int:
             print(finding)
         if findings:
             print(f"\n{len(errors)} error(s), {len(warnings)} warning(s).")
+        elif not discover_confs(target) and not args.live:
+            # Never say "clean" about something never read. A gate that
+            # reports success on zero inputs is the same defect class this
+            # linter exists to catch (a checker that carries its own copy of
+            # the answer, or in this case no input at all, and passes).
+            print(f"Checked 0 nginx confs under {target} — nothing was verified.")
         else:
             print(f"No SPA cache-canon issues found in {target}.")
 
