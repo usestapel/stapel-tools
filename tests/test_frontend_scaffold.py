@@ -4,6 +4,7 @@ canon, AGENTS.md, pre-commit README canon. Covers monolith (the "recommended"
 is an explicit follow-up, not built here — see AGENTS_MD's FRONTEND_SECTION
 only rendering for has_frontend=True)."""
 import json
+import re
 import shutil
 import subprocess
 
@@ -1135,3 +1136,135 @@ class TestCdnFrontendAutoWiring:
         assert "<ProfileSettings />" in routes
         prod_nginx = (proj / "service-configs" / "nginx" / "nginx.conf").read_text()
         assert "/cdn/" not in prod_nginx
+
+
+def _nginx_locations(conf: str) -> list[tuple[str, str]]:
+    """Split an nginx server block into its ``location`` blocks.
+
+    Returns ``(header, body)`` pairs with ``#`` comments stripped, so the
+    assertions below read only DIRECTIVES — never the prose in a comment
+    that happens to quote a bad directive.
+    """
+    stripped = "\n".join(line.split("#", 1)[0] for line in conf.splitlines())
+    blocks, depth, header, body = [], 0, None, []
+    for line in stripped.splitlines():
+        if header is None:
+            if line.strip().startswith("location ") and line.rstrip().endswith("{"):
+                header, depth, body = line.strip(), 1, []
+            continue
+        depth += line.count("{") - line.count("}")
+        if depth == 0:
+            blocks.append((header, "\n".join(body)))
+            header = None
+        else:
+            body.append(line)
+    return blocks
+
+
+class TestSpaCacheCanon:
+    """Owner directive (2026-07-26): the thin entry document is the ONLY
+    unhashed file, so it must never be cached; hashed build artifacts are
+    content-addressed, so they must be cached immutably for a year.
+
+    Live incident this encodes: on the app.ironmemo.com stand the entry
+    document carried BOTH ``expires 1d`` and an explicit
+    ``add_header Cache-Control "public, must-revalidate"`` — nginx emits both
+    headers, the browser takes max-age=86400, and a freshly deployed frontend
+    fix stayed invisible for up to 24h (its verification read the stale
+    bundle and wrongly reported the fix as failed).
+    """
+
+    def _prod_conf(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith")
+        return (proj / "service-configs" / "nginx" / "nginx.conf").read_text()
+
+    def _entry_location(self, conf):
+        for header, body in _nginx_locations(conf):
+            if "/index.html" in body:
+                return header, body
+        raise AssertionError("no location serves the SPA entry document")
+
+    def test_entry_document_is_never_cached(self, tmp_path):
+        conf = self._prod_conf(tmp_path)
+        _, body = self._entry_location(conf)
+        assert "expires off;" in body
+        cache_control = re.search(
+            r'add_header\s+Cache-Control\s+"([^"]+)"', body
+        )
+        assert cache_control, "entry document has no explicit Cache-Control"
+        value = cache_control.group(1)
+        assert "no-cache" in value
+        assert "must-revalidate" in value
+        # no positive freshness lifetime may sneak in next to no-cache
+        assert not re.search(r"max-age=[1-9]", value), value
+        assert "immutable" not in value
+
+    def test_hashed_assets_are_immutable_for_a_year(self, tmp_path):
+        conf = self._prod_conf(tmp_path)
+        hashed = [
+            (h, b)
+            for h, b in _nginx_locations(conf)
+            if "max-age=31536000" in b
+        ]
+        assert len(hashed) == 1, "expected exactly one immutable-asset location"
+        header, body = hashed[0]
+        assert "immutable" in body
+        assert "expires off;" in body
+
+        # The location must actually match vite's hashed build output and
+        # must NOT swallow the unhashed entry document.
+        pattern = re.match(r"location\s+~\*?\s+(\S+)\s*\{", header)
+        assert pattern, f"asset location is not a regex location: {header}"
+        rx = re.compile(pattern.group(1), re.IGNORECASE)
+        for hit in (
+            "/assets/index-DQ9k2Zx1.js",
+            "/assets/index-B7hUq0.css",
+            "/assets/inter-latin-a91f.woff2",
+            "/assets/index-DQ9k2Zx1.js.map",
+        ):
+            assert rx.search(hit), hit
+        for miss in ("/index.html", "/", "/app/api/health/", "/favicon-unhashed"):
+            assert not rx.search(miss), miss
+
+    def test_no_location_mixes_expires_with_an_explicit_cache_control(self, tmp_path):
+        """THE defect. `expires <time>` makes nginx emit its own
+        Cache-Control; an explicit add_header does NOT replace it, so the
+        response carries two conflicting headers and the browser keeps the
+        permissive one. Only `expires off;` (nginx adds nothing) may sit
+        next to an explicit Cache-Control.
+        """
+        conf = self._prod_conf(tmp_path)
+        for header, body in _nginx_locations(conf):
+            expires = re.findall(r"^\s*expires\s+(\S+?);", body, re.MULTILINE)
+            has_cc = "add_header Cache-Control" in body
+            for value in expires:
+                assert not (has_cc and value != "off"), (
+                    f"{header}: `expires {value};` next to an explicit "
+                    "Cache-Control add_header — nginx emits BOTH headers "
+                    "(the app.ironmemo.com stale-bundle incident)"
+                )
+
+    def test_cache_headers_are_self_contained_per_location(self, tmp_path):
+        """`add_header` does not merge: a location declaring any add_header
+        REPLACES every header inherited from the server block. The generated
+        server block must therefore declare no add_header of its own (else
+        the two cache locations would silently drop it)."""
+        conf = self._prod_conf(tmp_path)
+        in_locations = sum(
+            body.count("add_header") for _, body in _nginx_locations(conf)
+        )
+        stripped = "\n".join(line.split("#", 1)[0] for line in conf.splitlines())
+        assert stripped.count("add_header") == in_locations
+
+    def test_dev_template_stays_cache_directive_free(self, tmp_path):
+        """Dev serves the frontend by PROXYING to the Vite dev server, which
+        sets its own no-cache/HMR headers; the prod canon does not apply and
+        must not be half-copied here (a stray `expires` would be the same
+        defect in a different file)."""
+        proj = _create(tmp_path, "app", "monolith")
+        tmpl = (
+            proj / "service-configs" / "nginx-local" / "default.conf.template"
+        ).read_text()
+        stripped = "\n".join(line.split("#", 1)[0] for line in tmpl.splitlines())
+        assert "expires" not in stripped
+        assert "Cache-Control" not in stripped

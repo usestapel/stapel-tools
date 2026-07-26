@@ -80,14 +80,55 @@ server {
     # stapel-new-service appends one location block per backend service
     # above this line (each under its own reserved /<slug>/ prefix).
 
+    # ─── SPA cache canon (owner directive, 2026-07-26) ──────────────────────
+    # Live incident that made this a canon (app.ironmemo.com stand): the entry
+    # document was served with BOTH `expires 1d` AND
+    # `add_header Cache-Control "public, must-revalidate"`. nginx emits BOTH
+    # headers and the browser takes max-age=86400 — a freshly deployed
+    # frontend fix stayed invisible for up to 24h, and the verification of
+    # that fix read the STALE bundle and wrongly concluded the fix had failed.
+    #
+    # The two halves are opposites, on purpose:
+    #   * hashed build artifacts (vite writes dist/assets/<name>-<hash>.js|css)
+    #     are CONTENT-ADDRESSED — a new deploy is a new URL — so they are
+    #     cached for a year, immutably.
+    #   * index.html is the ONLY unhashed file; it is what points at the
+    #     current hashes. Caching it means a deploy does not reach users until
+    #     the cache expires, so it must revalidate on EVERY load.
+    #
+    # nginx details this depends on:
+    #   * NEVER combine an `expires` directive with an explicit
+    #     `add_header Cache-Control` — nginx adds its own Cache-Control on top
+    #     of yours and the response carries two conflicting ones (the incident
+    #     above). `expires off;` makes nginx add nothing, leaving exactly one
+    #     explicit header.
+    #   * `add_header` does NOT merge with a parent block's add_header: a
+    #     location that declares ANY add_header REPLACES every header
+    #     inherited from server/http. Both locations below are therefore
+    #     self-contained. This server block declares no add_header of its own
+    #     today — if one is ever added there, it must be repeated inside each
+    #     location here.
+    #   * a regex location always wins over the `/` prefix location no matter
+    #     where either appears in this file — the order below is readability
+    #     only, exactly like the reserved prefixes above.
+    location ~* ^/assets/.*\\.(?:js|mjs|css|woff2?|ttf|otf|eot|svg|png|jpe?g|gif|ico|webp|avif|map)$ {
+        root /usr/share/nginx/html;
+        expires off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+    }
+
     # Prod canon (§57): the built frontend, populated into this volume by
     # the one-shot frontend-build service (see docker-compose.yml). SPA
-    # fallback so client-side routes resolve on a hard refresh. Kept last
-    # for readability only — prefix-match specificity (not file order) is
-    # what actually keeps this from shadowing the reserved blocks above.
+    # fallback so client-side routes resolve on a hard refresh — the fallback
+    # is served FROM THIS location, so the no-cache header below is the one
+    # the entry document gets. Kept last for readability only — prefix-match
+    # specificity (not file order) is what actually keeps this from shadowing
+    # the reserved blocks above.
     location / {
         root /usr/share/nginx/html;
         try_files $uri $uri/ /index.html;
+        expires off;
+        add_header Cache-Control "no-cache, must-revalidate" always;
     }
 }
 """
