@@ -227,6 +227,22 @@ SECRET_KEY = os.getenv("SECRET_KEY", "")
 JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", SECRET_KEY)
 ALLOWED_HOSTS = ALLOWED_HOSTS + ["{{DIR}}"]  # type: ignore[name-defined]
 
+# Public origin of THIS project's frontend — the base every off-session
+# redirect a Stapel module builds: stapel-auth's SSO callback, magic link, QR
+# account-conflict, OTP-challenge continuation and security email/phone
+# verification links; stapel-billing's Stripe checkout/portal return URLs;
+# stapel-notifications' link rendering. All three resolve it through the same
+# ladder (STAPEL_<MOD>["FRONTEND_URL"] -> this flat setting -> the FRONTEND_URL
+# env var), so one value here wires all of them.
+#
+# NO fallback in this shared base ON PURPOSE: prod.py and staging inherit this
+# module, and a dev-friendly default here (http://localhost:3000 and friends)
+# would silently send real users' auth redirects to a developer's laptop
+# instead of failing loudly. That is exactly what stapel_auth.E003 refuses to
+# boot on with DEBUG=False — the dev fallback lives in dev.py, the real origin
+# comes from .env (FRONTEND_URL, written at project creation).
+FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+
 # Prefix of the dedicated auth service (e.g. "auth") when running in a
 # multi-service stack. Leave empty to use Django's own admin login. Canonical
 # name (read by stapel_core.django.mounts / AdminLoginRedirectMiddleware) —
@@ -312,6 +328,15 @@ EMAIL_BACKEND = "tests.harness.mailtrap.FileMailtrapBackend"
 if not SECRET_KEY:
     SECRET_KEY = "django-insecure-{{SLUG}}-dev-only"
     JWT_SECRET_KEY = JWT_SECRET_KEY or SECRET_KEY
+
+# Dev-only frontend origin — the local stack serves the SPA through nginx on
+# http://localhost (docker-compose.local.yml; the Vite dev server itself sits
+# behind it on :5173, so point this at http://localhost:5173 for a native
+# frontend run). Deliberately HERE and not in base.py: base is what prod.py
+# and staging inherit, and a dev default leaking into them is the failure
+# stapel_auth.E003 exists to catch. .env/.env.local's FRONTEND_URL wins over
+# this — base already read it.
+FRONTEND_URL = FRONTEND_URL or "http://localhost"
 
 INSTALLED_APPS += ["debug_toolbar"]
 MIDDLEWARE = MIDDLEWARE + ["debug_toolbar.middleware.DebugToolbarMiddleware"]
@@ -508,6 +533,14 @@ never overrides a real secret already exported) rather than depending on
 dev.py's (which would also pull in django-debug-toolbar's INSTALLED_APPS
 entry — see above).
 
+FRONTEND_URL is the same story one setting over: base.py reads it from the
+environment with no fallback (a default there would leak into prod — see its
+comment and stapel_auth.E003), and this gate runs with DEBUG=False, which is
+precisely when E003 demands a value. It is a plain Django setting, not a
+get_config key, so this layer supplies it as an assignment below rather than
+through os.environ — the same dev-layer-only containment the check's hint
+asks for.
+
 Never point real traffic at this module — it has no usable database.
 \"\"\"
 import os
@@ -518,6 +551,7 @@ os.environ.setdefault("JWT_SECRET_KEY", os.environ["SECRET_KEY"])
 from .base import *  # noqa: E402,F401,F403
 
 DATABASES = {"default": {"ENGINE": "django.db.backends.dummy"}}
+FRONTEND_URL = FRONTEND_URL or "http://localhost"  # noqa: F405 — gate-only, see docstring
 """
 
 # svc-<slug>/Makefile — this service's own controls, runnable standalone from

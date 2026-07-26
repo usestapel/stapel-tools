@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Fixed — generated projects were red on their own `manage.py check`
+
+No settings tier and no generated env file carried `FRONTEND_URL`, so every
+project this generator produced failed `stapel_auth.E003` the moment it ran
+with `DEBUG=False` — the monolith `check` gate, the boot-smoke tier, and a
+client's very first prod boot. The check is right: every off-session redirect
+the auth pair issues (SSO callback, magic link, QR account-conflict,
+OTP-challenge continuation, security verification links) resolves against that
+origin, and so do stapel-billing's Stripe checkout/portal returns and
+stapel-notifications' links. The templates were wrong.
+
+- `config/settings/base.py` (monolith/microservices) reads `FRONTEND_URL` from
+  the environment with **no** fallback — base is what `prod.py` and staging
+  star-import, and a dev default there is precisely the leak E003's hint warns
+  about.
+- The localhost fallback lives in `config/settings/dev.py` only; the minimal
+  preset's single-module equivalent keeps it inside the existing non-prod
+  branch, beside `SECRET_KEY`'s.
+- `config/settings/boot_smoke.py` supplies its own gate-only value, the way it
+  already seeds `SECRET_KEY` — that tier runs standalone with no env sourced.
+- `.env.example`/`.env` (all three presets) carry `FRONTEND_URL` set to the
+  project's declared public URL, documented; the committed dev `.env.local`
+  carries the local origin.
+- New gate: `manage.py check` under the **prod** tier fed the project's own
+  generated `.env`, plus its negative twin — drop the key and E003 must fire
+  again.
+
 ## [0.19.0] — 2026-07-22
 
 ### Added — media read-path auto-wiring (the frontend half of the descriptor)

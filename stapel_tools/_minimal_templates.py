@@ -41,6 +41,21 @@ if not SECRET_KEY and not _IS_PROD:
 DEBUG = os.getenv("DEBUG", "false" if _IS_PROD else "true").lower() in ("true", "1", "yes")
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "" if _IS_PROD else "*").split(",")
 
+# Public origin of this project's frontend — the base every off-session
+# redirect a Stapel module builds: stapel-auth's SSO callback, magic link, QR
+# account-conflict, OTP-challenge continuation and security verification
+# links; stapel-billing's Stripe checkout/portal returns; stapel-notifications'
+# links. All resolve it through the same ladder (STAPEL_<MOD>["FRONTEND_URL"]
+# -> this flat setting -> the FRONTEND_URL env var), so one value wires them
+# all. The fallback is confined to the non-prod branch exactly like SECRET_KEY
+# above: a default that survived into prod would silently send real users' auth
+# redirects at a developer's laptop, which is what stapel-auth's E003 system
+# check refuses to boot on with DEBUG=False. This preset ships no frontend of
+# its own — 5173 is Vite's dev-server default, the convention across this stack.
+FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+if not FRONTEND_URL and not _IS_PROD:
+    FRONTEND_URL = "http://localhost:5173"
+
 if _IS_PROD:
     from stapel_core.django.prodguard import guard_secret
 
@@ -271,6 +286,15 @@ SECRET_KEY=change_me_to_a_long_random_string
 DJANGO_ENV=local
 DEBUG=true
 ALLOWED_HOSTS=*
+
+# Public origin of this project's frontend — REQUIRED once DJANGO_ENV=prod.
+# Every off-session redirect a Stapel module issues is built on it (auth
+# SSO/magic-link/QR/OTP-challenge/security verification links, billing
+# checkout + portal returns, notification links), and stapel-auth's E003
+# system check refuses to boot with DEBUG=False and no value. The value
+# below is this project's declared public URL; config/settings.py falls back
+# to Vite's http://localhost:5173 for local runs and NEVER in the prod branch.
+FRONTEND_URL={{url}}
 """
 
 MINIMAL_README = """\

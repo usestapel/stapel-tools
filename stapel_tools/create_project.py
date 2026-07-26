@@ -1512,7 +1512,7 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     # _write_env_from_ctx() call in create_project() turns it into a real
     # .env with a freshly generated secret (SEC-6), same as monolith/
     # microservices.
-    _write(project_dir / ".env.example", MINIMAL_ENV_EXAMPLE)
+    _write(project_dir / ".env.example", r(MINIMAL_ENV_EXAMPLE))
     from ._templates import CELERY_APP_PY, CONFIG_INIT_PY
     _write(project_dir / "config" / "__init__.py", CONFIG_INIT_PY)
     # DJANGO_SETTINGS_MODULE default differs from the service tier layout.

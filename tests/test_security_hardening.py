@@ -4,6 +4,7 @@ connective tissue between the two — stapel-create-project writes real random
 secrets into .env specifically so the guard only ever fires on a
 copy-pasted .env.example.
 """
+import importlib.util
 import os
 import subprocess
 import sys
@@ -246,6 +247,133 @@ class TestProdGuardRuntimeBehavior:
         )
         assert result.returncode != 0
         assert "ImproperlyConfigured" in result.stderr
+
+
+def _manage_check(manage_dir, settings_module, env_values):
+    """`manage.py check` — the system-check phase, which is where a module's
+    own deploy gates live (stapel_auth.E003 & co). Distinct from `_boot()`
+    above: django.setup() alone never runs the check registry, so a settings
+    template can boot fine and still hand the client a project whose very
+    first `manage.py check` is red."""
+    env = {**os.environ, **env_values, "DJANGO_SETTINGS_MODULE": settings_module}
+    return subprocess.run(
+        [sys.executable, "manage.py", "check"],
+        cwd=manage_dir, env=env, capture_output=True, text=True,
+    )
+
+
+_AUTH_INSTALLED = importlib.util.find_spec("stapel_auth") is not None
+_needs_auth = pytest.mark.skipif(
+    not _AUTH_INSTALLED,
+    reason="stapel-auth not importable (bare stapel-tools checkout); CI's Tests "
+           "job installs it, so this gate does run for real there",
+)
+
+
+class TestFrontendUrlReachesTheProdTier:
+    """The generator used to hand the client a project that was red out of the
+    box: no settings tier and no generated .env carried FRONTEND_URL, so
+    ``manage.py check`` under any DEBUG=False tier failed stapel_auth.E003 —
+    every off-session redirect the auth pair issues (SSO callback, magic link,
+    QR, OTP-challenge, security verification links) would have resolved
+    against an empty base, or worse against some other module's leftover dev
+    default. The check was right; the templates were not.
+
+    The contract these tests lock in is the one E003's own hint states: a real
+    origin reaches prod/staging through the environment, and any dev fallback
+    is confined to a dev-only settings layer — never the shared base module
+    prod inherits.
+    """
+
+    @_needs_auth
+    def test_monolith_prod_check_is_green_with_the_generated_env(self, tmp_path):
+        """The load-bearing gate: the client's first `manage.py check` against
+        the tier a real deploy runs (prod, DEBUG=False), fed the project's own
+        generated .env — nothing hand-set."""
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "auth"])
+        result = _manage_check(
+            proj / "svc-app", "config.settings.prod", _read_env(proj / ".env"),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @_needs_auth
+    def test_monolith_prod_check_fails_loud_without_frontend_url(self, tmp_path):
+        """The gate above must be live, not vacuous: drop the one key and the
+        same command has to go red on E003 again."""
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "auth"])
+        env = _read_env(proj / ".env")
+        env.pop("FRONTEND_URL")
+        env["FRONTEND_URL"] = ""
+        result = _manage_check(proj / "svc-app", "config.settings.prod", env)
+        assert result.returncode != 0
+        assert "stapel_auth.E003" in result.stdout + result.stderr
+
+    @_needs_auth
+    def test_monolith_boot_smoke_check_is_green_standalone(self, tmp_path):
+        """The boot-smoke tier runs with no .env sourced at all (that is its
+        whole point — a fresh checkout, no docker), and with DEBUG=False, so
+        it needs its OWN gate-only fallback the way it already seeds
+        SECRET_KEY."""
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "auth"])
+        result = _manage_check(proj / "svc-app", "config.settings.boot_smoke", {})
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @_needs_auth
+    def test_minimal_prod_check_is_green_with_the_generated_env(self, tmp_path):
+        proj = _create(tmp_path, "app", "minimal", modules=["core", "auth"])
+        result = _manage_check(
+            proj, "config.settings", {**_read_env(proj / ".env"), "DJANGO_ENV": "prod"},
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+
+    @pytest.mark.parametrize("project_type,env_dir", [
+        ("monolith", "."), ("microservices", "."), ("minimal", "."),
+    ])
+    def test_generated_env_carries_a_real_origin(self, tmp_path, project_type, env_dir):
+        """Both halves: .env.example documents the key (it gets committed) and
+        the generated .env carries the project's declared public URL, not a
+        localhost placeholder that would ship to prod."""
+        proj = _create(tmp_path, "app", project_type)
+        for name in (".env", ".env.example"):
+            env = _read_env(proj / env_dir / name)
+            assert env["FRONTEND_URL"] == "https://x.dev", name
+
+    def test_dev_fallback_is_confined_to_the_dev_layer(self, tmp_path):
+        """E003's hint, enforced: base.py (what prod.py star-imports) reads the
+        env with NO fallback; the localhost default exists only in dev.py."""
+        proj = _create(tmp_path, "app", "monolith")
+        settings = proj / "svc-app" / "config" / "settings"
+        base = (settings / "base.py").read_text()
+        dev = (settings / "dev.py").read_text()
+        prod = (settings / "prod.py").read_text()
+
+        assert 'FRONTEND_URL = os.getenv("FRONTEND_URL", "")' in base
+        # No *code* line in base may hand FRONTEND_URL an origin of its own —
+        # comments explaining why are exactly what we want there.
+        base_code = [
+            line for line in base.splitlines()
+            if "FRONTEND_URL" in line and not line.lstrip().startswith("#")
+        ]
+        assert base_code == ['FRONTEND_URL = os.getenv("FRONTEND_URL", "")']
+        assert 'FRONTEND_URL = FRONTEND_URL or "http://localhost"' in dev
+        # prod adds nothing of its own — it inherits base's env read, so there
+        # is no second place a stale default could hide.
+        assert "FRONTEND_URL" not in prod
+
+    def test_minimal_dev_fallback_is_confined_to_the_non_prod_branch(self, tmp_path):
+        proj = _create(tmp_path, "app", "minimal")
+        settings = (proj / "config" / "settings.py").read_text()
+        assert 'FRONTEND_URL = os.getenv("FRONTEND_URL", "")' in settings
+        assert 'if not FRONTEND_URL and not _IS_PROD:' in settings
+
+    def test_committed_dev_env_carries_a_local_origin(self, tmp_path):
+        """.env.local is committed and dev-only (STAPEL_LOCAL_ENV=1) — it may
+        and should carry the local origin, since deploy/check-env.sh refuses
+        to ship it anywhere."""
+        proj = _create(tmp_path, "app", "monolith")
+        env = _read_env(proj / ".env.local")
+        assert env["STAPEL_LOCAL_ENV"] == "1"
+        assert env["FRONTEND_URL"] == "http://localhost"
 
 
 if __name__ == "__main__":

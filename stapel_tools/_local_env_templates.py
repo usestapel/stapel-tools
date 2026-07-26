@@ -125,6 +125,12 @@ SECRET_KEY={secret_key}
 JWT_SECRET_KEY={jwt_secret_key}
 ALLOWED_HOSTS=*
 SITE_URL=http://localhost
+# Frontend origin every off-session redirect is built on (auth SSO/magic-link/
+# QR/OTP-challenge/security links, billing returns, notification links). The
+# local stack serves the SPA through nginx on :80; use http://localhost:5173
+# for a native Vite run. A real deployment sets this in its own env — the
+# settings base carries no default, so prod can never inherit this one.
+FRONTEND_URL=http://localhost
 
 # ─── Entrypoint canon (bootstrap.sh, §57 item 3) — Django's own
 # createsuperuser --noinput reads these natively. Dev-only convenience
@@ -187,6 +193,12 @@ SECRET_KEY={secret_key}
 JWT_SECRET_KEY={jwt_secret_key}
 ALLOWED_HOSTS=*
 SITE_URL=http://localhost
+# Frontend origin every off-session redirect is built on (auth SSO/magic-link/
+# QR/OTP-challenge/security links, billing returns, notification links). The
+# local stack serves the SPA through nginx on :80; use http://localhost:5173
+# for a native Vite run. A real deployment sets this in its own env — the
+# settings base carries no default, so prod can never inherit this one.
+FRONTEND_URL=http://localhost
 
 # ─── Entrypoint canon (bootstrap.sh, §57 item 3) ────────────────────────────
 DJANGO_SUPERUSER_USERNAME=admin

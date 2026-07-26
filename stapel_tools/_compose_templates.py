@@ -485,6 +485,16 @@ JWT_SECRET_KEY=change_me_to_another_long_random_string
 ALLOWED_HOSTS={domain}
 SITE_URL={url}
 
+# Public origin of the FRONTEND — REQUIRED in prod/staging. Every off-session
+# redirect a Stapel module issues is built on it (auth SSO callback / magic
+# link / QR / OTP-challenge / security verification links, billing checkout +
+# portal returns, notification links); stapel_auth.E003 refuses to boot with
+# DEBUG=False and no value. Same origin as SITE_URL when nginx serves the built
+# SPA from this stack (the default); point it at the SPA's own origin when the
+# frontend is deployed separately. The dev value lives in .env.local /
+# config/settings/dev.py, never in the shared settings base.
+FRONTEND_URL={url}
+
 # ─── Service navigation (admin-suite AS-4) ──────────────────────────────────
 # The admin/Swagger "Services" menu is driven by this deploy-config env-JSON.
 # A monolith is a single service (one admin); the menu's "All Services"
@@ -641,6 +651,15 @@ SECRET_KEY=change_me_to_a_long_random_string
 JWT_SECRET_KEY=change_me_to_another_long_random_string
 ALLOWED_HOSTS={domain}
 SITE_URL={url}
+
+# Public origin of the FRONTEND — REQUIRED in prod/staging, shared verbatim by
+# every service (compose passes the same .env to all). Every off-session
+# redirect a Stapel module issues is built on it (auth SSO callback / magic
+# link / QR / OTP-challenge / security verification links, billing checkout +
+# portal returns, notification links); stapel_auth.E003 refuses to boot with
+# DEBUG=False and no value. The dev value lives in .env.local /
+# config/settings/dev.py, never in the shared settings base.
+FRONTEND_URL={url}
 
 # ─── Service navigation (admin-suite AS-4) ──────────────────────────────────
 # The admin/Swagger "Services" menu is driven by this deploy-config env-JSON,
