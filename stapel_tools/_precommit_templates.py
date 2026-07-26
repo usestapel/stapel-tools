@@ -126,7 +126,7 @@ repos:
   - repo: local
     hooks:
       - id: stapel-verify
-        name: stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC codes)
+        name: stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC/NGX codes)
         entry: stapel-verify .
         language: system
         pass_filenames: false
@@ -142,7 +142,7 @@ repos:
   - repo: local
     hooks:
       - id: stapel-verify
-        name: stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC codes)
+        name: stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC/NGX codes)
         entry: stapel-verify .
         language: system
         pass_filenames: false
@@ -168,7 +168,8 @@ pre-commit install
 
 Every commit then runs `stapel-verify .` (composes every backend linter this
 project ships: R001-R007, SWAP001-002, CFG001-003, URL001, ADO-codes,
-MIG-codes, DOC001 — see `AGENTS.md`) plus the regenerator/drift gates:
+MIG-codes, DOC001, NGX001-004 — see `AGENTS.md`) plus the regenerator/drift
+gates:
 `stapel-config-manifest . --check` (CONFIG.MD) and `stapel-docs . --check`
 (bilingual `docs/api.en.md`/`api.ru.md` — no-op until a `schema.json` has
 been generated). Run the full suite on demand with `pre-commit run

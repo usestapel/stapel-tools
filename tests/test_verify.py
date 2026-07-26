@@ -3,8 +3,8 @@
 Builds one fixture project with a deliberate violation for each composed
 linter (stapel-lint R006, stapel-adoption-lint ADO001/ADO002/ADO004,
 stapel-url-lint URL001, stapel-config-lint CFG001, stapel-migration-lint
-MIG001) and asserts every linter contributes to the summed report, the exit
-codes, and the ``--json`` shape.
+MIG001, stapel-nginx-cache-lint NGX001/NGX003) and asserts every linter
+contributes to the summed report, the exit codes, and the ``--json`` shape.
 """
 import json
 
@@ -27,6 +27,9 @@ def make_dirty_project(tmp_path):
     - CFG001 (config-lint): an ``os.environ.get`` read outside settings.
     - MIG001 (migration-lint): a destructive ``RemoveField`` without the
       contract-phase marker.
+    - NGX001 + NGX003 (nginx-cache-lint): the app.ironmemo.com SPA cache
+      defect — an entry document carrying BOTH ``expires 1d`` AND an explicit
+      ``add_header Cache-Control``.
     """
     workspace = tmp_path
     module = workspace / "stapel-verifyfixture"
@@ -87,6 +90,19 @@ def make_dirty_project(tmp_path):
         "        migrations.RemoveField(model_name='thing', name='legacy_field'),\n"
         "    ]\n"
     )
+
+    nginx = proj / "service-configs" / "nginx"
+    nginx.mkdir(parents=True)
+    (nginx / "nginx.conf").write_text(
+        "server {\n"
+        "  location / {\n"
+        "    root /frontend-react;\n"
+        "    try_files $uri $uri/ /index.html =404;\n"
+        "    expires 1d;\n"
+        "    add_header Cache-Control \"public, must-revalidate\";\n"
+        "  }\n"
+        "}\n"
+    )
     return proj
 
 
@@ -119,6 +135,7 @@ def test_every_linter_contributes_a_finding(tmp_path):
         "stapel-migration-lint",
         "stapel-swap-lint",
         "stapel-doc-lint",
+        "stapel-nginx-cache-lint",
     }
 
     assert by_name["stapel-lint"].errors >= 1
@@ -150,8 +167,15 @@ def test_every_linter_contributes_a_finding(tmp_path):
     assert by_name["stapel-swap-lint"].errors == 0
     assert by_name["stapel-swap-lint"].warnings == 0
 
+    # NGX001 (entry document cacheable for a day) + NGX003 (`expires` AND an
+    # explicit add_header Cache-Control -> two conflicting headers on the wire)
+    ngx_rules = {f["rule"] for f in by_name["stapel-nginx-cache-lint"].findings}
+    assert {"NGX001", "NGX003"} <= ngx_rules
+    assert by_name["stapel-nginx-cache-lint"].errors == 2
+
     total_errors = sum(r.errors for r in reports)
-    assert total_errors == 6  # R006, ADO001, ADO002, URL001, CFG001, MIG001
+    # R006, ADO001, ADO002, URL001, CFG001, MIG001, NGX001, NGX003
+    assert total_errors == 8
 
 
 def test_clean_project_reports_all_zero(tmp_path):
@@ -183,7 +207,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 7 linters." in out
+    assert "All clean across 8 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -192,8 +216,8 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert code == 1
     assert payload["ok"] is False
-    assert payload["errors"] == 6
-    assert len(payload["linters"]) == 7
+    assert payload["errors"] == 8
+    assert len(payload["linters"]) == 8
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
@@ -203,6 +227,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
         "stapel-migration-lint",
         "stapel-swap-lint",
         "stapel-doc-lint",
+        "stapel-nginx-cache-lint",
     }
     for entry in payload["linters"]:
         assert "errors" in entry

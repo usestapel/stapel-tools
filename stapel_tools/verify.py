@@ -29,6 +29,13 @@ Linters composed (in this order)
   swappable model/presenter indirection, DTOs built only through a presenter)
 * ``stapel_tools.doc_lint``        — DOC001 (§55 DOC-FIELD: model field docs,
   warning-level while the legacy sweep is in progress)
+* ``stapel_tools.nginx_cache_lint`` — NGX-codes (SPA cache canon: the unhashed
+  entry document must revalidate, hashed assets must be immutable, and no
+  location may emit both ``expires`` and ``add_header Cache-Control``).
+  Composed HERE on purpose: every generated project's pre-commit already runs
+  ``stapel-verify .``, so a project that already exists — including one whose
+  nginx conf was hand-maintained and never came from the scaffold — picks the
+  gate up on its next stapel-tools upgrade, with nothing to regenerate.
 
 Usage
 -----
@@ -50,7 +57,16 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from . import adoption_lint, config_lint, doc_lint, lint, migration_lint, swap_lint, url_lint
+from . import (
+    adoption_lint,
+    config_lint,
+    doc_lint,
+    lint,
+    migration_lint,
+    nginx_cache_lint,
+    swap_lint,
+    url_lint,
+)
 
 
 @dataclasses.dataclass
@@ -124,6 +140,13 @@ def run_doc_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-doc-lint", errors, warnings, _to_dicts(violations))
 
 
+def run_nginx_cache_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = nginx_cache_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-nginx-cache-lint", errors, warnings, _to_dicts(findings), notes)
+
+
 def verify_project(
     project: Path,
     *,
@@ -142,6 +165,7 @@ def verify_project(
         run_migration_lint(project, base_sha),
         run_swap_lint(project),
         run_doc_lint(project),
+        run_nginx_cache_lint(project),
     ]
 
 

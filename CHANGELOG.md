@@ -2,6 +2,52 @@
 
 ## [Unreleased]
 
+### Added — `stapel-nginx-cache-lint`, the SPA cache canon made machine-checkable
+
+The canon (owner directive, 2026-07-26) is two opposite halves: the thin,
+UNHASHED entry document must revalidate on every load, and content-hashed
+build artifacts must be cached long and `immutable`. The scaffold template now
+emits that shape — but a template only helps a project generated after it, and
+the incident happened in a hand-maintained conf. This is the enforcement layer
+for projects that already exist.
+
+The incident it encodes (app.ironmemo.com): `location /` carried BOTH
+`expires 1d` AND `add_header Cache-Control "public, must-revalidate"`. nginx
+emits its own `Cache-Control` for `expires` and appends yours on top, so the
+response carried two `Cache-Control` headers; a client combines them
+(RFC 9111 §5.2) into `max-age=86400, public, must-revalidate` and honours the
+max-age. A freshly deployed frontend fix stayed invisible for up to 24 hours —
+and a live verification of that fix read the stale bundle and drew the wrong
+conclusion.
+
+Rules, over `service-configs/nginx*/`:
+
+- **NGX001** (error) an entry-document / SPA-fallback location is cacheable.
+- **NGX002** (error) a hashed-asset location is not `immutable` (or is cached
+  for under a day).
+- **NGX003** (error) a location emits both an `expires` directive and an
+  explicit `add_header Cache-Control` — the double-header defect itself, on
+  any location, cacheable or not.
+- **NGX004** (warning) an entry document declares no cache policy at all, so a
+  client may apply heuristic freshness (RFC 9111 §4.2.2).
+
+`--live BASE_URL` additionally checks what a deployed stand ACTUALLY serves —
+it fetches the entry document, asserts it revalidates, then follows the first
+hashed asset the document itself references and asserts that one is immutable.
+A fixed conf that was never deployed is still stale, and that is the half a
+static check cannot reach.
+
+Composed into `stapel-verify`, which every generated project's pre-commit
+already runs — so an existing project picks the gate up on its next
+stapel-tools upgrade, with nothing to regenerate. Models nginx's real
+semantics: `expires off` emits nothing (the only value safe to combine with an
+explicit header), `expires` is inherited from the enclosing block, and
+`add_header` does NOT merge (any add_header in a location replaces the whole
+inherited set). Deliberately silent on `proxy_pass` locations, on `/media`
+(user uploads are never hashed) and on a bare `location /static/` (Django
+collectstatic is content-hashed only under a manifest storage). Suppress a
+justified exception with `# noqa: NGX00x` on the location line.
+
 ### Fixed — generated projects were red on their own `manage.py check`
 
 No settings tier and no generated env file carried `FRONTEND_URL`, so every

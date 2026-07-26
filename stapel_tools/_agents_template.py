@@ -142,17 +142,31 @@ invents output from nothing.
 {{FRONTEND_SECTION}}
 ## Verify before you claim done
 
-    stapel-verify .          # composes every backend linter above (R/SWAP/CFG/URL/ADO/MIG/DOC codes); exit 0 required
+    stapel-verify .          # composes every backend linter above (R/SWAP/CFG/URL/ADO/MIG/DOC/NGX codes); exit 0 required
     npx eslint .              # frontend/, if this project has one
 
 `stapel-verify` runs `stapel_tools.lint` (R001-R007), `adoption_lint`
 (module actually mounted, no shadow routes — ADO-codes), `url_lint`
 (URL001), `config_lint` (CFG001-003), `migration_lint` (MIG-codes,
-expand/contract), `swap_lint` (SWAP001/SWAP002) and `doc_lint` (DOC001) in
-one pass — no reimplemented rules, pure composition. A green run is
-required before calling backend work done; a green `npx eslint` (with
-`@stapel/eslint-plugin`'s flat config) is required before calling frontend
-work done.
+expand/contract), `swap_lint` (SWAP001/SWAP002), `doc_lint` (DOC001) and
+`nginx_cache_lint` (NGX001-004) in one pass — no reimplemented rules, pure
+composition. A green run is required before calling backend work done; a
+green `npx eslint` (with `@stapel/eslint-plugin`'s flat config) is required
+before calling frontend work done.
+
+The NGX codes are the SPA cache canon, and they exist because of a live
+incident: an entry document served with BOTH `expires 1d` AND
+`add_header Cache-Control "public, must-revalidate"` made nginx emit two
+Cache-Control headers, browsers took max-age=86400, and a deployed frontend
+fix stayed invisible for 24h — while the live verification of that fix read
+the stale bundle and concluded wrongly. The unhashed entry document must
+revalidate every load (`expires off;` +
+`add_header Cache-Control "no-cache, must-revalidate" always;`), hashed
+`/assets/*` must be `immutable`, and no location may combine `expires` with
+an explicit `add_header Cache-Control`. After deploying, check what the stand
+ACTUALLY serves — a fixed conf that was never deployed is still stale:
+
+    stapel-nginx-cache-lint . --live https://<stand-host>/
 """
 
 # Appended when the project has a frontend/ dir (monolith today — §57).
