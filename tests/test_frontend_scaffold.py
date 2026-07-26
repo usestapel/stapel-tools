@@ -641,7 +641,15 @@ class TestFrontendReactWiring:
 
         pkg = json.loads((proj / "frontend" / "package.json").read_text())
         deps = pkg["dependencies"]
-        assert deps["@stapel/auth-react"] == "^0.5.2"
+        # Read the expected pin from the registry rather than repeating the
+        # number here: a duplicated literal turns every legitimate version
+        # bump into a red test that says nothing about behaviour. What this
+        # asserts is the LINK — the registry's pin is what lands in the
+        # generated package.json.
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        expected = FRONTEND_REACT_LIBS["auth"]["version"]
+        assert deps["@stapel/auth-react"] == f"^{expected}"
         assert "antd" in deps
         assert "@stapel/tokens-antd" in deps
 
@@ -673,21 +681,34 @@ class TestFrontendReactWiring:
         missing = imported - declared
         assert not missing, f"imported but not declared: {missing}"
 
-    def test_react_module_dep_versions_match_published_stapel_react_pins(self, tmp_path):
-        """Exact version pins (§ verify against npm) — no invented packages,
-        no stale/mismatched version strings."""
+    def test_react_module_dep_versions_come_from_the_registry(self, tmp_path):
+        """Every selected pair's registry pin is what lands in package.json.
+
+        This used to hold a SECOND copy of the version table and assert
+        equality against it, under a docstring claiming the pins were
+        "verified against npm" — which they were not: nothing here talks to
+        npm, so all it really proved was that one hand-maintained table
+        matched another. The registry's `@stapel/core` pin sat at 0.6.2
+        while the generator emitted code importing `PackageNavManifest`, a
+        type published later, and this test stayed green through all of it.
+        The generated frontend simply did not compile, and the CI step that
+        would have said so was unreachable behind two earlier failures.
+
+        So: assert the LINK (registry → package.json), and let the e2e job's
+        `vite build` be what proves the pins are actually installable and
+        sufficient — a real build, not a mirror of a constant."""
         import json
 
-        expected = {
-            "auth": "0.5.2", "billing": "0.5.0", "calendar": "0.5.0",
-            "notifications": "0.5.0", "profiles": "0.6.0",
-            "recordings": "0.4.0", "workspaces": "0.6.0",
-        }
-        proj = _create(tmp_path, "app", "monolith", modules=["core", *expected.keys()])
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        keys = ["auth", "billing", "calendar", "notifications", "profiles",
+                "recordings", "workspaces"]
+        proj = _create(tmp_path, "app", "monolith", modules=["core", *keys])
         pkg = json.loads((proj / "frontend" / "package.json").read_text())
         deps = pkg["dependencies"]
-        for key, version in expected.items():
-            assert deps[self.REACT_PACKAGES[key]] == f"^{version}", key
+        for key in keys:
+            expected = FRONTEND_REACT_LIBS[key]["version"]
+            assert deps[self.REACT_PACKAGES[key]] == f"^{expected}", key
 
     def test_modules_tsx_wires_provider_and_runtime_per_selected_pair(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith", modules=["core", "billing", "recordings"])

@@ -435,7 +435,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.5.2",
+        "version": "0.10.1",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
@@ -491,7 +491,7 @@ FRONTEND_REACT_LIBS = {
     },
     "notifications": {
         "package": "@stapel/notifications-react",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "provider": "NotificationsProvider",
         "create_runtime": "createNotificationsRuntime",
         "register_i18n": "registerNotificationsI18n",
@@ -515,7 +515,7 @@ FRONTEND_REACT_LIBS = {
     },
     "profiles": {
         "package": "@stapel/profiles-react",
-        "version": "0.6.0",
+        "version": "0.12.0",
         "provider": "ProfilesProvider",
         "create_runtime": "createProfilesRuntime",
         "register_i18n": "registerProfilesI18n",
@@ -546,7 +546,7 @@ FRONTEND_REACT_LIBS = {
     },
     "workspaces": {
         "package": "@stapel/workspaces-react",
-        "version": "0.6.0",
+        "version": "0.7.0",
         "provider": "WorkspacesProvider",
         "create_runtime": "createWorkspacesRuntime",
         "register_i18n": "registerWorkspacesI18n",
@@ -558,7 +558,7 @@ FRONTEND_REACT_LIBS = {
 # FRONTEND_REACT_LIBS docstring above for why npm (not the sibling
 # checkout's workspace pin) is the source of truth here.
 FRONTEND_REACT_CORE_DEPS = {
-    "@stapel/core": "0.6.2",
+    "@stapel/core": "0.8.1",
     "@tanstack/react-query": "5.101.2",
 }
 # Only pulled in when >=1 selected module's registry entry has
@@ -595,7 +595,7 @@ FRONTEND_ROUTER_DEPS = {
 # — never for a project with routing active but no nav-bearing module
 # (e.g. `--landing` alone never needs the shell).
 FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
-FRONTEND_SHELL_REACT_VERSION = "0.1.0"
+FRONTEND_SHELL_REACT_VERSION = "0.2.0"
 
 # The source-agnostic image renderer — added whenever a media source is wired
 # (cdn, or a profiles avatar), so <Image meta={...image}> can render the
