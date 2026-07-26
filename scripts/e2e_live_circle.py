@@ -13,12 +13,21 @@ The circle (all live, Django test client over the real wired app):
      developer's `docker compose up` uses) + DJANGO_SETTINGS_MODULE=
      config.settings.dev (mock providers on);
   2. migrate;
-  3. POST /<slug>/api/v1/email/request/  → the OTP code must appear in the
-     LOG (mock provider — stapel_auth logs, never sends; this proves the
-     §57 item-7 mock canon end to end);
-  4. POST /<slug>/api/v1/email/verify/ with the code from the log →
-     REGISTERED (registration completed);
-  5. authenticated GET /<slug>/api/v1/me/ → 200 (login circle closed).
+  3. POST <auth email_request> → the OTP code must appear in the LOG (mock
+     provider — stapel_auth logs, never sends; this proves the §57 item-7
+     mock canon end to end);
+  4. POST <auth email_verify> with the code from the log → REGISTERED
+     (registration completed);
+  5. authenticated GET <auth me> → 200 (login circle closed).
+
+Every URL above is resolved with ``reverse()`` against the generated
+project's own urlconf rather than assembled from the slug. That is not
+tidiness: this script used to build ``/<slug>/api/v1/...`` by hand, and when
+commit 03163f6 fixed the monolith mismount (auth mounts at ``auth/api/``,
+its own key, not under the hosting service's slug) the gate went on asking
+for a path that no longer existed and failed on 404 for five days. A live
+gate that hardcodes the thing it is meant to be testing cannot report the
+truth about it.
 
 Exit 0 = the generated project drives; any assertion = non-zero.
 """
@@ -68,7 +77,10 @@ def find_key(obj, names: tuple[str, ...]):
 def main() -> int:
     import time
 
-    slug = sys.argv[1] if len(sys.argv) > 1 else "e2e"
+    # The slug is no longer used to build URLs (see the module docstring —
+    # they are reversed against the real urlconf now); it stays accepted so
+    # existing callers and CI invocations keep working unchanged.
+    _slug = sys.argv[1] if len(sys.argv) > 1 else "e2e"
     # Unique per run — rerunnable against a non-fresh DB (the OTP request
     # rate limit is per-email/30s; a crashed previous run must not 429 us).
     email = f"olga+{int(time.time())}@example.com"
@@ -100,11 +112,18 @@ def main() -> int:
         root.setLevel(logging.INFO)
 
     client = Client()
-    base = f"/{slug}/api/v1"
+
+    # Resolved, never assembled — see the module docstring. A NoReverseMatch
+    # here means auth is not wired into the generated project at all, which
+    # is itself the finding this gate exists to surface.
+    from django.urls import reverse
+
+    def auth_url(route: str) -> str:
+        return reverse(route)
 
     print("e2e: request email OTP...")
     r = client.post(
-        f"{base}/email/request/", {"email": email}, content_type="application/json"
+        auth_url("email_request"), {"email": email}, content_type="application/json"
     )
     assert r.status_code in (200, 201), (r.status_code, r.content[:500])
 
@@ -121,7 +140,7 @@ def main() -> int:
 
     print("e2e: verify email OTP (registration)...")
     r = client.post(
-        f"{base}/email/verify/",
+        auth_url("email_verify"),
         {"email": email, "code": code},
         content_type="application/json",
     )
@@ -136,7 +155,7 @@ def main() -> int:
     kwargs = {}
     if token:
         kwargs["HTTP_AUTHORIZATION"] = f"Bearer {token}"
-    r = client.get(f"{base}/me/", **kwargs)
+    r = client.get(auth_url("me"), **kwargs)
     assert r.status_code == 200, (r.status_code, r.content[:500])
     me = json.loads(r.content)
     assert email in json.dumps(me), me
