@@ -152,7 +152,7 @@ invents output from nothing.
     stapel-verify .          # composes every backend linter above (R/SWAP/CFG/URL/ADO/MIG/DOC/NGX codes); exit 0 required
     npx eslint .              # frontend/, if this project has one
 
-`stapel-verify` runs `stapel_tools.lint` (R001-R007), `adoption_lint`
+`stapel-verify` runs `stapel_tools.lint` (R001-R008), `adoption_lint`
 (module actually mounted, no shadow routes — ADO-codes), `url_lint`
 (URL001), `config_lint` (CFG000-005), `migration_lint` (MIG-codes,
 expand/contract), `swap_lint` (SWAP001/SWAP002), `doc_lint` (DOC001) and

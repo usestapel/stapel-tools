@@ -2,6 +2,33 @@
 
 ## [Unreleased]
 
+### Added — R008 (warning): a lifecycle/security flag inside `defaults=`
+
+`get_or_create(..., defaults={"is_active": True})` reads as an assertion about
+the object and is not one: on the *get* branch the dict is never touched, so
+the caller silently accepts whatever the stored row says — an account an admin
+deactivated, a revoked verification, a flag another service flipped.
+`update_or_create` has the mirror problem: the dict IS applied to the found
+row, so the same line silently rewrites the flag. Flags checked: `is_active`,
+`is_verified`, `is_staff`, and the `*_required` family.
+
+**Warning, and permanently so.** The pattern is often exactly right (a flag
+that genuinely only seeds initial state — stapel-auth's TOTP re-enrolment
+resets `is_active=False` on purpose), and an error-level rule on a legitimate
+idiom gets `# noqa`'d wholesale, which costs more than it saves. The rule's
+text names the canon instead of demanding a local fix: the invariant belongs
+on the **point of use**, once — stapel-auth gates session issuance on the live
+account state, so a deactivated user cannot get in no matter which
+`get_or_create` created the row.
+
+Fleet measurement before release: 4 findings across the stapel libraries
+(auth 2, currencies 1, notifications 1), 3 in the legacy marketplace
+checkout, 4 more in stapel-studio's vendored copies of the same files, 0 in
+the product. The most interesting one is real: `stapel_auth/sso_service.py`
+creates the SSO user with `is_active: True` in `defaults` — for an existing
+deactivated account that value does nothing, which is precisely why the gate
+has to be at session issuance.
+
 ### Added — CFG005: a library's CONFIG.MD row must name a knob the library has
 
 CFG003 says "a CONFIG.MD row read nowhere in the project is stale" — and then

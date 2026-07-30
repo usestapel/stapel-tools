@@ -658,7 +658,7 @@ pip install pre-commit
 pre-commit install
 ```
 
-Every commit then runs `stapel-verify .` — R001-R007, SWAP001-002,
+Every commit then runs `stapel-verify .` — R001-R008, SWAP001-002,
 CFG000-005, URL001, ADO-codes, MIG-codes, DOC001. Run the full suite on
 demand with `pre-commit run --all-files`.
 

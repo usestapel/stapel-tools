@@ -13,12 +13,16 @@ R004  @dataclass in dto.py without docstring — OpenAPI docs are driven by the 
 R005  StapelErrorResponse(status, 'literal') — use an ERR_* constant, not a raw string
 R006  StapelResponse({…}) — passing a dict literal skips serializer; use StapelResponse(MySerializer(dto))
 R007  @extend_schema view method without @flow_step — every endpoint must belong to a documented flow
+R008  get_or_create/update_or_create with a lifecycle or security flag in defaults= — WARNING
 R100  README must link both language docs when i18n artifacts exist (i18n-shipping.md §4) — WARNING
 
 Levels
 ------
-Most rules are errors (exit 1). R100 is a warning (printed, non-blocking) — the
-i18n doc-link convention is rolling out (W→E after the sweep, i18n-shipping.md §4).
+Most rules are errors (exit 1). R008 and R100 are warnings (printed,
+non-blocking): R100's i18n doc-link convention is rolling out (W→E after the
+sweep, i18n-shipping.md §4); R008 stays a warning permanently, because seeding
+a flag only at creation is sometimes exactly right and an error-level rule on a
+legitimate idiom gets silenced wholesale.
 
 Suppression
 -----------
@@ -298,6 +302,88 @@ def check_r007(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violat
 
 
 # ---------------------------------------------------------------------------
+# R008 — lifecycle/security flag in get_or_create(defaults=…)
+# ---------------------------------------------------------------------------
+
+#: Flags whose value decides whether an account/resource may be used at all.
+_R008_FLAGS = frozenset({"is_active", "is_verified", "is_staff"})
+#: …plus the "<something>_required" family (admit_required, mfa_required, …).
+_R008_SUFFIX = "_required"
+
+
+def _r008_keys(dict_node: ast.Dict) -> list[str]:
+    hits = []
+    for key in dict_node.keys:
+        if isinstance(key, ast.Constant) and isinstance(key.value, str):
+            if key.value in _R008_FLAGS or key.value.endswith(_R008_SUFFIX):
+                hits.append(key.value)
+    return sorted(hits)
+
+
+def check_r008(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    """A lifecycle/security flag passed in ``defaults=`` decides nothing for a
+    row that already exists.
+
+    ``get_or_create(..., defaults={"is_active": True})`` reads as "this object
+    is active" and is not: on the *get* branch the dict is never touched, so
+    the caller silently accepts whatever the stored row says — an object
+    deactivated by an admin, a revoked verification, a flag another service
+    flipped. ``update_or_create`` has the mirror problem: the dict IS applied
+    to the found row, so the same line silently re-activates it.
+
+    **Warning, never an error.** The pattern is often exactly right — a flag
+    that genuinely only seeds the initial state — and a rule that fails builds
+    on a legitimate idiom gets silenced wholesale, which costs more than it
+    saves.
+
+    The canon this points at is where the invariant belongs: on the **point of
+    use**, once, not on every creation site. stapel-auth gates issuing a
+    session on the account's live state, so a deactivated user cannot get in
+    no matter which of the dozen ``get_or_create`` calls first created the
+    row. Gate at the door; ``defaults`` is a seed, not a guarantee.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = (
+            func.attr if isinstance(func, ast.Attribute)
+            else func.id if isinstance(func, ast.Name)
+            else ""
+        )
+        if name not in ("get_or_create", "update_or_create"):
+            continue
+        for kw in node.keywords:
+            if kw.arg != "defaults" or not isinstance(kw.value, ast.Dict):
+                continue
+            hits = _r008_keys(kw.value)
+            if not hits or _noqa(lines, node.lineno, "R008"):
+                continue
+            flags = ", ".join(repr(h) for h in hits)
+            if name == "get_or_create":
+                detail = (
+                    "defaults is applied ONLY when the object is created — on "
+                    "the get branch the caller silently accepts whatever the "
+                    "stored row says (deactivated, unverified, revoked)"
+                )
+            else:
+                detail = (
+                    "update_or_create applies defaults to the row it FOUND too "
+                    "— this silently rewrites the flag on an existing object"
+                )
+            yield Violation(
+                path, node.lineno, "R008",
+                f"{name}(defaults=…) carries the lifecycle/security flag(s) "
+                f"{flags} — {detail}. Check the flag on "
+                f"the returned object, or gate the invariant at the point of "
+                f"use (canon: stapel-auth gates session issuance on the live "
+                f"account state, once, instead of in every creation site). "
+                f"Legitimate seeding: '# noqa: R008'",
+                level="warning",
+            )
+
+
+# ---------------------------------------------------------------------------
 # R100 — repo-level: README links both language docs when i18n artifacts exist
 # ---------------------------------------------------------------------------
 
@@ -390,6 +476,9 @@ def rules_for_file(path: str):
         checkers += [check_r004]
     if not is_view:
         checkers += [check_r005]
+    # R008 is not about a layer: get_or_create lives in services, consumers,
+    # actions, management commands and views alike.
+    checkers += [check_r008]
     return checkers
 
 
