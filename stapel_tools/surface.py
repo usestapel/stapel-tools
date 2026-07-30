@@ -319,7 +319,11 @@ def build_surface(meta: dict, *, repo: Path, package: str | None = None) -> list
                 f"{', '.join(FUNCTION_KINDS)}, not {kind!r}"
             )
         entry = {
-            "name": name.split(".")[-1] if kind == "capability_field" else name,
+            # `name` is the entry's identity inside the module, so it must be
+            # unique: a capability field keeps its class prefix, because
+            # `email_mock` exists on both the registration and the login DTO
+            # and they are two different published promises.
+            "name": name,
             "kind": kind,
             "path": path,
             "intent": item["intent"],

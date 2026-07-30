@@ -35,6 +35,10 @@ product is meant to call, subclass, mount or read —
   naming the symbol.** A warning would be read zero times. A library that
   exports a symbol it cannot explain in one line has just built the next
   mechanism nobody adopts.
+- **`name` is the entry's identity inside the module and is unique.** A
+  capability field keeps its class prefix (`RegistrationCapabilities.email_mock`)
+  — `email_mock` lives on both the registration and the login DTO, and those are
+  two different published promises to two different screens.
 - **`instead_of`** names the outside symbols an entry displaces
   (`IsNotAnonymousUser` → `rest_framework.permissions.IsAuthenticated`) — the
   fuel for a duplicate-of-surface check. **`consumer`** names who is obliged to

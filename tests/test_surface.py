@@ -300,7 +300,7 @@ class TestEntries:
         assert by_name["load_configured_factors"]["kind"] == "factory"
         assert by_name["strong_factors"]["kind"] == "predicate"
 
-        mock = by_name["email_mock"]
+        mock = by_name["RegistrationCapabilities.email_mock"]
         assert mock["kind"] == "capability_field"
         assert mock["path"] == (
             "stapel_probe.dto.RegistrationCapabilities.email_mock"
@@ -375,8 +375,8 @@ class TestStaticDocument:
         assert main([str(repo), "--check"]) == 0
         doc = json.loads((repo / "docs" / "capabilities.json").read_text())
         assert [e["name"] for e in doc["surface"] if e["kind"] == "capability_field"] == [
-            "email_mock",
-            "phone",
+            "RegistrationCapabilities.email_mock",
+            "RegistrationCapabilities.phone",
         ]
 
     def test_cli_check_detects_drift(self, tmp_path):
