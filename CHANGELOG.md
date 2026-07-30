@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.21.0] — 2026-07-30
+
 ### Added — R008 (warning): a lifecycle/security flag inside `defaults=`
 
 `get_or_create(..., defaults={"is_active": True})` reads as an assertion about
