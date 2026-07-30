@@ -545,6 +545,19 @@ def render_module_section(doc: dict) -> list[str]:
     ep_names = [ep.get("name", "?") for ep in eps]
     lines.append(f"**Extension points:** {', '.join(ep_names) if ep_names else '—'}")
     lines.append("")
+
+    # The usage surface (stapel_tools.surface): names + kinds only, the same
+    # compactness as the extension-point line above — the curated `intent` of
+    # each entry lives in capabilities.json / --index, where an exact-layer
+    # query can afford it. Absent entirely for a module that declares no
+    # surface_roots, so a catalog over today's fleet stays as short as it was.
+    surface = doc.get("surface") or []
+    if surface:
+        rendered = ", ".join(
+            f"{s.get('name', '?')} ({s.get('kind', '?')})" for s in surface
+        )
+        lines.append(f"**Surface (call these):** {rendered}")
+        lines.append("")
     lines.append(f"**Requires:** {_md_requires(doc.get('requires') or [])}")
     lines.append("")
 

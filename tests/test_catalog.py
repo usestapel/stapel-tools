@@ -229,3 +229,54 @@ def test_cli_writes_both_artifacts(tmp_path, capsys):
 def test_cli_requires_inputs(capsys):
     with pytest.raises(SystemExit):
         main([])
+
+
+class TestSurfaceProjection:
+    """The `surface` section reaches the prompt-ready projection.
+
+    Shipping a section that no projection reads would reproduce the exact
+    defect it exists to fix — a mechanism built, released and never picked up.
+    Names + kinds only: the curated intent lives in capabilities.json, where an
+    exact-layer query can afford it.
+    """
+
+    def _doc(self, surface):
+        return {
+            "module": "stapel-core",
+            "version": "0.17.0",
+            "provides": "the substrate",
+            "axes": [],
+            "extension_points": [],
+            "surface": surface,
+            "requires": [],
+        }
+
+    def test_surface_names_and_kinds_are_rendered(self):
+        md = render_markdown(
+            build_catalog(
+                [
+                    self._doc(
+                        [
+                            {
+                                "name": "IsNotAnonymousUser",
+                                "kind": "permission_class",
+                                "path": "p",
+                                "intent": "a very long curated line " * 20,
+                            }
+                        ]
+                    )
+                ]
+            )
+        )
+        assert "**Surface (call these):** IsNotAnonymousUser (permission_class)" in md
+        assert "a very long curated line" not in md
+
+    def test_no_surface_no_line(self):
+        md = render_markdown(build_catalog([self._doc([])]))
+        assert "Surface" not in md
+
+    def test_module_without_operations_total_does_not_break_the_roll_up(self):
+        """stapel-core ships no docs/schema.json, so its document omits the
+        counter — the aggregate must read that as "nothing to add", not crash."""
+        catalog = build_catalog([self._doc([])])
+        assert catalog["totals"]["operations"] == 0

@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.22.1] — 2026-07-30
+
+### Added — `surface` reaches `catalog.md`
+
+`stapel-catalog`'s prompt-ready projection now carries a
+`**Surface (call these):**` line per module — entry names + kinds, the same
+compactness the extension-point line already has. Shipping a section that no
+projection reads would have reproduced the exact defect the section exists to
+fix. The curated `intent` of each entry stays in `capabilities.json` /
+`--index`, where an exact-layer query can afford it. Absent entirely for a
+module that declares no `surface_roots`.
+
 ## [0.22.0] — 2026-07-30
 
 ### Added — `surface`: the third section of `capabilities.json` (`stapel_tools.surface`)
