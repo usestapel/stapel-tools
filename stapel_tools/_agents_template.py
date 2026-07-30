@@ -85,6 +85,13 @@ pre-commit hook fails the commit when it drifts).
 - Every `CONFIG.MD` row's Purpose column is filled in (CFG004) — a key with
   no stated purpose is undocumented in every way that matters, even if a
   row technically exists.
+- The project HAS a `CONFIG.MD` (CFG000). Without one, CFG002/CFG003 have
+  nothing to check against and simply do not run — a registry law must not
+  be switchable off by deleting the registry.
+- In a **library** checkout, every row the library owns names a key the
+  library actually has (CFG005) — in its `AppSettings` defaults, or wired
+  some other way in code. A switch documented as "turn it off without a
+  deploy" that was never introduced cannot be turned off.
 - `CONFIG.MD` is a GENERATED aggregate of the selected libs' own registries
   — never hand-edit the lib-owned sections (`## stapel-<lib>`) directly, run
   `stapel-config-manifest .` (regenerates from each lib's current CONFIG.MD)
@@ -147,7 +154,7 @@ invents output from nothing.
 
 `stapel-verify` runs `stapel_tools.lint` (R001-R007), `adoption_lint`
 (module actually mounted, no shadow routes — ADO-codes), `url_lint`
-(URL001), `config_lint` (CFG001-003), `migration_lint` (MIG-codes,
+(URL001), `config_lint` (CFG000-005), `migration_lint` (MIG-codes,
 expand/contract), `swap_lint` (SWAP001/SWAP002), `doc_lint` (DOC001) and
 `nginx_cache_lint` (NGX001-004) in one pass — no reimplemented rules, pure
 composition. A green run is required before calling backend work done; a

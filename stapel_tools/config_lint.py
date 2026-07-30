@@ -5,11 +5,20 @@ in the ``stapel-migration-lint`` / ``stapel-adoption-lint`` idiom (rule codes,
 ``--json``, ``--strict``, exit 1 on any error).
 
 The law is: configuration is read in ONE place (the settings module), and every
-key read there is described in the project-root CONFIG.MD. Three rules enforce
-the two halves of that sentence plus its converse.
+key read there is described in the project-root CONFIG.MD. The rules enforce
+the two halves of that sentence, its converse, the *existence* of the registry
+itself (CFG000), and — in a library checkout — that the rows a library owns
+name knobs it actually has (CFG005).
 
 Rules
 -----
+CFG000  (warning) The project has no CONFIG.MD at all. Everything below that
+        reads against the registry (CFG002, CFG003) is then unrunnable, so the
+        gate goes green by having no registry — the one failure mode a
+        registry law must not have. Warning-level, not error: it names the
+        hole in every ``stapel-verify`` run without failing a build that
+        simply has not done the CONFIG.MD sweep yet.
+
 CFG001  (error) A configuration/secret read happens OUTSIDE the settings module
         — ``get_config(...)`` / ``get_secret(...)`` / ``os.environ[...]`` /
         ``os.environ.get(...)`` / ``os.getenv(...)`` in any file that is not
@@ -36,6 +45,19 @@ CFG004  (warning) A CONFIG.MD row's Purpose column is empty — "documented" in
         (same posture as DOC001) — promote to error once every onboarded
         lib's CONFIG.MD carries a purpose for each row.
 
+CFG005  (error) **In a library checkout**, a CONFIG.MD row whose owner section
+        is this library names a key that exists nowhere in the library: not in
+        any ``AppSettings(defaults={...})`` namespace, not in a
+        ``declare_config`` call, and not read through
+        ``get_config``/``get_secret``/``os.environ``. This is CFG003's mirror
+        image and closes CFG003's hole: in a *consuming* project, rows owned by
+        a stapel lib are exempt "because the lib reads them itself" — an
+        assumption nothing checked. It came from a real switch documented as
+        "turn it off without a deploy" that had no settings key at all, so it
+        could not be turned off; CFG001 was the wrong class for it (there was
+        no read anywhere, which is precisely the defect). Both halves are
+        machine-readable, so the rule is an error, not a warning.
+
 ``os.environ.setdefault(...)`` is a write, not a read (manage.py / wsgi set
 DJANGO_SETTINGS_MODULE that way) and is never flagged.
 
@@ -50,6 +72,7 @@ import argparse
 import ast
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -189,6 +212,184 @@ def _noqa_rules(line: str) -> Optional[set[str]]:
     return {r.strip() for r in tail.replace(";", ",").split(",") if r.strip()}
 
 
+def _callee_name(func: ast.AST) -> str:
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return ""
+
+
+def _dict_string_keys(node: ast.AST) -> list[str]:
+    if not isinstance(node, ast.Dict):
+        return []
+    return [
+        k.value for k in node.keys
+        if isinstance(k, ast.Constant) and isinstance(k.value, str)
+    ]
+
+
+def _module_dicts(tree: ast.Module) -> dict[str, ast.Dict]:
+    """Module-level ``NAME = {...}`` assignments (the ``DEFAULTS = {...}``
+    idiom every lib's conf.py uses so the capabilities emitter can read the
+    axes without re-parsing the ``AppSettings()`` call)."""
+    out: dict[str, ast.Dict] = {}
+    for node in tree.body:
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign) and node.target is not None:
+            targets = [node.target]
+        value = getattr(node, "value", None)
+        if not isinstance(value, ast.Dict):
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                out[target.id] = value
+    return out
+
+
+def collect_settings_defaults(project: Path) -> dict[str, tuple[str, int]]:
+    """Keys of every ``AppSettings(..., defaults=...)`` in *project*.
+
+    The library half of the registry law is machine-readable: an
+    ``AppSettings`` namespace's ``defaults`` dict IS the set of knobs the
+    library actually offers. Keys are namespace-relative (``AppSettings._raw``
+    resolves a bare key name against the namespace dict / a flat setting / the
+    environment), which is exactly how a lib's CONFIG.MD names them.
+
+    ``defaults=`` is usually a module-level ``DEFAULTS = {...}`` name rather
+    than an inline literal, so a named dict in the same module is resolved.
+    Nested one level: a block key whose value is itself a dict literal (the
+    ``VECTOR`` / ``RERANK`` idiom) contributes its inner keys too, because
+    CONFIG.MD documents those inner knobs as rows of their own.
+
+    Also picks up ``declare_config("KEY", ...)`` (``stapel_core.config``), the
+    in-code alternative to a hand-written row.
+    """
+    found: dict[str, tuple[str, int]] = {}
+
+    def _record(dict_node: ast.Dict, py: Path, depth: int = 0) -> None:
+        for key_node, value_node in zip(dict_node.keys, dict_node.values):
+            if not (isinstance(key_node, ast.Constant) and isinstance(key_node.value, str)):
+                continue
+            found.setdefault(key_node.value, (str(py), key_node.lineno))
+            if depth < 1 and isinstance(value_node, ast.Dict):
+                _record(value_node, py, depth + 1)
+
+    for py in _walk_py(project):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        module_dicts = _module_dicts(tree)
+        # The DEFAULTS/-suffixed module dicts are the declared surface even
+        # when the AppSettings() call lives in another module.
+        for name, node in module_dicts.items():
+            if name == "DEFAULTS" or name.endswith("_DEFAULTS") or name.startswith("DEFAULT_"):
+                _record(node, py)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _callee_name(node.func)
+            if name == "AppSettings":
+                defaults: Optional[ast.AST] = None
+                for kw in node.keywords:
+                    if kw.arg == "defaults":
+                        defaults = kw.value
+                if defaults is None and len(node.args) >= 2:
+                    defaults = node.args[1]
+                if isinstance(defaults, ast.Name):
+                    defaults = module_dicts.get(defaults.id)
+                if isinstance(defaults, ast.Dict):
+                    _record(defaults, py)
+            elif name == "declare_config":
+                key = _str_first_arg(node)
+                if key:
+                    found.setdefault(key, (str(py), node.lineno))
+    return found
+
+
+def _docstring_nodes(tree: ast.AST) -> set[int]:
+    """ids of the string Constants that are docstrings / bare string
+    expressions — prose, not code that names a key."""
+    out: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
+                and isinstance(node.value.value, str):
+            out.add(id(node.value))
+    return out
+
+
+def collect_key_mentions(project: Path) -> set[str]:
+    """Every configuration-key-shaped name the library's *code* names.
+
+    Backing evidence of last resort for CFG005. A key is "wired" in ways an
+    AST read-matcher cannot follow — ``_resolve("KV_MOUNT", "VAULT_KV_MOUNT",
+    ...)`` behind a helper, ``BOOTSTRAP_PROVIDER_ENV = "STAPEL_SECRETS_
+    PROVIDER"`` then read through the constant, a flat ``DEBUG = ...`` Django
+    setting. All of those are real wiring; none of them is a
+    ``get_config("KEY")`` call. So CFG005 asks the weaker, exactly checkable
+    question instead: does the key exist in the code **at all**?
+
+    Counted: string constants that are not docstrings, module-level
+    UPPER_CASE assignment targets, and keyword-argument names. Deliberately
+    NOT counted: comments and docstrings — a key that appears only in prose is
+    documented, which is the thing being questioned.
+    """
+    mentions: set[str] = set()
+    for py in _walk_py(project):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        docstrings = _docstring_nodes(tree)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                if id(node) not in docstrings and node.value:
+                    mentions.add(node.value)
+            elif isinstance(node, ast.Name) and node.id.isupper():
+                mentions.add(node.id)
+            elif isinstance(node, ast.Attribute) and node.attr.isupper():
+                mentions.add(node.attr)
+    return mentions
+
+
+def _pyproject_name(project: Path) -> Optional[str]:
+    pyproject = project / "pyproject.toml"
+    try:
+        text = pyproject.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(r'(?m)^\s*name\s*=\s*["\']([^"\']+)["\']', text)
+    return match.group(1) if match else None
+
+
+def library_distribution(project: Path) -> Optional[str]:
+    """``stapel-<lib>`` when *project* is a **library checkout**, else None.
+
+    A library repo ships a ``pyproject.toml`` naming a ``stapel-*``
+    distribution and has no ``manage.py`` — it is the unit that OWNS its
+    CONFIG.MD rows. A consuming service (which has ``manage.py``) is the
+    CFG002/CFG003 world instead: there, library-owned rows are deliberately
+    exempt because the lib reads them internally. CFG005 is the check that
+    the assumption behind that exemption is true.
+    """
+    if (project / "manage.py").is_file():
+        return None
+    name = _pyproject_name(project)
+    if not name:
+        return None
+    normalized = name.strip().lower().replace("_", "-")
+    return normalized if normalized.startswith("stapel-") else None
+
+
+def _owner_matches(owner: Optional[str], distribution: str) -> bool:
+    if not owner:
+        return False
+    return owner.strip().lower().replace("_", "-") == distribution
+
+
 def collect_reads(project: Path) -> list[ConfigRead]:
     reads: list[ConfigRead] = []
     for py in _walk_py(project):
@@ -253,10 +454,35 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
 
     config_md = find_config_md(project)
     if config_md is None:
+        # ------------------------------------------------------------- CFG000
+        # The registry law must not be opt-out by omission. This used to be a
+        # note only — i.e. a project with no CONFIG.MD had CFG002/CFG003
+        # silently skipped and a green gate, and its pre-commit config said so
+        # in a comment ("CFG002/CFG003 у stapel-verify скипаются и так"). A
+        # warning is the honest level: it shows up in every stapel-verify run
+        # without failing a build that has not done the sweep yet.
         notes.append(
             f"stapel-config-lint: no {CONFIG_MD} at project root — CFG002/CFG003 "
             f"skipped (nothing to check reads against). CFG001 still enforced."
         )
+        # Only for a unit that HAS configuration to register: a Django service
+        # (manage.py), a stapel library distribution, or anything that reads a
+        # config key at all. A repo that reads nothing (a TS package, a spec
+        # repo) has no registry to be missing.
+        has_config_surface = bool(reads) or (project / "manage.py").is_file() \
+            or library_distribution(project) is not None
+        if not has_config_surface:
+            findings.sort(key=lambda f: (f.path, f.line, f.rule))
+            return findings
+        findings.append(Finding(
+            str(project / CONFIG_MD), 0, "CFG000",
+            f"no {CONFIG_MD} at the root — the config registry does not exist, "
+            f"so CFG002 (undeclared knob) and CFG003 (stale row) cannot run at "
+            f"all and every configuration key in this project is undocumented "
+            f"by construction. Create {CONFIG_MD} (stapel-config-manifest "
+            f"regenerates the library-owned sections)",
+            level="warning",
+        ))
         findings.sort(key=lambda f: (f.path, f.line, f.rule))
         return findings
 
@@ -303,6 +529,27 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
             f"a project-owned row is edited directly)",
             level="warning",
         ))
+
+    # ------------------------------------------------------------------ CFG005
+    distribution = library_distribution(project)
+    if distribution:
+        defaults = collect_settings_defaults(project)
+        backed = set(defaults) | read_keys | collect_key_mentions(project)
+        for entry in entries:
+            if not _owner_matches(entry.owner, distribution):
+                continue  # a row this lib re-documents from another owner
+            if entry.key in backed:
+                continue
+            findings.append(Finding(
+                str(config_md), entry.line, "CFG005",
+                f"'{entry.key}' is documented in {distribution}'s {CONFIG_MD} but "
+                f"exists nowhere in the library's code: it is in no "
+                f"AppSettings(defaults=...) namespace, no declare_config, no "
+                f"config read, and it is not even named as a literal or a "
+                f"setting anywhere — only in this table. A knob documented as "
+                f"switchable that was never introduced cannot be switched. Add "
+                f"it to the owning namespace's defaults, or drop the row",
+            ))
 
     _ = settings_read_keys  # (kept for readability of the two key sets)
     findings.sort(key=lambda f: (f.path, f.line, f.rule))

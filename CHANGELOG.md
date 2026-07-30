@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+### Added — CFG005: a library's CONFIG.MD row must name a knob the library has
+
+CFG003 says "a CONFIG.MD row read nowhere in the project is stale" — and then
+exempts every row owned by a stapel lib, on the assumption that the lib reads
+it internally. Nothing checked that assumption, and it is exactly where the
+defect lived: a switch documented as "turn it off without a deploy" that was
+never introduced in the owning namespace at all, so it could not be turned
+off. CFG001 was the wrong class for it (it catches a read outside settings;
+here there was no read *anywhere*, which is the defect).
+
+CFG005 is that missing mirror, and it runs where the assumption is checkable —
+in the **library checkout** (a `stapel-*` `pyproject.toml`, no `manage.py`).
+For every row under the library's own `## stapel-<lib>` owner section, the key
+must exist in the library's code: in an `AppSettings(defaults=...)` namespace
+(resolved through the `DEFAULTS = {...}` module constant every lib's `conf.py`
+uses, one level into nested blocks), in a `declare_config`, in a config read,
+or at minimum named as a literal / setting somewhere. Docstring and comment
+mentions do **not** count — a key that appears only in prose is documented,
+which is the thing being questioned.
+
+Measured on the fleet before release: 0 findings across all 20 library repos
+that ship a CONFIG.MD (the strict "must be in `defaults`" formulation alone
+gave 85 — all false, from keys wired through helpers, module constants or flat
+Django settings; the released rule reports none of them). Verified by planting
+the original offending row back into `stapel-recordings/CONFIG.MD`: it reds by
+name, and goes green again when removed.
+
+### Added — CFG000: the registry law is no longer opt-out by omission
+
+A project with no `CONFIG.MD` had CFG002/CFG003 **silently skipped** and a
+green gate — the note saying so went to stderr, and downstream pre-commit
+configs simply recorded the fact and moved on ("CFG002/CFG003 skipped
+anyway"). CFG000 reports the missing registry as a **warning**: visible in
+every `stapel-verify` run, still not failing a build that has not done the
+CONFIG.MD sweep. Raised only for a unit that has configuration to register (a
+`manage.py` service, a stapel distribution, or any file that reads a config
+key) — a TS package or a spec repo has no registry to be missing.
+
+Fleet count at release: 15 stapel repos + the product + 2 service checkouts.
+
 ## [0.20.0] — 2026-07-26
 
 ### Fixed

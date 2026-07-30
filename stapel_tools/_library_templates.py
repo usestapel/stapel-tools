@@ -659,7 +659,7 @@ pre-commit install
 ```
 
 Every commit then runs `stapel-verify .` — R001-R007, SWAP001-002,
-CFG001-003, URL001, ADO-codes, MIG-codes, DOC001. Run the full suite on
+CFG000-005, URL001, ADO-codes, MIG-codes, DOC001. Run the full suite on
 demand with `pre-commit run --all-files`.
 
 ## License

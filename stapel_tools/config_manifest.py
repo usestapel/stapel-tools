@@ -8,7 +8,7 @@ Two consumers share this module:
   project's config surface, what it must ask the client for and what
   boot-smoke will check;
 * ``assemble_scaffold`` (§1.3) writes that aggregate into the generated
-  project's root ``CONFIG.MD`` and runs ``config_lint`` (CFG001–CFG003) over
+  project's root ``CONFIG.MD`` and runs ``config_lint`` (CFG000–CFG005) over
   the result in its verify pass.
 
 The format is the one ``stapel_core.config.get_config`` routes on — a GFM table
@@ -235,7 +235,7 @@ def render_config_md(entries: Iterable[ConfigEntry], *, title: str = "CONFIG.MD"
         "per key, its source (`env` = process environment; `vault` = the",
         "`stapel_core.secrets` provider seam), purpose, whether it is required,",
         "and its default. `get_config(key)` routes reads here; the `config-lint`",
-        "gate (CFG001-CFG003) keeps this file and the settings in sync.",
+        "gate (CFG000-CFG005) keeps this file and the settings in sync.",
         "",
     ]
     order: list[str] = []
