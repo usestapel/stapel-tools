@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-07-30
+
+### Added — `stapel-catalog --from-installed`: the environment is the source
+
+A committed catalog is a snapshot, and a snapshot without a gate rots
+silently. This project proved that on itself twice: the `catalog.json` /
+`catalog.md` pair committed at the repo root still described **10** modules
+against a fleet of **26**, and the studio's `stack_index.json` still said
+`stapel-auth@0.7.5` against `0.18.0` on disk. Both were generated once, by
+hand, and never again.
+
+`--from-installed` removes the snapshot from the loop entirely: it sources
+the aggregate from the **current environment** — every installed `stapel-*`
+distribution that ships `docs/capabilities.json` in its wheel — so the index
+becomes a pure function of the lockfile and *cannot* lag the code that will
+actually run. Two lookups per distribution: the wheel's own RECORD first,
+then a `find_spec` probe of the declared top-level packages for editable
+installs (resolves the path without importing the package — no Django
+settings are touched). Unions with `--workspace`/paths and dedupes on the
+resolved document, so an editable install cannot make a module appear twice.
+
+The counterpart gate, `--check` (rebuild in memory, byte-compare, non-zero
+exit), already existed — it just was not wired anywhere. It belongs in the CI
+of whichever repo commits the artifact.
+
+### Changed — scaffolded modules ship their contract documents in the wheel
+
+`[tool.setuptools.package-data]` in the library/module template now carries
+`docs/capabilities.json`, `docs/flows.json`, `docs/errors.json` and
+`CONFIG.MD`. This is what makes `--from-installed` possible at all: a module
+that keeps its contract documents repo-only publishes code no agent reading
+an installed environment can see. Verified by artifact, not by config — a
+built wheel contains the four files, and `--from-installed` in a clean venv
+with only that wheel reproduces the module's full index entry (operations,
+errors, CONFIG rows). A `tests/test_new_library.py` case now pins it so the
+scaffold cannot regress into producing a mute module.
+
+### Removed — the repo-root `catalog.json` / `catalog.md` snapshot
+
+Deleted, not refreshed. They were a hand-run 10-module aggregate with no
+consumer anywhere in the fleet (grep-verified) and no gate — exactly the
+artifact shape this release argues against. `stapel-tools` deliberately
+commits no catalog of its own: the artifact belongs in the repo that
+consumes it, behind that repo's `--check` gate.
+
 ## [0.22.1] — 2026-07-30
 
 ### Added — `surface` reaches `catalog.md`

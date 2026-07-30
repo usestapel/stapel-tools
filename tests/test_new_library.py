@@ -166,3 +166,19 @@ class TestGeneratedRepoEndToEnd:
             scaffold_library("attrs-demo", "Attrs", tmp_path,
                              kind="library", git=False)
         )
+
+
+def test_scaffolded_pyproject_ships_the_contract_documents_in_the_wheel():
+    """A module whose contract documents stay repo-only publishes code no
+    installed-environment reader can see (`stapel-catalog --from-installed`).
+    The scaffold must not be able to produce such a module."""
+    import tomllib
+
+    for kind in ("module", "library"):
+        ctx = build_context("demo", "Demo")
+        plan = file_plan(kind, ctx)
+        data = tomllib.loads(plan["pyproject.toml"])
+        package_data = data["tool"]["setuptools"]["package-data"]["stapel_demo"]
+        for entry in ("docs/capabilities.json", "docs/flows.json",
+                      "docs/errors.json", "CONFIG.MD"):
+            assert entry in package_data, f"{kind}: {entry} missing"

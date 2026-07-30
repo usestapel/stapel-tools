@@ -52,7 +52,11 @@ package-dir = {"{{PKG}}" = "."}
 packages = [{{PACKAGES}}]
 
 [tool.setuptools.package-data]
-{{PKG}} = ["py.typed"{{PACKAGE_DATA_EXTRA}}]
+# The contract documents ship IN THE WHEEL: that is what makes
+# `stapel-catalog --from-installed` possible, i.e. what turns catalog
+# freshness from somebody's discipline into a property of the lockfile.
+# A module that keeps them repo-only publishes code an agent cannot read.
+{{PKG}} = ["py.typed", "docs/capabilities.json", "docs/flows.json", "docs/errors.json", "CONFIG.MD"{{PACKAGE_DATA_EXTRA}}]
 
 [tool.ruff]
 target-version = "py311"

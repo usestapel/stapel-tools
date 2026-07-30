@@ -216,3 +216,158 @@ def test_cli_check_legacy_mode(tmp_path):
     # touch nothing, add a module → drift
     rc = main([str(FULL), "--out-dir", str(tmp_path), "--check"])
     assert rc == 1
+
+
+# ── --from-installed: the environment as the source of truth ────────────────
+#
+# A committed snapshot is a claim about a checkout; --from-installed is a
+# claim about the interpreter that will actually run the product. It can only
+# work because the modules now ship docs/capabilities.json (+ flows/errors +
+# CONFIG.MD) as package-data, so the same layout a repo has on disk
+# (<root>/docs/..., <root>/CONFIG.MD) exists inside site-packages/<pkg>/.
+
+
+class _FakeDist:
+    """Minimal importlib.metadata.Distribution stand-in.
+
+    ``files``/``locate_file`` model a regular wheel install (RECORD lists the
+    shipped data files); ``top_level`` models the editable fallback, where
+    RECORD carries only the finder shim.
+    """
+
+    def __init__(self, name, root=None, files=None, top_level=None):
+        self.metadata = {"Name": name}
+        self._root = root
+        self._files = [Path(f) for f in (files or [])]
+        self._top_level = top_level
+
+    @property
+    def files(self):
+        return self._files
+
+    def locate_file(self, path):
+        return Path(self._root) / path
+
+    def read_text(self, filename):
+        if filename == "top_level.txt" and self._top_level:
+            return self._top_level + "\n"
+        return None
+
+
+def _fake_site_packages(tmp_path, pkg="stapel_demo"):
+    """A site-packages-shaped copy of the mod-full fixture."""
+    site = tmp_path / "site-packages"
+    root = site / pkg
+    (root / "docs").mkdir(parents=True)
+    for name in ("capabilities.json", "flows.json", "errors.json"):
+        (root / "docs" / name).write_text((FULL / "docs" / name).read_text())
+    (root / "CONFIG.MD").write_text((FULL / "CONFIG.MD").read_text())
+    return site
+
+
+def test_discover_installed_reads_the_wheel_record(tmp_path, monkeypatch):
+    import importlib.metadata as md
+
+    from stapel_tools.catalog import discover_installed
+
+    site = _fake_site_packages(tmp_path)
+    dist = _FakeDist(
+        "stapel-demo",
+        root=site,
+        files=["stapel_demo/__init__.py", "stapel_demo/docs/capabilities.json"],
+    )
+    monkeypatch.setattr(md, "distributions", lambda: iter([dist]))
+
+    found = discover_installed()
+    assert found == [site / "stapel_demo" / "docs" / "capabilities.json"]
+
+
+def test_discover_installed_ignores_non_stapel_and_docless_dists(tmp_path, monkeypatch):
+    import importlib.metadata as md
+
+    from stapel_tools.catalog import discover_installed
+
+    site = _fake_site_packages(tmp_path)
+    stapel = _FakeDist(
+        "stapel-demo", root=site,
+        files=["stapel_demo/docs/capabilities.json"],
+    )
+    # right prefix, ships nothing readable → absent, not a crash
+    docless = _FakeDist("stapel-nothing", root=site, files=["stapel_nothing/__init__.py"])
+    # wrong prefix → never even probed
+    foreign = _FakeDist("django", root=site, files=["django/docs/capabilities.json"])
+    monkeypatch.setattr(md, "distributions", lambda: iter([foreign, docless, stapel]))
+
+    assert discover_installed() == [site / "stapel_demo" / "docs" / "capabilities.json"]
+
+
+def test_discover_installed_falls_back_to_the_import_spec(tmp_path, monkeypatch):
+    """Editable install: RECORD has no docs/, the spec still finds them."""
+    import importlib.metadata as md
+
+    from stapel_tools.catalog import discover_installed
+
+    site = _fake_site_packages(tmp_path)
+    (site / "stapel_demo" / "__init__.py").write_text("")
+    monkeypatch.syspath_prepend(str(site))
+    dist = _FakeDist(
+        "stapel-demo", root=site,
+        files=["__editable__.stapel_demo.finder.py"],
+        top_level="stapel_demo",
+    )
+    monkeypatch.setattr(md, "distributions", lambda: iter([dist]))
+
+    assert discover_installed() == [site / "stapel_demo" / "docs" / "capabilities.json"]
+
+
+def test_from_installed_index_carries_the_shipped_siblings(tmp_path, monkeypatch):
+    """The point of shipping more than capabilities.json: an installed-sourced
+    index is not a degraded one — flows/errors/CONFIG.MD come along, so it
+    says the same thing the checkout-sourced index says."""
+    import importlib.metadata as md
+
+    from stapel_tools.catalog import main
+
+    site = _fake_site_packages(tmp_path)
+    dist = _FakeDist(
+        "stapel-demo", root=site,
+        files=["stapel_demo/docs/capabilities.json"],
+    )
+    monkeypatch.setattr(md, "distributions", lambda: iter([dist]))
+
+    out = tmp_path / "index.json"
+    assert main(["--from-installed", "--index", "-o", str(out)]) == 0
+    doc = json.loads(out.read_text())["modules"][0]
+    assert doc["module"] == "stapel-demo"
+    assert doc["flows"][0]["id"] == "demo.checkout"
+    assert doc["errors"][0]["code"] == "error.400.demo_bad_request"
+    assert doc["config_md"][0].startswith("| DEMO_ZEBRA |")
+
+
+def test_from_installed_unions_and_dedupes_against_paths(tmp_path, monkeypatch):
+    """An editable install resolves back into the checkout --workspace scans;
+    the module must not land in the catalog twice."""
+    import importlib.metadata as md
+
+    from stapel_tools.catalog import main
+
+    dist = _FakeDist(
+        "stapel-demo", root=FULL.parent,
+        files=["mod-full/docs/capabilities.json"],
+    )
+    monkeypatch.setattr(md, "distributions", lambda: iter([dist]))
+
+    out = tmp_path / "index.json"
+    assert main([str(FULL), "--from-installed", "--index", "-o", str(out)]) == 0
+    doc = json.loads(out.read_text())
+    assert doc["totals"]["modules"] == 1
+
+
+def test_from_installed_alone_with_an_empty_environment_errors(tmp_path, monkeypatch):
+    import importlib.metadata as md
+
+    from stapel_tools.catalog import main
+
+    monkeypatch.setattr(md, "distributions", lambda: iter([]))
+    with pytest.raises(SystemExit):
+        main(["--from-installed", "--index", "-o", str(tmp_path / "x.json")])

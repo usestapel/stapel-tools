@@ -6,7 +6,8 @@ Each Stapel module already emits, as its FOURTH per-module contract artifact,
 a drift-gated ``docs/capabilities.json`` (see :mod:`stapel_tools.capabilities`):
 a ``provides`` one-liner, the CTO-facing ``axes`` with their per-operation
 gates, ``extension_points`` and ``requires``. This tool is the read side: it
-gathers those documents across a workspace (or an explicit list of repos) and
+gathers those documents across a workspace, an explicit list of repos, or the
+INSTALLED distributions of the current environment (``--from-installed``), and
 projects them into two catalog artifacts:
 
 * ``catalog.json`` — the full machine aggregate: every source document verbatim
@@ -21,6 +22,21 @@ Both outputs are DETERMINISTIC — modules are sorted by name, axes by key, and
 no timestamps or environment-dependent values are emitted — so two runs over
 the same inputs are byte-for-byte identical (catalog.md is an artifact that
 gets committed into other repos' prompts, so stability matters).
+
+Where the catalog gets its freshness
+-----------------------------------
+A committed aggregate is a snapshot, and a snapshot without a gate goes stale
+silently — that is the observed failure mode, twice over, of this project's
+own aggregates. Two mechanisms, in increasing order of strength:
+
+* ``--check`` — the drift gate for a committed artifact: rebuild in memory,
+  compare byte-for-byte, non-zero exit on any mismatch. Belongs in the CI of
+  whichever repo commits the artifact, next to ``make contract-check``.
+* ``--from-installed`` — no snapshot at all: source the aggregate from the
+  current environment (every installed ``stapel-*`` distribution shipping
+  ``docs/capabilities.json`` in its wheel). Then the index is a pure function
+  of the lockfile and *cannot* lag the code that will actually run. This is
+  the right shape for a client project with pins.
 
 Curated recipes
 ---------------
@@ -45,6 +61,7 @@ input, not discovered artifacts.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -91,6 +108,98 @@ def discover_workspace(workspace: Path) -> list[Path]:
         for p in workspace.glob("stapel-*/docs/capabilities.json")
         if p.is_file()
     )
+
+
+def _installed_capabilities(dist) -> Path | None:
+    """Locate a single installed distribution's shipped
+    ``<pkg>/docs/capabilities.json``, or ``None`` if it ships none.
+
+    Two lookups, in order of trustworthiness:
+
+    1. the distribution's own RECORD (``dist.files``) — authoritative for a
+       regular wheel install;
+    2. a spec probe of the declared top-level packages — the editable-install
+       fallback, where RECORD lists only the ``__editable__`` finder shim and
+       the real files live in the source checkout. ``find_spec`` on a
+       top-level name resolves the path WITHOUT executing the package (no
+       Django settings are touched).
+    """
+    try:
+        files = dist.files or []
+    except Exception:  # pragma: no cover - malformed metadata
+        files = []
+    for entry in files:
+        parts = entry.parts
+        if len(parts) >= 3 and parts[-2:] == ("docs", "capabilities.json"):
+            try:
+                path = Path(dist.locate_file(entry))
+            except Exception:  # pragma: no cover - defensive
+                continue
+            if path.is_file():
+                return path
+
+    tops: list[str] = []
+    try:
+        raw = dist.read_text("top_level.txt") or ""
+        tops = [line.strip() for line in raw.splitlines() if line.strip()]
+    except Exception:  # pragma: no cover - defensive
+        tops = []
+    if not tops:
+        name = (dist.metadata["Name"] or "").replace("-", "_")
+        tops = [name] if name else []
+    for top in tops:
+        try:
+            spec = importlib.util.find_spec(top)
+        except (ImportError, ValueError):  # pragma: no cover - broken install
+            continue
+        origin = getattr(spec, "origin", None) if spec else None
+        if not origin:
+            continue
+        candidate = Path(origin).parent / "docs" / "capabilities.json"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def discover_installed(
+    *,
+    prefix: str = "stapel-",
+    warn=lambda msg: print(msg, file=sys.stderr),
+) -> list[Path]:
+    """Every INSTALLED ``stapel-*`` distribution's shipped
+    ``docs/capabilities.json``, sorted by distribution name.
+
+    This is the environment-sourced twin of :func:`discover_workspace`, and
+    the stronger of the two: a workspace scan describes whatever happens to
+    be checked out next to you, while this describes *what is actually
+    importable in this environment*. The index it feeds is therefore a pure
+    function of the lockfile — it cannot drift away from the code the product
+    will run, which is the property a committed snapshot never has.
+
+    Requires the modules to ship their contract documents in the wheel
+    (``[tool.setuptools.package-data] <pkg> = ["docs/capabilities.json",
+    "docs/flows.json", "docs/errors.json", "CONFIG.MD"]``); a module built
+    before that lands is silently absent here — it published nothing to read.
+    """
+    from importlib.metadata import distributions
+
+    found: dict[str, Path] = {}
+    for dist in distributions():
+        try:
+            name = dist.metadata["Name"] or ""
+        except Exception:  # pragma: no cover - malformed metadata
+            continue
+        if not name.startswith(prefix) or name in found:
+            continue
+        path = _installed_capabilities(dist)
+        if path is not None:
+            found[name] = path
+    if not found:
+        warn(
+            "stapel-catalog: warning: no installed stapel-* distribution "
+            "ships docs/capabilities.json in this environment"
+        )
+    return [found[name] for name in sorted(found)]
 
 
 def load_documents_with_roots(
@@ -658,6 +767,15 @@ def main(argv: list[str] | None = None) -> int:
         "for --react-root (<workspace>/stapel-react) in --index mode.",
     )
     parser.add_argument(
+        "--from-installed",
+        action="store_true",
+        help="Source the catalog from the CURRENT ENVIRONMENT instead of a "
+        "checkout: every installed stapel-* distribution that ships "
+        "docs/capabilities.json in its wheel. The result is a pure function "
+        "of the lockfile — it cannot go stale against the code the product "
+        "actually runs. Combines with --workspace/paths (sources are unioned).",
+    )
+    parser.add_argument(
         "--recipes",
         help="Curated recipes YAML (composite projections) — rendered as its "
         "own catalog.md section / index 'recipes' key.",
@@ -703,8 +821,28 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
         sources += ws_sources
+    if args.from_installed:
+        sources += discover_installed()
     if not sources:
-        parser.error("no inputs: pass module repo paths and/or --workspace")
+        parser.error(
+            "no inputs: pass module repo paths and/or --workspace/--from-installed"
+        )
+    # Unioned sources can name the same document twice (an EDITABLE install
+    # resolves back into the very checkout --workspace scanned) — dedupe on
+    # the resolved capabilities.json so a module never lands in the catalog
+    # twice.
+    seen: set[Path] = set()
+    deduped: list[Path] = []
+    for source in sources:
+        try:
+            key = capabilities_path(source).resolve()
+        except OSError:  # pragma: no cover - defensive
+            key = capabilities_path(source)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(source)
+    sources = deduped
 
     recipes = load_recipes(Path(args.recipes)) if args.recipes else None
 

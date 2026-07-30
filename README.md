@@ -181,7 +181,31 @@ stapel-catalog ../stapel-auth ../stapel-billing --out-dir ./catalog
 
 # add curated composite recipes (marketplace = N modules) as their own section
 stapel-catalog --workspace ~/Projects/stapel --recipes recipes.yaml --out-dir ./catalog
+
+# the environment IS the source: every installed stapel-* wheel, no checkout
+stapel-catalog --from-installed --index -o ./stack_index.json
 ```
+
+#### Freshness is a property, not a chore
+
+Two rules keep a catalog from becoming a lie:
+
+1. **`--from-installed`** sources the aggregate from the *current
+   environment* — every installed `stapel-*` distribution that ships
+   `docs/capabilities.json` in its wheel (modules ship `capabilities.json`,
+   `flows.json`, `errors.json` and `CONFIG.MD` as package-data, so an
+   installed-sourced index is not a degraded one). The result is a pure
+   function of the lockfile: it cannot drift away from the code the product
+   actually runs, no matter whose discipline lapses.
+2. **`--check`** is the drift gate for a *committed* catalog: it rebuilds in
+   memory and compares byte-for-byte against the artifact on disk, exiting
+   non-zero on any mismatch. A committed aggregate without this gate in CI is
+   a snapshot that will go stale silently — that is not a hypothesis, it is
+   how both of this project's aggregates rotted. Wire it next to
+   `make contract-check`.
+
+`stapel-tools` deliberately commits **no** catalog of its own: the artifact
+belongs in the repo that consumes it, behind that repo's `--check` gate.
 
 Recipes are curated, not derived — a minimal, dependency-free YAML subset:
 
