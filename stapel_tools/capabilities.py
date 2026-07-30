@@ -15,8 +15,9 @@ This module is the generic MECHANISM, lifted from the stapel-auth etalon
   stapel-tools);
 - its curated layer is its own hand-written ``docs/capabilities.meta.json``
   (summary/business_label per axis, ``provides``, ``requires``,
-  ``extension_points``) — a missing/extra/empty entry is a LOUD emission
-  error, never a silent skip;
+  ``extension_points``, and — optionally — ``surface_roots`` + one ``intent``
+  line per selected symbol, see :mod:`stapel_tools.surface`) — a
+  missing/extra/empty entry is a LOUD emission error, never a silent skip;
 - its axis rule (which ``conf.py`` DEFAULTS keys are CTO-facing axes) and
   axis grouping come in as callables (``is_axis`` / ``axis_group`` — see
   :func:`axis_group_rules` for the common exact+suffix form).
@@ -188,6 +189,7 @@ def build_capabilities(
     is_axis: Callable[[str], bool],
     axis_group: Callable[[str], str],
     canonical_prefix: str,
+    repo: Path | None = None,
 ) -> dict:
     """Assemble the capabilities.json document (pure core — fully argument-driven).
 
@@ -259,15 +261,25 @@ def build_capabilities(
         if method in _HTTP_METHODS
     )
 
-    return {
+    doc = {
         "module": module,
         "version": version,
         "provides": meta["provides"],
         "axes": axes,
         "extension_points": meta["extension_points"],
-        "operations_total": operations_total,
-        "requires": meta["requires"],
     }
+    # The usage surface (stapel_tools.surface): opt-in per module — a library
+    # that has not declared surface_roots yet emits exactly what it emitted
+    # before this section existed, so introducing it turns no CI red.
+    if repo is not None:
+        from stapel_tools.surface import build_surface
+
+        surface = build_surface(meta, repo=repo)
+        if surface:
+            doc["surface"] = surface
+    doc["operations_total"] = operations_total
+    doc["requires"] = meta["requires"]
+    return doc
 
 
 def emit_capabilities(
@@ -320,6 +332,7 @@ def emit_capabilities(
         is_axis=is_axis,
         axis_group=axis_group,
         canonical_prefix=canonical_prefix,
+        repo=repo,
     )
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -369,7 +382,8 @@ def run_capabilities_cli(
     gated = sum(1 for a in doc["axes"] if a["gates"]["operations"])
     print(
         f"{doc['module']} capabilities: {len(doc['axes'])} axes ({gated} gating "
-        f"operations), {doc['operations_total']} operations total → "
+        f"operations), {len(doc.get('surface') or [])} surface entries, "
+        f"{doc['operations_total']} operations total → "
         f"{args.out}/capabilities.json",
         file=sys.stderr,
     )

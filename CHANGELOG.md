@@ -2,6 +2,65 @@
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-07-30
+
+### Added — `surface`: the third section of `capabilities.json` (`stapel_tools.surface`)
+
+`axes` describe the **configuration** surface ("what can be switched on");
+`extension_points` describe the **substitution** surface ("what can be
+replaced"). Neither answers the question a product author actually asks —
+*"is there already a mechanism for X, and what do I call?"* — so six mechanisms
+in one night were built, released, and never picked up: a permission class, a
+safety gate, a published capability field, a nav template, a loader factory and
+a set of error predicates. Not one of them was findable by a machine reading
+the fleet's contracts, and four of the six live in `stapel-core`, which had no
+contract document at all — not out of neglect: the format could only describe
+axes and OpenAPI operations, and the core has neither.
+
+`surface` is that third section: the **usage** surface. One entry per symbol a
+product is meant to call, subclass, mount or read —
+`{name, kind, path, intent, instead_of?, consumer?}`.
+
+- **`kind` is a CLOSED vocabulary** of exactly the six observed genres:
+  `permission_class`, `gate_function`, `template`, `predicate`,
+  `capability_field`, `factory`. Closed on purpose — an open one becomes a heap
+  of synonyms (`helper`/`util`/`function`) and a search over it stops working.
+  It grows on the seventh incident, not in advance.
+- **The entry set is DERIVED, never hand-listed.** A module declares
+  `surface_roots` in `docs/capabilities.meta.json` — *scopes*, not symbols — and
+  four closed selectors (`permission_classes`, `functions`, `capability_fields`,
+  `templates`) expand them by AST. A new export inside a declared root shows up
+  by itself and demands an intent; a deleted one takes its stale prose with it.
+- **LOUD, not a warning: a selected export with no `intent` fails emission,
+  naming the symbol.** A warning would be read zero times. A library that
+  exports a symbol it cannot explain in one line has just built the next
+  mechanism nobody adopts.
+- **`instead_of`** names the outside symbols an entry displaces
+  (`IsNotAnonymousUser` → `rest_framework.permissions.IsAuthenticated`) — the
+  fuel for a duplicate-of-surface check. **`consumer`** names who is obliged to
+  read a published field (`email_mock` → `frontend`) — the fuel for a
+  publisher-without-consumer check. Both checks are separate work; this release
+  ships the data they need.
+
+**Opt-in per module, on purpose.** A library with no `surface_roots` emits
+byte-identical output to before, so the section turns no existing CI red and
+buys nobody a rush of filler intent lines. What is *not* optional is the
+inside of a declared root: once a module declares one, it can never again grow
+an unexplained export there.
+
+### Added — `stapel-surface`, for modules with no OpenAPI pipeline
+
+`stapel-surface <repo>` emits a whole `capabilities.json` from the curated meta
+layer alone (the `stapel-core` shape), `--patch` injects only `surface` +
+refreshed `module`/`version` into a module's existing document (the
+`stapel-agent` shape, whose document is still hand-written), and `--check` is
+the byte-for-byte drift gate for both.
+
+**`operations_total` is no longer mandatory.** It is emitted only when the
+module actually ships a `docs/schema.json`. The core serves no catalogued HTTP
+surface, and omitting the counter says that; a mandatory `0` would have been a
+claim about the module rather than about the document.
+
 ## [0.21.0] — 2026-07-30
 
 ### Added — R008 (warning): a lifecycle/security flag inside `defaults=`
