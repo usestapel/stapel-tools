@@ -2,6 +2,87 @@
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-08-01
+
+### Added — `stapel-surface-lint`: reinvention fails before the merge, not after
+
+`stapel-adoption-lint` catches non-adoption **after the fact** — the module is
+pinned, installed and simply not mounted. By then the product has already lived
+without the mechanism and the finding arrives as archaeology. These four rules
+read the `surface` section shipped in 0.22.0 and fail on the first CI run of the
+branch that reinvents one of its entries, so the price of not looking drops from
+a production incident to a single iteration. All four are composed into
+`stapel-verify`, which every generated project's pre-commit already runs — a
+project picks them up on its next upgrade with nothing to regenerate.
+
+Each rule was built against the incident that motivated it and measured against
+the whole fleet (26 libraries, the legacy marketplace tree, the studio slice and
+two live products — 40 repositories). Numbers below are that measurement.
+
+- **SUR001 duplicate-of-surface** — a class subclassing `BasePermission` under a
+  name an installed module already publishes as a `permission_class`. **6
+  findings, all in one repository**: the legacy `marketplace-common-python`
+  keeps its own `IsNotAnonymousUser`, `IsStaffUser`, `IsSuperUser`,
+  `IsServiceRequest`, `ReadOnlyOrStaff` and `ReadOnlyOrSuperUser` beside the six
+  `stapel-core` ships. The design's broader form ("any `BasePermission`
+  subclass while the index holds a `permission_class`") was rejected on
+  measurement: it flags every legitimate domain permission a product must own
+  (`IsWorkspaceAdmin`, `IsAdOwner`, `IsReportModerator`), and a rule that reds on
+  a product's own domain gets muted wholesale.
+- **SUR002 instead_of** — a symbol a module explicitly displaces
+  (`IsNotAnonymousUser.instead_of = [rest_framework.permissions.IsAuthenticated]`)
+  sits in `permission_classes` while the replacement is used **nowhere in the
+  project**. **11 findings across 10 repositories**, one per displaced symbol.
+  The per-call-site form the design sketches was measured first and dropped: 13
+  findings in a single product and 67 occurrences fleet-wide, nearly all of them
+  a deliberate "this endpoint is open to guests". What is never deliberate is a
+  repository that has not once heard of the replacement — and `AUTH_ANONYMOUS`
+  defaults to **on**, so those guest sessions are authenticated and sail
+  straight through `IsAuthenticated`. Both DRF import idioms resolve
+  (`IsAuthenticated` and `permissions.IsAuthenticated` — the second is the
+  majority spelling, 35 view classes in one product; matching only the first
+  would have been an accidental narrowing rather than a decided one).
+- **SUR003 imported-but-never-called** — a `gate_function` bound by an import
+  and never mentioned again. **0 findings fleet-wide**, which is the honest
+  result: every live import of `redaction_gate` / `sanitize_for_rag` /
+  `detect_pwned_markers` calls it. Verified by reproducing the incident on the
+  real file — `iron-recordings`' `mic_stage.py` is clean with its call and reds
+  naming `redaction_gate` with the call removed, which is exactly how the gate
+  was lost during the lab port: the import survived, the call did not, and the
+  protection became its own appearance. Four legitimate no-call shapes are
+  cleared first, all of them observed in the fleet: `__init__.py`, a name in
+  `__all__`, an import under `if TYPE_CHECKING:`, and any other reference to the
+  bound name (a callback, a registry value, a `functools.partial` — a deferred
+  call is a call).
+- **SUR004 publisher-without-consumer** — a `capability_field` declaring
+  `consumer: frontend` that the `-react` package reads nowhere outside its
+  generated OpenAPI types. **2 gaps, reported to the 2 repositories that can fix
+  them**: `email_mock` and `phone_mock` occur in `auth-react`'s
+  `src/api/generated/schema.ts` and in nothing else, while every sibling field of
+  the same two DTOs occurs 14–179 times in hand-written components. Typed,
+  published, unread — which is how a dev deployment's screen says "code sent"
+  when nothing was sent. Reporting to every repository that can merely *see* the
+  gap cost 78 findings to say the same 2 things, so the rule is scoped to the
+  publisher and the consumer.
+
+**What these rules do not catch, stated in the docstrings rather than implied:**
+prevention *before* the code is written (outside the studio pipeline, code is
+written first and checked second — these buy one iteration, not clairvoyance);
+a semantic duplicate with no structural signature (SUR001 matches the published
+*name*; a reinvention called `IsRealAccount` is invisible to it, and an
+AST-similarity heuristic was measured against the fleet's actual renamed
+reimplementations — `IsInternalService`/`IsServiceAPIKey` beside
+`IsServiceRequest` — and matched none of them while promising noise); predicates,
+the genre that leaves no trace at all; a gate passed around instead of called;
+and a consumer that reads a field and then ignores it.
+
+**Inert until the contract documents ship.** The index is sourced from the
+installed distributions first (`stapel-catalog --from-installed`'s machinery) and
+from `--workspace` checkouts second. Today's products pin module versions built
+before 0.23.0 taught the scaffold to put `docs/capabilities.json` in the wheel,
+so in a product venv the linter emits one honest note and skips — and turns
+itself on, per module, as modules republish.
+
 ## [0.23.0] — 2026-07-30
 
 ### Added — `stapel-catalog --from-installed`: the environment is the source

@@ -318,6 +318,31 @@ but the branch is not `main`/`master` nor merged into it. ADO004 (warning) a
 stapel modules, settings-configured packages, and an entry-point-only
 runtime/tooling allowlist are exempt.
 
+### `stapel-surface-lint` — pre-merge gate against reinventing what the fleet ships
+
+```bash
+stapel-surface-lint .                        # lint the project in .
+stapel-surface-lint proj/ --json             # machine output
+stapel-surface-lint proj/ --workspace ~/ws   # extra root for sibling module repos
+stapel-surface-lint proj/ --no-installed     # workspace checkouts only
+```
+
+Reads the `surface` section of every `capabilities.json` the environment and the
+workspace expose (installed distributions first — the index is a function of the
+lockfile) and fails the branch that rebuilds one of its entries. SUR001 (error) a
+`BasePermission` subclass declared under a name an installed module already
+publishes as a `permission_class` — matched on the published name, so a
+product's own domain permissions stay quiet. SUR002 (error) a symbol listed in
+`instead_of` sits in `permission_classes` while its published replacement is used
+nowhere in the project; one finding per displaced symbol, never per call site.
+SUR003 (error) a `gate_function` imported and never mentioned again — re-export
+hubs, `__all__`, `TYPE_CHECKING` and any value reference are cleared first.
+SUR004 (error) a `capability_field` with `consumer: frontend` that the `-react`
+package reads nowhere outside its generated OpenAPI types; reported only to the
+publishing module and to the consuming package. Composed into `stapel-verify`.
+Silent, with a note, in an environment whose installed modules ship no
+`docs/capabilities.json` yet.
+
 ### `stapel-release-manifest` — build the open `release.json` manifest
 
 ```bash
