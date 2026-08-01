@@ -29,6 +29,16 @@ Linters composed (in this order)
   swappable model/presenter indirection, DTOs built only through a presenter)
 * ``stapel_tools.doc_lint``        — DOC001 (§55 DOC-FIELD: model field docs,
   warning-level while the legacy sweep is in progress)
+* ``stapel_tools.surface_lint``    — SUR-codes (pre-merge gate against
+  reinventing what the fleet already publishes: a permission class the project
+  re-declares under a published name, a displaced symbol used where its
+  replacement is never used at all, a ``gate_function`` imported and never
+  called, a capability field published for a consumer that never reads it).
+  Composed HERE for the same reason as the nginx rules: it reads the ``surface``
+  section of whatever ``capabilities.json`` the project's environment and
+  workspace expose, so a project picks the gate up on its next stapel-tools
+  upgrade with nothing to regenerate — and stays silent, by design, in an
+  environment whose installed modules ship no contract document yet.
 * ``stapel_tools.nginx_cache_lint`` — NGX-codes (SPA cache canon: the unhashed
   entry document must revalidate, hashed assets must be immutable, and no
   location may emit both ``expires`` and ``add_header Cache-Control``).
@@ -42,8 +52,8 @@ Usage
     stapel-verify <project_root> [--workspace ROOT ...] [--base-sha SHA] [--json]
 
 ``--workspace`` and ``--base-sha`` are forwarded to the sub-linters that
-accept them (adoption-lint, migration-lint respectively); the other linters
-ignore what does not apply to them.
+accept them (adoption-lint and surface-lint, migration-lint respectively);
+the other linters ignore what does not apply to them.
 
 Exit codes: 0 all clean (warnings allowed), 1 any linter reported at least one
 error, 2 usage/environment error (bad project_root).
@@ -64,6 +74,7 @@ from . import (
     lint,
     migration_lint,
     nginx_cache_lint,
+    surface_lint,
     swap_lint,
     url_lint,
 )
@@ -140,6 +151,15 @@ def run_doc_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-doc-lint", errors, warnings, _to_dicts(violations))
 
 
+def run_surface_lint(project: Path, search_roots: list[Path]) -> LinterReport:
+    notes: list[str] = []
+    findings = surface_lint.lint_project(
+        project, search_roots=search_roots, notes=notes
+    )
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-surface-lint", errors, warnings, _to_dicts(findings), notes)
+
+
 def run_nginx_cache_lint(project: Path) -> LinterReport:
     notes: list[str] = []
     findings = nginx_cache_lint.lint_project(project, notes=notes)
@@ -165,6 +185,7 @@ def verify_project(
         run_migration_lint(project, base_sha),
         run_swap_lint(project),
         run_doc_lint(project),
+        run_surface_lint(project, search_roots),
         run_nginx_cache_lint(project),
     ]
 
@@ -226,8 +247,9 @@ def main(argv: Optional[list] = None) -> int:
     )
     parser.add_argument(
         "--workspace", action="append", default=[],
-        help="Extra root to search for sibling stapel-<mod> repos (repeatable) "
-             "— forwarded to stapel-adoption-lint.",
+        help="Extra root to search for sibling stapel-<mod> / stapel-react "
+             "repos (repeatable) — forwarded to stapel-adoption-lint and "
+             "stapel-surface-lint.",
     )
     parser.add_argument(
         "--base-sha", metavar="SHA",

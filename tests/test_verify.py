@@ -3,12 +3,28 @@
 Builds one fixture project with a deliberate violation for each composed
 linter (stapel-lint R006, stapel-adoption-lint ADO001/ADO002/ADO004,
 stapel-url-lint URL001, stapel-config-lint CFG001, stapel-migration-lint
-MIG001, stapel-nginx-cache-lint NGX001/NGX003) and asserts every linter
+MIG001, stapel-surface-lint SUR001, stapel-nginx-cache-lint NGX001/NGX003) and asserts every linter
 contributes to the summed report, the exit codes, and the ``--json`` shape.
 """
 import json
 
+import pytest
+
+from stapel_tools import catalog
 from stapel_tools.verify import LinterReport, main, verify_project
+
+
+@pytest.fixture(autouse=True)
+def no_installed_surface(monkeypatch):
+    """Source the surface index from the fixture workspace only.
+
+    ``stapel-surface-lint`` reads the INSTALLED distributions by design — that
+    is what makes it a function of the lockfile in a real project. In a
+    developer's workspace venv every fleet module is an editable install, so
+    without this the composition tests would assert against whatever happens to
+    be checked out next door and pass or fail by accident.
+    """
+    monkeypatch.setattr(catalog, "discover_installed", lambda **kw: [])
 
 # ---------------------------------------------------------------------------
 # fixture builder — one project with a violation for every composed linter
@@ -27,6 +43,8 @@ def make_dirty_project(tmp_path):
     - CFG001 (config-lint): an ``os.environ.get`` read outside settings.
     - MIG001 (migration-lint): a destructive ``RemoveField`` without the
       contract-phase marker.
+    - SUR001 (surface-lint): a local permission class re-declared under a name
+      stapel_verifyfixture already publishes in its surface.
     - NGX001 + NGX003 (nginx-cache-lint): the app.ironmemo.com SPA cache
       defect — an entry document carrying BOTH ``expires 1d`` AND an explicit
       ``add_header Cache-Control``.
@@ -38,6 +56,20 @@ def make_dirty_project(tmp_path):
     (module / "docs" / "schema.json").write_text(json.dumps({
         "openapi": "3.0.3",
         "paths": {"/verifyfixture/ping": {"post": {"operationId": "verifyfixture_op"}}},
+    }))
+    (module / "docs" / "capabilities.json").write_text(json.dumps({
+        "module": "stapel-verifyfixture",
+        "version": "1.0.0",
+        "provides": "fixture",
+        "axes": [],
+        "extension_points": [],
+        "surface": [{
+            "name": "IsFixtureUser",
+            "kind": "permission_class",
+            "path": "stapel_verifyfixture.permissions.IsFixtureUser",
+            "intent": "The fixture's published permission class.",
+        }],
+        "requires": [],
     }))
 
     proj = workspace / "proj"
@@ -60,6 +92,12 @@ def make_dirty_project(tmp_path):
         "]\n"
     )
     (proj / "requirements.txt").write_text("stapel_verifyfixture\nPyJWT\n")
+    (proj / "permissions.py").write_text(
+        "from rest_framework import permissions\n\n\n"
+        "class IsFixtureUser(permissions.BasePermission):\n"
+        "    def has_permission(self, request, view):\n"
+        "        return True\n"
+    )
 
     (proj / "app").mkdir()
     (proj / "app" / "__init__.py").write_text("")
@@ -135,6 +173,7 @@ def test_every_linter_contributes_a_finding(tmp_path):
         "stapel-migration-lint",
         "stapel-swap-lint",
         "stapel-doc-lint",
+        "stapel-surface-lint",
         "stapel-nginx-cache-lint",
     }
 
@@ -169,13 +208,17 @@ def test_every_linter_contributes_a_finding(tmp_path):
 
     # NGX001 (entry document cacheable for a day) + NGX003 (`expires` AND an
     # explicit add_header Cache-Control -> two conflicting headers on the wire)
+    sur_rules = {f["rule"] for f in by_name["stapel-surface-lint"].findings}
+    assert sur_rules == {"SUR001"}
+    assert by_name["stapel-surface-lint"].errors == 1
+
     ngx_rules = {f["rule"] for f in by_name["stapel-nginx-cache-lint"].findings}
     assert {"NGX001", "NGX003"} <= ngx_rules
     assert by_name["stapel-nginx-cache-lint"].errors == 2
 
     total_errors = sum(r.errors for r in reports)
-    # R006, ADO001, ADO002, URL001, CFG001, MIG001, NGX001, NGX003
-    assert total_errors == 8
+    # R006, ADO001, ADO002, URL001, CFG001, MIG001, SUR001, NGX001, NGX003
+    assert total_errors == 9
 
 
 def test_clean_project_reports_all_zero(tmp_path):
@@ -207,7 +250,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 8 linters." in out
+    assert "All clean across 9 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -216,8 +259,8 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert code == 1
     assert payload["ok"] is False
-    assert payload["errors"] == 8
-    assert len(payload["linters"]) == 8
+    assert payload["errors"] == 9
+    assert len(payload["linters"]) == 9
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
@@ -227,6 +270,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
         "stapel-migration-lint",
         "stapel-swap-lint",
         "stapel-doc-lint",
+        "stapel-surface-lint",
         "stapel-nginx-cache-lint",
     }
     for entry in payload["linters"]:
