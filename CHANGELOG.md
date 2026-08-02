@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Added — `stapel-catalog` emits the fleet's root `llms.txt` index
+
+Badge-canon §3 p.5: an agent that does not yet know which module it needs
+should read ONE small file, not `catalog.md` in full or all 26+ modular
+`docs/llms.txt` files. `stapel-catalog` now emits `llms.txt` alongside
+`catalog.json`/`catalog.md` — one line per module, its `provides` one-liner,
+and a link to that module's own `docs/llms.txt` (a GitHub blob URL from the
+`STAPEL_LIBS` registry, falling back to a workspace-relative path for a module
+the registry doesn't carry).
+
+Same three properties as `stapel-llms-txt`, reused rather than reinvented:
+deterministic (sorted by module name), a hard token budget
+(`DEFAULT_TOKEN_BUDGET`/`--llms-budget`, `EmitError` rather than truncation),
+and LOUD about partial coverage — a module counts as "described" only when its
+`docs/llms.txt` actually exists on disk (or in the wheel under
+`--from-installed`); the rest are listed by name under "Not yet described",
+never silently dropped. `--check` now also drift-gates `llms.txt`.
+
 ## [0.25.0] — 2026-08-02
 
 ### Added — `stapel-llms-txt`: the module describes itself to an agent, and the description cannot drift

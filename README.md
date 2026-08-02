@@ -169,12 +169,20 @@ G6 — absent means always-on). `--capabilities` is reserved (§3.4 env-aware).
 Aggregates every module's `docs/capabilities.json` (the fourth contract
 artifact) into a catalog for stack advisors and CTO prompts. Emits
 `catalog.json` (the full machine aggregate — every source document verbatim
-plus roll-up totals and curated recipes) and `catalog.md` (a compact,
+plus roll-up totals and curated recipes), `catalog.md` (a compact,
 prompt-ready projection: header roll-up, then per module a `provides`
 one-liner, an axis table `key | default | ops gated`, extension-point names and
-requires). Both outputs are deterministic (modules sorted by name, axes by key,
-no timestamps), so `catalog.md` is stable enough to commit into other repos'
-system prompts.
+requires) and `llms.txt` (the fleet's own **root index**, badge-canon §3 p.5:
+one line per module — its `provides` one-liner and a link to that module's
+own `docs/llms.txt`, the fifth contract artifact from `stapel-llms-txt`
+below). `llms.txt` is what an agent that does not yet know which module it
+needs should read FIRST — one small file instead of catalog.md in full or
+every modular `docs/llms.txt`. A module counts as "described" only once its
+own `docs/llms.txt` actually exists on disk (or in the wheel, under
+`--from-installed`) — a module without one yet is listed by name under "Not
+yet described", loudly, never silently dropped. All three outputs are
+deterministic (modules sorted by name, axes by key, no timestamps), so they
+are stable enough to commit into other repos' system prompts.
 
 ```bash
 # scan a workspace (repos without capabilities.json are skipped with a warning)
@@ -197,10 +205,12 @@ Two rules keep a catalog from becoming a lie:
 1. **`--from-installed`** sources the aggregate from the *current
    environment* — every installed `stapel-*` distribution that ships
    `docs/capabilities.json` in its wheel (modules ship `capabilities.json`,
-   `flows.json`, `errors.json` and `CONFIG.MD` as package-data, so an
-   installed-sourced index is not a degraded one). The result is a pure
-   function of the lockfile: it cannot drift away from the code the product
-   actually runs, no matter whose discipline lapses.
+   `flows.json`, `errors.json`, `CONFIG.MD` and — once a module adopts
+   `stapel-llms-txt` — `llms.txt` as package-data, so an installed-sourced
+   index is not a degraded one; the root `llms.txt`'s "described" count comes
+   from the same wheel-shipped files). The result is a pure function of the
+   lockfile: it cannot drift away from the code the product actually runs, no
+   matter whose discipline lapses.
 2. **`--check`** is the drift gate for a *committed* catalog: it rebuilds in
    memory and compares byte-for-byte against the artifact on disk, exiting
    non-zero on any mismatch. A committed aggregate without this gate in CI is

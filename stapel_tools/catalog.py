@@ -8,7 +8,7 @@ a ``provides`` one-liner, the CTO-facing ``axes`` with their per-operation
 gates, ``extension_points`` and ``requires``. This tool is the read side: it
 gathers those documents across a workspace, an explicit list of repos, or the
 INSTALLED distributions of the current environment (``--from-installed``), and
-projects them into two catalog artifacts:
+projects them into three catalog artifacts:
 
 * ``catalog.json`` — the full machine aggregate: every source document verbatim
   plus roll-up totals (and the curated recipes, if any);
@@ -16,12 +16,18 @@ projects them into two catalog artifacts:
   system prompt: a header with the roll-up, then one section per module
   (name, version, ``provides`` one-liner, an axis table `key | default |
   ops gated`, extension-point names, requires) and, if supplied, a curated
-  ``recipes`` section.
+  ``recipes`` section;
+* ``llms.txt``     — the fleet's ROOT index (badge-canon §3 p.5): one line per
+  module, its ``provides`` one-liner and a link to that module's own
+  ``docs/llms.txt`` (:mod:`stapel_tools.llms_txt`). This is the file an agent
+  reads FIRST, before it knows which module it wants — the alternative is
+  reading catalog.md in full or all 26+ modular llms.txt files just to find
+  out. See :func:`build_llms_index`.
 
-Both outputs are DETERMINISTIC — modules are sorted by name, axes by key, and
-no timestamps or environment-dependent values are emitted — so two runs over
-the same inputs are byte-for-byte identical (catalog.md is an artifact that
-gets committed into other repos' prompts, so stability matters).
+All three outputs are DETERMINISTIC — modules are sorted by name, axes by key,
+and no timestamps or environment-dependent values are emitted — so two runs
+over the same inputs are byte-for-byte identical (these are artifacts that get
+committed into other repos' prompts, so stability matters).
 
 Where the catalog gets its freshness
 -----------------------------------
@@ -66,6 +72,8 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+
+from stapel_tools.llms_txt import DEFAULT_TOKEN_BUDGET, EmitError, approx_tokens
 
 CATALOG_SCHEMA_VERSION = 1
 
@@ -740,6 +748,130 @@ def render_markdown(catalog: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# root llms.txt index (badge-canon §3 p.5) — the fleet's OWN entry point
+# ---------------------------------------------------------------------------
+#
+# catalog.md is a compact but still per-module-detailed projection meant for a
+# system prompt that already knows it wants the whole fleet. The gap this
+# closes is earlier than that: an agent that does not yet know WHICH module it
+# needs should not have to read 26 modular docs/llms.txt files (or even one
+# catalog.md) to find out — it should read ONE small file that names every
+# module, its one-line `provides`, and a link to go deeper.
+#
+# Same three llms_txt.py properties, reused rather than reinvented:
+# deterministic (sorted by module name, no timestamps), a hard token budget
+# (DEFAULT_TOKEN_BUDGET, imported — not re-declared — from stapel_tools.llms_txt,
+# raising EmitError rather than truncating), and LOUD about a module that has
+# no docs/llms.txt yet: it is listed by name in its own section, never quietly
+# dropped, because a partial rollout that reads like a complete one is the
+# exact failure this file exists to prevent.
+
+
+def module_llms_link(module_name: str) -> str:
+    """Where to find ``module_name``'s own ``docs/llms.txt``.
+
+    Prefers the STAPEL_LIBS registry's GitHub repo URL (survives outside any
+    one checkout — this index gets embedded in prompts read far from this
+    workspace, same as the badge-canon links). Falls back to a workspace-
+    relative path (``<module>/docs/llms.txt``) for a module the registry
+    doesn't carry yet (a new module, or a test fixture) — never a dead link
+    to nothing, just a less portable one.
+    """
+    from stapel_tools.create_project import STAPEL_LIBS
+
+    entry = STAPEL_LIBS.get(module_name.removeprefix("stapel-"))
+    repo = (entry or {}).get("repo")
+    if repo:
+        if repo.endswith(".git"):
+            repo = repo[:-4]
+        return f"{repo}/blob/main/docs/llms.txt"
+    return f"{module_name}/docs/llms.txt"
+
+
+def build_llms_index(
+    pairs: list[tuple[dict, Path]],
+    *,
+    budget: int = DEFAULT_TOKEN_BUDGET,
+) -> tuple[str, int, int]:
+    """Render the fleet's root ``llms.txt`` from ``(doc, repo_root)`` pairs
+    (:func:`load_documents_with_roots`'s shape).
+
+    A module counts as "described" when its repo root has a committed
+    ``docs/llms.txt`` on disk — true for both a workspace checkout and an
+    installed distribution, since :func:`discover_installed` resolves to the
+    same ``<root>/docs/`` layout a checkout has (the wheel ships
+    ``docs/llms.txt`` next to ``docs/capabilities.json`` under the same
+    package-data discipline).
+
+    Returns ``(text, described_count, total_count)`` — the counts are what
+    the CLI prints LOUDLY to stderr; a caller must not have to re-derive them
+    from the rendered text.
+
+    Raises :class:`EmitError` (never truncates) when the render exceeds
+    ``budget`` tokens — the same failure mode as a single module's llms.txt.
+    """
+    modules = sorted(pairs, key=lambda pair: pair[0].get("module", ""))
+    described: list[tuple[str, dict]] = []
+    missing: list[str] = []
+    for doc, root in modules:
+        name = doc.get("module", "?")
+        has_llms = bool(root) and (root / "docs" / "llms.txt").is_file()
+        if has_llms:
+            described.append((name, doc))
+        else:
+            missing.append(name)
+
+    total = len(modules)
+    lines = [
+        "# Stapel fleet — llms.txt index",
+        "",
+        f"{len(described)}/{total} modules describe their own surface in "
+        "docs/llms.txt as of this build.",
+        "",
+        "Generated by `stapel-catalog` from each module's "
+        "docs/capabilities.json (`provides`) and docs/llms.txt presence. Do "
+        "not edit by hand.",
+        "",
+        "An agent that does not yet know which module it needs reads this "
+        "ONE file, then follows the link for that module's full surface "
+        "(usage surface, axes, HTTP operations, error codes).",
+        "",
+        f"## Described ({len(described)})",
+        "",
+    ]
+    if described:
+        for name, doc in described:
+            provides = " ".join((doc.get("provides") or "").split())
+            link = module_llms_link(name)
+            entry = f"- **{name}** — {link}"
+            lines.append(f"{entry} — {provides}" if provides else entry)
+    else:
+        lines.append("(none yet — no module in this build has a committed docs/llms.txt)")
+    lines.append("")
+
+    lines.append(f"## Not yet described ({len(missing)})")
+    lines.append("")
+    if missing:
+        for name in missing:
+            lines.append(f"- {name} — no docs/llms.txt yet")
+    else:
+        lines.append("(none — every module in this build has one)")
+
+    text = "\n".join(lines).rstrip("\n") + "\n"
+    total_tokens = approx_tokens(text)
+    if total_tokens > budget:
+        raise EmitError(
+            f"stapel-catalog: root llms.txt is ~{total_tokens} tokens, over "
+            f"the {budget}-token budget by {total_tokens - budget}.\n"
+            "  Nothing was written. This index is one line per module by "
+            "design — if it no longer fits, the fleet has outgrown a flat "
+            "list; raise the ceiling DELIBERATELY with --llms-budget, or add "
+            "a curated grouping layer (do not truncate silently)."
+        )
+    return text, len(described), total
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -808,6 +940,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Drift-check: build fresh in memory and compare against the "
         "already-committed artifact(s) byte-for-byte; nonzero exit and no "
         "write on any mismatch or missing file.",
+    )
+    parser.add_argument(
+        "--llms-budget",
+        type=int,
+        default=DEFAULT_TOKEN_BUDGET,
+        help=f"Token ceiling for the root llms.txt index (default "
+        f"{DEFAULT_TOKEN_BUDGET}, stapel_tools.llms_txt's own budget). "
+        "Exceeding it FAILS the whole run; the file is never truncated. "
+        "Ignored in --index mode (no llms.txt is emitted there).",
     )
     args = parser.parse_args(argv)
 
@@ -884,17 +1025,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    docs, skipped = load_documents(sources)
+    pairs, skipped = load_documents_with_roots(sources)
+    docs = [doc for doc, _root in pairs]
     catalog = build_catalog(docs, recipes=recipes)
     catalog_json = _stable_json(catalog)
     catalog_md = render_markdown(catalog)
     out_dir = Path(args.out_dir)
+
+    try:
+        llms_index, described, total = build_llms_index(pairs, budget=args.llms_budget)
+    except EmitError as exc:
+        print(f"stapel-catalog: {exc}", file=sys.stderr)
+        return 1
 
     if args.check:
         stale = [
             p for p, rendered in (
                 (out_dir / "catalog.json", catalog_json),
                 (out_dir / "catalog.md", catalog_md),
+                (out_dir / "llms.txt", llms_index),
             )
             if not p.is_file() or p.read_text() != rendered
         ]
@@ -903,18 +1052,23 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"stapel-catalog: --check: {p} is missing or stale (drift detected)",
                       file=sys.stderr)
             return 1
-        print(f"stapel-catalog: --check: catalog.json/catalog.md up to date in {out_dir}",
-              file=sys.stderr)
+        print(
+            f"stapel-catalog: --check: catalog.json/catalog.md/llms.txt up to "
+            f"date in {out_dir} ({described}/{total} modules describe llms.txt)",
+            file=sys.stderr,
+        )
         return 0
 
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "catalog.json").write_text(catalog_json)
     (out_dir / "catalog.md").write_text(catalog_md)
+    (out_dir / "llms.txt").write_text(llms_index)
 
     print(
         f"stapel-catalog: {catalog['totals']['modules']} modules covered "
-        f"({len(skipped)} skipped), {catalog['totals']['operations']} operations "
-        f"→ {out_dir}/catalog.json, {out_dir}/catalog.md",
+        f"({len(skipped)} skipped), {catalog['totals']['operations']} operations, "
+        f"{described}/{total} describe llms.txt "
+        f"→ {out_dir}/catalog.json, {out_dir}/catalog.md, {out_dir}/llms.txt",
         file=sys.stderr,
     )
     return 0
