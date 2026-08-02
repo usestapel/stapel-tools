@@ -2,6 +2,67 @@
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-08-02
+
+### Added — `stapel-llms-txt`: the module describes itself to an agent, and the description cannot drift
+
+`llms.txt` existed in **none of the 27 Python libraries**. The frontend has had
+one per package since `scripts/gen-manifest.mjs` shipped, and it has never gone
+stale for a structural reason: the file is *generated from the same artifacts as
+the code* and stands under `git diff --exit-code`. Hand-written, it rots on the
+first release that moves a symbol, and it rots **silently** — nothing reads it
+except a model, and a model cannot tell a stale surface from a current one. The
+measured cost of exactly that: the studio index listing 25 modules of 26, with
+the auth version eleven releases behind.
+
+`docs/llms.txt` becomes the **fifth per-module contract artifact** next to
+`docs/{schema,flows,errors,capabilities}.json`, in the same pipeline: emitted by
+`make contract`, gated by `make contract-check`, committed, shipped in the wheel.
+
+The main section is **`surface`**. `axes` answer "what can I switch on" and
+`schema` answers "what can I call over HTTP", but the question that cost six
+mechanisms their adoption — a permission class, a safety gate, a published
+capability field, a nav template, a loader factory, a set of error predicates —
+is *"is there already something for X, and what is it called?"*. Only `surface`
+answers it, and its `instead_of` line names the outside symbol a product would
+otherwise reach for.
+
+Three properties are copied from the frontend generator, not reinvented:
+
+- **Deterministic.** Every list has an explicit sort key (axes by key, surface
+  by the closed kind vocabulary then name, operations by tag then operationId,
+  errors by code, flows by id); no timestamps, no absolute paths, no
+  environment values. Reversing the source document's ordering produces a
+  byte-identical file — asserted in the tests, because a drift gate that
+  compares bytes cannot tolerate any incidental order.
+- **Hard token budget**, 4000 — the frontend's `LLMS_TOKEN_BUDGET` verbatim, so
+  both halves of the fleet describe themselves at the same cost. Over budget
+  **fails** with a per-section cost breakdown and writes nothing at all. It
+  does not drop a section, elide intents or cut the tail: a truncated context
+  file reads exactly like a complete one at the point of use, which is how two
+  silent truncations already survived review. The message names the trim order
+  (`surface → axes → extension_points`) and the deliberate alternative,
+  `--budget N` in the module's Makefile. Measured: `stapel-auth` renders at
+  ~7261 tokens (operations 2027 · axes 1892 · errors 1542 · surface 1183) and
+  is therefore a deliberate decision, not an accident.
+- **Loud when there is nothing to say.** A module with no
+  `docs/capabilities.json` (`tools`, `vault`, `runner-protocol`, `taskspecs`)
+  is an error naming the module. An empty `llms.txt` is worse than a missing
+  one: it answers "does the fleet have a mechanism for X?" with a confident no.
+  `--skip-missing` makes it an explicit, still-loud no-op for fleet loops.
+
+Token economy is in the rendering, not in what gets dropped: the shared mount
+prefix is stated once and each operation line carries only what distinguishes
+it (`GET /things/{id}/ — demo_retrieve`), error lines keep code, status,
+remediation and interpolation slots while the localized prose stays in
+`errors.<lang>.md`, and flows are an index rather than a transcript. Sections
+whose source document is absent do not appear at all — `stapel-core`, which has
+no OpenAPI surface and no axes, renders as usage surface plus seams at ~1824
+tokens.
+
+`--out` renders a checkout the caller must not write to (a foreign repo under a
+drift gate); `--stdout` skips the file entirely.
+
 ## [0.24.0] — 2026-08-01
 
 ### Added — `stapel-surface-lint`: reinvention fails before the merge, not after

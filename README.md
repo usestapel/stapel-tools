@@ -347,6 +347,54 @@ publishing module and to the consuming package. Composed into `stapel-verify`.
 Silent, with a note, in an environment whose installed modules ship no
 `docs/capabilities.json` yet.
 
+### `stapel-llms-txt` — generate the module's own `docs/llms.txt`
+
+```bash
+stapel-llms-txt .                       # emit <repo>/docs/llms.txt
+stapel-llms-txt . --check               # drift gate (nonzero exit, no write)
+stapel-llms-txt . --out /tmp/x          # render a checkout you must not write to
+stapel-llms-txt . --budget 8000         # raise the ceiling DELIBERATELY
+stapel-llms-txt . --skip-missing        # a repo with no contract is a loud no-op
+```
+
+The fifth per-module contract artifact, next to
+`docs/{schema,flows,errors,capabilities}.json` and under the same discipline:
+emitted by `make contract`, gated by `make contract-check`, committed, shipped
+in the wheel. It renders the module's surface slice for an agent's context —
+header + `provides`, then **Configuration axes** (key, kind, default, business
+label, gated operations and the OR-composed co-gates), **Usage surface** (the
+main section: `name — path`, `instead of`, `consumer`, the curated intent),
+**Extension points**, **Fits with**, then the compact `METHOD /path —
+operationId` catalog grouped by tag with the mount prefix factored out, the
+error codes one line each (`code [status] remediation {slots}` — localized
+prose stays in `errors.<lang>.md`), and the flow index. Sections whose source
+document is absent do not appear at all, so `stapel-core` — no OpenAPI, no
+axes — renders as surface + seams.
+
+Three properties, copied from the frontend's `scripts/gen-manifest.mjs` rather
+than reinvented:
+
+- **deterministic** — every list has an explicit sort key, nothing carries a
+  timestamp or an absolute path, so the drift gate compares bytes without
+  false reds;
+- **hard token budget** — 4000 by default, the frontend's `LLMS_TOKEN_BUDGET`.
+  Over budget **fails** with a per-section cost breakdown and writes *nothing*;
+  it never truncates, because a cut context file is indistinguishable from a
+  complete one at the point of use. The reported trim order is `surface → axes
+  → extension_points`; `--budget N` in the module's Makefile is the deliberate
+  alternative;
+- **loud when there is nothing to say** — a module with no
+  `docs/capabilities.json` is an error naming the module, never an empty
+  `llms.txt`. An empty context file answers "does the fleet have a mechanism
+  for X?" with a confident no.
+
+Per-module wiring is two lines:
+
+```make
+contract:       python3 -m stapel_tools.llms_txt .
+contract-check: python3 -m stapel_tools.llms_txt . --check
+```
+
 ### `stapel-release-manifest` — build the open `release.json` manifest
 
 ```bash
