@@ -175,6 +175,7 @@ def test_every_linter_contributes_a_finding(tmp_path):
         "stapel-doc-lint",
         "stapel-surface-lint",
         "stapel-nginx-cache-lint",
+        "stapel-env-address-lint",
     }
 
     assert by_name["stapel-lint"].errors >= 1
@@ -250,7 +251,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 9 linters." in out
+    assert "All clean across 10 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -260,7 +261,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     assert code == 1
     assert payload["ok"] is False
     assert payload["errors"] == 9
-    assert len(payload["linters"]) == 9
+    assert len(payload["linters"]) == 10
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
@@ -272,6 +273,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
         "stapel-doc-lint",
         "stapel-surface-lint",
         "stapel-nginx-cache-lint",
+        "stapel-env-address-lint",
     }
     for entry in payload["linters"]:
         assert "errors" in entry

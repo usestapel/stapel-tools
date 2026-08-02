@@ -46,6 +46,15 @@ Linters composed (in this order)
   ``stapel-verify .``, so a project that already exists — including one whose
   nginx conf was hand-maintained and never came from the scaffold — picks the
   gate up on its next stapel-tools upgrade, with nothing to regenerate.
+* ``stapel_tools.env_address_lint`` — EADDR-codes (the "address that belongs
+  to the environment, frozen into a file that outlives it" class:
+  ``docs/pending/env-address-class-v2.md``). EADDR001 catches a literal
+  private IP endpoint in a deploy-class file; EADDR002 is itself the delivery
+  channel for the upstream-reachability gate into a project that has not
+  mounted it yet (same "rule as transport" idiom as the nginx-cache rules
+  above); EADDR003 catches an env-boundary proxy location with no fast
+  ``proxy_connect_timeout``, which is half of why the original incident read
+  as "server load" for a full day instead of "wrong address".
 
 Usage
 -----
@@ -71,6 +80,7 @@ from . import (
     adoption_lint,
     config_lint,
     doc_lint,
+    env_address_lint,
     lint,
     migration_lint,
     nginx_cache_lint,
@@ -167,6 +177,13 @@ def run_nginx_cache_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-nginx-cache-lint", errors, warnings, _to_dicts(findings), notes)
 
 
+def run_env_address_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = env_address_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-env-address-lint", errors, warnings, _to_dicts(findings), notes)
+
+
 def verify_project(
     project: Path,
     *,
@@ -187,6 +204,7 @@ def verify_project(
         run_doc_lint(project),
         run_surface_lint(project, search_roots),
         run_nginx_cache_lint(project),
+        run_env_address_lint(project),
     ]
 
 
