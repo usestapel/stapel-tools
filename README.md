@@ -1,7 +1,11 @@
 # stapel-tools
 
-[![CI](https://github.com/usestapel/stapel-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/usestapel/stapel-tools/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/stapel-tools.svg)](https://pypi.org/project/stapel-tools/)
+[![CI](https://img.shields.io/github/actions/workflow/status/usestapel/stapel-tools/ci.yml?branch=main&logo=github&label=CI)](https://github.com/usestapel/stapel-tools/actions/workflows/ci.yml?query=branch%3Amain)
+[![coverage](https://img.shields.io/codecov/c/github/usestapel/stapel-tools?branch=main&logo=codecov&label=coverage)](https://app.codecov.io/gh/usestapel/stapel-tools)
+[![pypi](https://img.shields.io/pypi/v/stapel-tools?logo=pypi&logoColor=white&label=pypi)](https://pypi.org/project/stapel-tools/)
+[![downloads](https://static.pepy.tech/badge/stapel-tools/month)](https://pepy.tech/project/stapel-tools)
+[![python](https://img.shields.io/pypi/pyversions/stapel-tools?logo=python&logoColor=white)](https://pypi.org/project/stapel-tools/)
+[![license](https://img.shields.io/github/license/usestapel/stapel-tools)](https://github.com/usestapel/stapel-tools/blob/main/LICENSE)
 
 CLI scaffold and linting tools for Stapel/Django projects.
 

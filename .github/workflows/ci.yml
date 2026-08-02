@@ -28,10 +28,31 @@ jobs:
           pip install ruff --quiet
           ruff check . --select E,F,W --ignore E501
 
-      - name: Tests
+      - name: Tests with coverage
         run: |
-          pip install pytest pytest-django django djangorestframework "psycopg[binary]" "stapel-core @ git+https://github.com/usestapel/stapel-core.git" "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" --quiet
-          pytest tests/
+          pip install pytest pytest-cov pytest-django django djangorestframework "psycopg[binary]" "stapel-core @ git+https://github.com/usestapel/stapel-core.git" "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" --quiet
+          pytest tests/ \
+            --cov=stapel_tools \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --junitxml=junit.xml \
+            -o junit_family=legacy
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        with:
+          files: coverage.xml
+          flags: stapel-tools
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        uses: codecov/test-results-action@v1
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Smoke-generate every project type
         run: |
