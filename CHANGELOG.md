@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.26.0] — 2026-08-02
 
 ### Added — `stapel-catalog` emits the fleet's root `llms.txt` index
 
