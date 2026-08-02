@@ -48,6 +48,7 @@ stapel-i18n-seed = "stapel_tools.i18n_seed:main"
 stapel-reserved-paths = "stapel_tools.reserved_paths:main"
 stapel-catalog = "stapel_tools.catalog:main"
 stapel-surface = "stapel_tools.surface:main"
+stapel-llms-txt = "stapel_tools.llms_txt:main"
 stapel-gen-client = "stapel_tools.gen_client:main"
 stapel-docs = "stapel_tools.api_docs:main"
 
