@@ -39,7 +39,7 @@ class TestDeployScriptsEmitted:
     @pytest.mark.parametrize("ptype", ["monolith", "microservices"])
     def test_deploy_dir_with_executable_scripts(self, tmp_path, ptype):
         proj = _create(tmp_path, ptype)
-        for rel in ("deploy/deploy.sh", "deploy/check-env.sh"):
+        for rel in ("deploy/deploy.sh", "deploy/check-env.sh", "deploy/preflight.sh"):
             path = proj / rel
             assert path.exists(), rel
             assert path.stat().st_mode & stat.S_IXUSR, f"{rel} not executable"
@@ -57,6 +57,55 @@ class TestDeployScriptsEmitted:
         assert "docker-compose.local.yml" not in text.replace(
             "never docker-compose.local.yml", ""
         ).replace("# ", "")  # only ever mentioned as forbidden, in comments
+
+    def test_deploy_sh_calls_preflight_after_check_env(self, tmp_path):
+        """env-address-class-v2.md §3.5: preflight runs AFTER the config gate
+        (check-env.sh) and BEFORE build/up — reachability is only checked
+        once the env itself is known sane."""
+        proj = _create(tmp_path)
+        text = (proj / "deploy" / "deploy.sh").read_text()
+        assert "preflight.sh" in text
+        assert text.index("check-env.sh") < text.index("preflight.sh")
+        assert text.index("preflight.sh") < text.index("compose") \
+            or text.index("preflight.sh") < text.rindex("up")
+
+
+class TestPreflightScript:
+    """deploy/preflight.sh — env-address-class-v2.md §3.5. The one-shot
+    docker-run reachability probe itself needs a live docker daemon + a real
+    compose network to test end-to-end (covered live, not in this suite —
+    see the upstream-gate template's own verification); here we exercise the
+    two paths that need no network at all: "nothing configured" and "no gate
+    script to reuse"."""
+
+    def test_no_targets_configured_is_a_noop(self, tmp_path):
+        proj = _create(tmp_path)
+        env = proj / ".env"
+        env.write_text(GOOD_ENV)
+        result = subprocess.run(
+            ["sh", "deploy/preflight.sh", ".env"], cwd=proj,
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert "nothing to probe" in result.stdout
+
+    def test_targets_set_but_no_gate_script_refuses(self, tmp_path):
+        proj = _create(tmp_path)
+        env = proj / ".env"
+        env.write_text(GOOD_ENV + "PREFLIGHT_TARGETS=rtc=@host-gateway:7880\n")
+        result = subprocess.run(
+            ["sh", "deploy/preflight.sh", ".env"], cwd=proj,
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 1
+        assert "40-upstream-gate.sh" in result.stderr
+
+    def test_is_executable_and_valid_posix_sh(self, tmp_path):
+        proj = _create(tmp_path)
+        script = proj / "deploy" / "preflight.sh"
+        assert script.stat().st_mode & stat.S_IXUSR
+        proc = subprocess.run(["sh", "-n", str(script)], capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stderr
 
 
 class TestCheckEnvGate:

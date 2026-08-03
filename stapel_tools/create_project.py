@@ -917,14 +917,17 @@ def _write_deploy_scripts(project_dir: Path):
     """``deploy/`` — prod/stage deploy scripts with the hard dev-env gate
     (owner decision, §57 revision — see _deploy_templates.py). Emitted for
     every project type that ships a prod compose (monolith/microservices)."""
-    from ._deploy_templates import CHECK_ENV_SH, DEPLOY_SH
+    from ._deploy_templates import CHECK_ENV_SH, DEPLOY_SH, PREFLIGHT_SH
 
     check_env = project_dir / "deploy" / "check-env.sh"
     deploy = project_dir / "deploy" / "deploy.sh"
+    preflight = project_dir / "deploy" / "preflight.sh"
     _write(check_env, CHECK_ENV_SH)
     _write(deploy, DEPLOY_SH)
+    _write(preflight, PREFLIGHT_SH)
     check_env.chmod(0o755)
     deploy.chmod(0o755)
+    preflight.chmod(0o755)
 
 
 def _append_prod_nginx_locations(project_dir: Path, upstream_service: str, prefixes: list[str]):

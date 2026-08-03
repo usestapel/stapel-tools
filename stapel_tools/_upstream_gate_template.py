@@ -12,10 +12,12 @@ directions, all four triage branches print the right diagnosis (three
 against real network conditions, the firewall/silent-drop branch against a
 controlled fake-nc harness — this sandbox's virtualized docker networking
 answers even unroutable addresses, so a genuine packet black hole could not
-be reproduced live here), and the /proc/net/route gateway math matches the
-spec's own worked example bit-for-bit (``01D7A8C0`` -> ``192.168.215.1``).
+be reproduced live here), the /proc/net/route gateway math matches the
+spec's own worked example bit-for-bit (``01D7A8C0`` -> ``192.168.215.1``),
+and ``--probe-only`` (what deploy/preflight.sh shells out to) returns 0/1/2
+for reachable/unreachable/config-error against a real one-shot container.
 
-See docs/pending/env-address-class-v2.md §3.3-§3.4 for the full design.
+See docs/pending/env-address-class-v2.md §3.3-§3.5 for the full design.
 """
 from __future__ import annotations
 
@@ -84,6 +86,21 @@ TARGETS="${UPSTREAM_GATE_TARGETS:-}"
 TIMEOUT="${UPSTREAM_GATE_TIMEOUT:-30}"
 
 log() { echo "$ME: $*" >&2; }
+
+# --probe-only name=host:port — probe exactly ONE target and print the same
+# triage diagnosis, no include file, no nginx reload. This is what
+# deploy/preflight.sh (env-address-class-v2.md §3.5) shells out to from a
+# one-shot container placed in the project's own compose network, BEFORE a
+# deploy restarts anything — reusing this exact resolve/probe/triage code so
+# preflight and the running gate can never disagree about what "reachable"
+# means.
+if [ "${1:-}" = "--probe-only" ]; then
+    entry="${2:-}"
+    case "$entry" in
+        *=*) : ;;
+        *) log "CONFIG ERROR: \"$entry\" is not name=host:port"; exit 2 ;;
+    esac
+fi
 
 mkdir -p "$GATE_DIR"
 
@@ -274,6 +291,16 @@ current_state() {
 # ---------------------------------------------------------------------------
 # main
 # ---------------------------------------------------------------------------
+
+if [ "${1:-}" = "--probe-only" ]; then
+    name="${entry%%=*}"; hostport="${entry#*=}"
+    if diagnosis="$(probe "$name" "$hostport")"; then
+        log "$name: OK ($hostport)"
+        exit 0
+    fi
+    printf '%s\n' "$diagnosis" | while IFS= read -r line; do log "$line"; done
+    exit 1
+fi
 
 if [ -z "$TARGETS" ]; then
     log "CONFIG ERROR: UPSTREAM_GATE_TARGETS is empty — the gate is mounted"
