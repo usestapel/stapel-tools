@@ -128,10 +128,9 @@ class TestGeneratedProjectPassesStapelVerify:
     def test_generated_presenters_md_is_fresh_by_its_own_check(self, tmp_path):
         """The freshness hook the pre-commit config wires must be green on a
         fresh generation (no false positive on day one)."""
+        import importlib.util
         import os
         import subprocess
-
-        import importlib.util
 
         if importlib.util.find_spec("stapel_core") is None:
             pytest.skip("stapel-core not importable")

@@ -9,8 +9,6 @@ with a mask, loopback/resolver addresses, `0.0.0.0` binds, and the
 import json
 from pathlib import Path
 
-import pytest
-
 from stapel_tools import env_address_lint as eal
 
 
