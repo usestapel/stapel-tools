@@ -233,6 +233,32 @@ def expand_root(root: dict, *, repo: Path, package: str) -> list[tuple[str, str,
 # ---------------------------------------------------------------------------
 
 
+def _no_surface_reason(meta: dict) -> str | None:
+    """The module's explicit "I expose nothing" declaration, or ``None``.
+
+    Why a reason and not a bare flag: before this existed, four modules
+    (booking, classified, social, shop) had no ``surface`` key at all — and
+    so did every module that had simply not got round to declaring one. The
+    two are opposite states and looked identical, which is exactly why the
+    section could not be made mandatory: any rule would either red-flag the
+    honest composite presets or keep waving the real omissions through.
+
+    A sentence also survives the next reader. "No surface" ages badly on its
+    own; "composite preset, only INSTALLED_APPS data" tells the next person
+    whether the answer is still true after somebody adds a service module.
+    """
+    raw = meta.get("no_surface")
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or not raw.strip():
+        raise SystemExit(
+            "surface: 'no_surface' must be a non-empty sentence saying WHY this "
+            "module exposes nothing (a bare true/empty string is the silence "
+            "this key exists to replace)."
+        )
+    return raw.strip()
+
+
 def build_surface(meta: dict, *, repo: Path, package: str | None = None) -> list[dict]:
     """Assemble the ``surface`` section from the meta's roots + intents.
 
@@ -244,12 +270,38 @@ def build_surface(meta: dict, *, repo: Path, package: str | None = None) -> list
     declared a root yet emits exactly what it emitted before.
     """
     roots = meta.get("surface_roots") or []
+    declared_none = _no_surface_reason(meta)
+    if roots and declared_none is not None:
+        raise SystemExit(
+            "surface: capabilities.meta.json declares BOTH 'surface_roots' and "
+            "'no_surface'. Pick one: either this module has a usage surface and "
+            "the roots select it, or it deliberately has none and the reason "
+            "says why."
+        )
     if not roots:
         if meta.get("surface"):
             raise SystemExit(
                 "surface: capabilities.meta.json carries a 'surface' intent map "
                 "but no 'surface_roots' — nothing selects those symbols, so "
                 "every entry is unreachable prose. Declare the roots."
+            )
+        if declared_none is None:
+            raise SystemExit(
+                "surface: this module declares neither 'surface_roots' nor "
+                "'no_surface' in docs/capabilities.meta.json.\n\n"
+                "The usage surface is the section that answers 'does the fleet "
+                "already have something for X, and what is it called' — the "
+                "question that cost six mechanisms their adoption. Silence is "
+                "not an answer to it, and it is indistinguishable from having "
+                "forgotten.\n\n"
+                "Declare one:\n"
+                '  "surface_roots": [{"select": "functions", "path": "services.py"}]\n'
+                "      — and one intent line per selected symbol; or\n"
+                '  "no_surface": "Composite preset: apps.py + preset.py carry '
+                'only INSTALLED_APPS/URL_INCLUDES data, nothing a product calls."\n'
+                "      — a real sentence, not a placeholder. A module that "
+                "genuinely exposes nothing is a legitimate answer; it just has "
+                "to be said out loud."
             )
         return []
     if package is None:
@@ -426,6 +478,12 @@ def patch_capabilities(repo: Path, meta: dict) -> dict:
 
     surface = build_surface(meta, repo=repo)
     doc.pop("surface", None)
+    if not surface and _no_surface_reason(meta) is not None:
+        # An EMPTY list, not an absent key. "Declared none" and "never got
+        # round to it" must not look the same downstream either: the fleet
+        # aggregate, the llms.txt renderer and any future obligation all read
+        # this document, not the meta layer.
+        doc["surface"] = []
     if surface:
         # keep the section next to its two siblings, before the counters
         rebuilt: dict = {}

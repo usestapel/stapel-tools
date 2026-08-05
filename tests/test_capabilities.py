@@ -145,6 +145,11 @@ def _meta() -> dict:
              "summary": "Register providers."},
         ],
         "axes": axes,
+        # Every meta now answers the surface question one way or the other:
+        # this probe is a settings fixture with no code to point at, so it
+        # declares emptiness explicitly rather than staying silent.
+        "no_surface": "Test fixture: the probe module has no source tree, "
+                      "only settings axes, so there is nothing to expose.",
     }
 
 

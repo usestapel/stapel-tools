@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.27.0] — 2026-08-05
+
+### Changed (BREAKING for meta authors) — every module must answer the surface question
+
+`build_surface()` used to treat a `capabilities.meta.json` with no
+`surface_roots` as "no surface section" and emit nothing. That made two
+opposite states look identical: a module that genuinely exposes nothing to a
+product, and a module whose author simply had not got round to declaring one.
+Both produced silence — and silence is what the `surface` section exists to
+abolish (an agent reading `llms.txt` cannot tell "nothing here" from "not
+described yet", so it writes its own copy of what the module already ships).
+
+A meta now has to say which of the two it is:
+
+- `surface_roots` — the module has a usage surface, and the roots select it
+  (unchanged; the LOUD rule still fails emission on a selected symbol without
+  an `intent`).
+- `no_surface` — a **non-empty sentence** saying WHY the module exposes
+  nothing. A bare `true`/`""` is rejected: that is the same silence under a
+  new key.
+
+Declaring neither is a hard `SystemExit` naming both options. Declaring both is
+a hard `SystemExit` too — they contradict.
+
+When emptiness is declared, `capabilities.json` now carries `"surface": []` —
+an **empty list, not an absent key** — so downstream readers see the
+declaration rather than inferring it from a missing field.
+
+Four preset modules (`stapel-booking`, `stapel-classified`, `stapel-social`,
+`stapel-shop`) were exactly the "no key at all" case and now declare
+`no_surface` with a real reason.
+
 ## [0.26.0] — 2026-08-02
 
 ### Added — `stapel-catalog` emits the fleet's root `llms.txt` index

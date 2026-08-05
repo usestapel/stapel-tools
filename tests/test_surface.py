@@ -167,9 +167,52 @@ class TestLoud:
         with pytest.raises(SystemExit, match="no 'surface_roots'"):
             build_surface(meta, repo=repo)
 
-    def test_no_roots_no_section(self, tmp_path):
+
+# ---------------------------------------------------------------------------
+# silence is not an answer: every module declares roots OR declares emptiness
+# ---------------------------------------------------------------------------
+
+
+class TestObligation:
+    def test_declaring_nothing_at_all_is_an_error(self, tmp_path):
+        """The state this whole key exists to abolish.
+
+        Before, a module with neither key emitted no ``surface`` section and
+        said nothing — indistinguishable from a module that had genuinely
+        nothing to expose. Both looked like silence downstream.
+        """
         repo = _repo(tmp_path, {})
-        assert build_surface({}, repo=repo) == []
+        with pytest.raises(SystemExit) as exc:
+            build_surface({}, repo=repo)
+        assert "neither 'surface_roots' nor 'no_surface'" in str(exc.value)
+
+    def test_declared_emptiness_with_a_reason_is_an_empty_surface(self, tmp_path):
+        meta = {"no_surface": "Composite preset: apps.py carries INSTALLED_APPS data only."}
+        repo = _repo(tmp_path, meta)
+        assert build_surface(meta, repo=repo) == []
+
+    def test_bare_true_is_not_a_reason(self, tmp_path):
+        """A reason has to be a sentence — ``true`` is the silence again."""
+        meta = {"no_surface": True}
+        repo = _repo(tmp_path, meta)
+        with pytest.raises(SystemExit, match="non-empty sentence"):
+            build_surface(meta, repo=repo)
+
+    def test_empty_reason_is_not_a_reason(self, tmp_path):
+        meta = {"no_surface": "   "}
+        repo = _repo(tmp_path, meta)
+        with pytest.raises(SystemExit, match="non-empty sentence"):
+            build_surface(meta, repo=repo)
+
+    def test_roots_and_declared_emptiness_contradict(self, tmp_path):
+        meta = {
+            "surface_roots": [{"select": "permission_classes", "path": "perms.py"}],
+            "surface": {"IsNotAnonymousUser": {"intent": "use me"}},
+            "no_surface": "nothing here",
+        }
+        repo = _repo(tmp_path, meta)
+        with pytest.raises(SystemExit, match="BOTH 'surface_roots' and 'no_surface'"):
+            build_surface(meta, repo=repo)
 
 
 # ---------------------------------------------------------------------------
