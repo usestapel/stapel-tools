@@ -83,7 +83,7 @@ server {
   location ~* ^/assets/.*\\.(?:js|mjs|css|woff2?|ttf|otf|eot|svg|png|jpe?g|gif|ico|webp|avif|map)$ {
     root /usr/share/nginx/html;
     expires off;
-    add_header Cache-Control "public, max-age=31536000, immutable" always;
+    add_header Cache-Control "public, max-age=31536000, immutable";
   }
 
   location / {
@@ -717,3 +717,93 @@ class TestWiring:
         pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
         scripts = tomllib.loads(pyproject.read_text())["project"]["scripts"]
         assert scripts["stapel-nginx-cache-lint"] == "stapel_tools.nginx_cache_lint:main"
+
+
+class TestNGX005ImmutableOn404:
+    """`always` on the hashed-asset location caches a MISSING chunk for a year.
+
+    Measured live on both stands (2026-08-05):
+        curl -I https://app.ironmemo.com/assets/nope-00000000.js
+        -> HTTP 404 + Cache-Control: public, max-age=31536000, immutable
+
+    nginx's `always` flag adds the header to error responses too. Any deploy
+    window where index.html is already new and a chunk is not on disk yet
+    leaves whoever asked for it with a cached, IMMUTABLE "does not exist" —
+    reload will not even recheck, so the app stays broken for that user until
+    they clear the cache by hand.
+    """
+
+    def _conf(self, header):
+        return (
+            "server {\n"
+            "  location ~* ^/assets/.*\\\\.(?:js|css)$ {\n"
+            "    root /usr/share/nginx/html;\n"
+            "    expires off;\n"
+            f"    {header}\n"
+            "  }\n"
+            "}\n"
+        )
+
+    def test_always_on_a_long_lived_asset_header_is_an_error(self):
+        rules = {
+            f.rule
+            for f in _lint(self._conf(
+                'add_header Cache-Control "public, max-age=31536000, immutable" always;'
+            ))
+        }
+        assert "NGX005" in rules
+
+    def test_same_header_without_always_is_clean(self):
+        assert _lint(self._conf(
+            'add_header Cache-Control "public, max-age=31536000, immutable";'
+        )) == []
+
+    def test_entry_document_keeps_always(self):
+        """no-cache on an error response is harmless — only the LONG-lived
+        header is dangerous there, so NGX005 must not fire on the entry doc."""
+        conf = (
+            "server {\n"
+            "  location / {\n"
+            "    root /usr/share/nginx/html;\n"
+            "    try_files $uri $uri/ /index.html;\n"
+            "    expires off;\n"
+            '    add_header Cache-Control "no-cache, must-revalidate" always;\n'
+            "  }\n"
+            "}\n"
+        )
+        assert [f for f in _lint(conf) if f.rule == "NGX005"] == []
+
+
+class TestInheritedRootIsStillDisk:
+    """A location with no `root` of its own still serves from the server's.
+
+    Blind spot with live consequences: meettoday's
+    `location /assets/ { expires off; add_header Cache-Control "…immutable"
+    always; }` declares no root, so `serves_from_disk` said False and BOTH
+    NGX002 and NGX005 skipped the exact block they exist to check. The gate
+    said "no issues" about a file it had not really read.
+    """
+
+    def test_inherited_root_location_is_checked(self):
+        conf = (
+            "server {\n"
+            "  root /usr/share/nginx/html;\n"
+            "  location /assets/ {\n"
+            "    expires off;\n"
+            '    add_header Cache-Control "public, max-age=31536000, immutable" always;\n'
+            "  }\n"
+            "}\n"
+        )
+        assert "NGX005" in {f.rule for f in _lint(conf)}
+
+    def test_a_proxied_location_is_not_disk(self):
+        conf = (
+            "server {\n"
+            "  root /usr/share/nginx/html;\n"
+            "  location /assets/ {\n"
+            "    proxy_pass http://upstream;\n"
+            '    add_header Cache-Control "public, max-age=31536000, immutable" always;\n'
+            "  }\n"
+            "}\n"
+        )
+        assert _lint(conf) == []

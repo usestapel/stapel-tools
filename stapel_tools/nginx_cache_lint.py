@@ -51,6 +51,18 @@ NGX003  (error) A location emits BOTH an ``expires`` directive AND an explicit
         Fix: ``expires off;`` (nginx then adds nothing) and keep exactly one
         explicit ``add_header Cache-Control``.
 
+NGX005  (error) A hashed-asset location caches long AND carries `always` on its
+        ``Cache-Control`` add_header. `always` makes nginx emit the header on
+        ERROR responses too, so a 404 for a missing chunk comes back as
+        ``max-age=31536000, immutable`` — the client caches the ABSENCE of that
+        chunk for a year and will not recheck even on reload. Measured live on
+        both stands (2026-08-05): ``/assets/nope-00000000.js`` -> 404 with a
+        year-long immutable header. Any deploy window where index.html is
+        already new and a chunk is not on disk yet leaves whoever hit it with a
+        permanently broken app. Fix: drop `always` on THAT location only — the
+        header still reaches 2xx/3xx (304 included), errors get nothing. The
+        entry document keeps `always`: no-cache on an error is harmless.
+
 NGX004  (warning) An entry-document / SPA-fallback location declares NO cache
         policy at all — no ``expires``, no ``Cache-Control``. Not a
         double-header defect and not an explicit long cache, but the response
@@ -473,10 +485,29 @@ def _segments(pattern: str) -> set[str]:
 
 
 def serves_from_disk(loc: Block) -> bool:
-    """A location backed by the filesystem (root/alias), not an upstream."""
+    """A location backed by the filesystem (root/alias), not an upstream.
+
+    ``root`` is INHERITED in nginx: a location that declares none still serves
+    from the ``root`` of its enclosing server/http block. Requiring the
+    location to own one was a blind spot with live consequences — meettoday's
+    ``location /assets/ { expires off; add_header Cache-Control "…immutable"
+    always; }`` declares no root of its own, so this returned False, and both
+    NGX002 and NGX005 silently skipped the exact block they exist to check.
+    The gate reported "no issues" about a file it had not really read (found
+    2026-08-05, confirming NGX005 against the live stands).
+    """
     if loc.own("proxy_pass") or loc.own("fastcgi_pass") or loc.own("uwsgi_pass"):
         return False
-    return bool(loc.own("root") or loc.own("alias") or loc.own("try_files"))
+    if loc.own("root") or loc.own("alias") or loc.own("try_files"):
+        return True
+    # No own root: inherited from an ancestor, as long as nothing in the chain
+    # hands the request to an upstream instead.
+    for ancestor in loc.ancestors():
+        if ancestor.own("proxy_pass"):
+            return False
+        if ancestor.own("root") or ancestor.own("alias"):
+            return True
+    return False
 
 
 def is_entry_document(loc: Block) -> bool:
@@ -622,8 +653,11 @@ def _suppressed(lines: list[str], rule: str, *line_numbers: int) -> bool:
 CANON_ENTRY = (
     'expires off; add_header Cache-Control "no-cache, must-revalidate" always;'
 )
+# Deliberately WITHOUT `always` — see NGX005. `always` would also stamp the
+# year-long immutable header onto 404s, and a browser then caches "this chunk
+# does not exist" for a year.
 CANON_ASSET = (
-    'expires off; add_header Cache-Control "public, max-age=31536000, immutable" always;'
+    'expires off; add_header Cache-Control "public, max-age=31536000, immutable";'
 )
 #: below this, "long-lived" is not a fair description of a hashed artifact
 MIN_IMMUTABLE_MAX_AGE = 86400
@@ -736,6 +770,35 @@ def lint_conf(path: Path, src: Optional[str] = None) -> list[Finding]:
                     "error", loc.line,
                 )
 
+            # ------------------------------------------------------ NGX005
+            # Measured live on BOTH stands (2026-08-05):
+            #   curl -I https://app.ironmemo.com/assets/nope-00000000.js
+            #   -> HTTP 404 + Cache-Control: public, max-age=31536000, immutable
+            # The `always` flag makes nginx stamp the header onto error
+            # responses too, so a client caches "this chunk does not exist" for
+            # a YEAR — and `immutable` means a reload will not even recheck.
+            # Any moment of deploy inconsistency (index.html already new, the
+            # chunk not on disk yet) leaves whoever hit that window with a
+            # permanently broken app until they clear their cache by hand.
+            if policy.cacheable and (policy.max_age or 0) >= MIN_IMMUTABLE_MAX_AGE:
+                for directive in resolved.cache_control_headers:
+                    if directive.args and directive.args[-1] == "always":
+                        add(
+                            "NGX005", directive.line,
+                            f"{label} caches content-hashed artifacts for "
+                            f"{policy.max_age}s AND uses `always`, so nginx stamps "
+                            f"that header onto 404s as well — a client that asks for "
+                            f"a chunk during a deploy window caches its absence for "
+                            f"the full lifetime, immutably, and the app stays broken "
+                            f"for that user until they clear the cache by hand. Drop "
+                            f"`always` here: without it nginx still adds the header "
+                            f"to 2xx/3xx (304 included, so revalidation is "
+                            f"unaffected) and leaves error responses alone. Canon: "
+                            f"{CANON_ASSET}",
+                            "error", loc.line,
+                        )
+                        break
+
     findings.sort(key=lambda f: (f.line, f.rule))
     return findings
 
@@ -751,6 +814,18 @@ CONF_GLOBS = (
     "service-configs/nginx*/**/*.conf.template",
     "service-configs/nginx*/*.conf",
     "service-configs/nginx*/*.conf.template",
+    # meettoday keeps its confs in a plain `nginx/` directory, not the
+    # scaffold's `service-configs/nginx/`. Until this line existed, this gate
+    # had NEVER checked meettoday: it reported "no nginx conf found" and the
+    # run exited 0. Honest wording, useless coverage — the cache canon was
+    # unguarded on a live stand for as long as the gate has existed.
+    # (Found 2026-08-05 while confirming NGX005 on both products; the sibling
+    # stapel-frontend-delivery-lint reads the same files fine, so the two
+    # gates disagreed about where a project's nginx lives.)
+    "nginx/**/*.conf",
+    "nginx/**/*.conf.template",
+    "nginx/*.conf",
+    "nginx/*.conf.template",
 )
 
 

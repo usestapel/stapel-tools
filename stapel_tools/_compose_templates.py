@@ -115,7 +115,15 @@ server {
     location ~* ^/assets/.*\\.(?:js|mjs|css|woff2?|ttf|otf|eot|svg|png|jpe?g|gif|ico|webp|avif|map)$ {
         root {{FRONTEND_ROOT}};
         expires off;
-        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        # NOT `always` — deliberately, unlike the entry document below.
+        # `always` also stamps this header onto ERROR responses, so a 404 for a
+        # chunk that is not on disk yet comes back "immutable, max-age=1 year":
+        # the browser caches the chunk's ABSENCE for a year and will not
+        # recheck even on reload, leaving that user with a permanently broken
+        # app. Measured live on both stands 2026-08-05; guarded by NGX005.
+        # Without `always` nginx still adds the header to 2xx/3xx — 304
+        # included, so revalidation is unaffected.
+        add_header Cache-Control "public, max-age=31536000, immutable";
     }
 {{FRONTEND_EXTRA_LOCATIONS}}
 
@@ -157,7 +165,8 @@ NGINX_EXTRA_FRONTEND_BLOCK = """\
     location ~* ^{mount_re}(/assets/.*\\.(?:js|mjs|css|woff2?|ttf|otf|eot|svg|png|jpe?g|gif|ico|webp|avif|map))$ {{
         alias {root}$1;
         expires off;
-        add_header Cache-Control "public, max-age=31536000, immutable" always;
+        # No `always` — see the root app's asset location (NGX005).
+        add_header Cache-Control "public, max-age=31536000, immutable";
     }}
 
     location {mount}/ {{

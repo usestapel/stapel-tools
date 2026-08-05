@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.29.0] — 2026-08-05
+
+### Fixed — NGX005: the cache canon cached a MISSING chunk for a year
+
+Measured live on BOTH stands while verifying the cache policy on request:
+
+    curl -I https://app.ironmemo.com/assets/nope-00000000.js
+    -> HTTP 404 + Cache-Control: public, max-age=31536000, immutable
+
+The `always` flag on the hashed-asset location makes nginx emit that header on
+ERROR responses too. So a 404 for a chunk that is not on disk yet is cached as
+`immutable` for a year: the browser will not recheck even on reload. Any deploy
+window where index.html is already new and a chunk has not landed leaves
+whoever hit it with a permanently broken app until they clear their cache by
+hand — the same window the 0.28.0 atomic swap closes, except this one survives
+the swap because it lives in the client.
+
+The header on the entry document keeps `always` (no-cache on an error is
+harmless); only the long-lived one is dangerous. Without `always` nginx still
+adds the header to 2xx/3xx — 304 included, so revalidation is unaffected.
+Fixed in `NGINX_CONF` and the per-frontend block, and guarded by the new rule.
+
+### Fixed — two blind spots that made this gate report success about files it never read
+
+* `discover_confs` looked only under `service-configs/nginx*/`. meettoday keeps
+  its confs in a plain `nginx/` directory, so this gate had **never** checked
+  meettoday: it printed "no nginx conf found" and exited 0. Honest wording,
+  zero coverage.
+* `serves_from_disk` required the location to declare its own `root`. nginx
+  INHERITS `root`, and meettoday's `location /assets/` declares none — so both
+  NGX002 and NGX005 skipped the exact block they exist to check.
+
+With both closed, the gate finds the real defect in both products.
+
 ## [0.28.1] — 2026-08-05
 
 ### Fixed — the generated pnpm image did not build
