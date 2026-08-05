@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.28.0] — 2026-08-05
+
+### Added — frontend delivery is one mechanism, and a gate watches the seam
+
+Verdict `tasks/fable/frontend-delivery-split-repo.md` (tracker #237).
+
+The §57 canon — a one-shot writer filling a volume, with nginx gated on
+`service_completed_successfully` — lived only in the MONOLITH compose template.
+The microservice template carried none of it: its nginx mounted only
+`./service-configs/nginx`. The canon did not travel, and nothing noticed.
+
+Live consequence on ironmemo: nginx served `root /frontend-react`, a bind onto a
+host directory that both `scripts/deploy_stand.sh` and `.gitlab-ci.yml`
+explicitly EXCLUDED from rsync. No build ever landed there. For months this read
+as "the frontend does not update" and was repeatedly diagnosed as caching.
+
+**`render_frontend_delivery()`** now renders the delivery shape for all three
+templates from one function, driven by a `Frontend` record whose `delivery` field
+is the configuration axis:
+
+* `build` — compose builds it from a sibling directory (the monolith, unchanged)
+* `image` — a dist-carrier image pinned by `${FRONTEND_IMAGE}:${FRONTEND_TAG}`;
+  the split-repo answer, and the new default for `--type microservices`
+* `host` — a bare bind. Legacy, permitted, and the template says out loud that
+  compose has no writer for it rather than looking complete.
+
+`depends_on` is templated into the BASE, not an overlay: several docker compose
+versions refuse to override a service that arrived through `include:`, so gating
+nginx from the prod overlay would work on the author's machine and fail on the
+stand.
+
+**Atomic-ish swap** replaces `rm -rf /output/* && cp -r dist/. /output/`. That
+one-liner 404'd the site for the length of the copy AND deleted the previous
+build's content-hashed chunks, so every tab open across a deploy broke on its
+next fetch. Builds now land in their own directory, `current` is repointed, and
+`FRONTEND_KEEP_PREVIOUS` previous builds stay. Honest limit: `ln -sfn` is
+unlink+symlink, so the window is sub-millisecond, not zero.
+
+**`stapel-frontend-delivery-lint` (FED001–FED006)** — the gate on the seam
+"nginx root ↔ who writes to that path". FED001 resolves every disk-served
+frontend root to its mount and demands a provable writer, and separately checks
+that a bind source is not `--exclude`d by the deploy script or CI — that second
+half is what catches ironmemo. FED002 refuses a mutable image tag outside the
+local stack, FED003 an unpinned `FRONTEND_*` variable, FED004 a contract-digest
+mismatch, FED005 anything unparseable on the delivery path (error, never a
+silent skip — a conservative skip is how ironmemo went unnoticed), FED006 warns
+on a bind nobody builds. Composed into `stapel-verify`, so it reaches the whole
+fleet through a `stapel-tools` upgrade.
+
+**`stapel-frontend-repo-init`** writes the publishing half into a SEPARATE
+frontend repository: dist-carrier Dockerfile (not an nginx image — the project's
+own nginx stays the single boundary owning reserved paths, TLS, the proxy table
+and the cache canon), the publish script, and a CI job pushing an immutable
+`sha-<gitsha>`.
+
+### Fixed
+
+`stapel-new-service` appended `- <svc>` under an nginx `depends_on` that is now a
+MAPPING, producing a compose file that would not parse at all (`did not find
+expected '-' indicator`). It now detects the existing shape and speaks it.
+
 ## [0.27.0] — 2026-08-05
 
 ### Changed (BREAKING for meta authors) — every module must answer the surface question

@@ -68,3 +68,21 @@ def test_refuses_a_directory_that_is_not_a_frontend(tmp_path):
     (tmp_path / "notafrontend").mkdir()
     with pytest.raises(SystemExit, match="no package.json"):
         init_frontend_repo(tmp_path / "notafrontend")
+
+
+def test_install_step_follows_the_lockfile(tmp_path):
+    """`npm ci` in a pnpm repo does not fail loudly — it resolves a DIFFERENT
+    dependency tree than every developer has, and the image you ship stops
+    matching the app anyone tested. ironmemo-frontend is pnpm."""
+    for lock, expect in (
+        ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
+        ("yarn.lock", "yarn install --immutable"),
+        (None, "npm ci"),
+    ):
+        d = tmp_path / (lock or "npm")
+        d.mkdir()
+        (d / "package.json").write_text("{}\n")
+        if lock:
+            (d / lock).write_text("")
+        init_frontend_repo(d, ci="none")
+        assert expect in (d / "Dockerfile").read_text()

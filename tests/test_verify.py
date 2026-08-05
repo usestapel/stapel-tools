@@ -176,6 +176,7 @@ def test_every_linter_contributes_a_finding(tmp_path):
         "stapel-surface-lint",
         "stapel-nginx-cache-lint",
         "stapel-env-address-lint",
+        "stapel-frontend-delivery-lint",
     }
 
     assert by_name["stapel-lint"].errors >= 1
@@ -217,9 +218,18 @@ def test_every_linter_contributes_a_finding(tmp_path):
     assert {"NGX001", "NGX003"} <= ngx_rules
     assert by_name["stapel-nginx-cache-lint"].errors == 2
 
+    # FED001: the fixture's nginx serves `/frontend-react` and the fixture has
+    # no compose file at all — nothing describes what fills that directory.
+    # That is the ironmemo shape in miniature, and it is a real finding, not
+    # fixture noise.
+    fed_rules = {f["rule"] for f in by_name["stapel-frontend-delivery-lint"].findings}
+    assert fed_rules == {"FED001"}
+    assert by_name["stapel-frontend-delivery-lint"].errors == 1
+
     total_errors = sum(r.errors for r in reports)
-    # R006, ADO001, ADO002, URL001, CFG001, MIG001, SUR001, NGX001, NGX003
-    assert total_errors == 9
+    # R006, ADO001, ADO002, URL001, CFG001, MIG001, SUR001, NGX001, NGX003,
+    # FED001
+    assert total_errors == 10
 
 
 def test_clean_project_reports_all_zero(tmp_path):
@@ -251,7 +261,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 10 linters." in out
+    assert "All clean across 11 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -260,8 +270,8 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert code == 1
     assert payload["ok"] is False
-    assert payload["errors"] == 9
-    assert len(payload["linters"]) == 10
+    assert payload["errors"] == 10
+    assert len(payload["linters"]) == 11
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
@@ -274,6 +284,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
         "stapel-surface-lint",
         "stapel-nginx-cache-lint",
         "stapel-env-address-lint",
+        "stapel-frontend-delivery-lint",
     }
     for entry in payload["linters"]:
         assert "errors" in entry

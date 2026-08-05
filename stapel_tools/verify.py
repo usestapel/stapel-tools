@@ -81,6 +81,7 @@ from . import (
     config_lint,
     doc_lint,
     env_address_lint,
+    frontend_delivery_lint,
     lint,
     migration_lint,
     nginx_cache_lint,
@@ -184,6 +185,15 @@ def run_env_address_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-env-address-lint", errors, warnings, _to_dicts(findings), notes)
 
 
+def run_frontend_delivery_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = frontend_delivery_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport(
+        "stapel-frontend-delivery-lint", errors, warnings, _to_dicts(findings), notes
+    )
+
+
 def verify_project(
     project: Path,
     *,
@@ -205,6 +215,7 @@ def verify_project(
         run_surface_lint(project, search_roots),
         run_nginx_cache_lint(project),
         run_env_address_lint(project),
+        run_frontend_delivery_lint(project),
     ]
 
 

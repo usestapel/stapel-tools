@@ -126,7 +126,7 @@ repos:
   - repo: local
     hooks:
       - id: stapel-verify
-        name: stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC/NGX codes)
+        name: stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC/NGX/EADDR/FED codes)
         entry: stapel-verify .
         language: system
         pass_filenames: false
@@ -142,7 +142,7 @@ repos:
   - repo: local
     hooks:
       - id: stapel-verify
-        name: stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC/NGX codes)
+        name: stapel-verify (R/SWAP/CFG/URL/ADO/MIG/DOC/NGX/EADDR/FED codes)
         entry: stapel-verify .
         language: system
         pass_filenames: false

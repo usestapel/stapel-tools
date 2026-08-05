@@ -50,7 +50,12 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from ._frontend_templates import DOCKERFILE, FRONTEND_PUBLISH_SH
+from ._frontend_templates import (
+    DOCKERIGNORE,
+    FRONTEND_PUBLISH_SH,
+    detect_package_manager,
+    render_dockerfile,
+)
 
 # GitLab. Mirrors what the backend repos in this fleet already use.
 GITLAB_CI_JOB = """\
@@ -158,8 +163,15 @@ def init_frontend_repo(repo: Path, *, ci: str = "gitlab", force: bool = False) -
             "refuses to scatter one into a directory that is not one."
         )
 
+    # The LOCKFILE decides the install step. `npm ci` in a pnpm repo does not
+    # fail loudly — it resolves a DIFFERENT dependency tree than every
+    # developer has, and the image you ship stops matching the app anyone
+    # tested. ironmemo-frontend is pnpm; the scaffold's own frontend is npm.
+    pm = detect_package_manager(repo)
     out = [
-        _write(repo / "Dockerfile", DOCKERFILE, force=force),
+        f"  package manager: {pm} (from the lockfile)",
+        _write(repo / "Dockerfile", render_dockerfile(pm), force=force),
+        _write(repo / ".dockerignore", DOCKERIGNORE, force=force),
         _write(
             repo / "frontend-publish.sh",
             FRONTEND_PUBLISH_SH,

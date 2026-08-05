@@ -1053,13 +1053,27 @@ echo "frontend-publish: $OUT/current -> $BUILD_ID"
 # dist and the publish step, deliberately NOT an nginx: the project's own nginx
 # stays the single boundary owning reserved paths, TLS, the proxy table and the
 # cache canon.
-DOCKERFILE = """\
+# Without this, `COPY . .` drags node_modules (a host-built tree, wrong
+# platform, hundreds of MB) and a stale local dist/ into the image — the stale
+# dist being the nastier of the two, since the publish step would ship it if
+# the build ever failed to overwrite it.
+DOCKERIGNORE = """\
+node_modules
+dist
+.git
+.env
+.env.*
+*.log
+coverage
+.DS_Store
+"""
+
+DOCKERFILE_TEMPLATE = """\
 FROM node:22-alpine AS build
 WORKDIR /app
-COPY package*.json ./
-RUN npm install
+{{INSTALL}}
 COPY . .
-RUN npm run build
+RUN {{BUILD_CMD}}
 
 # Prod canon (§57): `docker compose run --rm frontend-build` (or the one-shot
 # service in docker-compose.yml) publishes dist/ into whatever is mounted at
@@ -1069,6 +1083,47 @@ COPY frontend-publish.sh /usr/local/bin/frontend-publish
 RUN chmod +x /usr/local/bin/frontend-publish
 CMD ["/usr/local/bin/frontend-publish"]
 """
+
+# Install steps per package manager. The LOCKFILE decides — writing `npm
+# install` into a repo whose lockfile is pnpm's does not fail loudly, it
+# silently resolves a DIFFERENT dependency tree than every developer has, and
+# the image you ship stops matching the app anyone tested.
+_INSTALL_STEPS = {
+    "npm": "COPY package*.json ./\nRUN npm ci",
+    "pnpm": (
+        "RUN corepack enable\n"
+        "COPY package.json pnpm-lock.yaml ./\n"
+        "RUN pnpm install --frozen-lockfile"
+    ),
+    "yarn": (
+        "RUN corepack enable\n"
+        "COPY package.json yarn.lock ./\n"
+        "RUN yarn install --immutable"
+    ),
+}
+_BUILD_CMDS = {"npm": "npm run build", "pnpm": "pnpm build", "yarn": "yarn build"}
+
+
+def detect_package_manager(repo) -> str:
+    """npm | pnpm | yarn, from the lockfile actually committed."""
+    if (repo / "pnpm-lock.yaml").is_file():
+        return "pnpm"
+    if (repo / "yarn.lock").is_file():
+        return "yarn"
+    return "npm"
+
+
+def render_dockerfile(package_manager: str = "npm") -> str:
+    if package_manager not in _INSTALL_STEPS:
+        raise ValueError(f"unknown package manager: {package_manager!r}")
+    return DOCKERFILE_TEMPLATE.replace(
+        "{{INSTALL}}", _INSTALL_STEPS[package_manager]
+    ).replace("{{BUILD_CMD}}", _BUILD_CMDS[package_manager])
+
+
+# The scaffold's own frontend is npm (that is what stapel-create-project
+# writes), so this stays the historical constant for it.
+DOCKERFILE = render_dockerfile("npm")
 
 README_MD = """\
 # {{SLUG}}-frontend

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.27.0"
+version = "0.28.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -31,6 +31,7 @@ stapel-config-manifest = "stapel_tools.config_manifest:main"
 stapel-url-lint = "stapel_tools.url_lint:main"
 stapel-nginx-cache-lint = "stapel_tools.nginx_cache_lint:main"
 stapel-env-address-lint = "stapel_tools.env_address_lint:main"
+stapel-frontend-delivery-lint = "stapel_tools.frontend_delivery_lint:main"
 stapel-swap-lint = "stapel_tools.swap_lint:main"
 stapel-doc-lint = "stapel_tools.doc_lint:main"
 stapel-surface-lint = "stapel_tools.surface_lint:main"
