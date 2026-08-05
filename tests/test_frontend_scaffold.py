@@ -283,7 +283,40 @@ class TestThemeJsonScaffold:
         dockerfile = (proj / "frontend" / "Dockerfile").read_text()
         assert "FROM node:22-alpine AS build" in dockerfile
         assert "npm run build" in dockerfile
-        assert "cp -r dist/." in dockerfile
+        # The export stage publishes via the shipped script, not a CMD
+        # one-liner — see the next test for what the script has to do.
+        assert "FROM build AS export" in dockerfile
+        assert "frontend-publish" in dockerfile
+
+    def test_publish_script_swaps_a_build_dir_instead_of_wiping_the_volume(self, tmp_path):
+        """The shape it replaces was `rm -rf /output/* && cp -r dist/. /output/`.
+
+        Two real defects in that one-liner, both user-visible on every deploy:
+        the site 404s for as long as the copy takes, and the PREVIOUS build's
+        content-hashed chunks are deleted, so any tab open across the deploy
+        dies on its next chunk fetch. The replacement publishes into a
+        per-build directory and repoints `current`, keeping N previous builds.
+        """
+        proj = _create(tmp_path, "app", "monolith")
+        script = (proj / "frontend" / "frontend-publish.sh").read_text()
+        assert "rm -rf /output/*" not in script
+        assert "$OUT/$BUILD_ID" in script
+        assert 'ln -sfn "$BUILD_ID" "$OUT/current"' in script
+        assert "FRONTEND_KEEP_PREVIOUS" in script
+        # ...and nginx must actually serve through that symlink, or the swap
+        # is decorative.
+        conf = (proj / "service-configs" / "nginx" / "nginx.conf").read_text()
+        assert "root /usr/share/nginx/html/current;" in conf
+
+    def test_nginx_waits_for_the_frontend_writer(self, tmp_path):
+        """nginx starting before the volume is filled serves 404s until the
+        one-shot finishes. The gate lives in the BASE on purpose: several
+        docker compose versions refuse to override a service that arrived via
+        `include:`, so gating from the prod overlay would work locally and
+        fail on the stand."""
+        proj = _create(tmp_path, "app", "monolith")
+        base = (proj / "docker-compose.base.yml").read_text()
+        assert "frontend-build:\n        condition: service_completed_successfully" in base
 
 
 class TestEntrypointCanon:
@@ -1268,3 +1301,113 @@ class TestSpaCacheCanon:
         stripped = "\n".join(line.split("#", 1)[0] for line in tmpl.splitlines())
         assert "expires" not in stripped
         assert "Cache-Control" not in stripped
+
+
+class TestSplitRepoFrontendDelivery:
+    """The microservice topology had NO frontend delivery at all.
+
+    Its nginx mounted only `./service-configs/nginx` — no frontend volume, no
+    writer, no gate. The canon lived in the monolith template and did not
+    travel. Measured live on ironmemo (2026-08-05): nginx served
+    `root /frontend-react`, a bind onto a host directory that both
+    `scripts/deploy_stand.sh` and `.gitlab-ci.yml` explicitly EXCLUDED from
+    rsync, so no build ever landed there. For months that read as "the
+    frontend does not update" and was repeatedly misdiagnosed as caching.
+    """
+
+    def test_micro_project_declares_a_frontend_and_a_writer(self, tmp_path):
+        proj = _create(tmp_path, "app", "microservices")
+        base = (proj / "docker-compose.base.yml").read_text()
+        prod = (proj / "docker-compose.yml").read_text()
+        # nginx has something to serve...
+        assert "frontend-dist:/usr/share/nginx/html:ro" in base
+        # ...someone fills it...
+        assert "frontend-build:" in prod
+        assert "- frontend-dist:/output" in prod
+        # ...and nginx does not start before they have.
+        assert "condition: service_completed_successfully" in base
+
+    def test_micro_frontend_is_pinned_by_env_not_built_here(self, tmp_path):
+        """A microservice project's frontend is a SEPARATE repository, so
+        compose cannot build it — it pulls a published dist-carrier image
+        pinned in the env template. The pin lives in git precisely because
+        deploy regenerates .env from the template on every run: a tag edited
+        on the stand disappears without a word."""
+        proj = _create(tmp_path, "app", "microservices")
+        prod = (proj / "docker-compose.yml").read_text()
+        env = (proj / ".env.example").read_text()
+        assert "${FRONTEND_IMAGE}:${FRONTEND_TAG}" in prod
+        assert "\n    build:\n" not in prod  # nothing to build: another repo owns it
+        assert "FRONTEND_IMAGE=" in env
+        assert "FRONTEND_TAG=" in env
+
+    def test_micro_compose_parses(self, tmp_path):
+        proj = _create(tmp_path, "app", "microservices")
+        data = _docker_compose_config(proj, "docker-compose.yml")
+        if data is None:
+            return
+        assert "frontend-build" in data["services"]
+        assert data["services"]["frontend-build"]["restart"] == "no"
+        assert "frontend-dist" in data["volumes"]
+
+
+class TestFrontendAxis:
+    """`delivery` is a configuration axis, not three code paths."""
+
+    def test_host_delivery_has_no_writer_and_says_so(self):
+        from stapel_tools._compose_templates import (
+            MONOLITH_COMPOSE_BASE,
+            MONOLITH_COMPOSE_PROD,
+            Frontend,
+            render_compose_base,
+            render_frontend_delivery,
+        )
+
+        f = Frontend(delivery="host", host_path="./frontend-react")
+        base = render_compose_base(MONOLITH_COMPOSE_BASE, "none", "none", [f])
+        prod = render_frontend_delivery(MONOLITH_COMPOSE_PROD, [f])
+        assert "- ./frontend-react:/usr/share/nginx/html:ro" in base
+        # Nothing to wait for — and the comment says why, rather than the file
+        # quietly looking complete.
+        assert "depends_on: []" in base
+        assert "delivery=host" in prod
+        assert "FED001" in prod
+
+    def test_host_delivery_without_a_source_is_refused(self):
+        from stapel_tools._compose_templates import Frontend
+
+        with pytest.raises(ValueError, match="host_path"):
+            Frontend(delivery="host")
+
+    def test_unknown_delivery_is_refused(self):
+        from stapel_tools._compose_templates import Frontend
+
+        with pytest.raises(ValueError, match="delivery must be one of"):
+            Frontend(delivery="scp")
+
+    def test_second_frontend_gets_its_own_volume_prefix_and_env(self):
+        from stapel_tools._compose_templates import (
+            MICRO_COMPOSE_PROD,
+            NGINX_CONF,
+            Frontend,
+            render_frontend_delivery,
+            render_nginx_conf,
+        )
+
+        fronts = [Frontend(delivery="image"), Frontend(name="kmp", mount="/kmp", delivery="image")]
+        prod = render_frontend_delivery(MICRO_COMPOSE_PROD, fronts)
+        conf = render_nginx_conf(NGINX_CONF, fronts)
+        assert "${FRONTEND_KMP_IMAGE}:${FRONTEND_KMP_TAG}" in prod
+        assert "- frontend-dist-kmp:/output" in prod
+        # alias, not root: the URL prefix is not part of the on-disk path.
+        assert "alias /usr/share/nginx/html-kmp/current/;" in conf
+
+    def test_a_project_with_no_root_frontend_is_refused(self):
+        from stapel_tools._compose_templates import (
+            NGINX_CONF,
+            Frontend,
+            render_nginx_conf,
+        )
+
+        with pytest.raises(ValueError, match="no frontend mounted at"):
+            render_nginx_conf(NGINX_CONF, [Frontend(name="kmp", mount="/kmp")])

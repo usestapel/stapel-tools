@@ -1,4 +1,5 @@
 """Docker Compose templates for project scaffolding."""
+import dataclasses
 import re
 
 # Runs on EVERY postgres startup (via the db service's command wrapper),
@@ -112,10 +113,11 @@ server {
     #     where either appears in this file — the order below is readability
     #     only, exactly like the reserved prefixes above.
     location ~* ^/assets/.*\\.(?:js|mjs|css|woff2?|ttf|otf|eot|svg|png|jpe?g|gif|ico|webp|avif|map)$ {
-        root /usr/share/nginx/html;
+        root {{FRONTEND_ROOT}};
         expires off;
         add_header Cache-Control "public, max-age=31536000, immutable" always;
     }
+{{FRONTEND_EXTRA_LOCATIONS}}
 
     # Prod canon (§57): the built frontend, populated into this volume by
     # the one-shot frontend-build service (see docker-compose.yml). SPA
@@ -124,14 +126,81 @@ server {
     # the entry document gets. Kept last for readability only — prefix-match
     # specificity (not file order) is what actually keeps this from shadowing
     # the reserved blocks above.
+    #
+    # `root` points at the `current` SYMLINK inside the frontend volume, not at
+    # the volume itself. Each build lands in its own `<build-id>/` directory and
+    # the one-shot writer repoints `current` at it. What that replaces was
+    # `rm -rf /output/* && cp -r dist/. /output/`: a multi-second window where
+    # the site 404s, and — worse — the previous build's HASHED assets deleted
+    # out from under every browser tab that was open across the deploy, which
+    # then breaks on its next chunk fetch. nginx follows the symlink per
+    # request, so a repoint takes effect immediately with no reload.
     location / {
-        root /usr/share/nginx/html;
+        root {{FRONTEND_ROOT}};
         try_files $uri $uri/ /index.html;
         expires off;
         add_header Cache-Control "no-cache, must-revalidate" always;
     }
 }
 """
+
+# One extra frontend mounted under its own URL prefix (e.g. /kmp). Same cache
+# canon as the root app, per-prefix: hashed assets immutable, entry document
+# never cached. `alias` (not `root`) because the URL prefix is NOT part of the
+# on-disk path.
+NGINX_EXTRA_FRONTEND_BLOCK = """\
+
+    # ─── frontend: {name} at {mount} ────────────────────────────────────────
+    # The capture group is what `alias` substitutes: the URL prefix is not part
+    # of the on-disk path, so /kmp/assets/x-<hash>.js must resolve to
+    # <root>/assets/x-<hash>.js.
+    location ~* ^{mount_re}(/assets/.*\\.(?:js|mjs|css|woff2?|ttf|otf|eot|svg|png|jpe?g|gif|ico|webp|avif|map))$ {{
+        alias {root}$1;
+        expires off;
+        add_header Cache-Control "public, max-age=31536000, immutable" always;
+    }}
+
+    location {mount}/ {{
+        alias {root}/;
+        try_files $uri $uri/ {mount}/index.html;
+        expires off;
+        add_header Cache-Control "no-cache, must-revalidate" always;
+    }}
+"""
+
+
+def render_nginx_conf(template: str, frontends: "list[Frontend] | None" = None) -> str:
+    """Point the SPA locations at the delivered frontends.
+
+    ``None`` keeps the historical single-frontend default (one app at ``/``)
+    so callers that predate the delivery axis render exactly what they did
+    before, apart from the ``/current`` swap directory.
+    """
+    fronts = DEFAULT_FRONTENDS if frontends is None else frontends
+    root = next((f for f in fronts if f.is_root), None)
+    if root is None:
+        raise ValueError(
+            "nginx conf: no frontend mounted at '/' — the SPA fallback has "
+            "nothing to serve. Declare one, or generate a project without the "
+            "frontend locations."
+        )
+    extra = "".join(
+        NGINX_EXTRA_FRONTEND_BLOCK.format(
+            name=f.name,
+            mount=f.mount.rstrip("/"),
+            mount_re=re.escape(f.mount.rstrip("/")),
+            root=f.nginx_root,
+        )
+        for f in fronts
+        if not f.is_root
+    )
+    return render_tokens(
+        template,
+        {
+            "FRONTEND_ROOT": root.nginx_root,
+            "FRONTEND_EXTRA_LOCATIONS": extra.rstrip("\n"),
+        },
+    )
 
 # Dev-canon (§57): mounted via the nginx image's OWN envsubst-on-templates
 # entrypoint (https://hub.docker.com/_/nginx — "Using environment variables
@@ -289,17 +358,267 @@ def render_tokens(template: str, ctx: dict) -> str:
     return result
 
 
-def render_compose_base(template: str, broker: str, task_broker: str = "none") -> str:
+def render_compose_base(
+    template: str,
+    broker: str,
+    task_broker: str = "none",
+    frontends: "list[Frontend] | None" = None,
+) -> str:
     """Splice the chosen broker(s) (nats | kafka | none) into a compose base.
 
     *task_broker* adds a second broker dedicated to Tasks when it differs
     from the event broker.
+
+    *frontends* fills the frontend-delivery tokens (see
+    :func:`render_frontend_delivery`). ``None`` means "this base carries no
+    frontend tokens" (the local stack) and is left alone; an EMPTY list means
+    "declared, and there are none" — the tokens collapse to nothing.
     """
     brokers = [b for b in ("nats", "kafka") if b in (broker, task_broker)]
     services = "".join(_BROKER_SERVICES[b] for b in brokers)
     volumes = "".join(_BROKER_VOLUMES[b] for b in brokers)
-    return template.replace("{{BROKER_SERVICES}}", services).replace(
+    rendered = template.replace("{{BROKER_SERVICES}}", services).replace(
         "{{BROKER_VOLUMES}}", volumes
+    )
+    if frontends is not None:
+        rendered = render_frontend_delivery(rendered, frontends)
+    return rendered
+
+
+# ---------------------------------------------------------------------------
+# frontend delivery — ONE renderer for every topology
+# ---------------------------------------------------------------------------
+#
+# Why this exists (verdict 2026-08-05, tasks/fable/frontend-delivery-split-repo.md;
+# tracker #237). The monolith template carried the §57 canon — a one-shot
+# `frontend-build` populating a volume, with nginx gated on
+# `service_completed_successfully` — and the microservice template carried
+# NOTHING: its nginx mounted only `./service-configs/nginx`. The canon did not
+# travel. Live consequence on ironmemo: nginx served `root /frontend-react`, a
+# bind onto a host directory that both the deploy script and CI explicitly
+# EXCLUDED from rsync, so no build ever landed there. For months that read as
+# "the frontend does not update" and was repeatedly misdiagnosed as caching.
+#
+# So the delivery shape is rendered from one function for all three templates.
+# Adding a topology cannot silently skip it: the templates carry the tokens,
+# and a token left unrendered is a visible `{{...}}` in generated YAML.
+#
+# `depends_on` deliberately lives in the BASE, not in an overlay. Several
+# docker compose versions refuse to override a service that arrived through
+# `include:` ("services.nginx conflicts with imported resource" — the same
+# reason MONOLITH_COMPOSE_LOCAL is self-contained, see its header comment), and
+# nginx is defined in the base. Gating nginx from the prod overlay would
+# therefore work on the author's machine and fail on the stand.
+
+
+@dataclasses.dataclass(frozen=True)
+class Frontend:
+    """One frontend app delivered to a project's nginx.
+
+    ``delivery`` is the configuration axis the verdict asks for — a project
+    switches transport without a different code path:
+
+    * ``build`` — compose builds it from ``context`` (same repo; the monolith
+      default, byte-identical to the pre-existing §57 shape).
+    * ``image`` — a prebuilt dist-carrier image from a registry, pinned by
+      ``${<PREFIX>_IMAGE}:${<PREFIX>_TAG}``. This is the split-repo answer:
+      the frontend repo publishes an immutable ``sha-<gitsha>`` tag, and the
+      BACKEND repo holds the pin, so "which frontend goes with this backend"
+      is answerable from one repo's history.
+    * ``host`` — a plain bind mount from ``host_path``. Legacy/escape hatch,
+      and the shape ironmemo is in today. Permitted, but it proves nothing
+      about delivery, which is exactly why FED001 (stapel-frontend-delivery-
+      lint) demands a writer for it.
+
+    Naming rule: the FIRST frontend (``mount == "/"``) keeps the historical
+    bare names — volume ``frontend-dist``, container path
+    ``/usr/share/nginx/html``, service ``frontend-build`` — so existing
+    generated projects and their nginx confs stay valid. Additional frontends
+    are suffixed by name (``frontend-dist-kmp``, ``/usr/share/nginx/html-kmp``,
+    ``frontend-kmp-build``).
+    """
+
+    name: str = "frontend"
+    mount: str = "/"
+    delivery: str = "build"
+    context: str = "./frontend"
+    host_path: str = ""
+
+    DELIVERIES = ("build", "image", "host")
+
+    def __post_init__(self) -> None:
+        if self.delivery not in self.DELIVERIES:
+            raise ValueError(
+                f"frontend {self.name!r}: delivery must be one of "
+                f"{', '.join(self.DELIVERIES)}, got {self.delivery!r}"
+            )
+        if self.delivery == "host" and not self.host_path:
+            raise ValueError(
+                f"frontend {self.name!r}: delivery='host' needs host_path — a bind "
+                "mount with no source is the 'nginx serves a directory nobody "
+                "fills' shape this machinery exists to abolish"
+            )
+
+    @property
+    def is_root(self) -> bool:
+        return self.mount == "/"
+
+    @property
+    def suffix(self) -> str:
+        return "" if self.is_root else f"-{self.name}"
+
+    @property
+    def volume(self) -> str:
+        return f"frontend-dist{self.suffix}"
+
+    @property
+    def container_path(self) -> str:
+        """Where nginx sees this frontend's build tree (the parent of
+        ``current``, not the served root — see :attr:`nginx_root`)."""
+        return f"/usr/share/nginx/html{self.suffix}"
+
+    @property
+    def nginx_root(self) -> str:
+        """What belongs in nginx's ``root``/``alias``.
+
+        The extra ``/current`` is the atomic-swap layout: each build lands in
+        its own ``<build-id>/`` directory and ``current`` is repointed at it.
+        The shape it replaces was ``rm -rf /output/* && cp -r dist/. /output/``,
+        which (a) left a multi-second window where the site 404s and (b) DELETED
+        the previous build's hashed assets, so every browser tab open across a
+        deploy broke on its next chunk fetch.
+        """
+        return f"{self.container_path}/current"
+
+    @property
+    def service(self) -> str:
+        return f"frontend{self.suffix}-build" if self.suffix else "frontend-build"
+
+    @property
+    def env_prefix(self) -> str:
+        base = "FRONTEND" if self.is_root else f"FRONTEND_{self.name.upper()}"
+        return re.sub(r"[^A-Z0-9_]", "_", base)
+
+
+DEFAULT_FRONTENDS = [Frontend()]
+
+
+def _frontend_nginx_mounts(frontends: "list[Frontend]") -> str:
+    lines = []
+    for f in frontends:
+        if f.delivery == "host":
+            lines.append(f"      - {f.host_path}:{f.container_path}:ro\n")
+        else:
+            lines.append(f"      - {f.volume}:{f.container_path}:ro\n")
+    return "".join(lines)
+
+
+def _frontend_nginx_depends(frontends: "list[Frontend]") -> str:
+    """nginx must not start before each one-shot writer has finished.
+
+    A ``host`` frontend has no writer in compose at all — nothing to wait for —
+    and that is precisely the state FED001 refuses to accept silently.
+    """
+    waited = [f for f in frontends if f.delivery != "host"]
+    if not waited:
+        return "    depends_on: []\n"
+    out = ["    depends_on:\n"]
+    for f in waited:
+        out.append(f"      {f.service}:\n")
+        out.append("        condition: service_completed_successfully\n")
+    return "".join(out)
+
+
+def _frontend_volumes(frontends: "list[Frontend]") -> str:
+    return "".join(f"  {f.volume}:\n" for f in frontends if f.delivery != "host")
+
+
+_FRONTEND_SERVICE_HEADER = """\
+
+  # Prod canon (§57): one-shot writer — populates the {volume} volume nginx
+  # serves from (see docker-compose.base.yml). Not a long-lived service:
+  # `restart: "no"`, runs once per `docker compose up` and again on demand via
+  # `docker compose run --rm {service}`.
+"""
+
+_FRONTEND_SERVICE_BUILD = """\
+  {service}:
+    build:
+      context: {context}
+    restart: "no"
+    environment:
+      FRONTEND_KEEP_PREVIOUS: "${{FRONTEND_KEEP_PREVIOUS:-2}}"
+    volumes:
+      - {volume}:/output
+"""
+
+_FRONTEND_SERVICE_IMAGE = """\
+  {service}:
+    # Split-repo delivery: the frontend repo publishes this dist-CARRIER image
+    # (build stage + a one-shot copy into /output) — NOT an nginx image. The
+    # project's own nginx stays the single boundary that owns reserved paths,
+    # TLS, the proxy table and the cache canon; a frontend repo shipping its own
+    # nginx would put half of that outside this repo's gates.
+    #
+    # The tag is pinned in scripts/env.stand.template (git), never edited on the
+    # stand: deploy regenerates .env from that template every run, so a hand
+    # edit there disappears silently. Bumping the frontend is a commit here.
+    image: "${{{prefix}_IMAGE}}:${{{prefix}_TAG}}"
+    restart: "no"
+    environment:
+      FRONTEND_KEEP_PREVIOUS: "${{FRONTEND_KEEP_PREVIOUS:-2}}"
+    volumes:
+      - {volume}:/output
+"""
+
+_FRONTEND_SERVICE_HOST = """\
+  # {name}: delivery=host — nginx binds {host_path} straight from the stand's
+  # filesystem, so compose has no writer for it and cannot gate nginx on one.
+  # Something OUTSIDE this file has to put a build there; stapel-frontend-
+  # delivery-lint (FED001) is what checks that something actually does, and
+  # that the deploy script/CI does not exclude the path from its rsync.
+"""
+
+
+def render_frontend_delivery(template: str, frontends: "list[Frontend]") -> str:
+    """Fill a compose template's frontend-delivery tokens.
+
+    Tokens (a template may carry any subset):
+      ``{{FRONTEND_NGINX_MOUNTS}}``  — nginx volume/bind mounts
+      ``{{FRONTEND_NGINX_DEPENDS}}`` — nginx ``depends_on`` gate (BASE only)
+      ``{{FRONTEND_VOLUMES}}``       — top-level named volumes
+      ``{{FRONTEND_SERVICES}}``      — the one-shot writer services (PROD only)
+    """
+    services = []
+    for f in frontends:
+        if f.delivery == "host":
+            services.append(
+                _FRONTEND_SERVICE_HOST.format(name=f.name, host_path=f.host_path)
+            )
+            continue
+        services.append(
+            _FRONTEND_SERVICE_HEADER.format(volume=f.volume, service=f.service)
+        )
+        if f.delivery == "build":
+            services.append(
+                _FRONTEND_SERVICE_BUILD.format(
+                    service=f.service, context=f.context, volume=f.volume
+                )
+            )
+        else:
+            services.append(
+                _FRONTEND_SERVICE_IMAGE.format(
+                    service=f.service, prefix=f.env_prefix, volume=f.volume
+                )
+            )
+    return render_tokens(
+        template,
+        {
+            "FRONTEND_NGINX_MOUNTS": _frontend_nginx_mounts(frontends).rstrip("\n"),
+            "FRONTEND_NGINX_DEPENDS": _frontend_nginx_depends(frontends).rstrip("\n"),
+            "FRONTEND_VOLUMES": _frontend_volumes(frontends).rstrip("\n"),
+            "FRONTEND_SERVICES": "".join(services).rstrip("\n"),
+        },
     )
 
 
@@ -372,15 +691,15 @@ services:
       - ./service-configs/nginx:/etc/nginx/conf.d:ro
       - static-content:/staticfiles:ro
       - media-content:/media:ro
-      - frontend-dist:/usr/share/nginx/html:ro
-    depends_on: []
+{{FRONTEND_NGINX_MOUNTS}}
+{{FRONTEND_NGINX_DEPENDS}}
 
 volumes:
   db-data:
   redis-data:
 {{BROKER_VOLUMES}}  static-content:
   media-content:
-  frontend-dist:
+{{FRONTEND_VOLUMES}}
 """
 
 MONOLITH_COMPOSE_PROD = """\
@@ -388,17 +707,7 @@ include:
   - docker-compose.base.yml
 
 services:
-  # Prod canon (§57): one-shot build — populates the frontend-dist volume
-  # nginx serves from (see docker-compose.base.yml's nginx `frontend-dist`
-  # mount + service-configs/nginx/nginx.conf's `location /`). Not a
-  # long-lived service: `restart: "no"`, runs once per `docker compose up`
-  # and again on demand via `docker compose run --rm frontend-build`.
-  frontend-build:
-    build:
-      context: ./frontend
-    restart: "no"
-    volumes:
-      - frontend-dist:/output
+{{FRONTEND_SERVICES}}
 
   # Add backend services from their individual .yml files:
   # svc-app:
@@ -658,13 +967,15 @@ services:
       - ./service-configs/nginx:/etc/nginx/conf.d:ro
       - static-content:/staticfiles:ro
       - media-content:/media:ro
-    depends_on: []
+{{FRONTEND_NGINX_MOUNTS}}
+{{FRONTEND_NGINX_DEPENDS}}
 
 volumes:
   db-data:
   redis-data:
 {{BROKER_VOLUMES}}  static-content:
   media-content:
+{{FRONTEND_VOLUMES}}
 """
 
 MICRO_COMPOSE_PROD = """\
@@ -672,6 +983,8 @@ include:
   - docker-compose.base.yml
 
 services:
+{{FRONTEND_SERVICES}}
+
   # Add your services here.
   # Run: stapel-new-service <name> --prefix svc-
 """
@@ -701,6 +1014,27 @@ SITE_URL={url}
 # DEBUG=False and no value. The dev value lives in .env.local /
 # config/settings/dev.py, never in the shared settings base.
 FRONTEND_URL={url}
+
+# ─── Frontend delivery ──────────────────────────────────────────────────────
+# This project's frontend lives in its OWN repository, so compose cannot build
+# it: it pulls the dist-carrier image that repo publishes and a one-shot service
+# copies the bundle into the volume nginx serves (docker-compose.yml's
+# `frontend-build`).
+#
+# FRONTEND_TAG must be an IMMUTABLE tag — `sha-<gitsha>`, the shape the frontend
+# CI pushes. Never `latest`/`dev`: with a moving tag "which frontend is on this
+# stand" has no answer and a redeploy silently changes the app. The pin belongs
+# in git (this template), NOT in the stand's .env — deploy regenerates .env from
+# here on every run, so an edit made on the server disappears without a word.
+# Bumping the frontend is a commit in THIS repo; that is what makes the
+# backend↔frontend pair readable from one repository's history.
+# stapel-frontend-delivery-lint enforces both halves (FED002, FED003).
+FRONTEND_IMAGE=registry.example.com/{name}/frontend
+FRONTEND_TAG=sha-0000000
+# How many previous builds stay on disk beside the live one. They exist so a
+# browser tab opened BEFORE a deploy can still fetch its content-hashed chunks
+# instead of dying with a chunk-load error.
+FRONTEND_KEEP_PREVIOUS=2
 
 # ─── Service navigation (admin-suite AS-4) ──────────────────────────────────
 # The admin/Swagger "Services" menu is driven by this deploy-config env-JSON,

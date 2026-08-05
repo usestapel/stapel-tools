@@ -858,12 +858,23 @@ def _generate_presenters_md(
     return True
 
 
-def _write_shared_infra(project_dir: Path):
+def _write_shared_infra(project_dir: Path, frontends=None):
     """Configs referenced by the compose templates: nginx vhost and the
-    postgres script that creates POSTGRES_MULTIPLE_DATABASES on startup."""
-    from ._compose_templates import NGINX_CONF, POSTGRES_ENSURE_DATABASES
+    postgres script that creates POSTGRES_MULTIPLE_DATABASES on startup.
 
-    _write(project_dir / "service-configs" / "nginx" / "nginx.conf", NGINX_CONF)
+    *frontends* (list of ``_compose_templates.Frontend``) decides what the SPA
+    locations point at; ``None`` = the historical single app at ``/``.
+    """
+    from ._compose_templates import (
+        NGINX_CONF,
+        POSTGRES_ENSURE_DATABASES,
+        render_nginx_conf,
+    )
+
+    _write(
+        project_dir / "service-configs" / "nginx" / "nginx.conf",
+        render_nginx_conf(NGINX_CONF, frontends),
+    )
     ensure_script = project_dir / "service-configs" / "postgres" / "ensure-databases.sh"
     _write(ensure_script, POSTGRES_ENSURE_DATABASES)
     ensure_script.chmod(0o755)
@@ -1259,6 +1270,10 @@ def _write_frontend_scaffold(
     _write(frontend / "eslint.config.js", F.ESLINT_CONFIG_JS)
     _write(frontend / ".gitignore", F.GITIGNORE)
     _write(frontend / "Dockerfile", F.DOCKERFILE)
+    # The publish step the Dockerfile's export stage runs. A separate file, not
+    # a CMD one-liner, because it does a build-id swap + prune instead of the
+    # old `rm -rf /output/*` — see FRONTEND_PUBLISH_SH's own comment.
+    _write(frontend / "frontend-publish.sh", F.FRONTEND_PUBLISH_SH)
     _write(frontend / "README.md", r(F.README_MD))
 
 
@@ -1271,9 +1286,11 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         MONOLITH_GITIGNORE,
         MONOLITH_MAKEFILE,
         NGINX_LOCAL_CONF_TEMPLATE,
+        Frontend,
         nginx_local_backend_locations,
         render_compose_base,
         render_env,
+        render_frontend_delivery,
         render_tokens,
     )
     from .new_service import scaffold_service
@@ -1301,8 +1318,15 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     # docker-compose files. The local stack is SELF-CONTAINED (no include —
     # see MONOLITH_COMPOSE_LOCAL's own docstring), so it needs the broker
     # blocks spliced in too, plus the service DB name for its own postgres.
-    _write(project_dir / "docker-compose.base.yml", render_compose_base(MONOLITH_COMPOSE_BASE, broker, task_broker))
-    _write(project_dir / "docker-compose.yml", render_tokens(MONOLITH_COMPOSE_PROD, compose_ctx))
+    # One frontend, in this same repo, built by compose — the §57 shape this
+    # project type has always had, now expressed through the shared delivery
+    # renderer so the monolith and the microservice topology cannot drift.
+    frontends = [Frontend()]
+    _write(project_dir / "docker-compose.base.yml", render_compose_base(MONOLITH_COMPOSE_BASE, broker, task_broker, frontends))
+    _write(
+        project_dir / "docker-compose.yml",
+        render_frontend_delivery(render_tokens(MONOLITH_COMPOSE_PROD, compose_ctx), frontends),
+    )
     _write(
         project_dir / "docker-compose.local.yml",
         render_tokens(
@@ -1322,7 +1346,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     _write(project_dir / "Makefile", render_tokens(MONOLITH_MAKEFILE, {
         "TITLE": ctx["title"], "DIR_NAME": dir_name,
     }))
-    _write_shared_infra(project_dir)
+    _write_shared_infra(project_dir, frontends)
     # Local-nginx canon (§57): a SEPARATE directory from service-configs/nginx/
     # (prod) — docker-compose.local.yml's `nginx` service override points its
     # conf.d AND templates mounts here instead. Contains only a *.template
@@ -1566,17 +1590,27 @@ def _create_microservices(project_dir: Path, ctx: dict, broker: str, task_broker
         MICRO_COMPOSE_PROD,
         MICRO_ENV_TEMPLATE,
         MONOLITH_GITIGNORE,
+        Frontend,
         render_compose_base,
         render_env,
+        render_frontend_delivery,
     )
     if task_broker == broker:
         task_broker = "none"  # same broker — nothing extra to wire
-    _write(project_dir / "docker-compose.base.yml", render_compose_base(MICRO_COMPOSE_BASE, broker, task_broker))
-    _write(project_dir / "docker-compose.yml", MICRO_COMPOSE_PROD)
+    # A microservice project's frontend lives in its OWN repository (that is
+    # what makes it a microservice project), so compose cannot build it —
+    # it pulls the dist-carrier image the frontend repo publishes, pinned by
+    # ${FRONTEND_IMAGE}:${FRONTEND_TAG} in the env template. Declaring the
+    # delivery here, at scaffold time, is the whole point: the shape this
+    # replaces was a micro base whose nginx mounted no frontend at all, which
+    # on ironmemo meant a stand serving a directory nothing ever wrote to.
+    frontends = [Frontend(delivery="image")]
+    _write(project_dir / "docker-compose.base.yml", render_compose_base(MICRO_COMPOSE_BASE, broker, task_broker, frontends))
+    _write(project_dir / "docker-compose.yml", render_frontend_delivery(MICRO_COMPOSE_PROD, frontends))
     _write(project_dir / ".env.example", render_env(MICRO_ENV_TEMPLATE, broker, ctx, task_broker))
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", "")
-    _write_shared_infra(project_dir)
+    _write_shared_infra(project_dir, frontends)
     _write_deploy_scripts(project_dir)
     _write_agents_and_checks(project_dir, ctx["slug"], has_frontend=False)
     from ._precommit_templates import README_CHECKS_SECTION_BACKEND_ONLY

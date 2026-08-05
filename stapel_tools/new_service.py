@@ -364,7 +364,17 @@ def _update_compose_base(root: Path, slug: str, dir_name: str):
             lines[i] = f'{prefix}: "{value}"'
             break
 
-    # Update nginx depends_on
+    # Update nginx depends_on.
+    #
+    # Two shapes exist in the wild and mixing them is a YAML parse error, not a
+    # soft warning: `depends_on:` is EITHER a list of names OR a map of
+    # name -> {condition}. Since the frontend-delivery renderer started gating
+    # nginx on the one-shot writer (`frontend-build: {condition:
+    # service_completed_successfully}` — see _compose_templates.
+    # _frontend_nginx_depends), a freshly generated base carries the MAP form,
+    # and blindly appending `- svc-app` under it produced
+    # "did not find expected '-' indicator" and a compose file that would not
+    # parse at all. So: detect the existing shape and speak it.
     for i, line in enumerate(lines):
         if line.strip().startswith("nginx:"):
             j = i
@@ -372,15 +382,24 @@ def _update_compose_base(root: Path, slug: str, dir_name: str):
                 j += 1
             if j < len(lines):
                 indent = len(lines[j]) - len(lines[j].lstrip())
-                item = " " * (indent + 2) + f"- {dir_name}"
+                pad = " " * (indent + 2)
+                k = j + 1
+                exists = any(
+                    lines[x].strip().rstrip(":").lstrip("- ") == dir_name
+                    for x in range(k, min(k + 30, len(lines)))
+                )
                 if lines[j].strip() in ("depends_on: []", "depends_on: [ ]"):
+                    # Empty: start the map form — the one the generator emits.
                     lines[j] = " " * indent + "depends_on:"
-                    lines.insert(j + 1, item)
-                else:
-                    k = j + 1
-                    exists = any(dir_name in lines[x] for x in range(k, min(k + 20, len(lines))))
-                    if not exists:
-                        lines.insert(j + 1, item)
+                    lines.insert(j + 1, f"{pad}{dir_name}:")
+                    lines.insert(j + 2, f"{pad}  condition: service_started")
+                elif not exists:
+                    nxt = lines[j + 1].strip() if j + 1 < len(lines) else ""
+                    if nxt.startswith("- "):
+                        lines.insert(j + 1, f"{pad}- {dir_name}")  # legacy list form
+                    else:
+                        lines.insert(j + 1, f"{pad}{dir_name}:")
+                        lines.insert(j + 2, f"{pad}  condition: service_started")
             break
 
     path.write_text("\n".join(lines) + "\n")

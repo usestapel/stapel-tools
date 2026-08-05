@@ -986,9 +986,73 @@ dist/
 *.log
 """
 
+# The one-shot publish step, run inside the `export` stage. Not a one-liner in
+# CMD any more, because the thing it replaced was a one-liner with two real
+# defects (verdict 2026-08-05, tasks/fable/frontend-delivery-split-repo.md):
+#
+#   rm -rf /output/* && cp -r dist/. /output/
+#
+#   1. The window between `rm` and the end of `cp` is seconds long, and during
+#      it the site 404s. Not theoretical — it is every deploy.
+#   2. It DELETES the previous build's hashed assets. Vite's chunks are
+#      content-addressed, so a tab that was open before the deploy asks for a
+#      chunk that no longer exists and dies with a chunk-load error. The user
+#      sees a broken app, not a new one.
+#
+# So: each build lands in its own directory and `current` is repointed at it,
+# with the previous FRONTEND_KEEP_PREVIOUS builds left in place so open tabs
+# keep resolving their chunks.
+#
+# Honest limit: `ln -sfn` is unlink+symlink, not a rename — there IS a
+# sub-millisecond window where `current` does not exist. That is not zero, and
+# this comment is not going to claim it is. It replaces a multi-second window
+# with a sub-millisecond one; making it truly atomic needs `mv -T`, which
+# busybox (alpine) does not reliably provide.
+FRONTEND_PUBLISH_SH = """\
+#!/bin/sh
+# Publish dist/ into the volume mounted at /output. See the Dockerfile comment.
+set -eu
+
+OUT="${OUTPUT_DIR:-/output}"
+KEEP="${FRONTEND_KEEP_PREVIOUS:-2}"
+BUILD_ID="${BUILD_ID:-$(date -u +%Y%m%d%H%M%S)}"
+
+if [ ! -d dist ]; then
+    echo "frontend-publish: no dist/ — the build stage produced nothing" >&2
+    exit 1
+fi
+
+mkdir -p "$OUT/$BUILD_ID"
+cp -R dist/. "$OUT/$BUILD_ID/"
+
+# Repoint. Old builds stay until pruned below, so a browser tab that loaded the
+# previous index.html can still fetch its chunks.
+ln -sfn "$BUILD_ID" "$OUT/current"
+
+# Prune: keep the newest $KEEP builds BESIDES the live one. Never touch
+# `current` itself, and never fail the deploy over a prune error.
+if [ "$KEEP" -ge 0 ] 2>/dev/null; then
+    ls -1t "$OUT" 2>/dev/null \\
+        | grep -v '^current$' \\
+        | tail -n "+$((KEEP + 2))" \\
+        | while read -r old; do
+            [ -d "$OUT/$old" ] && rm -rf "$OUT/$old" || true
+        done
+fi
+
+echo "frontend-publish: $OUT/current -> $BUILD_ID"
+"""
+
 # Multi-stage: `build` produces the static bundle; `export` is the one-shot
-# stage docker-compose.yml (prod) runs to copy it into the frontend-dist
+# stage docker-compose.yml (prod) runs to publish it into the frontend-dist
 # volume nginx serves from. This image is never a long-lived service.
+#
+# In split-repo (microservice) projects this same image is what the frontend
+# repo PUBLISHES to a registry under an immutable `sha-<gitsha>` tag — the
+# backend's compose pulls it by that pin instead of building it. It carries the
+# dist and the publish step, deliberately NOT an nginx: the project's own nginx
+# stays the single boundary owning reserved paths, TLS, the proxy table and the
+# cache canon.
 DOCKERFILE = """\
 FROM node:22-alpine AS build
 WORKDIR /app
@@ -997,12 +1061,13 @@ RUN npm install
 COPY . .
 RUN npm run build
 
-# Prod canon (§57): `docker compose run --rm frontend-build` (or the
-# one-shot service in docker-compose.yml) copies dist/ into whatever host
-# path is mounted at /output — the frontend-dist volume the main nginx
-# mounts read-only at /usr/share/nginx/html.
+# Prod canon (§57): `docker compose run --rm frontend-build` (or the one-shot
+# service in docker-compose.yml) publishes dist/ into whatever is mounted at
+# /output — the frontend-dist volume the main nginx mounts read-only.
 FROM build AS export
-CMD ["sh", "-c", "rm -rf /output/* && cp -r dist/. /output/"]
+COPY frontend-publish.sh /usr/local/bin/frontend-publish
+RUN chmod +x /usr/local/bin/frontend-publish
+CMD ["/usr/local/bin/frontend-publish"]
 """
 
 README_MD = """\
