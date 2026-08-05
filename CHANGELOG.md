@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.28.1] — 2026-08-05
+
+### Fixed — the generated pnpm image did not build
+
+Verified live by building `ironmemo-frontend`'s generated Dockerfile: `pnpm
+install --frozen-lockfile` exits 1 with `ERR_PNPM_IGNORED_BUILDS`. pnpm 10
+refuses to run dependencies' lifecycle scripts unless the repo lists them in
+`pnpm.onlyBuiltDependencies`, and a Docker build has no way to answer the
+interactive `pnpm approve-builds` prompt (ironmemo needs them for `esbuild`
+and `@tailwindcss/oxide`). The build stage now sets
+`dangerouslyAllowAllBuilds` — those same scripts already run on every
+developer's machine (esbuild without its postinstall has no binary and the app
+does not build at all), so this REPRODUCES the local situation rather than
+widening trust. A repo wanting a narrower answer declares
+`onlyBuiltDependencies` and the line stops mattering.
+
+Verified end to end after the fix: image builds, the publish step writes
+`/output/<build-id>` and repoints `current`, a second run leaves the previous
+build's hashed assets in place, and pruning keeps exactly
+`FRONTEND_KEEP_PREVIOUS` old builds beside the live one.
+
 ## [0.28.0] — 2026-08-05
 
 ### Added — frontend delivery is one mechanism, and a gate watches the seam
