@@ -1090,8 +1090,19 @@ CMD ["/usr/local/bin/frontend-publish"]
 # the image you ship stops matching the app anyone tested.
 _INSTALL_STEPS = {
     "npm": "COPY package*.json ./\nRUN npm ci",
+    # `dangerouslyAllowAllBuilds` looks alarming and is the correct call here:
+    # pnpm 10 refuses dependency lifecycle scripts unless the repo lists them
+    # in `pnpm.onlyBuiltDependencies`, and a Docker build cannot answer the
+    # interactive `pnpm approve-builds` prompt — the install just exits 1
+    # (ERR_PNPM_IGNORED_BUILDS; measured on ironmemo-frontend, where esbuild
+    # and @tailwindcss/oxide both need theirs). Those same scripts already run
+    # on every developer's machine — esbuild without its postinstall has no
+    # binary and the app does not build at all — so allowing them in the build
+    # container REPRODUCES the local situation rather than widening trust.
+    # A repo that wants a narrower answer declares `onlyBuiltDependencies` in
+    # package.json; this line then changes nothing.
     "pnpm": (
-        "RUN corepack enable\n"
+        "RUN corepack enable && pnpm config set dangerouslyAllowAllBuilds true\n"
         "COPY package.json pnpm-lock.yaml ./\n"
         "RUN pnpm install --frozen-lockfile"
     ),
