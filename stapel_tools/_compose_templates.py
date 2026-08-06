@@ -296,22 +296,39 @@ server {
 # {{BROKER_ENV}}. A dedicated Task broker (--task-broker) adds its blocks
 # next to the event broker's.
 
+#: Конфиг nats-server. Отдельным файлом, а не флагами, потому что
+#: `max_payload` флагом задать НЕЛЬЗЯ — см. комментарий в NATS_SERVICE_BLOCK.
+NATS_CONF = """\
+port: 4222
+http_port: 8222
+jetstream {
+  store_dir: /data
+}
+
+# Функция comm — это request-reply, и ответ целиком едет одним сообщением.
+# Дефолтный потолок 1 МиБ структурированный ответ по реальному тексту
+# перешагивает раньше, чем кажется (замер на ironmemo 06.08.2026: ответ
+# отвергнут, вызывающий не услышал ничего и вышел по таймауту, хотя работа
+# была сделана). 8 МиБ — запас, который сам NATS считает разумным; дальше
+# ответ должен быть ссылкой, а не сообщением побольше.
+max_payload: 8MB
+"""
+
 NATS_SERVICE_BLOCK = """\
   # Events (JetStream) + RPC (request-reply) for stapel_core.comm
   nats:
     image: nats:2.10-alpine
     restart: unless-stopped
-    # --max_payload: NATS caps a single message at 1 MiB by default, and a
-    # comm Function is request-reply over exactly that. A structured answer
-    # built from real text (an LLM completion over a meeting transcript, a
-    # batch of records) passes 1 MiB sooner than it looks. Measured on
-    # ironmemo 2026-08-06: the reply was refused, the caller heard nothing and
-    # timed out, and the work had already been done — see stapel_core's
-    # FunctionPayloadTooLarge for the guard that now makes that visible.
-    # 8 MiB is the headroom NATS itself considers reasonable; beyond it the
-    # answer is a reference, not a bigger message.
-    command: ["--jetstream", "--store_dir", "/data", "--max_payload", "8388608"]
+    # ЗАПУСК ЧЕРЕЗ КОНФИГ-ФАЙЛ, НЕ ФЛАГИ. `max_payload` у nats-server
+    # существует ТОЛЬКО как настройка конфига: флага `--max_payload` нет, и
+    # на него сервер отвечает "flag provided but not defined", печатает usage
+    # и выходит — то есть контейнер уходит в рестарт-петлю, а всё, что к нему
+    # подключается, получает "Name or service not known". Ровно это и
+    # случилось на стенде ironmemo 07.08.2026, потому что правку внесли, не
+    # запустив. Отсюда же и гейт: e2e поднимает этот сервис живьём.
+    command: ["-c", "/etc/nats/nats.conf"]
     volumes:
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
       - nats-data:/data
 
 """

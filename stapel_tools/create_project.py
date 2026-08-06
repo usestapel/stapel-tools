@@ -866,6 +866,7 @@ def _write_shared_infra(project_dir: Path, frontends=None):
     locations point at; ``None`` = the historical single app at ``/``.
     """
     from ._compose_templates import (
+        NATS_CONF,
         NGINX_CONF,
         POSTGRES_ENSURE_DATABASES,
         render_nginx_conf,
@@ -878,6 +879,12 @@ def _write_shared_infra(project_dir: Path, frontends=None):
     ensure_script = project_dir / "service-configs" / "postgres" / "ensure-databases.sh"
     _write(ensure_script, POSTGRES_ENSURE_DATABASES)
     ensure_script.chmod(0o755)
+
+    # Пишется ВСЕГДА, а не только при broker="nats": компоуз монтирует его
+    # путём, и отсутствующий файл docker создал бы КАТАЛОГОМ — nats-server
+    # молча не нашёл бы конфиг. Лишний файл в проекте без NATS дешевле, чем
+    # этот отказ.
+    _write(project_dir / "nats" / "nats.conf", NATS_CONF)
 
 
 ENV_PRESETS = ("standalone", "studio")

@@ -167,6 +167,42 @@ jobs:
       - name: Generate (stapel-assemble, gates must be green)
         run: stapel-assemble e2e --type monolith --libs auth notifications --output-dir "$RUNNER_TEMP"
 
+      # ИНФРАСТРУКТУРА ДОЛЖНА СТАРТОВАТЬ, а не «валидироваться». Инцидент
+      # 07.08.2026: в compose стоял `--max_payload` — флага с таким именем у
+      # nats-server нет, сервер печатал usage и выходил, контейнер уходил в
+      # рестарт-петлю, а всё подключающееся получало "Name or service not
+      # known". `docker compose config -q` это пропускал: как ДОКУМЕНТ YAML
+      # был безупречен. Поймало падение стенда, а не CI.
+      #
+      # Проект под это генерируется ОТДЕЛЬНЫЙ: у e2e-проекта выше брокера
+      # нет (`stapel-assemble` его не выбирает), и проверять там было бы
+      # нечего — молчаливый скип вместо гейта.
+      - name: Инфра сгенерированного проекта РЕАЛЬНО поднимается (nats)
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from stapel_tools.create_project import create_project
+          create_project(name="natse2e", project_type="monolith", title="natse2e",
+                         url="https://x.dev", company_name="X", company_email="x@x.dev",
+                         modules=["core"], output_dir=Path("/tmp/natse2e"),
+                         use_submodules=False, init_git=False, broker="nats")
+          PY
+          cd /tmp/natse2e/natse2e
+          docker compose -f docker-compose.local.yml --env-file .env.local up -d nats
+          sleep 5
+          cid=$(docker compose -f docker-compose.local.yml --env-file .env.local ps -q nats)
+          state=$(docker inspect -f '{{.State.Status}}' "$cid")
+          restarts=$(docker inspect -f '{{.RestartCount}}' "$cid")
+          echo "nats: state=$state restarts=$restarts"
+          docker logs "$cid" | tail -20
+          # Неверный флаг убивает процесс сразу; restart:unless-stopped его
+          # поднимает, и счётчик рестартов — самый честный индикатор.
+          [ "$state" = "running" ] && [ "$restarts" = "0" ]
+          # ...и настройка, ради которой всё затевалось, ДЕЙСТВИТЕЛЬНО
+          # применилась — спрашиваем сам сервер, а не собственный конфиг.
+          docker exec "$cid" wget -qO- http://localhost:8222/varz | tr ',' '\n' | grep max_payload | tee /dev/stderr | grep -q 8388608
+          docker compose -f docker-compose.local.yml --env-file .env.local down -v
+
       - name: stapel-verify on the generated project (0 required)
         run: stapel-verify "$RUNNER_TEMP/e2e"
 
