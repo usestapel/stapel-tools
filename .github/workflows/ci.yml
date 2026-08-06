@@ -4,6 +4,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Ежедневно — ради джобы registry ниже. Она обязана срабатывать ТОГДА, КОГДА
+  # релизного прогона не было вовсе: два из трёх инцидентов этого класса —
+  # непушнутый лёгкий тег и лежащий провайдер — воркфлоу не создают, и любая
+  # проверка внутри релизного пути их структурно не видит.
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
 
 jobs:
   test:
@@ -85,6 +92,31 @@ jobs:
                   yaml.safe_load(base.read_text())
               print("OK", name)
           PY
+
+  # ─── Тег без релиза — не релиз ────────────────────────────────────────────
+  # Единственный шаг волны, который до сих пор никто не смотрел. Три способа
+  # промолчать, все случившиеся здесь: ненастроенный доверенный издатель
+  # (#48), лёгкий тег, который `--follow-tags` не пушит (0.15.2/0.15.3), и
+  # лежащий GitHub Actions (06.08.2026 — коммиты и теги на месте, прогонов
+  # ноль). Каждый раз находили руками.
+  #
+  # `fetch-depth: 0` обязателен: без тегов чек молча проверять нечего.
+  # `continue-on-error` — намеренно: у флота есть исторические дыры (~40 на
+  # 07.08.2026), и красить ими каждый PR значит получить гейт, который
+  # отключат. Смотреть сюда — на ежедневный прогон.
+  registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e . --quiet
+      - name: Каждый тег версии имеет релиз на PyPI
+        continue-on-error: true
+        run: stapel-registry-check .
 
   # ─── E2E: "оно едет" — the generated project must DRIVE, live, every run ──
   # (owner directive). Every live-run shishka is pinned here forever:
