@@ -301,7 +301,16 @@ NATS_SERVICE_BLOCK = """\
   nats:
     image: nats:2.10-alpine
     restart: unless-stopped
-    command: ["--jetstream", "--store_dir", "/data"]
+    # --max_payload: NATS caps a single message at 1 MiB by default, and a
+    # comm Function is request-reply over exactly that. A structured answer
+    # built from real text (an LLM completion over a meeting transcript, a
+    # batch of records) passes 1 MiB sooner than it looks. Measured on
+    # ironmemo 2026-08-06: the reply was refused, the caller heard nothing and
+    # timed out, and the work had already been done — see stapel_core's
+    # FunctionPayloadTooLarge for the guard that now makes that visible.
+    # 8 MiB is the headroom NATS itself considers reasonable; beyond it the
+    # answer is a reference, not a bigger message.
+    command: ["--jetstream", "--store_dir", "/data", "--max_payload", "8388608"]
     volumes:
       - nats-data:/data
 

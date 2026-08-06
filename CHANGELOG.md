@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.29.1] — 2026-08-06
+
+### Changed — the scaffolded NATS gets headroom for a Function reply
+
+`--max_payload 8388608`. NATS caps a single message at 1 MiB by default, and a
+comm Function is request-reply over exactly that. Measured on ironmemo
+(2026-08-06): an `llm.complete` reply over a meeting transcript exceeded the
+cap, the reply was refused inside the subscription callback, and the caller sat
+until its timeout while the work had already been done. stapel-core 0.19.0 makes
+that failure visible (`FunctionPayloadTooLarge`); this is the headroom half —
+and only headroom: past 8 MiB the answer has to be a reference, not a bigger
+message.
+
 ## [0.29.0] — 2026-08-05
 
 ### Fixed — NGX005: the cache canon cached a MISSING chunk for a year
