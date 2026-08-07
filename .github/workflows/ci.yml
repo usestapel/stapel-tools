@@ -37,7 +37,7 @@ jobs:
 
       - name: Tests with coverage
         run: |
-          pip install pytest pytest-cov pytest-django django djangorestframework "psycopg[binary]" "stapel-core @ git+https://github.com/usestapel/stapel-core.git" "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" --quiet
+          pip install pytest pytest-cov pytest-django "django<6.1" djangorestframework "psycopg[binary]" "stapel-core @ git+https://github.com/usestapel/stapel-core.git" "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" --quiet
           pytest tests/ \
             --cov=stapel_tools \
             --cov-report=term-missing \
@@ -157,7 +157,7 @@ jobs:
       - name: Install tools + generated-project runtime deps
         run: |
           pip install -e . --quiet
-          pip install pytest pytest-django django djangorestframework "psycopg[binary]" pyyaml \
+          pip install pytest pytest-django "django<6.1" djangorestframework "psycopg[binary]" pyyaml \
             django-debug-toolbar debugpy celery redis django-redis \
             "stapel-core @ git+https://github.com/usestapel/stapel-core.git" \
             "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" \
