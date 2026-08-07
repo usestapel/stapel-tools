@@ -58,6 +58,28 @@ CFG005  (error) **In a library checkout**, a CONFIG.MD row whose owner section
         no read anywhere, which is precisely the defect). Both halves are
         machine-readable, so the rule is an error, not a warning.
 
+CFG006  (error) A key the library OFFERS — a row of the dict handed to
+        ``AppSettings(defaults=...)`` — that the library's own code never
+        names anywhere else. The knob exists for whoever configures the
+        deployment, is listed in MODULE.md, resolves through the namespace and
+        returns its default forever, because nothing reads it. Настройка,
+        которую никто не читает, — это не настройка, а обещание.
+
+        Пришпилено живым дефектом (08.08.2026, миттудей):
+        ``LOGIN_NOTIFICATION_ENABLED`` лежал в ``stapel_auth`` с дефолтом
+        False, был описан в MODULE.md — и не читался ни одной строкой.
+        Письма «обнаружен подозрительный вход» уходили безусловно, погасить
+        их развёртывание не могло вообще никак, а документация обещала
+        обратное. Ни один гейт этого не видел: CFG003/CFG005 висят на
+        CONFIG.MD, а у либы CONFIG.MD нет вовсе, и вся семья молча скипалась.
+
+        CFG006 намеренно НЕ зависит от CONFIG.MD: обе половины вопроса —
+        объявление и потребление — целиком внутри кода. Считается любое
+        упоминание имени вне самого объявления (атрибут ``settings.KEY``,
+        строка в ``_resolve``, константа), потому что способов «прочитать»
+        много, а ноль упоминаний означает ровно одно. Осознанно
+        зарезервированную ручку глушите ``# noqa: CFG006`` на строке ключа.
+
 ``os.environ.setdefault(...)`` is a write, not a read (manage.py / wsgi set
 DJANGO_SETTINGS_MODULE that way) and is never flagged.
 
@@ -247,6 +269,85 @@ def _module_dicts(tree: ast.Module) -> dict[str, ast.Dict]:
             if isinstance(target, ast.Name):
                 out[target.id] = value
     return out
+
+
+def collect_offered_knobs(project: Path) -> dict[str, tuple[str, int]]:
+    """Ключи, которые библиотека ПРЕДЛАГАЕТ настраивать, и место объявления.
+
+    Строгий родственник :func:`collect_settings_defaults`. Тот берёт всякий
+    модульный словарь с именем ``DEFAULTS``/``*_DEFAULTS``/``DEFAULT_*`` и
+    разворачивает вложенные блоки — для сверки с CONFIG.MD это правильно,
+    там документируются и внутренние ручки. Для CFG006 такая широта
+    смертельна: под неё попадают реестры типов уведомлений, списки языков и
+    прочие словари, к настройкам отношения не имеющие, и правило утонуло бы
+    в шуме (замер по флоту: 82 «находки» широким неводом против 4 этим).
+
+    Поэтому здесь ТОЛЬКО словарь, реально отданный в
+    ``AppSettings(defaults=...)``, и только его верхний уровень: ровно тот
+    набор имён, который ``AppSettings`` умеет разрешать как ключ namespace.
+    """
+    offered: dict[str, tuple[str, int]] = {}
+    for py in _walk_py(project):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        module_dicts = _module_dicts(tree)
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or _callee_name(node.func) != "AppSettings":
+                continue
+            defaults: Optional[ast.AST] = None
+            for kw in node.keywords:
+                if kw.arg == "defaults":
+                    defaults = kw.value
+            if defaults is None and len(node.args) >= 2:
+                defaults = node.args[1]
+            if isinstance(defaults, ast.Name):
+                defaults = module_dicts.get(defaults.id)
+            if not isinstance(defaults, ast.Dict):
+                continue
+            for key_node in defaults.keys:
+                if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+                    offered.setdefault(key_node.value, (str(py), key_node.lineno))
+    return offered
+
+
+def collect_key_consumption(
+    project: Path, declarations: dict[str, tuple[str, int]]
+) -> set[str]:
+    """Имена ключей, которые код называет ВНЕ места их объявления.
+
+    Тот же принцип, что у :func:`collect_key_mentions`: спрашиваем не «есть
+    ли канонический read», а слабый, зато точно проверяемый вопрос — упомянут
+    ли ключ в коде вообще. Способов прочитать настройку много
+    (``settings.KEY``, ``_resolve("KEY", ...)``, константа, передача строки в
+    хелпер), и требовать одну форму значило бы получить правило, которое
+    ругается на исправный код.
+
+    Ключевая деталь — вычитание САМОГО объявления: строка-ключ внутри
+    ``defaults={...}`` это и есть объявление, и засчитывать её за
+    потребление означало бы, что правило не сработает никогда.
+    """
+    consumed: set[str] = set()
+    for py in _walk_py(project):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        path = str(py)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute):
+                consumed.add(node.attr)
+            elif isinstance(node, ast.Name):
+                consumed.add(node.id)
+            elif isinstance(node, ast.keyword) and node.arg:
+                consumed.add(node.arg)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                site = declarations.get(node.value)
+                if site is not None and site == (path, node.lineno):
+                    continue  # это и есть объявление
+                consumed.add(node.value)
+    return consumed
 
 
 def collect_settings_defaults(project: Path) -> dict[str, tuple[str, int]]:
@@ -451,6 +552,39 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
             f"one audited place and in CONFIG.MD; suppress a deliberate exception "
             f"with '# noqa: CFG001'",
         ))
+
+    # ------------------------------------------------------------------ CFG006
+    # СТОИТ ВЫШЕ ранних выходов намеренно. Вся семья CFG002-CFG005 висит на
+    # CONFIG.MD и при его отсутствии молча скипается — а `stapel-auth`,
+    # библиотека, где мёртвая ручка стоила первого впечатления о продукте,
+    # CONFIG.MD не имеет вовсе. Правило, которое выключается там, где дефект
+    # и живёт, — не правило.
+    offered = collect_offered_knobs(project)
+    if offered:
+        consumed = collect_key_consumption(project, offered)
+        for key in sorted(offered):
+            if key in consumed:
+                continue
+            decl_path, decl_line = offered[key]
+            lines = line_cache.get(decl_path)
+            if lines is None:
+                try:
+                    lines = Path(decl_path).read_text(encoding="utf-8").splitlines()
+                except (OSError, UnicodeDecodeError):
+                    lines = []
+                line_cache[decl_path] = lines
+            raw = lines[decl_line - 1] if 0 < decl_line <= len(lines) else ""
+            suppressed = _noqa_rules(raw)
+            if suppressed is not None and (not suppressed or "CFG006" in suppressed):
+                continue
+            findings.append(Finding(
+                decl_path, decl_line, "CFG006",
+                f"'{key}' is offered as a setting but the library never reads "
+                f"it — the knob resolves to its default forever, so whoever "
+                f"sets it in a deployment changes nothing. Wire it, or drop "
+                f"the row; suppress a deliberate reservation with "
+                f"'# noqa: CFG006'",
+            ))
 
     config_md = find_config_md(project)
     if config_md is None:
