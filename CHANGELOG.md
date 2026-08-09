@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.35.0] — 2026-08-10
+
+### Added — `stapel_tools.template_contract`: the sixth artifact, for the one surface with no contract
+
+Django templates shipped in a library are an extension surface — a host drops
+a file of the same name into a directory that resolves first and the letter is
+theirs. It was the only such surface in the fleet with nothing declared about
+it: `capabilities.json`, `errors.json`, `flows.json`, `schema.json` and
+`llms.txt` between them name not one template path and not one context
+variable. So a host obtained the contract by reading the library's service
+code, and the library could break that host twice over with every test on both
+sides staying green:
+
+* rename a context variable → Django's `string_if_invalid = ''` renders the
+  hole as an empty string, so the mail ships with a blank where the OTP code
+  was: 200 OK, no exception, nobody can log in;
+* rename a template file → the host's override shadows nothing and the
+  LIBRARY's letter goes out under the host's brand, while the host's guard
+  ("this resolves from our folder, not site-packages") stays GREEN, because it
+  asserts the name the host itself chose and that file still exists. The guard
+  matches by name while the override is dead.
+
+`build_document()` emits `docs/templates.json` — routing key → template path →
+the whole `{% extends %}`/`{% include %}` chain → the context variables the
+library passes, grouped by provenance. Same discipline as the other emitters:
+deterministic render, `--check` drift gate, loud failure instead of a partial
+artifact.
+
+Two derivation halves, neither of them retyped by hand:
+
+* `scan_call_site()` reads the Python AST of the module that renders. Every
+  literal-key write into the context dict is a declared variable; a write
+  reachable only under an `if` is `conditional` and carries the guard's source
+  text; a write under a computed key is reported as `dynamic_keys` rather than
+  guessed at.
+* `scan_source()` / `resolve_chain()` read the templates with **Django's own
+  lexer and filter-expression parser**, not a regex — so a filter argument
+  (`{{ host|default:name }}` reads both) is a read, a loop variable is not a
+  context variable, and an `{% include %}` sitting inside an `{% if %}`
+  contributes optional rather than required reads.
+
+It is loud where it cannot be sure: an unmodelled template tag, a template a
+route names but nobody ships, a render call site whose wiring no longer matches
+the declared one, or a template that reads a variable no provenance declares —
+each aborts emission naming the thing. And it states its own edges in the
+artifact's `limits` rather than implying completeness.
+
+`load_contract()` / `declared_for()` are the consumer half, for a HOST project's
+gate: point them at the installed dependency and assert that every template you
+override still exists upstream at that exact path and that every variable your
+template reads is still declared. `declared_for()` raises on an unknown path
+instead of returning an empty set — an empty set passes a subset check, which
+is precisely how the dead-override failure hides.
+
 ## [0.34.0] — 2026-08-09
 
 ### Fixed — the scaffold's `@stapel/core` pin builds again
