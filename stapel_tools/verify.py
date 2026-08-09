@@ -25,14 +25,17 @@ Linters composed (in this order)
   trap)
 * ``stapel_tools.config_lint``     — CFG-codes (config-in-one-place law)
 * ``stapel_tools.migration_lint``  — MIG-codes (expand/contract discipline)
-* ``stapel_tools.swap_lint``       — SWAP001/SWAP002/SWAP003 (§55
+* ``stapel_tools.swap_lint``       — SWAP001/SWAP002/SWAP003/SWAP004 (§55
   anti-lock-in: swappable model/presenter indirection, DTOs built only
   through a presenter, and no hardcoded dotted path into another top-level
   package — the ``stapel-workspaces 0.19.0`` shape that worked in a monolith
   and answered a permanent 503 in a split deployment, because a symbol
   resolution has no remote form. A path that comes from configuration is the
   extension mechanism and is never flagged; only a string literal naming
-  somebody else's package is)
+  somebody else's package is. SWAP004 bans importing a vendor SDK a fleet
+  library owns the integration for — ``livekit`` outside ``stapel_video`` —
+  because a provider call added in product code is a capability no other
+  consumer gets and a fix the product can no longer receive)
 * ``stapel_tools.doc_lint``        — DOC001 (§55 DOC-FIELD: model field docs,
   warning-level while the legacy sweep is in progress)
 * ``stapel_tools.surface_lint``    — SUR-codes (pre-merge gate against

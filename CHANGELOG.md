@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.34.0] — 2026-08-09
+
+### Added — SWAP004: a vendor SDK belongs to the library that owns the seam
+
+A product carried its own copy of a LiveKit provider next to `stapel-video`'s.
+It was not a bad copy — it was *ahead* of the library on two capabilities, and
+that is the whole mechanism. A fork of a provider layer never starts as a fork;
+it starts as one call the library did not have yet, added where the engineer
+was standing. Every capability added there is one no other consumer ever gets,
+and the day the library fixes something real (a rename that reaches a call
+already in progress) the product with the fork cannot receive the fix at all.
+
+`SWAP004` (error) flags a direct import of a vendor SDK a fleet library owns
+the integration for, from anywhere outside that library — today `livekit`
+outside `stapel_video`, from a table (`_VENDOR_SDK_OWNERS`) that gains a row
+the day a library ships the capability for the fleet, not before. It is not a
+dependency ban: depend on the SDK, run it in a worker. What you may not do is
+*import* it, because that is the one act that puts a provider call in product
+code. The fix is always the same — add the capability to the library's provider
+contract and call it through the seam.
+
+Lazy imports inside functions are flagged too (that is where a fork actually
+grows); relative imports, look-alike package names, `tests/`, and
+`# noqa: SWAP004` are not. Composed into `stapel-verify` with the rest of the
+family.
+
 ## [0.33.0] — 2026-08-09
 
 ### Added — `stapel-readme`: README.md becomes an assembled artifact, not a hand-written monolith

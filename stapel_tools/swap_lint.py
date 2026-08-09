@@ -51,6 +51,33 @@ SWAP003  (error) A **hardcoded dotted-path literal naming a symbol in another
          Functions, which are topology-independent by construction.
          Suppress with ``# noqa: SWAP003``.
 
+SWAP004  (error) A direct import of a **vendor SDK that a fleet library owns
+         the integration for**, from anywhere outside that library. The
+         table is tiny and explicit (``_VENDOR_SDK_OWNERS``): today
+         ``livekit`` belongs to ``stapel_video``.
+
+         Prototype: a product that carried its own copy of the LiveKit
+         provider next to the library's. It was not a bad copy — it was
+         AHEAD of the library on two capabilities. That is the whole
+         mechanism: a fork of a provider layer never starts as a fork, it
+         starts as one call the library did not have yet, added where the
+         engineer was standing. Every capability added there is a capability
+         no other consumer ever gets, and the day the library fixes
+         something (a rename that reaches a live call), the product with the
+         fork cannot receive the fix at all.
+
+         The rule is what makes "upstream it" a mechanism instead of a
+         request. With it, the next engineer who needs a new vendor call
+         physically cannot add it in the product, so it lands in the library
+         and every consumer gets it. Without it the whole arrangement is a
+         prose obligation, which is the defect class this file exists for.
+
+         Not a dependency ban: a product may still depend on the SDK
+         (transitively it does), run it in a worker, or vendor an unrelated
+         piece. What it may not do is *import* it — the one act that puts a
+         provider call in product code. Suppress a deliberate exception with
+         ``# noqa: SWAP004``.
+
 The line SWAP003 draws (this is the whole design)
 --------------------------------------------------
 A dotted path is the fleet's *extension mechanism*, so the rule must not
@@ -897,6 +924,70 @@ def find_swap003(project: Path, ours: Optional[set[str]] = None) -> list[Violati
 
 
 # ---------------------------------------------------------------------------
+# SWAP004 — a vendor SDK imported outside the library that owns it
+# ---------------------------------------------------------------------------
+
+#: Top-level import name of a vendor SDK -> the fleet package that owns the
+#: integration with it. Deliberately a table rather than a heuristic: each row
+#: is a decision that a library now carries this vendor for the whole fleet,
+#: and is added the day that library ships the capability, not before. Keys are
+#: matched on the TOP-LEVEL package only (``livekit.api`` is ``livekit``).
+_VENDOR_SDK_OWNERS = {
+    # stapel-video owns the video-provider seam: token minting, the live
+    # rename/kick pair, room metadata, the health probe and recording egress.
+    # A product reaching for livekit.api directly is re-growing the fork the
+    # seam replaced.
+    "livekit": "stapel_video",
+}
+
+
+def find_swap004(project: Path, ours: Optional[set] = None) -> list:
+    """Vendor-SDK imports outside the fleet library that owns the vendor."""
+    if ours is None:
+        ours = own_package_names(project)
+    violations: list = []
+    for py in _walk_py(project):
+        tree, lines = _read(py)
+        if tree is None:
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                # A relative import can never name a foreign top-level package.
+                if node.level or not node.module:
+                    continue
+                imported = [node.module]
+            else:
+                continue
+            for dotted in imported:
+                top = _canon_token(dotted.split(".")[0])
+                owner = _VENDOR_SDK_OWNERS.get(top)
+                if owner is None:
+                    continue
+                if _canon_token(owner) in ours:
+                    continue  # this IS the library that owns the vendor
+                line = lines[node.lineno - 1] if node.lineno <= len(lines) else ""
+                suppressed = _noqa_rules(line)
+                if suppressed is not None and (
+                    not suppressed or "SWAP004" in suppressed
+                ):
+                    continue
+                violations.append(Violation(
+                    str(py), node.lineno, "SWAP004",
+                    f"`{dotted}` is a vendor SDK owned by `{owner}`: import it "
+                    f"there, not here. A provider call added where you are "
+                    f"standing is a capability no other consumer of `{owner}` "
+                    f"ever gets — and it is how this product stops being able "
+                    f"to receive fixes to that provider at all. Add the "
+                    f"capability to `{owner}`'s provider contract and call it "
+                    f"through the seam",
+                ))
+    violations.sort(key=lambda v: (v.path, v.line))
+    return violations
+
+
+# ---------------------------------------------------------------------------
 # combined driver
 # ---------------------------------------------------------------------------
 
@@ -907,6 +998,7 @@ def lint_project(project: Path) -> list[Violation]:
     violations = find_swap001(project, entries)
     violations.extend(find_swap002(project))
     violations.extend(find_swap003(project))
+    violations.extend(find_swap004(project))
     violations.sort(key=lambda v: (v.path, v.line, v.rule))
     return violations
 

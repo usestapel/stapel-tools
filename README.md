@@ -404,6 +404,24 @@ allowlist to add yourself to. `tests/`, `test_*.py`, `migrations/` and
 settings assignment is data, not resolution, and is never seen. Suppress a
 deliberate exception with `# noqa: SWAP003`. Composed into `stapel-verify`.
 
+SWAP004 (error) **a vendor SDK imported outside the fleet library that owns
+the integration** — today `livekit` outside `stapel_video`. Prototype: a
+product carrying its own copy of the LiveKit provider next to the library's.
+It was not a bad copy; it was *ahead* of the library on two capabilities, and
+that is the mechanism — a fork of a provider layer never starts as a fork, it
+starts as one call the library did not have yet, added where the engineer was
+standing. Every capability added there is one no other consumer gets, and the
+day the library fixes something the product with the fork cannot receive the
+fix at all.
+
+Not a dependency ban: depend on the SDK, run it in a worker, whatever. What
+you may not do is *import* it, because that is the one act that puts a
+provider call in product code. The fix is always the same: add the capability
+to the library's provider contract and call it through the seam. The
+owner table (`_VENDOR_SDK_OWNERS`) is explicit and tiny — a row is added the
+day a library ships the capability for the whole fleet, not before. Suppress
+with `# noqa: SWAP004`.
+
 Measured across the fleet on release: 34 raw hits, 3 after triage.
 
 ### `stapel-llms-txt` — generate the module's own `docs/llms.txt`
