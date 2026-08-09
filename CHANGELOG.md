@@ -1,5 +1,74 @@
 # Changelog
 
+## [0.33.0] — 2026-08-09
+
+### Added — `stapel-readme`: README.md becomes an assembled artifact, not a hand-written monolith
+
+Every README in the fleet was hand-written, so every README rotted, and it
+rotted in the part a reader trusts most: the numbers. A hand-typed version, a
+hand-copied badge row, a hand-curated list of links are all restatements of
+artifacts that already exist in machine form — and restating them by hand is a
+promise to restate them again on every release, which nobody keeps. The fleet
+has three tracker items about exactly this failure class.
+
+The split (#257): the **static** half — what the library is, why it exists, how
+to think about it — lives in `docs/readme.md`, written by a human. The
+**generated** half is assembled by `stapel-readme` from `pyproject.toml` and
+`docs/{capabilities,schema,errors,flows}.json`: title, badge row, install line,
+an "at a glance" facts table (version, Python/Django floors, HTTP operations,
+config axes, usage surface, extension points, error codes, flows, fleet
+dependencies), documentation links in every language the module ships,
+cross-links to READMEs in other languages, and the licence footer.
+
+Three properties, all of them the point:
+
+- **A badge that cannot be true is not emitted.** Every badge of
+  `docs/pending/badge-canon.md` §1.1 has its precondition checked in the
+  checkout — CI iff `ci.yml` exists, coverage iff `codecov.yml` exists *and*
+  the workflow uploads, `python` iff there are `major.minor` classifiers,
+  `license` iff there is a `LICENSE`, `llms.txt` iff the file exists.
+  Publication is the one fact a checkout cannot prove, so it is declared
+  (`[tool.stapel.readme] pypi`, default true) and `--verify` checks the
+  declaration against PyPI over the network — deliberately outside the
+  hermetic drift gate. An unpublished module gets a `status-unreleased` badge
+  and a `pip install git+…` line (canon §4.1) instead of a badge rendering
+  "package or version not found".
+- **Contradictory inputs stop the render.** A `capabilities.json` version that
+  disagrees with `pyproject.toml` fails the emission with both numbers and
+  writes nothing. That is #226 verbatim; a generator that quietly preferred the
+  fresher input would leave the other free to rot forever.
+- **Doc links are absolute.** README.md is also the PyPI long description,
+  where a relative link is a 404 — as every hand-written README in the fleet
+  currently demonstrates.
+
+`--check` is the drift gate (byte-for-byte, same contract as
+`stapel-llms-txt`); the render is deterministic; `docs/readme.<lang>.md`
+produces `README.<lang>.md` with a language switch between them.
+
+Proven end to end on `stapel-auth` (112 operations, 28 axes, 127 error codes,
+4 flows, 3 error-doc languages) and `stapel-mailtrap` (capabilities only, no
+schema/flows/errors) — the two extremes. Rollout plan for the rest:
+`docs/pending/readme-as-artifact.md` in the workspace.
+
+### Added — `stapel-storefront`: the public page, generated from the catalogue
+
+We publish 26 packages and ship an `llms.txt` everywhere so agents can discover
+us, while a human who follows a link sees an organisation page of bare
+repository names (#259). `stapel-storefront` assembles that page — a library
+table with badges, the roll-up totals, and the quickstart — from the catalogue
+aggregate (`stapel_tools.catalog`, drift-gated per #184) joined with each
+module's `pyproject.toml` for the badge preconditions.
+
+No version number is typed anywhere on the page: the version and download cells
+are live shields/pepy badges, so a page committed today still tells the truth
+about a release made tomorrow. Badges come from `stapel_tools.readme`
+unchanged — one canon, one implementation, used by both the module READMEs and
+the storefront.
+
+`--format md` writes `index.md` (the shape GitHub renders as an organisation
+profile page — no hosting, no DNS, no build); `--format html` writes a
+self-contained `index.html`; `--check` is the drift gate.
+
 ## [0.32.0] — 2026-08-09
 
 ### Added — SWAP003: a dotted path may point at your own things, or at what config chose. Not at somebody else's package.
