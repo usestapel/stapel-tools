@@ -370,6 +370,34 @@ MEDIA_URL = "http://localhost/media/{{SLUG}}/"
 INTERNAL_IPS = ["127.0.0.1", "localhost"]
 """
 
+TEST_SETTINGS = """\
+from stapel_core.templates import strict_template_variables
+
+from .local import *  # noqa
+
+# A missing template variable renders as a visible marker here instead of
+# Django's default empty string.
+#
+# The default is what turns a renamed context variable into a hole in a
+# delivered email: the template still renders, the suite still passes, and only
+# the message that went out has a blank where the OTP code was. 200 OK, no
+# exception, nobody can log in. Scoped to tests on purpose — it is not a
+# production rendering change, and a marker in a dev page is a surprise nobody
+# asked for.
+#
+# In a test that renders, assert on it:
+#
+#     from stapel_core.templates import assert_no_missing_variables
+#     assert_no_missing_variables(html)
+#
+# Note this is the NET, not the closure: it catches the variable a test happens
+# to exercise. The closure for a template you override from a library is that
+# library's docs/templates.json, asserted in CI
+# (stapel_tools.template_contract.declared_for).
+TEMPLATES = strict_template_variables(TEMPLATES)  # noqa: F405
+"""
+
+
 PROD_SETTINGS = """\
 import os
 
@@ -468,7 +496,7 @@ from django.contrib import admin  # noqa: F401 — import kept ready for the fir
 
 PYTEST_INI = """\
 [pytest]
-DJANGO_SETTINGS_MODULE = config.settings.local
+DJANGO_SETTINGS_MODULE = config.settings.test
 python_files = tests.py test_*.py *_test.py
 python_classes = Test* *Tests
 python_functions = test_*

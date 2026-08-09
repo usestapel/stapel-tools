@@ -34,6 +34,7 @@ from ._templates import (
     MANAGE_PY,
     MODELS_PY,
     PROD_SETTINGS,
+    TEST_SETTINGS,
     PYTEST_INI,
     REQUIREMENTS_TXT,
     SERVICE_YML,
@@ -243,6 +244,9 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / "config" / "settings" / "dev.py": render(DEV_SETTINGS, ctx),
         root / d / "config" / "settings" / "local.py": render(LOCAL_SETTINGS, ctx),
         root / d / "config" / "settings" / "prod.py": render(PROD_SETTINGS, ctx),
+        # Tests run on this one (pytest.ini) — local plus the
+        # missing-template-variable marker.
+        root / d / "config" / "settings" / "test.py": render(TEST_SETTINGS, ctx),
         # Boot-smoke gate (R3/§44, `make boot-smoke` — part of `make
         # controls`): the service-dir counterpart of the minimal preset's
         # config/settings_boot_smoke.py.

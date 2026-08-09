@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.36.0] — 2026-08-10
+
+### Added — a generated project is born knowing when a template variable went missing
+
+The scaffold now writes `config/settings/test.py` (`from .local import *` plus
+stapel-core 0.21's `strict_template_variables(TEMPLATES)`) and points
+`pytest.ini` at it. An unresolved template variable renders as a visible marker
+under test instead of Django's default empty string, and the generated comment
+says how to assert on it and — the part that matters — that it is the net and
+not the closure: the closure for a template you override from a library is that
+library's `docs/templates.json`, read with `template_contract.declared_for`.
+
+The mechanism existed one product at a time before this. That is how the next
+product starts where the last one did.
+
 ## [0.35.0] — 2026-08-10
 
 ### Added — `stapel_tools.template_contract`: the sixth artifact, for the one surface with no contract
