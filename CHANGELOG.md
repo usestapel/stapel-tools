@@ -2,6 +2,14 @@
 
 ## [0.34.0] — 2026-08-09
 
+### Fixed — the scaffold's `@stapel/core` pin builds again
+
+`@stapel/notifications-react` 0.6.1 imports `useErrorText`, which `@stapel/core`
+only exports from 0.11.0; the scaffold still pinned 0.8.1. npm installs that
+combination happily — the peer range is `>=0.3.0 <1.0.0` — and the generated
+frontend then fails at BUILD time on a missing export, which is what the
+`e2e-generated-project` job has been red on.
+
 ### Added — SWAP004: a vendor SDK belongs to the library that owns the seam
 
 A product carried its own copy of a LiveKit provider next to `stapel-video`'s.

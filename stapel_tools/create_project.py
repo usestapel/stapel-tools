@@ -558,7 +558,11 @@ FRONTEND_REACT_LIBS = {
 # FRONTEND_REACT_LIBS docstring above for why npm (not the sibling
 # checkout's workspace pin) is the source of truth here.
 FRONTEND_REACT_CORE_DEPS = {
-    "@stapel/core": "0.8.1",
+    # 0.11.0, not 0.8.1: `@stapel/notifications-react` 0.6.1 imports
+    # `useErrorText`, which core only exports from 0.11.0. A peer range this
+    # wide (`>=0.3.0 <1.0.0`) does not catch that — npm installs happily and
+    # the generated frontend fails at BUILD time on a missing export.
+    "@stapel/core": "0.11.0",
     "@tanstack/react-query": "5.101.2",
 }
 # Only pulled in when >=1 selected module's registry entry has
