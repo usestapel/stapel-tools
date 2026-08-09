@@ -1,6 +1,6 @@
 """`stapel-docs` — bilingual docs/api.en.md + docs/api.ru.md generation and
-its pre-commit drift gate (owner directive: "документация по api/флоу — в
-идеале двуязычная")."""
+its pre-commit drift gate (owner directive: "api/flow docs should ideally be
+bilingual")."""
 import shutil
 from pathlib import Path
 

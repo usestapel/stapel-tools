@@ -1,4 +1,4 @@
-"""stapel-catalog --index tests (agent-knowledge-base.md §64 "Волна 1").
+"""stapel-catalog --index tests (agent-knowledge-base.md §64 "Wave 1").
 
 Exercises :func:`stapel_tools.catalog.build_index` — the full machine index
 extension over :func:`build_catalog`: per module, ``flows``/``errors``

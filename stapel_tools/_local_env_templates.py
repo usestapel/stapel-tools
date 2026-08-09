@@ -22,8 +22,8 @@ Two pieces:
 
 2. ``.env.local`` templates — a COMMITTED dev environment file (owner decision
    revising the first §57 cut: a gitignored .env.local never reaches the next
-   developer's clone — "до Олега не доедет"; clone → compose up must just
-   work). Committed means every value is DETERMINISTIC and RECOGNIZABLY a
+   developer's clone — "it won't make it to Oleg"; clone → compose up must
+   just work). Committed means every value is DETERMINISTIC and RECOGNIZABLY a
    dev value, never a real secret:
 
    - ``SECRET_KEY``/``JWT_SECRET_KEY`` carry the ``django-insecure-dev-``
@@ -62,7 +62,7 @@ ENV_LOCAL_BANNER = """\
 # value is a deterministic, recognizable dev marker (django-insecure-dev-*
 # keys, default postgres password, admin/admin superuser).
 #
-# СТЕНДЫ/ПРОД — ЗАПРЕЩЕНО. Never point a stage/prod deployment at this file
+# STAGE/PROD — FORBIDDEN. Never point a stage/prod deployment at this file
 # or copy values out of it:
 #   - deploy/deploy.sh refuses any env with these markers (deploy/check-env.sh);
 #   - stapel-core's prodguard refuses django-insecure-* SECRET_KEY and the

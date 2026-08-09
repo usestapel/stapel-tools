@@ -1,7 +1,7 @@
 """Shared per-module doc-artifact discovery for `stapel-gen-client` /
-`stapel-docs` (owner directive, `docs/pending/profile-fields.md` "Дополнение
-владельца" §17.07 — "раз мы оверрайдим профайл, его фронтенд-пара должна
-уметь это грамотно обрабатывать").
+`stapel-docs` (owner directive, `docs/pending/profile-fields.md` "Owner
+addendum" §17.07 — "if we override a profile, its frontend pair must be
+able to handle that properly").
 
 Both commands need the same thing: which backend module "slices" does this
 PROJECT carry a committed OpenAPI ``schema.json`` for, and where do its

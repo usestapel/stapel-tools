@@ -1135,10 +1135,10 @@ def _check_contract(model: _Model, notes: list) -> list[Finding]:
 
     if not build_infos and not labels:
         notes.append(
-            "stapel-frontend-delivery-lint: FED004 — контрактный слепок не заведён "
-            "(нет dist/build-info.json и нет compose-лейбла со слепком), проверять "
-            "нечего. Это НЕ 'чисто': рассинхрон фронта и бэка сейчас ничем не "
-            "ловится (вердикт §2.4)."
+            "stapel-frontend-delivery-lint: FED004 — no contract snapshot set up "
+            "(no dist/build-info.json and no compose label with a snapshot), "
+            "nothing to check. This is NOT 'clean': a frontend/backend "
+            "desync currently goes uncaught (verdict §2.4)."
         )
         return findings
 
@@ -1243,21 +1243,21 @@ def lint_project(target: Path, *, notes: Optional[list] = None) -> list[Finding]
 
     if not conf_paths:
         notes.append(
-            f"stapel-frontend-delivery-lint: под {target} не найдено ни одного "
-            f"nginx-конфа ({', '.join(CONF_GLOBS)}) — FED001/FED005 проверять нечего, "
-            f"это не 'чисто'."
+            f"stapel-frontend-delivery-lint: found no nginx conf under {target} "
+            f"({', '.join(CONF_GLOBS)}) — nothing for FED001/FED005 to check, "
+            f"this is not 'clean'."
         )
     if not compose_paths:
         notes.append(
-            "stapel-frontend-delivery-lint: не найдено ни одного docker-compose*.yml — "
-            "доказать наполнение раздаваемых директорий нечем; FED002/FED003 не "
-            "выполнялись."
+            "stapel-frontend-delivery-lint: found no docker-compose*.yml — "
+            "nothing to prove the served directories are populated; FED002/FED003 "
+            "did not run."
         )
     if not env_files:
         notes.append(
-            "stapel-frontend-delivery-lint: не найдено env-шаблона "
-            f"({', '.join(ENV_TEMPLATE_GLOBS)}) — пин тега фронта негде хранить, "
-            "FED003 сработает на любую FRONTEND_*-переменную."
+            "stapel-frontend-delivery-lint: found no env template "
+            f"({', '.join(ENV_TEMPLATE_GLOBS)}) — nowhere to pin the frontend tag, "
+            "FED003 will fire on any FRONTEND_* variable."
         )
 
     roots: list[StaticRoot] = []
@@ -1274,9 +1274,9 @@ def lint_project(target: Path, *, notes: Optional[list] = None) -> list[Finding]
 
     if not roots and conf_paths:
         notes.append(
-            "stapel-frontend-delivery-lint: в найденных nginx-конфах нет ни одной "
-            "локации, раздающей фронт с диска (entry-документ или хешированные "
-            "ассеты) — FED001 нечего проверять."
+            "stapel-frontend-delivery-lint: none of the nginx confs found have a "
+            "location serving the frontend from disk (entry document or hashed "
+            "assets) — nothing for FED001 to check."
         )
 
     for root in roots:

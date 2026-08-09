@@ -23,7 +23,7 @@ Placeholders (``{{KEY}}``), filled by ``create_project._create_monolith``:
                          default from docker-compose.local.yml's env, not
                          from this file.
 
-Colour tokens (§68 color-token-matrix, Ф5): ``THEME_JSON`` is this project's
+Colour tokens (§68 color-token-matrix, P5): ``THEME_JSON`` is this project's
 OWN ``stapel.theme.json`` — the neutral role dictionary (surface*/text*/
 border*/brand*/link + success/warning/error/info x {base,-bg,-border,-on}),
 seeded with a sensible bluish ``brand`` ramp and standard status colours,
@@ -89,7 +89,7 @@ TSCONFIG_JSON = """\
 """
 
 # Used INSTEAD of TSCONFIG_JSON whenever the scripted-nav route tree is
-# active (Ф1) — ``src/nav.generated.ts`` does ``import stapelNavOverrides
+# active (P1) — ``src/nav.generated.ts`` does ``import stapelNavOverrides
 # from "../stapel.nav.json"`` (the deep-merge-over-default override channel,
 # read again at RUNTIME by the exact same ``resolveNav`` call the shipped
 # app's ``<AppShell/>`` would use — see that file's own docstring), which
@@ -202,7 +202,7 @@ createRoot(document.getElementById("root")!).render(
 
 
 def render_main_tsx(*, routing_active: bool, has_modules: bool) -> str:
-    """``frontend/src/main.tsx`` — the collapse rule (owner directive, Ф1):
+    """``frontend/src/main.tsx`` — the collapse rule (owner directive, P1):
     a selection with NO routing feature active (no ``--auth``, no
     ``--landing``, no selected pair with nav entries) returns ``MAIN_TSX``
     UNCHANGED, byte for byte — the exact current clean-shell output.
@@ -534,7 +534,7 @@ def _ts_string_array(values: list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Scripted-fullstack navigation (Ф1) — nav.generated.ts / routes.tsx /
+# Scripted-fullstack navigation (P1) — nav.generated.ts / routes.tsx /
 # ProtectedRoute.tsx / stapel.nav.json / LandingPage.tsx
 #
 # Consumes create_project.FRONTEND_REACT_LIBS[<key>]["nav"] — the manually
@@ -668,7 +668,7 @@ def render_routes_tsx(
     """``frontend/src/routes.tsx`` — react-router v7's ``createBrowserRouter``
     (v7 ships v6-future behaviour as ITS OWN default; there is no
     future-flags object to pass here, unlike v6). The decision tree (owner
-    directive, Ф1):
+    directive, P1):
 
     - ``"/"`` — ``<LandingPage/>`` when ``--landing``, else a redirect to
       "/app" (only reachable when routing is active at all, which this
@@ -718,7 +718,7 @@ def render_routes_tsx(
     lines: list[str] = [
         "/**",
         " * GENERATED — react-router v7 route tree (scripted-fullstack",
-        " * navigation, Ф1 owner directive: one scripted command produces a",
+        " * navigation, P1 owner directive: one scripted command produces a",
         " * working navigated fullstack, no LLM in the loop). react-router v7",
         " * ships v6-future behaviour as its OWN default — there is no",
         " * future-flags object to configure here.",
@@ -791,7 +791,7 @@ import { useAuthSessionState } from "@stapel/auth-react";
 
 /**
  * Gates "/app" behind an authenticated session (scripted-fullstack
- * navigation, Ф1):
+ * navigation, P1):
  *  - not ready yet (session still restoring/probing) -> render nothing, no
  *    flash of a login redirect before the real answer is known.
  *  - ready, not authenticated -> redirect to "/login".

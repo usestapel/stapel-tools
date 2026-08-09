@@ -10,7 +10,7 @@ not a pre-commit-managed venv, since stapel-verify needs THIS project's
 Django settings importable and eslint needs THIS project's plugin config.
 
 Plus the regenerator-of-everything-that-can-be-regenerated set (owner
-directive: "в pre-commit должен быть регенератор ВСЕГО, что можно"):
+directive: "pre-commit should have a regenerator for everything it can"):
 config-manifest-check (CONFIG.MD), reserved-paths-check
 (reserved-paths.json, frontend projects only), api-docs-check
 (docs/api.en.md + api.ru.md, every project — `stapel-docs`), gen-client-
@@ -57,8 +57,8 @@ _RESERVED_PATHS_HOOK = """\
         always_run: true
 """
 
-# stapel-docs --check (owner directive: "документация по api/флоу — в
-# идеале двуязычная"): regenerates docs/api.en.md + docs/api.ru.md from the
+# stapel-docs --check (owner directive: "api/flow docs should ideally
+# be bilingual"): regenerates docs/api.en.md + docs/api.ru.md from the
 # project's own schema.json/flows.json/errors.json (+ translations, when a
 # module ships them) and fails the commit on drift; auto-fix by running
 # `stapel-docs .` (no --check) and committing the result. Wired into EVERY
@@ -76,8 +76,8 @@ _API_DOCS_HOOK = """\
         always_run: true
 """
 
-# stapel-gen-client --check (docs/pending/profile-fields.md "Дополнение
-# владельца" §17.07, tier 2): regenerates the project's OWN typed-client
+# stapel-gen-client --check (docs/pending/profile-fields.md "Owner
+# addendum" §17.07, tier 2): regenerates the project's OWN typed-client
 # override (frontend/src/api/generated-override/<mod>/schema.ts) from its
 # own schema.json and fails the commit on drift; auto-fix by running
 # `stapel-gen-client .` (no --check) and committing the result. The command
@@ -97,7 +97,7 @@ _GEN_CLIENT_HOOK = """\
         always_run: true
 """
 
-# tokens-check (§68 color-token-matrix, Ф5): regenerates
+# tokens-check (§68 color-token-matrix, P5): regenerates
 # frontend/src/stapel-tokens/ (the CSS custom-property core, §68 neutral
 # colour-role dictionary) from this project's OWN frontend/stapel.theme.json
 # and fails the commit on drift. Runs THROUGH the frontend's own npm script

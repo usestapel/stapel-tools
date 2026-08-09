@@ -114,7 +114,7 @@ done
 
 if [ "$fail" -ne 0 ]; then
     echo "" >&2
-    echo "check-env: REFUSING to deploy a default/dev env. Сгенерируйте боевой env — дефолтный запрещён (see .env.example; stapel-core prodguard would refuse these values at boot anyway)." >&2
+    echo "check-env: REFUSING to deploy a default/dev env. Generate a real prod env — the default is forbidden (see .env.example; stapel-core prodguard would refuse these values at boot anyway)." >&2
     exit 1
 fi
 echo "check-env: $ENV_FILE looks deployable (no dev/default markers)."

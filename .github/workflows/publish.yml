@@ -63,7 +63,7 @@ jobs:
               print("OK", name)
           PY
 
-  # ─── E2E: "оно едет" — the generated project must DRIVE, live, every run ──
+  # ─── E2E: "it drives" — the generated project must DRIVE, live, every run ──
   # (owner directive). Every live-run shishka is pinned here forever:
   # entrypoint model imports, kafka silence (inline bus default), a missing
   # proxy rule (generated prefixes), the port lost in redirects

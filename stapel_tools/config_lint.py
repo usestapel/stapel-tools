@@ -62,23 +62,23 @@ CFG006  (error) A key the library OFFERS — a row of the dict handed to
         ``AppSettings(defaults=...)`` — that the library's own code never
         names anywhere else. The knob exists for whoever configures the
         deployment, is listed in MODULE.md, resolves through the namespace and
-        returns its default forever, because nothing reads it. Настройка,
-        которую никто не читает, — это не настройка, а обещание.
+        returns its default forever, because nothing reads it. An unread
+        setting isn't a setting, it's a promise.
 
-        Пришпилено живым дефектом (08.08.2026, миттудей):
-        ``LOGIN_NOTIFICATION_ENABLED`` лежал в ``stapel_auth`` с дефолтом
-        False, был описан в MODULE.md — и не читался ни одной строкой.
-        Письма «обнаружен подозрительный вход» уходили безусловно, погасить
-        их развёртывание не могло вообще никак, а документация обещала
-        обратное. Ни один гейт этого не видел: CFG003/CFG005 висят на
-        CONFIG.MD, а у либы CONFIG.MD нет вовсе, и вся семья молча скипалась.
+        Caught live (2026-08-08): ``LOGIN_NOTIFICATION_ENABLED`` shipped in
+        ``stapel_auth`` with a False default, documented in MODULE.md, and
+        read by no line of code — the "suspicious login" email always sent,
+        with no way to turn it off, while the docs claimed otherwise.
+        CFG003/CFG005 depend on CONFIG.MD, which this library doesn't have,
+        so the whole family skipped silently.
 
-        CFG006 намеренно НЕ зависит от CONFIG.MD: обе половины вопроса —
-        объявление и потребление — целиком внутри кода. Считается любое
-        упоминание имени вне самого объявления (атрибут ``settings.KEY``,
-        строка в ``_resolve``, константа), потому что способов «прочитать»
-        много, а ноль упоминаний означает ровно одно. Осознанно
-        зарезервированную ручку глушите ``# noqa: CFG006`` на строке ключа.
+        CFG006 deliberately does NOT depend on CONFIG.MD: both halves of the
+        question — declaration and consumption — live entirely in code. Any
+        mention of the name outside its own declaration counts (a
+        ``settings.KEY`` attribute, a string in ``_resolve``, a constant),
+        since there's more than one way to "read" a key and zero mentions is
+        unambiguous. Suppress a deliberately reserved knob with
+        ``# noqa: CFG006`` on the key's line.
 
 ``os.environ.setdefault(...)`` is a write, not a read (manage.py / wsgi set
 DJANGO_SETTINGS_MODULE that way) and is never flagged.
@@ -272,19 +272,19 @@ def _module_dicts(tree: ast.Module) -> dict[str, ast.Dict]:
 
 
 def collect_offered_knobs(project: Path) -> dict[str, tuple[str, int]]:
-    """Ключи, которые библиотека ПРЕДЛАГАЕТ настраивать, и место объявления.
+    """Keys the library OFFERS as configurable, and where each is declared.
 
-    Строгий родственник :func:`collect_settings_defaults`. Тот берёт всякий
-    модульный словарь с именем ``DEFAULTS``/``*_DEFAULTS``/``DEFAULT_*`` и
-    разворачивает вложенные блоки — для сверки с CONFIG.MD это правильно,
-    там документируются и внутренние ручки. Для CFG006 такая широта
-    смертельна: под неё попадают реестры типов уведомлений, списки языков и
-    прочие словари, к настройкам отношения не имеющие, и правило утонуло бы
-    в шуме (замер по флоту: 82 «находки» широким неводом против 4 этим).
+    A stricter sibling of :func:`collect_settings_defaults`, which unrolls
+    any module-level ``DEFAULTS``/``*_DEFAULTS``/``DEFAULT_*`` dict including
+    nested blocks — right for a CONFIG.MD diff, since internal knobs are
+    documented there too. That breadth is fatal for CFG006: it would sweep in
+    notification-type registries, language lists, and other dicts that
+    aren't settings at all (fleet measurement: 82 hits with the wide net
+    versus 4 with this one).
 
-    Поэтому здесь ТОЛЬКО словарь, реально отданный в
-    ``AppSettings(defaults=...)``, и только его верхний уровень: ровно тот
-    набор имён, который ``AppSettings`` умеет разрешать как ключ namespace.
+    So only the dict actually handed to ``AppSettings(defaults=...)``, and
+    only its top level — exactly the names ``AppSettings`` resolves as a
+    namespace key.
     """
     offered: dict[str, tuple[str, int]] = {}
     for py in _walk_py(project):
@@ -315,18 +315,17 @@ def collect_offered_knobs(project: Path) -> dict[str, tuple[str, int]]:
 def collect_key_consumption(
     project: Path, declarations: dict[str, tuple[str, int]]
 ) -> set[str]:
-    """Имена ключей, которые код называет ВНЕ места их объявления.
+    """Key names the code mentions OUTSIDE the spot where they're declared.
 
-    Тот же принцип, что у :func:`collect_key_mentions`: спрашиваем не «есть
-    ли канонический read», а слабый, зато точно проверяемый вопрос — упомянут
-    ли ключ в коде вообще. Способов прочитать настройку много
-    (``settings.KEY``, ``_resolve("KEY", ...)``, константа, передача строки в
-    хелпер), и требовать одну форму значило бы получить правило, которое
-    ругается на исправный код.
+    Same principle as :func:`collect_key_mentions`: not "is there a
+    canonical read" but the weaker, reliably checkable question — is the key
+    mentioned in code at all. There's more than one way to read a setting
+    (``settings.KEY``, ``_resolve("KEY", ...)``, a constant, a string passed
+    to a helper), and requiring one specific form would flag correct code.
 
-    Ключевая деталь — вычитание САМОГО объявления: строка-ключ внутри
-    ``defaults={...}`` это и есть объявление, и засчитывать её за
-    потребление означало бы, что правило не сработает никогда.
+    The key detail is subtracting the declaration itself: the key string
+    inside ``defaults={...}`` IS the declaration, and counting it as
+    consumption would mean the rule never fires.
     """
     consumed: set[str] = set()
     for py in _walk_py(project):
@@ -345,7 +344,7 @@ def collect_key_consumption(
             elif isinstance(node, ast.Constant) and isinstance(node.value, str):
                 site = declarations.get(node.value)
                 if site is not None and site == (path, node.lineno):
-                    continue  # это и есть объявление
+                    continue  # this is the declaration itself
                 consumed.add(node.value)
     return consumed
 
@@ -554,11 +553,11 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
         ))
 
     # ------------------------------------------------------------------ CFG006
-    # СТОИТ ВЫШЕ ранних выходов намеренно. Вся семья CFG002-CFG005 висит на
-    # CONFIG.MD и при его отсутствии молча скипается — а `stapel-auth`,
-    # библиотека, где мёртвая ручка стоила первого впечатления о продукте,
-    # CONFIG.MD не имеет вовсе. Правило, которое выключается там, где дефект
-    # и живёт, — не правило.
+    # Placed ABOVE the early exits deliberately. The whole CFG002-CFG005
+    # family depends on CONFIG.MD and skips silently without it — but
+    # `stapel-auth`, the library where a dead knob cost a first impression,
+    # has no CONFIG.MD at all. A rule that turns off exactly where the
+    # defect lives isn't a rule.
     offered = collect_offered_knobs(project)
     if offered:
         consumed = collect_key_consumption(project, offered)
@@ -592,7 +591,7 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
         # The registry law must not be opt-out by omission. This used to be a
         # note only — i.e. a project with no CONFIG.MD had CFG002/CFG003
         # silently skipped and a green gate, and its pre-commit config said so
-        # in a comment ("CFG002/CFG003 у stapel-verify скипаются и так"). A
+        # in a comment ("CFG002/CFG003 skip anyway under stapel-verify"). A
         # warning is the honest level: it shows up in every stapel-verify run
         # without failing a build that has not done the sweep yet.
         notes.append(

@@ -1,15 +1,16 @@
-"""CFG006 — библиотека предлагает настройку, которую сама не читает.
+"""CFG006 — a library offers a setting that it never reads itself.
 
-ПРИШПИЛЕНО ЖИВЫМ ДЕФЕКТОМ (08.08.2026, миттудей). `stapel-auth` объявлял
-``LOGIN_NOTIFICATION_ENABLED`` с дефолтом False, описывал его в MODULE.md — и
-не читал ни одной строкой. Письма «обнаружен подозрительный вход» уходили
-безусловно; развёртывание не могло погасить их вообще никак, а документация
-обещала обратное. Первым, что видел новый человек от продукта, была тревога.
+Caught live (2026-08-08): `stapel-auth` declared
+``LOGIN_NOTIFICATION_ENABLED`` with a False default, documented it in
+MODULE.md — and read it in zero lines. The "suspicious login" email always
+sent; deployment had no way to turn it off, while the docs claimed
+otherwise. The first thing a new user saw from the product was an alert.
 
-ПОЧЕМУ ЭТОГО НЕ ЛОВИЛ НИ ОДИН ГЕЙТ. Вся семья CFG002-CFG005 висит на
-CONFIG.MD, а у `stapel-auth` CONFIG.MD нет вовсе — и семья молча скипалась
-ровно там, где дефект и жил. CFG006 поэтому не зависит от реестра: обе
-половины вопроса, объявление и потребление, целиком внутри кода.
+WHY NO GATE CAUGHT THIS. The whole CFG002-CFG005 family depends on
+CONFIG.MD, and `stapel-auth` has no CONFIG.MD — so the family skipped
+silently exactly where the defect lived. CFG006 therefore doesn't depend on
+the registry: both halves of the question, declaration and consumption,
+live entirely in code.
 """
 import textwrap
 from pathlib import Path
@@ -57,8 +58,8 @@ def _cfg006_keys(root: Path) -> list[str]:
     ]
 
 
-class TestЛовитНастоящийДефект:
-    def test_объявленная_но_нечитаемая_ручка_названа(self, tmp_path):
+class TestCatchesTheRealDefect:
+    def test_declared_but_unread_knob_is_named(self, tmp_path):
         root = _lib(tmp_path, CONF_WITH_DEAD_KNOB, {
             "tasks.py": """
                 from .conf import thing_settings
@@ -69,8 +70,8 @@ class TestЛовитНастоящийДефект:
         })
         assert _cfg006_keys(root) == ["LOGIN_NOTIFICATION_ENABLED"]
 
-    def test_подключённая_ручка_молчит(self, tmp_path):
-        # Ровно та правка, что закрыла инцидент.
+    def test_wired_knob_is_silent(self, tmp_path):
+        # The exact fix that closed the incident.
         root = _lib(tmp_path, CONF_WITH_DEAD_KNOB, {
             "tasks.py": """
                 from .conf import thing_settings
@@ -83,31 +84,31 @@ class TestЛовитНастоящийДефект:
         })
         assert _cfg006_keys(root) == []
 
-    def test_объявление_не_засчитывается_за_чтение(self, tmp_path):
-        """Самая тонкая часть: ключ — строка внутри самого ``defaults``.
+    def test_declaration_does_not_count_as_a_read(self, tmp_path):
+        """The subtlest part: the key is a string inside ``defaults`` itself.
 
-        Засчитай её за упоминание — и правило не сработает НИКОГДА, оставаясь
-        при этом зелёным и убедительным.
+        Count it as a mention and the rule would NEVER fire, while staying
+        green and convincing.
         """
         root = _lib(tmp_path, CONF_WITH_DEAD_KNOB)
         assert "LOGIN_NOTIFICATION_ENABLED" in _cfg006_keys(root)
 
 
-class TestНеЗависитОтРеестра:
-    def test_срабатывает_без_config_md(self, tmp_path):
-        # Место, где дефект и жил: CONFIG.MD нет, вся семья CFG002-CFG005
-        # скипается. CFG006 обязан отработать.
+class TestDoesNotDependOnTheRegistry:
+    def test_fires_without_config_md(self, tmp_path):
+        # Exactly where the defect lived: no CONFIG.MD, the whole
+        # CFG002-CFG005 family skips. CFG006 must still run.
         root = _lib(tmp_path, CONF_WITH_DEAD_KNOB)
         assert not (root / "CONFIG.MD").exists()
         assert "CFG006" in _codes(root)
 
 
-class TestНеШумит:
-    def test_чужие_словари_не_считаются_настройками(self, tmp_path):
-        """Реестры типов, списки языков и прочие DEFAULTS-подобные словари.
+class TestStaysQuiet:
+    def test_unrelated_dicts_do_not_count_as_settings(self, tmp_path):
+        """Type registries, language lists, and other DEFAULTS-shaped dicts.
 
-        Широкий невод давал 82 «находки» по флоту против 4 у этого правила —
-        и был бы отключён в первый же день.
+        The wide net gave 82 fleet-wide "hits" against 4 from this rule —
+        it would have been disabled on day one.
         """
         root = _lib(tmp_path, """
             from stapel_core.conf import AppSettings
@@ -128,9 +129,10 @@ class TestНеШумит:
         })
         assert _cfg006_keys(root) == []
 
-    def test_вложенные_блоки_не_разворачиваются(self, tmp_path):
-        # Внутренние ключи блока читаются самим блоком, а не через namespace —
-        # требовать для них отдельного упоминания значит ругаться на исправное.
+    def test_nested_blocks_are_not_unrolled(self, tmp_path):
+        # A block's inner keys are read through the block itself, not the
+        # namespace — requiring a separate mention for them would flag
+        # correct code.
         root = _lib(tmp_path, """
             from stapel_core.conf import AppSettings
 
@@ -147,9 +149,9 @@ class TestНеШумит:
         })
         assert _cfg006_keys(root) == []
 
-    def test_чтение_строкой_а_не_атрибутом_засчитывается(self, tmp_path):
-        # Настройку читают и через хелперы: `_resolve("KEY", ...)`. Требовать
-        # одну каноническую форму — значит получить ложные срабатывания.
+    def test_read_by_string_not_attribute_still_counts(self, tmp_path):
+        # A setting can also be read through a helper: `_resolve("KEY",
+        # ...)`. Requiring one canonical form would produce false positives.
         root = _lib(tmp_path, CONF_WITH_DEAD_KNOB, {
             "use.py": """
                 from .conf import thing_settings
@@ -163,10 +165,10 @@ class TestНеШумит:
         assert _cfg006_keys(root) == []
 
 
-class TestГлушилка:
-    def test_noqa_на_строке_ключа_снимает(self, tmp_path):
-        # Осознанный резерв под ещё не построенный путь — законный случай,
-        # но он обязан быть НАПИСАН, а не подразумеваться.
+class TestSuppression:
+    def test_noqa_on_the_key_line_clears_it(self, tmp_path):
+        # A deliberate reservation for a not-yet-built path is legitimate,
+        # but it must be WRITTEN, not implied.
         root = _lib(tmp_path, """
             from stapel_core.conf import AppSettings
 
@@ -184,7 +186,7 @@ class TestГлушилка:
         })
         assert _cfg006_keys(root) == []
 
-    def test_голый_noqa_тоже_снимает(self, tmp_path):
+    def test_bare_noqa_also_clears_it(self, tmp_path):
         root = _lib(tmp_path, """
             from stapel_core.conf import AppSettings
 
@@ -195,8 +197,8 @@ class TestГлушилка:
         assert _cfg006_keys(root) == []
 
 
-class TestСборщики:
-    def test_предлагаемые_ручки_это_только_defaults_переданный_в_appsettings(self, tmp_path):
+class TestCollectors:
+    def test_offered_knobs_is_only_the_defaults_passed_to_appsettings(self, tmp_path):
         root = _lib(tmp_path, """
             from stapel_core.conf import AppSettings
 
@@ -207,7 +209,7 @@ class TestСборщики:
         """)
         assert sorted(collect_offered_knobs(root)) == ["A", "B"]
 
-    def test_потребление_видит_атрибут_имя_и_строку(self, tmp_path):
+    def test_consumption_sees_attribute_name_and_string(self, tmp_path):
         root = _lib(tmp_path, "DEFAULTS = {}\n", {
             "use.py": """
                 VALUE = obj.SOME_ATTR

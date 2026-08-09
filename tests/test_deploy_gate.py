@@ -115,7 +115,7 @@ class TestCheckEnvGate:
         result = _run_gate(proj, ".env.local")
         assert result.returncode == 1
         assert "STAPEL_LOCAL_ENV" in result.stderr
-        assert "запрещён" in result.stderr or "REFUSING" in result.stderr
+        assert "REFUSING" in result.stderr
 
     def test_refuses_dev_marked_secret_key(self, tmp_path):
         proj = _create(tmp_path)

@@ -33,8 +33,9 @@ def _create(tmp_path, name, project_type, modules=None, **kwargs):
 
 def _docker_compose_config(project_dir, *files):
     """Validate via `docker compose config` when the Docker CLI is on PATH
-    (directive: "compose валиден docker compose config'ом если docker
-    доступен — иначе YAML-парс"); otherwise just parse every file as YAML."""
+    (directive: "compose is valid via docker compose config when docker is
+    available — otherwise a YAML parse"); otherwise just parse every file
+    as YAML."""
     if shutil.which("docker") is None:
         for f in files:
             yaml.safe_load((project_dir / f).read_text())
@@ -176,7 +177,7 @@ class TestFrontendScaffold:
 
 
 class TestThemeJsonScaffold:
-    """§68 Ф5 — the scaffold's `frontend/stapel.theme.json` is the neutral
+    """§68 P5 — the scaffold's `frontend/stapel.theme.json` is the neutral
     colour-role dictionary (not a design-system-specific vocabulary), and the
     generator is called via @stapel/tokens' own published `stapel-tokens`
     bin — never a vendored/forked copy of the engine (the exact failure mode
@@ -695,7 +696,7 @@ class TestFrontendReactWiring:
         `npm install` with a missing/undeclared package. Modules with no
         FRONTEND_REACT_LIBS "nav" mirror (billing/calendar/recordings/
         workspaces) — a nav-bearing selection (auth/profiles/notifications)
-        activates react-router routing instead of App.tsx (Ф1,
+        activates react-router routing instead of App.tsx (P1,
         TestFrontendNavWiring's own equivalent gate covers THAT shape)."""
         import json
 
@@ -779,7 +780,7 @@ class TestFrontendReactWiring:
         """"billing" carries no FRONTEND_REACT_LIBS "nav" mirror, so it
         stays on the flat single-page App.tsx/ModulesPanel shape — a
         nav-bearing selection like "profiles" activates react-router
-        routing instead (Ф1, TestFrontendNavWiring)."""
+        routing instead (P1, TestFrontendNavWiring)."""
         proj = _create(tmp_path, "app", "monolith", modules=["core", "billing"])
         app_tsx = (proj / "frontend" / "src" / "App.tsx").read_text()
         assert 'from "./modules.js"' in app_tsx
@@ -826,7 +827,7 @@ class TestFrontendReactWiring:
 
 
 class TestFrontendNavWiring:
-    """Ф1 scripted-fullstack navigation — SCAFFOLD half (the lib-side core,
+    """P1 scripted-fullstack navigation — SCAFFOLD half (the lib-side core,
     ``@stapel/shell-react``'s ``resolveNav``/``<AppShell/>``, already
     shipped to stapel-react main; not yet published to npm). ``--auth``/
     ``--landing``/a selected pair with mirrored nav entries turns on

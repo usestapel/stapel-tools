@@ -440,7 +440,7 @@ FRONTEND_REACT_LIBS = {
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
         "default_component": "AuthPanel",
-        # Scripted-fullstack navigation (Ф1) — a MANUALLY PINNED MIRROR of
+        # Scripted-fullstack navigation (P1) — a MANUALLY PINNED MIRROR of
         # this pair's own `nav-manifest.json` (verified 2026-07-20 against
         # the sibling stapel-react checkout's
         # packages/auth-react/nav-manifest.json — not yet on npm, see the
@@ -571,7 +571,7 @@ FRONTEND_REACT_ANTD_DEPS = {
     "@stapel/tokens-antd": "0.4.0",
 }
 
-# Scripted-fullstack navigation (Ф1) — router deps for the generated
+# Scripted-fullstack navigation (P1) — router deps for the generated
 # frontend, added whenever routing is active (any of: `--auth`,
 # `--landing`, or a selected pair's FRONTEND_REACT_LIBS entry carries a
 # "nav" mirror — see `_write_frontend_scaffold`). `@stapel/shell-react`'s
@@ -880,10 +880,10 @@ def _write_shared_infra(project_dir: Path, frontends=None):
     _write(ensure_script, POSTGRES_ENSURE_DATABASES)
     ensure_script.chmod(0o755)
 
-    # Пишется ВСЕГДА, а не только при broker="nats": компоуз монтирует его
-    # путём, и отсутствующий файл docker создал бы КАТАЛОГОМ — nats-server
-    # молча не нашёл бы конфиг. Лишний файл в проекте без NATS дешевле, чем
-    # этот отказ.
+    # Written ALWAYS, not only when broker="nats": compose mounts it by
+    # path, and a missing file would make docker create a DIRECTORY there —
+    # nats-server would silently fail to find its config. An extra file in
+    # an NATS-less project is cheaper than that failure.
     _write(project_dir / "nats" / "nats.conf", NATS_CONF)
 
 
@@ -1128,7 +1128,7 @@ def _render_frontend_package_json(
     """Injects the react-pair deps (+ their shared support deps, + antd/
     tokens-antd IFF at least one selected pair mounts a `/default` skin OR
     the scripted nav shell needs `<AppShell/>`), the router deps
-    (``routing_active`` — Ф1, ``FRONTEND_ROUTER_DEPS``) and
+    (``routing_active`` — P1, ``FRONTEND_ROUTER_DEPS``) and
     ``@stapel/shell-react`` (``shell_react_needed``) into the already
     SLUG-rendered ``PACKAGE_JSON`` template — via json.loads/dumps (not
     string tokens) so the result stays valid JSON regardless of key order or
@@ -1181,7 +1181,7 @@ def _write_frontend_scaffold(
     ``@stapel/<key>-react`` pair (FRONTEND_REACT_LIBS), that pair's dep +
     provider wiring is generated into ``package.json``/``src/modules.tsx``.
 
-    Scripted-fullstack navigation (Ф1, this task): ``want_auth`` (default —
+    Scripted-fullstack navigation (P1, this task): ``want_auth`` (default —
     derived by the caller from whether "auth" was selected) and
     ``want_landing`` (``--landing``) drive react-router v7 wiring —
     ``routing_active`` is true when either flag is set OR at least one
@@ -2161,7 +2161,7 @@ def main():
     parser.add_argument(
         "--landing", action="store_true",
         help="Scaffold a LandingPage.tsx + \"/\" route (scripted-fullstack "
-             "navigation, Ф1). Monolith only today.",
+             "navigation, P1). Monolith only today.",
     )
     parser.add_argument(
         "--auth", dest="auth", action="store_true", default=None,

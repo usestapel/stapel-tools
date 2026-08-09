@@ -1,5 +1,5 @@
 """api-docs-check / gen-client-check pre-commit wiring (owner directive:
-"в pre-commit должен быть регенератор ВСЕГО, что можно" — item 4 of the
+"pre-commit should have a regenerator for everything it can" — item 4 of the
 task that added `stapel-docs`/`stapel-gen-client`).
 
 `stapel-verify`/`config-manifest-check`/eslint wiring is already covered by

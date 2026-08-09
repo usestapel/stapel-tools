@@ -4,10 +4,10 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-  # Ежедневно — ради джобы registry ниже. Она обязана срабатывать ТОГДА, КОГДА
-  # релизного прогона не было вовсе: два из трёх инцидентов этого класса —
-  # непушнутый лёгкий тег и лежащий провайдер — воркфлоу не создают, и любая
-  # проверка внутри релизного пути их структурно не видит.
+  # Daily, for the registry job below. It must fire precisely when NO release
+  # run happened at all: two of three incidents in this class — an unpushed
+  # lightweight tag and a dead provider — never create a workflow run, so
+  # any check living inside the release path structurally can't see them.
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
@@ -93,17 +93,17 @@ jobs:
               print("OK", name)
           PY
 
-  # ─── Тег без релиза — не релиз ────────────────────────────────────────────
-  # Единственный шаг волны, который до сих пор никто не смотрел. Три способа
-  # промолчать, все случившиеся здесь: ненастроенный доверенный издатель
-  # (#48), лёгкий тег, который `--follow-tags` не пушит (0.15.2/0.15.3), и
-  # лежащий GitHub Actions (06.08.2026 — коммиты и теги на месте, прогонов
-  # ноль). Каждый раз находили руками.
+  # ─── A tag without a release is not a release ─────────────────────────────
+  # The one wave step nobody had been watching. Three ways this stayed
+  # silent, all of which actually happened: an unconfigured trusted
+  # publisher (#48), a lightweight tag that `--follow-tags` doesn't push
+  # (0.15.2/0.15.3), and a dead GitHub Actions setup (2026-08-06 — commits
+  # and tags present, zero workflow runs). Found by hand every time.
   #
-  # `fetch-depth: 0` обязателен: без тегов чек молча проверять нечего.
-  # `continue-on-error` — намеренно: у флота есть исторические дыры (~40 на
-  # 07.08.2026), и красить ими каждый PR значит получить гейт, который
-  # отключат. Смотреть сюда — на ежедневный прогон.
+  # `fetch-depth: 0` is required: without tags there's nothing to check.
+  # `continue-on-error` is deliberate: the fleet has historical gaps (~40 as
+  # of 2026-08-07), and reddening every PR over them gets this gate turned
+  # off. Watch the daily run instead.
   registry:
     runs-on: ubuntu-latest
     steps:
@@ -114,11 +114,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e . --quiet
-      - name: Каждый тег версии имеет релиз на PyPI
+      - name: Every version tag has a PyPI release
         continue-on-error: true
         run: stapel-registry-check .
 
-  # ─── E2E: "оно едет" — the generated project must DRIVE, live, every run ──
+  # ─── E2E: "it drives" — the generated project must DRIVE, live, every run ──
   # (owner directive). Every live-run shishka is pinned here forever:
   # entrypoint model imports, kafka silence (inline bus default), a missing
   # proxy rule (generated prefixes), the port lost in redirects
@@ -167,17 +167,17 @@ jobs:
       - name: Generate (stapel-assemble, gates must be green)
         run: stapel-assemble e2e --type monolith --libs auth notifications --output-dir "$RUNNER_TEMP"
 
-      # ИНФРАСТРУКТУРА ДОЛЖНА СТАРТОВАТЬ, а не «валидироваться». Инцидент
-      # 07.08.2026: в compose стоял `--max_payload` — флага с таким именем у
-      # nats-server нет, сервер печатал usage и выходил, контейнер уходил в
-      # рестарт-петлю, а всё подключающееся получало "Name or service not
-      # known". `docker compose config -q` это пропускал: как ДОКУМЕНТ YAML
-      # был безупречен. Поймало падение стенда, а не CI.
+      # INFRASTRUCTURE MUST START, not merely "validate". Incident
+      # (2026-08-07): compose carried `--max_payload` — nats-server has no
+      # such flag, the server printed usage and exited, the container
+      # restart-looped, and everything connecting got "Name or service not
+      # known". `docker compose config -q` let this through: as a YAML
+      # DOCUMENT it was flawless. A stand failure caught this, not CI.
       #
-      # Проект под это генерируется ОТДЕЛЬНЫЙ: у e2e-проекта выше брокера
-      # нет (`stapel-assemble` его не выбирает), и проверять там было бы
-      # нечего — молчаливый скип вместо гейта.
-      - name: Инфра сгенерированного проекта РЕАЛЬНО поднимается (nats)
+      # A SEPARATE project is generated for this: the e2e project above has
+      # no broker (`stapel-assemble` doesn't select one for it), so there
+      # would be nothing to check there — a silent skip instead of a gate.
+      - name: Generated project's infra ACTUALLY comes up (nats)
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -195,11 +195,11 @@ jobs:
           restarts=$(docker inspect -f '{{.RestartCount}}' "$cid")
           echo "nats: state=$state restarts=$restarts"
           docker logs "$cid" | tail -20
-          # Неверный флаг убивает процесс сразу; restart:unless-stopped его
-          # поднимает, и счётчик рестартов — самый честный индикатор.
+          # A wrong flag kills the process immediately; restart:unless-stopped
+          # brings it back up, and the restart count is the most honest signal.
           [ "$state" = "running" ] && [ "$restarts" = "0" ]
-          # ...и настройка, ради которой всё затевалось, ДЕЙСТВИТЕЛЬНО
-          # применилась — спрашиваем сам сервер, а не собственный конфиг.
+          # ...and the setting this was all for ACTUALLY took effect — ask
+          # the server itself, not our own config.
           docker exec "$cid" wget -qO- http://localhost:8222/varz | tr ',' '\n' | grep max_payload | tee /dev/stderr | grep -q 8388608
           docker compose -f docker-compose.local.yml --env-file .env.local down -v
 

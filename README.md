@@ -257,8 +257,8 @@ A project with no `schema.json` generated yet is a graceful no-op, exit 0.
 ### `stapel-gen-client` — project-owned typed API-client override
 
 Tier 2 of the answer to "if we override a module's backend, its frontend
-pair must handle that" (`docs/pending/profile-fields.md` "Дополнение
-владельца"): regenerates a typed TS client from the PROJECT'S OWN
+pair must handle that" (`docs/pending/profile-fields.md` "Owner
+addendum"): regenerates a typed TS client from the PROJECT'S OWN
 `schema.json` (not the library's upstream one) into
 `frontend/src/api/generated-override/<module>/schema.ts` — reusing
 openapi-typescript (the same generation core stapel-react's own

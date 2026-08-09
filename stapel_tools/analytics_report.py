@@ -3,7 +3,7 @@ Stapel analytics report generator (frontend-guardrails.md §3.3).
 
 Builds a summary report of the typed-analytics surface across a pnpm workspace
 of `@stapel/*-react` pairs and/or a customer application. Sources are STATIC and
-already generated (§3.3: "Источники — только статика и generated-артефакты"):
+already generated (§3.3: "sources are static and generated artifacts only"):
 
     events.json / manifest.events   defineEvent catalog (name, description, typed
                                      props, optional flow link, source file:line)

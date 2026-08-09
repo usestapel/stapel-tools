@@ -296,8 +296,8 @@ server {
 # {{BROKER_ENV}}. A dedicated Task broker (--task-broker) adds its blocks
 # next to the event broker's.
 
-#: Конфиг nats-server. Отдельным файлом, а не флагами, потому что
-#: `max_payload` флагом задать НЕЛЬЗЯ — см. комментарий в NATS_SERVICE_BLOCK.
+#: nats-server config. A dedicated file, not flags, because `max_payload`
+#: CANNOT be set as a flag — see the comment in NATS_SERVICE_BLOCK.
 NATS_CONF = """\
 port: 4222
 http_port: 8222
@@ -305,12 +305,12 @@ jetstream {
   store_dir: /data
 }
 
-# Функция comm — это request-reply, и ответ целиком едет одним сообщением.
-# Дефолтный потолок 1 МиБ структурированный ответ по реальному тексту
-# перешагивает раньше, чем кажется (замер на ironmemo 06.08.2026: ответ
-# отвергнут, вызывающий не услышал ничего и вышел по таймауту, хотя работа
-# была сделана). 8 МиБ — запас, который сам NATS считает разумным; дальше
-# ответ должен быть ссылкой, а не сообщением побольше.
+# stapel_core.comm's call() is request-reply, and the reply travels as one
+# message. The 1MiB default cap gets hit by real structured replies sooner
+# than expected (measured on ironmemo 2026-08-06: reply rejected, caller
+# heard nothing and timed out even though the work had finished). 8MB is the
+# headroom NATS itself treats as reasonable; past that, a reply should be a
+# link, not a bigger message.
 max_payload: 8MB
 """
 
@@ -319,13 +319,13 @@ NATS_SERVICE_BLOCK = """\
   nats:
     image: nats:2.10-alpine
     restart: unless-stopped
-    # ЗАПУСК ЧЕРЕЗ КОНФИГ-ФАЙЛ, НЕ ФЛАГИ. `max_payload` у nats-server
-    # существует ТОЛЬКО как настройка конфига: флага `--max_payload` нет, и
-    # на него сервер отвечает "flag provided but not defined", печатает usage
-    # и выходит — то есть контейнер уходит в рестарт-петлю, а всё, что к нему
-    # подключается, получает "Name or service not known". Ровно это и
-    # случилось на стенде ironmemo 07.08.2026, потому что правку внесли, не
-    # запустив. Отсюда же и гейт: e2e поднимает этот сервис живьём.
+    # LAUNCH VIA CONFIG FILE, NOT FLAGS. nats-server's `max_payload` exists
+    # ONLY as a config setting: there is no `--max_payload` flag, and the
+    # server responds with "flag provided but not defined", prints usage,
+    # and exits — the container restart-loops and anything connecting to it
+    # gets "Name or service not known". Exactly this happened on the
+    # ironmemo stand (2026-08-07) from an edit that was never run. Same
+    # reason for the gate: e2e brings this service up live.
     command: ["-c", "/etc/nats/nats.conf"]
     volumes:
       - ./nats/nats.conf:/etc/nats/nats.conf:ro

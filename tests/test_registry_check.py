@@ -1,20 +1,20 @@
-"""Тег без релиза — не релиз (stapel-registry-check, задача #232).
+"""A tag without a release is not a release (stapel-registry-check, task #232).
 
-Фикстуры ниже — три РЕАЛЬНЫХ случая из этого флота, а не выдуманные:
+The fixtures below are three REAL incidents from this fleet, not made up:
 
-* четыре либы несли теги версий, которых на PyPI никогда не было — publish
-  падал на своей же конфигурации доверенного издателя (#48);
-* 0.15.2 и 0.15.3 не уехали с машины вовсе: `--follow-tags` молча не пушит
-  легковесный тег, а push отрапортовал успех, потому что жаловаться ему было
-  не на что;
-* 2026-08-06 — GitHub Actions в `major_outage`: коммиты и теги на удалёнке
-  есть, воркфлоу не создан ни один, на PyPI не уехало ничего.
+* four libs carried version tags that were never on PyPI — publish had
+  failed on its own trusted-publisher config (#48);
+* 0.15.2 and 0.15.3 never left the machine at all: `--follow-tags` silently
+  doesn't push a lightweight tag, and push reported success because it had
+  nothing to complain about;
+* 2026-08-06 — GitHub Actions in `major_outage`: commits and tags exist on
+  the remote, no workflow ran, nothing reached PyPI.
 
-Все три обнаружены руками. Гейт стоит одного HTTP-запроса.
+All three were found by hand. The gate costs one HTTP request.
 
-САМОЕ ВАЖНОЕ здесь — последний класс тестов: недоступный реестр НЕ считается
-успехом. Гейт публикации, который зеленеет, когда не смог спросить, — ровно
-тот дефект, против которого этот модуль и написан.
+The MOST IMPORTANT class of test here is the last one: an unreachable
+registry does NOT count as success. A publish gate that goes green when it
+couldn't ask is exactly the defect this module exists to catch.
 """
 import json
 import subprocess
@@ -26,7 +26,7 @@ from stapel_tools import registry_check as rc
 
 @pytest.fixture
 def repo(tmp_path):
-    """Инициализированный git-репозиторий с pyproject."""
+    """An initialized git repo with a pyproject."""
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "stapel-demo"\nversion = "0.3.0"\n', encoding="utf-8"
     )
@@ -35,7 +35,7 @@ def repo(tmp_path):
 
 
 def tag(repo, *versions):
-    """Проставить теги версий (пустыми коммитами — содержимое не важно)."""
+    """Stamp version tags (as empty commits — content doesn't matter)."""
     subprocess.run(
         ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit",
          "-q", "--allow-empty", "-m", "x"],
@@ -54,14 +54,14 @@ def codes(findings):
 
 
 # ---------------------------------------------------------------------------
-# REG001 — тот, который поймал бы все три инцидента
+# REG001 — the rule that would have caught all three incidents
 # ---------------------------------------------------------------------------
 
 
 class TestTagWithoutRelease:
     def test_tag_not_in_registry_is_an_error(self, repo, monkeypatch):
         tag(repo, "0.3.0")
-        published(monkeypatch)  # реестр пуст — публикация не состоялась
+        published(monkeypatch)  # empty registry — publish never happened
         findings = rc.check_repo(repo)
         assert codes(findings) == ["REG001"]
         assert findings[0].level == "error"
@@ -78,25 +78,26 @@ class TestTagWithoutRelease:
         assert rc.check_repo(repo) == []
 
     def test_every_dead_tag_is_named_separately(self, repo, monkeypatch):
-        # Инцидент #48: четыре либы, а не одна. Свернуть их в «есть проблемы»
-        # значило бы заставить человека выяснять список руками.
+        # Incident #48: four libs, not one. Collapsing them into "there are
+        # problems" would leave a human to work out the list by hand.
         tag(repo, "0.1.0", "0.2.0", "0.3.0")
         published(monkeypatch, "0.1.0")
         assert codes(rc.check_repo(repo)).count("REG001") == 2
 
 
 class TestPrehistory:
-    """Теги старше первого релиза — не сломанный релиз, а «пакета ещё не было».
+    """Tags older than the first release aren't a broken release — the
+    package just didn't exist yet.
 
-    Замер по флоту 07.08.2026: 100 недостающих тегов, 60 из них — предыстория.
-    Без этого отсечения настоящие сорок (в том числе застрявшая в тот день
-    stapel-core 0.19.0) тонут в шуме, а гейт, который никто не читает, — это
-    отсутствующий гейт.
+    Fleet measurement (2026-08-07): 100 missing tags, 60 of them prehistory.
+    Without this cutoff the real forty (including that day's stuck
+    stapel-core 0.19.0) drown in noise, and a gate nobody reads is a
+    missing gate.
     """
 
     def test_tags_before_the_first_release_are_not_errors(self, repo, monkeypatch):
         tag(repo, "0.1.0", "0.2.0", "0.3.0")
-        published(monkeypatch, "0.3.0")  # первый релиз — 0.3.0
+        published(monkeypatch, "0.3.0")  # first release is 0.3.0
         assert rc.check_repo(repo) == []
 
     def test_but_the_count_is_always_said_out_loud(self, repo, monkeypatch):
@@ -104,10 +105,10 @@ class TestPrehistory:
         published(monkeypatch, "0.3.0")
         notes = []
         rc.check_repo(repo, notes=notes)
-        assert notes and "2 тег" in notes[0] and "--all-history" in notes[0]
+        assert notes and "2 tag" in notes[0] and "--all-history" in notes[0]
 
     def test_a_hole_after_the_first_release_stays_an_error(self, repo, monkeypatch):
-        # Ровно класс #48: ранние версии опубликованы, средняя — нет.
+        # Exactly the #48 class: early versions published, the middle one isn't.
         tag(repo, "0.1.0", "0.2.0", "0.3.0")
         published(monkeypatch, "0.1.0", "0.3.0")
         (finding,) = rc.check_repo(repo)
@@ -119,14 +120,15 @@ class TestPrehistory:
         assert len(rc.check_repo(repo, all_history=True)) == 2
 
     def test_nothing_published_at_all_keeps_every_tag(self, repo, monkeypatch):
-        # Пустой реестр — не «предыстория», а полностью несостоявшийся выпуск:
-        # отсекать тут не от чего, и молчать было бы худшим из исходов.
+        # An empty registry isn't "prehistory" but a release that never
+        # happened at all: there's nothing to cut off from, and staying
+        # silent would be the worst outcome.
         tag(repo, "0.1.0", "0.2.0")
         published(monkeypatch)
         assert codes(rc.check_repo(repo)).count("REG001") == 2
 
     def test_version_key_orders_numerically_not_lexically(self):
-        # '0.9.0' > '0.10.0' по строке — на этом отсечение съело бы настоящую дыру.
+        # '0.9.0' > '0.10.0' as a string — the cutoff would eat a real hole here.
         assert rc.version_key("0.9.0") < rc.version_key("0.10.0")
         assert rc.version_key("1.0.0") > rc.version_key("0.99.99")
 
@@ -136,7 +138,7 @@ class TestPrehistory:
 
 
 # ---------------------------------------------------------------------------
-# REG002/REG003 — предупреждения, не блокеры
+# REG002/REG003 — warnings, not blockers
 # ---------------------------------------------------------------------------
 
 
@@ -148,19 +150,19 @@ class TestWarnings:
         assert finding.level == "warning" and "0.2.9" in finding.message
 
     def test_untagged_unreleased_manifest_version_is_stated_once(self, repo, monkeypatch):
-        published(monkeypatch)  # ни тегов, ни релизов — обычная разработка
+        published(monkeypatch)  # no tags, no releases — ordinary development
         assert codes(rc.check_repo(repo)) == ["REG003"]
 
     def test_registry_version_newer_than_local_is_not_a_rule(self, repo, monkeypatch):
-        # Устаревший чекаут — не дефект релиза; ловить его здесь значило бы
-        # краснеть у всех, кто не сделал fetch.
+        # A stale checkout isn't a release defect; flagging it here would
+        # redden the build for anyone who hasn't fetched.
         tag(repo, "0.3.0")
         published(monkeypatch, "0.3.0", "0.4.0")
         assert codes(rc.check_repo(repo)) == ["REG002"]
 
 
 # ---------------------------------------------------------------------------
-# Недоступный реестр ≠ «ничего не опубликовано»
+# Unreachable registry != "nothing published"
 # ---------------------------------------------------------------------------
 
 
@@ -169,7 +171,7 @@ class TestUnreachable:
         tag(repo, "0.3.0")
 
         def boom(name, kind):
-            raise rc.RegistryUnreachable("нет сети")
+            raise rc.RegistryUnreachable("no network")
 
         monkeypatch.setattr(rc, "released_versions", boom)
         with pytest.raises(rc.RegistryUnreachable):
@@ -179,7 +181,7 @@ class TestUnreachable:
         tag(repo, "0.3.0")
         monkeypatch.setattr(
             rc, "released_versions",
-            lambda n, k: (_ for _ in ()).throw(rc.RegistryUnreachable("нет сети")),
+            lambda n, k: (_ for _ in ()).throw(rc.RegistryUnreachable("no network")),
         )
         assert rc.main([str(repo)]) == 1
         assert "Refusing to report success" in capsys.readouterr().err
@@ -188,10 +190,10 @@ class TestUnreachable:
         tag(repo, "0.3.0")
         monkeypatch.setattr(
             rc, "released_versions",
-            lambda n, k: (_ for _ in ()).throw(rc.RegistryUnreachable("нет сети")),
+            lambda n, k: (_ for _ in ()).throw(rc.RegistryUnreachable("no network")),
         )
         assert rc.main([str(repo), "--offline-ok"]) == 0
-        # Молчаливого зелёного быть не должно даже под явным опт-аутом.
+        # Silent green must not happen even under an explicit opt-out.
         assert "cannot reach" in capsys.readouterr().err
 
     def test_404_means_no_releases_yet_not_unreachable(self, monkeypatch):
@@ -215,7 +217,7 @@ class TestUnreachable:
 
 
 # ---------------------------------------------------------------------------
-# Непроверенное названо непроверенным
+# What wasn't checked is reported as not checked
 # ---------------------------------------------------------------------------
 
 
@@ -236,7 +238,7 @@ class TestNotSilent:
 
 
 # ---------------------------------------------------------------------------
-# npm и обход флота
+# npm and fleet discovery
 # ---------------------------------------------------------------------------
 
 
@@ -275,7 +277,7 @@ class TestNpmAndDiscovery:
 
 
 # ---------------------------------------------------------------------------
-# машиночитаемый вывод — для крона
+# machine-readable output — for cron
 # ---------------------------------------------------------------------------
 
 

@@ -1,5 +1,5 @@
 """`stapel-gen-client` — tier-2 project-owned typed client override
-(docs/pending/profile-fields.md "Дополнение владельца" §17.07) and its
+(docs/pending/profile-fields.md "Owner addendum" §17.07) and its
 pre-commit drift/no-op gates.
 
 Generation-invoking tests need a real `node`/`npx` (the generation core is

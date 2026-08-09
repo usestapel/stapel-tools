@@ -29,7 +29,7 @@ a re-invention:
    missing one: it answers "does the fleet have a mechanism for X?" with a
    confident no.
 
-What goes in, and in what order (badge-canon §3, "порядок = порядок в файле")
+What goes in, and in what order (badge-canon §3, "order = order in the file")
 ---------------------------------------------------------------------------
 ====================================  =======================================
 Source                                Section

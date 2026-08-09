@@ -1,4 +1,4 @@
-# Curated composite projections (BACKLOG §33 p.1 "составные рецепты").
+# Curated composite projections (BACKLOG §33 p.1 "composite recipes").
 recipes:
   - name: marketplace
     summary: Two-sided marketplace — accounts, profiles and listings.

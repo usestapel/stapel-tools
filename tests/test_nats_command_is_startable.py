@@ -1,28 +1,22 @@
-"""Инфраструктурная строчка обязана быть ЗАПУСКАЕМОЙ, а не правдоподобной.
+"""A generated infra line must be STARTABLE, not merely plausible.
 
-Инцидент 07.08.2026, стенд ironmemo. В компоуз внесли
-``command: ["-m", "8222", "--max_payload", "8388608"]``. Выглядит разумно,
-проходит `docker compose config -q`, проходит любой YAML-линтер. Флага
-``--max_payload`` у nats-server НЕ СУЩЕСТВУЕТ: он печатает
-"flag provided but not defined: -max_payload", выводит usage и выходит с
-нулём. Контейнер ушёл в рестарт-петлю, и всё, что к нему подключается,
-начало получать ``Name or service not known``.
+Incident (2026-08-07, ironmemo stand): the compose file carried
+``command: ["-m", "8222", "--max_payload", "8388608"]``. It looks
+reasonable and passes both `docker compose config -q` and any YAML linter.
+But nats-server has NO ``--max_payload`` flag: it prints "flag provided but
+not defined: -max_payload", prints usage, and exits 0. The container
+restart-looped, and everything connecting to it got
+``Name or service not known``. A stand failure caught this, not a test or
+gate — compose was validated as a document (keys present, YAML parses),
+never as a program.
 
-Поймали это не тесты и не гейты, а падение стенда.
+Pins two properties: (1) the generator doesn't emit `max_payload` as a
+flag, and (2) the config file a service needs is actually written by the
+scaffold — otherwise docker would create a directory in its place and
+nats-server would fail to find its config just as silently.
 
-Класс шире NATS: НИ ОДИН гейт флота не проверял, что сгенерированный
-инфраструктурный сервис вообще стартует. Компоуз валидировался как
-документ — что ключи на месте и YAML разбирается, — а не как программа.
-
-Здесь пришпилены два свойства:
-
-1. генератор не выдаёт `max_payload` флагом (тот конкретный дефект);
-2. у сервиса, которому нужен конфиг-файл, этот файл РЕАЛЬНО пишется
-   скаффолдом — иначе docker создал бы на его месте каталог, и
-   nats-server снова не нашёл бы конфига, просто молча.
-
-Живой запуск — в e2e-джобе ci.yml: она поднимает nats и требует, чтобы он
-остался жив. Юнит-тест ловит дешевле и раньше, живой прогон — честнее.
+The live check lives in ci.yml's e2e job, which brings nats up for real.
+This unit test catches the same class cheaper and earlier.
 """
 import tempfile
 from pathlib import Path
@@ -33,39 +27,39 @@ import yaml
 from stapel_tools import _compose_templates as ct
 
 
-class TestГенераторНеВыдаётНесуществующийФлаг:
-    def test_max_payload_не_уходит_в_командную_строку(self):
-        # Точная сигнатура инцидента. Смотрим на РАЗОБРАННУЮ команду, а не на
-        # текст блока: в комментариях слово `--max_payload` стоит законно —
-        # там объяснено, почему его там быть не должно. Первая редакция этого
-        # теста искала подстроку и падала на собственном комментарии.
+class TestGeneratorDoesNotEmitNonexistentFlag:
+    def test_max_payload_does_not_reach_the_command_line(self):
+        # The incident's exact signature. Checks the PARSED command, not the
+        # block's raw text — `--max_payload` legitimately appears in a
+        # comment explaining why it must not be a flag. The first version of
+        # this test matched on substring and failed on its own comment.
         command = yaml.safe_load(ct.NATS_SERVICE_BLOCK)["nats"]["command"]
         assert not any("max_payload" in arg for arg in command), command
 
-    def test_nats_запускается_конфиг_файлом(self):
+    def test_nats_starts_via_config_file(self):
         block = yaml.safe_load(ct.NATS_SERVICE_BLOCK)["nats"]
         assert block["command"] == ["-c", "/etc/nats/nats.conf"]
 
-    def test_потолок_объявлен_в_конфиге_а_не_потерян(self):
-        # Отказ от флага не должен означать отказ от самой настройки:
-        # 1 МиБ по умолчанию — это исходный дефект загрузки файлов.
+    def test_payload_cap_is_declared_in_config_not_dropped(self):
+        # Dropping the flag must not mean dropping the setting itself:
+        # the 1MiB default is the original file-upload defect.
         assert "max_payload: 8MB" in ct.NATS_CONF
 
-    def test_конфиг_несёт_порты_под_healthcheck(self):
-        # healthcheck компоуза стучится в 8222/healthz; конфиг обязан этот
-        # порт открыть, иначе сервис поднимется и будет вечно unhealthy.
+    def test_config_carries_ports_needed_for_healthcheck(self):
+        # Compose's healthcheck hits 8222/healthz; the config must open
+        # that port or the service comes up permanently unhealthy.
         assert "http_port: 8222" in ct.NATS_CONF
         assert "port: 4222" in ct.NATS_CONF
 
-    def test_jetstream_не_потерян_при_переезде_с_флагов(self):
-        # `--jetstream --store_dir /data` были ВЕРНЫМИ флагами; переезжая на
-        # конфиг, их легко было потерять вместе с неверным.
+    def test_jetstream_survives_the_move_off_flags(self):
+        # `--jetstream --store_dir /data` were the CORRECT flags; moving to
+        # a config file made it easy to lose them along with the wrong one.
         assert "jetstream" in ct.NATS_CONF
         assert "store_dir: /data" in ct.NATS_CONF
 
 
-class TestФайлКоторыйМонтируютСуществует:
-    """Смонтированный, но не созданный путь docker делает КАТАЛОГОМ."""
+class TestMountedFileActuallyExists:
+    """A path that's mounted but never created becomes a DIRECTORY under docker."""
 
     @pytest.fixture
     def project(self):
@@ -80,17 +74,17 @@ class TestФайлКоторыйМонтируютСуществует:
             )
             yield Path(tmp) / "natsproj"
 
-    def test_скаффолд_пишет_конфиг_который_монтирует(self, project):
+    def test_scaffold_writes_the_config_it_mounts(self, project):
         conf = project / "nats" / "nats.conf"
-        assert conf.is_file(), "компоуз монтирует nats/nats.conf — файла нет"
+        assert conf.is_file(), "compose mounts nats/nats.conf — file is missing"
         assert "max_payload" in conf.read_text(encoding="utf-8")
 
-    def test_путь_монтирования_совпадает_с_написанным(self, project):
+    def test_mount_path_matches_what_was_written(self, project):
         compose = yaml.safe_load(
             (project / "docker-compose.base.yml").read_text(encoding="utf-8")
         )
         mounts = compose["services"]["nats"]["volumes"]
         source = next(m.split(":")[0] for m in mounts if "nats.conf" in m)
-        # Именно эта сверка ловит опечатку в пути, которую YAML-валидатор
-        # пропускает, а docker превращает в пустой каталог.
+        # This exact check catches a path typo that the YAML validator
+        # misses and docker turns into an empty directory.
         assert (project / source.lstrip("./")).is_file()

@@ -79,7 +79,7 @@ CATALOG_SCHEMA_VERSION = 1
 
 #: Markdown table separator row (``|---|---|`` etc.) — only dashes/colons per
 #: cell once split on ``|``. Used to filter CONFIG.MD table rows down to real
-#: data rows (agent-knowledge-base.md §64 "Волна 1").
+#: data rows (agent-knowledge-base.md §64 "Wave 1").
 _TABLE_SEP_CHARS = set("-: ")
 
 
@@ -442,7 +442,7 @@ def build_catalog(docs: list[dict], recipes: list[dict] | None = None) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# full machine index (agent-knowledge-base.md §64 "Волна 1") — extends the
+# full machine index (agent-knowledge-base.md §64 "Wave 1") — extends the
 # capabilities aggregate above with the other per-module artifacts an ADVISOR
 # exact-layer query needs, per module: flows.json (verbatim), errors.json
 # (verbatim), CONFIG.MD table rows, the STAPEL_LIBS registry projection
@@ -572,7 +572,7 @@ def build_index(
     react_root: Path | None = None,
     warn=lambda msg: print(msg, file=sys.stderr),
 ) -> tuple[dict, list[str]]:
-    """Assemble the FULL machine index (agent-knowledge-base.md §64 "Волна
+    """Assemble the FULL machine index (agent-knowledge-base.md §64 "Wave
     1"): :func:`build_catalog`'s aggregate, with every module extended by
     ``flows`` (verbatim ``docs/flows.json``, ``[]`` if undocumented — an
     honest gap, e.g. billing/recordings ship an empty file today), ``errors``

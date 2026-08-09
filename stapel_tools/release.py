@@ -295,8 +295,8 @@ def check_contract_freshness(project_dir: Path) -> list:
             continue  # no top-level version (e.g. schema.json) — not checked
         violations.append(Violation(
             f"docs/{name}", 1, "REL001",
-            f"артефакт {name}: version {version} отстаёт от pyproject "
-            f"{project_version} — прогони make contract и закоммить",
+            f"artifact {name}: version {version} lags behind pyproject's "
+            f"{project_version} — run make contract and commit",
             level="error",
         ))
     return violations

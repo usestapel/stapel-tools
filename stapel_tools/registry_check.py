@@ -236,9 +236,9 @@ def check_repo(
 
     findings: list[Finding] = []
     missing = [t for t in tags if t not in published]
-    # Предыстория: теги старше самого первого релиза. Тогда пакета на реестре
-    # не было вовсе — попросить эту версию было не у кого, и «сломанным
-    # релизом» это не является. Считаем и называем, но не краснеем.
+    # Prehistory: tags older than the very first release. The package didn't
+    # exist on the registry yet, so there was nobody to publish that version
+    # — not a broken release. Counted and named, but not flagged.
     prehistoric: list[str] = []
     if published and not all_history:
         floor = min(published, key=version_key)
@@ -246,10 +246,10 @@ def check_repo(
         missing = [m for m in missing if m not in prehistoric]
     if prehistoric:
         notes.append(
-            f"{label}: {len(prehistoric)} тег(ов) старше первого релиза "
-            f"({min(published, key=version_key)}) — до него пакета на реестре "
-            f"не существовало, эти теги НЕ проверялись как релизы "
-            f"(--all-history покажет их)."
+            f"{label}: {len(prehistoric)} tag(s) older than the first release "
+            f"({min(published, key=version_key)}) — the package didn't exist "
+            f"on the registry yet, these tags were NOT checked as releases "
+            f"(--all-history will show them)."
         )
     for tagged in missing:
         findings.append(Finding(

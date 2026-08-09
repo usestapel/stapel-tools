@@ -1,5 +1,5 @@
 """stapel-docs — bilingual API/flow documentation (§57-family owner
-directive: "документация по api/флоу — в идеале двуязычная").
+directive: "api/flow docs should ideally be bilingual").
 
 Renders ``docs/api.en.md`` + ``docs/api.ru.md`` at the project root from
 artifacts every module already ships (`_docgen_scan.discover_modules`):

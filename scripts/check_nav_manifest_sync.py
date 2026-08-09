@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Drift gate for the scripted-fullstack navigation (Ф1) nav-manifest
+"""Drift gate for the scripted-fullstack navigation (P1) nav-manifest
 mirror: ``create_project.FRONTEND_REACT_LIBS[<key>]["nav"]`` is a MANUALLY
 PINNED MIRROR of each ``@stapel/<key>-react`` pair's own
 ``nav-manifest.json`` (same discipline the version pins right above it in

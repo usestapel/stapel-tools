@@ -14,7 +14,7 @@ R005  StapelErrorResponse(status, 'literal') — use an ERR_* constant, not a ra
 R006  StapelResponse({…}) — passing a dict literal skips serializer; use StapelResponse(MySerializer(dto))
 R007  @extend_schema view method without @flow_step — every endpoint must belong to a documented flow
 R008  get_or_create/update_or_create with a lifecycle or security flag in defaults= — WARNING
-R009  call('llm.transcribe'|...) — синхронный вызов долгой операции; ставьте задачей (comm.start)
+R009  call('llm.transcribe'|...) — synchronous call to a long operation; make it a task (comm.start)
 R100  README must link both language docs when i18n artifacts exist (i18n-shipping.md §4) — WARNING
 
 Levels
@@ -389,14 +389,14 @@ def check_r008(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violat
 # ---------------------------------------------------------------------------
 
 
-#: Операции, которые идут МИНУТАМИ, а при очереди — сколько угодно.
-#: Синхронный ``call()`` для них негоден по построению: вызывающий обязан
-#: назвать срок ожидания заранее, а очередь его не знает.
+#: Operations that run for MINUTES, or longer still if queued. A synchronous
+#: ``call()`` can't work for them: the caller must name a wait deadline up
+#: front, and the queue doesn't know one.
 #:
-#: Список именно перечислением, а не эвристикой по имени: «долгая» — это
-#: свойство операции, известное её автору, и угадывать его по подстроке
-#: значило бы ловить ложные срабатывания на llm.embed или llm.rerank,
-#: которые как раз укладываются в секунды.
+#: Listed explicitly rather than matched by name heuristic: "long-running" is
+#: a property of the operation known to its author, and guessing from a
+#: substring would false-positive on llm.embed or llm.rerank, which finish in
+#: seconds.
 LONG_RUNNING_OPERATIONS = frozenset({
     "llm.transcribe",
     "llm.summarize",
@@ -406,23 +406,20 @@ LONG_RUNNING_OPERATIONS = frozenset({
 
 
 def check_r009(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
-    """Долгую операцию нельзя звать синхронным ``call()``.
+    """A long-running operation must not be called through synchronous ``call()``.
 
-    ЖИВОЙ ДЕФЕКТ (08.08.2026, стенд айронмемо). ``call("llm.transcribe",
-    payload)`` без аргумента ``timeout`` брал ``FUNCTION_TIMEOUT`` — пять
-    секунд по умолчанию. Настоящая расшифровка укладывается в 14 секунд,
-    сводка в 36. То есть КАЖДАЯ настоящая запись падала по таймауту,
-    ретраилась трижды и уходила в error спустя два с половиной часа, а
-    человек всё это время смотрел на «обрабатывается».
+    Caught live (2026-08-08): ``call("llm.transcribe", payload)`` with no
+    ``timeout`` took the 5s ``FUNCTION_TIMEOUT`` default, but a real
+    transcription takes 14s — every real call timed out, retried three
+    times, and errored two and a half hours later.
 
-    Явный ``timeout=`` дефект не закрывает, а отодвигает: если исполнители
-    заняты, ждать придётся столько, сколько длится очередь, и никакое
-    число здесь не угадать. Поэтому правило требует не «поставьте срок», а
-    смены примитива — ``stapel_core.comm.start()``: задача возвращает
-    task_id сразу, состояние наблюдаемо через ``status()``, завершение
-    приходит Action'ом ``task.completed``.
+    A ``timeout=`` argument only postpones the same problem: under a busy
+    queue, the wait is unbounded and no number is a safe guess. The fix is a
+    different primitive — ``stapel_core.comm.start()`` returns a task_id
+    immediately, state is observable via ``status()``, completion arrives as
+    a ``task.completed`` Action.
 
-    Осознанное исключение (скрипт, разовая утилита, тест) глушится
+    A deliberate exception (script, one-off utility, test) is suppressed with
     ``# noqa: R009``.
     """
     for node in ast.walk(tree):
@@ -441,10 +438,11 @@ def check_r009(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violat
             continue
         yield Violation(
             path, node.lineno, "R009",
-            f"call({first.value!r}) — синхронный вызов долгой операции. "
-            f"Ждать её ответа нельзя: срок неугадываем, если перед вами "
-            f"очередь. Ставьте задачей — stapel_core.comm.start({first.value!r}, "
-            f"payload, correlation_id=...) — и досчитывайте по task.completed",
+            f"call({first.value!r}) — synchronous call to a long-running "
+            f"operation. Its response can't be waited on: the deadline is "
+            f"unguessable behind a queue. Make it a task instead — "
+            f"stapel_core.comm.start({first.value!r}, "
+            f"payload, correlation_id=...) — and follow up via task.completed",
         )
 
 
@@ -539,8 +537,8 @@ def rules_for_file(path: str):
     # R008 is not about a layer: get_or_create lives in services, consumers,
     # actions, management commands and views alike.
     checkers += [check_r008]
-    # R009 — тем более: долгую операцию можно позвать откуда угодно, и
-    # именно из стадии конвейера её и звали, когда всё падало.
+    # R009 too: a long-running operation can be called from anywhere, and
+    # it was a pipeline stage that called it when this broke in production.
     checkers += [check_r009]
     return checkers
 

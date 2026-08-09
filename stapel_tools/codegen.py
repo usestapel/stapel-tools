@@ -1,7 +1,7 @@
 """
 stapel-codegen — emit the backend artifacts that drive the frontend codegen.
 
-Design: docs/flow-system.md §0.1 + "Порядок реализации" п.1. The codegen source
+Design: docs/flow-system.md §0.1 + "Implementation order" item 1. The codegen source
 is a single *all-modules* Django instance (e.g. stapel-example-monolith on
 sqlite). From it we emit three language-agnostic artifacts:
 

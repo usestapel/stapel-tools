@@ -568,7 +568,7 @@ class TestEnvTemplate:
         notes = []
         findings = by_rule(fdl.lint_project(target, notes=notes), "FED003")
         assert findings and "no env template" in findings[0].message
-        assert any("env-шаблона" in note for note in notes)
+        assert any("env template" in note for note in notes)
 
     def test_a_default_does_not_excuse_absence(self, tmp_path):
         target = project(tmp_path, {
@@ -606,7 +606,7 @@ class TestContractSnapshot:
         })
         notes = []
         fdl.lint_project(target, notes=notes)
-        assert any("FED004" in note and "не заведён" in note for note in notes)
+        assert any("FED004" in note and "no contract snapshot" in note for note in notes)
 
     def test_snapshot_without_a_digest_field(self, tmp_path):
         target = project(tmp_path, {
@@ -794,7 +794,7 @@ class TestZeroInput:
         target = project(tmp_path, {"README.md": "# nothing here\n"})
         notes = []
         assert fdl.lint_project(target, notes=notes) == []
-        assert any("nginx-конфа" in note for note in notes)
+        assert any("nginx conf" in note for note in notes)
         assert any("docker-compose" in note for note in notes)
 
         assert fdl.main([str(target)]) == 0
@@ -809,7 +809,7 @@ class TestZeroInput:
         })
         notes = []
         assert fdl.lint_project(target, notes=notes) == []
-        assert any("нет ни одной" in note for note in notes)
+        assert any("none of the nginx confs" in note for note in notes)
 
 
 # ---------------------------------------------------------------------------
