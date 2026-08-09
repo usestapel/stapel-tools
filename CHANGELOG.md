@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.31.0] — 2026-08-09
+
+### Added — R010/R011: the source is English, and homoglyphs are caught
+
+R010 flags Cyrillic in a comment, a docstring or an identifier. It ignores
+plain string literals on purpose: Russian data is legitimate (i18n catalogues,
+e-mail bodies, fixtures whose Cyrillic is the thing under test), Russian prose
+and names are not. Because data is exempt the rule needs no per-path
+allowlist — and a rule with no allowlist is one nobody learns to silence.
+
+R011 flags a word carrying both alphabets. Those are the expensive ones:
+`miттudei` reads as Latin, greps as neither, and survives review because the
+eye cannot tell the two т apart. Five such words were found across the fleet,
+including a section citation `§Р13` with a Cyrillic Р.
+
+Both rules also run on test files, unlike the layer rules — Russian names were
+thickest exactly there, and pytest prints those names.
+
+### Fixed — the release pipeline had been red since 0.29.2
+
+A single unused `import pytest` in `tests/test_config_lint_cfg006.py` failed
+ruff on every matrix branch, which took CI on main down and blocked publishing.
+0.29.2 and 0.30.0 were tagged and never reached PyPI because of it; the last
+published version was 0.29.1. Their contents ship here.
+
 ## [0.29.1] — 2026-08-06
 
 ### Changed — the scaffolded NATS gets headroom for a Function reply

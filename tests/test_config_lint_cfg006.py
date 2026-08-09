@@ -15,8 +15,6 @@ live entirely in code.
 import textwrap
 from pathlib import Path
 
-import pytest
-
 from stapel_tools.config_lint import (
     collect_key_consumption,
     collect_offered_knobs,
