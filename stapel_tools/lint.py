@@ -15,6 +15,8 @@ R006  StapelResponse({…}) — passing a dict literal skips serializer; use Sta
 R007  @extend_schema view method without @flow_step — every endpoint must belong to a documented flow
 R008  get_or_create/update_or_create with a lifecycle or security flag in defaults= — WARNING
 R009  call('llm.transcribe'|...) — synchronous call to a long operation; make it a task (comm.start)
+R010  Cyrillic in a comment, a docstring or an identifier — source is English-only
+R011  One word carrying both Latin and Cyrillic letters — a homoglyph
 R100  README must link both language docs when i18n artifacts exist (i18n-shipping.md §4) — WARNING
 
 Levels
@@ -33,8 +35,11 @@ Add "# noqa" to silence all rules on that line.
 
 import argparse
 import ast
+import io
 import os
+import re
 import sys
+import tokenize
 from collections import Counter
 from dataclasses import dataclass
 from typing import Iterator
@@ -519,6 +524,122 @@ def check_readme_i18n_links(root: str) -> list[Violation]:
     return violations
 
 
+
+# ---------------------------------------------------------------------------
+# R010 / R011 — the source is English
+# ---------------------------------------------------------------------------
+#
+# Owner ruling, 2026-08-09: identifiers, comments, docstrings, log messages and
+# commit messages are English, in the OSS libraries and the private products
+# alike. Russian that is CONTENT stays: i18n catalogues, e-mail templates, UI
+# copy, prompts, and fixtures whose Cyrillic is the thing under test.
+#
+# That distinction is why R010 ignores plain string literals, and why it needs
+# no per-path allowlist: prose and names have no legitimate reason to be
+# Russian, data does. A rule without an allowlist is one nobody learns to
+# silence wholesale.
+
+CYRILLIC = re.compile(r"[\u0400-\u04FF]")
+
+#: A word carrying BOTH scripts. ``\w`` is unicode-aware, so this matches
+#: ``miттudei`` but never a Cyrillic word standing next to a Latin one.  # noqa: R010,R011
+MIXED_SCRIPT_WORD = re.compile(r"\b(?=\w*[a-zA-Z])(?=\w*[\u0400-\u04FF])\w+\b")
+
+#: Escape sequences, stripped before the homoglyph scan. On raw source text the
+#: ``n`` of ``"\nУточняющий"`` and the ``b`` of ``r"\bготово"`` attach to the  # noqa: R010
+#: Cyrillic that follows and read as one mixed word. Three of the first four
+#: hits across the fleet were exactly this, and none of them were defects.
+ESCAPE_SEQ = re.compile(r"\\.")
+
+#: Below this length a mixed-script hit is a regex character class, not a word:
+#: ``[a-zА-Я]`` puts ``z`` directly against ``А``.  # noqa: R010
+MIN_HOMOGLYPH_WORD = 4
+
+_DOC_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+_NAME_FIELDS = ("name", "id", "arg", "attr", "asname")
+
+
+def _comment_tokens(lines: list[str]) -> Iterator[tuple[int, str]]:
+    """Comment tokens only — a ``#`` inside a string literal is not a comment."""
+    src = "".join(ln if ln.endswith("\n") else ln + "\n" for ln in lines)
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+            if tok.type == tokenize.COMMENT:
+                yield tok.start[0], tok.string
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        return
+
+
+def _docstring_node(node):
+    body = getattr(node, "body", None)
+    if not body:
+        return None
+    first = body[0]
+    if (isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)):
+        return first.value
+    return None
+
+
+def _first_cyrillic_line(doc_node) -> int:
+    """The line the Cyrillic actually sits on, not the line the block opens on.
+
+    Reporting a module docstring at line 1 produces a violation that can never
+    be suppressed: line 1 is inside the string, so a trailing ``# noqa`` there
+    would be text rather than a directive.
+    """
+    start = getattr(doc_node, "lineno", 1)
+    for offset, line in enumerate(doc_node.value.splitlines()):
+        if CYRILLIC.search(line):
+            return start + offset
+    return start
+
+
+def check_r010(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    """E: Cyrillic in a comment, a docstring or an identifier."""
+    for lineno, text in _comment_tokens(lines):
+        if CYRILLIC.search(text) and not _noqa(lines, lineno, "R010"):
+            yield Violation(path, lineno, "R010", "comment is not in English")
+
+    for node in ast.walk(tree):
+        if isinstance(node, _DOC_OWNERS):
+            doc = _docstring_node(node)
+            if doc is not None and CYRILLIC.search(doc.value):
+                first = _first_cyrillic_line(doc)
+                end = getattr(doc, "end_lineno", first)
+                if not (_noqa(lines, first, "R010") or _noqa(lines, end, "R010")):
+                    yield Violation(path, first, "R010", "docstring is not in English")
+        for field in _NAME_FIELDS:
+            value = getattr(node, field, None)
+            if isinstance(value, str) and CYRILLIC.search(value):
+                line = getattr(node, "lineno", 1)
+                if not _noqa(lines, line, "R010"):
+                    yield Violation(
+                        path, line, "R010",
+                        f"identifier {value!r} is not in English",
+                    )
+
+
+def check_r011(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    """E: one word, two alphabets — a homoglyph.
+
+    ``miттudei`` reads as Latin, greps as neither, and survives review because  # noqa: R010,R011
+    the eye cannot tell the two т apart. Unlike R010 this also looks inside
+    string literals: no legitimate text mixes scripts mid-word.
+    """
+    for lineno, raw in enumerate(lines, start=1):
+        line = ESCAPE_SEQ.sub(" ", raw)
+        for word in MIXED_SCRIPT_WORD.findall(line):
+            if len(word) < MIN_HOMOGLYPH_WORD:
+                continue
+            if _noqa(lines, lineno, "R011"):
+                continue
+            yield Violation(
+                path, lineno, "R011",
+                f"{word!r} mixes Latin and Cyrillic letters in one word",
+            )
+
+
 def rules_for_file(path: str):
     basename = os.path.basename(path)
     is_view = "views" in basename
@@ -540,6 +661,9 @@ def rules_for_file(path: str):
     # R009 too: a long-running operation can be called from anywhere, and
     # it was a pipeline stage that called it when this broke in production.
     checkers += [check_r009]
+    # R010/R011 are about the language of the source, so they apply to
+    # every file regardless of layer.
+    checkers += [check_r010, check_r011]
     return checkers
 
 
@@ -548,7 +672,7 @@ def rules_for_file(path: str):
 # ---------------------------------------------------------------------------
 
 
-def scan_file(path: str) -> list[Violation]:
+def scan_file(path: str, checkers=None) -> list[Violation]:
     try:
         src = open(path, encoding="utf-8").read()
     except (OSError, UnicodeDecodeError):
@@ -560,7 +684,7 @@ def scan_file(path: str) -> list[Violation]:
 
     lines = src.splitlines()
     violations: list[Violation] = []
-    for checker in rules_for_file(path):
+    for checker in (checkers if checkers is not None else rules_for_file(path)):
         violations.extend(checker(tree, lines, path))
     violations.sort(key=lambda v: v.line)
     return violations
@@ -585,9 +709,18 @@ def scan_paths(roots: list[str]) -> list[Violation]:
                     continue
                 if fname.endswith(tuple(SKIP_SUFFIXES)):
                     continue
+                fpath = os.path.join(dirpath, fname)
                 if fname.startswith("test_") or fname == "tests.py":
+                    # Layer rules (views/serializers/DTO) do not apply to tests,
+                    # but the language rules do — and tests were where Russian
+                    # names were thickest: whole classes and test methods were
+                    # spelled in Cyrillic, and pytest prints those names. A
+                    # language rule blind to tests would miss its main target.
+                    all_violations.extend(
+                        scan_file(fpath, checkers=[check_r010, check_r011])
+                    )
                     continue
-                all_violations.extend(scan_file(os.path.join(dirpath, fname)))
+                all_violations.extend(scan_file(fpath))
     all_violations.sort(key=lambda v: (v.path, v.line))
     return all_violations
 
