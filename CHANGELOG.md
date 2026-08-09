@@ -1,5 +1,80 @@
 # Changelog
 
+## [0.32.0] — 2026-08-09
+
+### Added — SWAP003: a dotted path may point at your own things, or at what config chose. Not at somebody else's package.
+
+`stapel-workspaces 0.19.0` asked Django's app registry whether
+`stapel_profiles` ran in this process, and then resolved
+`stapel_profiles.validators.validate_display_name` and a model accessor by
+string. It worked in a monolith and answered a permanent 503 in a split
+deployment, because **a symbol resolution has no remote form**. An audit found
+it was the only cross-module symbol resolution in the fleet — the anomaly, not
+the pattern; everything else goes through comm Functions, which are
+topology-independent by construction.
+
+SWAP003 flags a **hardcoded dotted-path literal whose top-level package is not
+ours**, handed at runtime to `import_string`, `importlib.import_module`,
+`apps.get_model` / `apps.is_installed`, `find_spec`, or `getattr` on an
+imported module object. That is a hidden import across a module boundary with
+none of an import's honesty: no dependency declaration, no version constraint,
+no failure until runtime.
+
+The line it draws is the whole design, and it is decided at the call site with
+no index and no configuration: **where did the value come from?** A path that
+arrives from configuration — `STAPEL_RECORDINGS["STORAGE"]`, `NORMALIZER`,
+`PIPELINE_RESOLVER`, the GDPR provider registry, merge-registries keyed by
+kind, every `get_model(KEY, default=...)` swap seam SWAP001 already guards —
+never hands a string constant to the resolver, so the rule never sees it. A
+literal naming your own package is likewise silent: "only to your own
+overridable entities" is exactly what that means. What is left is the
+undeclared reach at a peer, which is what the incident was.
+
+"Ours" is derived, never configured, and there is no allowlist to join: every
+top-level package in the tree, every `AppConfig` label, the `pyproject.toml`
+name, everything the manifest pins (`[project.dependencies]`, any extra, any
+`requirements*.txt` anywhere in the tree), the standard library, and `django`
+itself. `stapel-workspaces` declares `stapel-core` and nothing else, so
+`stapel_profiles` is foreign to it by its own manifest.
+
+It also folds string constants and exactly ONE level of local helper. That is
+not a flourish: the incident wraps the probe and the `import_string` behind
+`profiles_in_process(dotted_path)` and puts every literal at the *call* sites.
+An earlier draft that read only resolver arguments found a parameter, cleared
+the file containing the defect, and reported zero across the fleet — a dead
+rule that ships looking healthy. The 24 new tests assert both directions for
+every case for the same reason.
+
+Composed into `stapel-verify`, so every consumer gets it on upgrade.
+
+**Measured across the whole fleet — 37 repos plus `ironmemo-backend` and the
+meettoday backend — before shipping: 34 raw hits, 3 after triage.** Each
+exclusion was paid for by a class of hit that was not a defect: 11 ×
+`getattr(mod, "__version__")` on a statically imported optional dependency
+(`ironmemo-backend`); 5 × `apps.is_installed("django.contrib.*")`, which asks
+whether the host turned admin on — configuration, not topology (`stapel-core`,
+`stapel-recordings`); 4 × sibling repos checked into `stapel-studio/.vendor/`,
+linted as if they were that project's code; and everything the manifest pins
+(`pyvips` behind `stapel-cdn`'s `images` extra, `stapel_core.django.taskstore`
+from `stapel-recordings`, `meeteval==0.4.3` from `ironmemo-backend`). Two more
+classes need no exclusion because the design already makes them invisible, and
+both are pinned by tests: dotted paths inside stapel-tools' own code templates
+(generated source text, not resolution) and Django's settings strings
+(`AUTH_USER_MODEL`, `MIDDLEWARE`, `DEFAULT_AUTO_FIELD`) — assignments, not
+calls.
+
+The 3 that remain are named, not silenced: `stapel-core`'s
+`adoption_checks.py:124` (`is_installed("stapel_auth")`) and
+`stapel_preflight.py:295` (`is_installed("stapel_workspaces")`), both
+diagnostics whose subject genuinely is the deployment topology, and
+`stapel-workspaces`' `_codegen_settings.py:56` (`find_spec("stapel_profiles")`),
+a test harness assembling a co-mounted monolith. A `checks.py`-shaped exemption
+was considered and rejected: a hole defined by file location is a hole people
+learn to hide behind, whereas three `# noqa: SWAP003` lines with a reason are
+greppable and reviewable. `stapel-workspaces`' four product-code hits were
+fixed in that repo while this shipped; the rule fires on the committed defect
+and is silent on the fix.
+
 ## [0.31.0] — 2026-08-09
 
 ### Added — R010/R011: the source is English, and homoglyphs are caught

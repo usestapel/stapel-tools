@@ -357,6 +357,55 @@ publishing module and to the consuming package. Composed into `stapel-verify`.
 Silent, with a note, in an environment whose installed modules ship no
 `docs/capabilities.json` yet.
 
+### `stapel-swap-lint` — the anti-lock-in indirection gate
+
+```bash
+stapel-swap-lint .            # lint the project in .
+stapel-swap-lint proj/ --json # machine output
+```
+
+SWAP001 (error) a direct import — or instantiation — of a class registered as
+the `default=` of a `get_model()` / `get_presenter()` call somewhere in the
+tree: one stray import silently defeats a host's config-swap for that call
+site, with no error, just an override that never takes effect. SWAP002 (error)
+a `views.py` filling in a DTO imported from a sibling `dto.py` by hand instead
+of going through a presenter.
+
+SWAP003 (error) **a hardcoded dotted path into another top-level package,
+resolved at runtime** — `import_string("other_pkg.validators.validate")`,
+`importlib.import_module("other_pkg.thing")`, `apps.get_model("other_app",
+"Model")`, `apps.is_installed("other_app")`, `find_spec("other_pkg")`,
+`getattr(other_pkg_module, "symbol")`. Prototype: `stapel-workspaces 0.19.0`,
+which asked Django's app registry whether `stapel_profiles` ran in this
+process and then resolved `stapel_profiles.validators.validate_display_name`
+by string. It worked in a monolith and answered a permanent 503 in a split
+deployment, because **a symbol resolution has no remote form**.
+
+The line the rule draws — and the reason it does not outlaw the fleet's own
+extension mechanism — is *where the value comes from*, decided at the call
+site with no index and no configuration:
+
+| shape | verdict |
+| --- | --- |
+| `import_string(settings.STAPEL_RECORDINGS["STORAGE"])` | silent — the host chose it |
+| `import_string(getattr(settings, "NORMALIZER", DEFAULT))` | silent — a declared extension point |
+| `get_model(KEY, default="ourpkg.models.Thing")` | silent — a swap seam waiting to be overridden |
+| `import_string("ourpkg.validators.validate")` | silent — your own overridable entity |
+| `apps.is_installed("django.contrib.admin")` | silent — a question about the host's config |
+| `find_spec("pyvips")` with `pyvips` in an extra | silent — declared, pinned, installed with you |
+| `import_string("other_pkg.validators.validate")` | **error** — nobody chose it but the author |
+
+"Ours" is derived, never configured: every top-level package in the tree,
+every `AppConfig` label, the `pyproject.toml` distribution name, everything
+the manifest pins (`[project.dependencies]`, any extra, any
+`requirements*.txt`), the standard library, and `django`. There is no
+allowlist to add yourself to. `tests/`, `test_*.py`, `migrations/` and
+`.vendor/` are out of scope; a dotted path inside a code template or a
+settings assignment is data, not resolution, and is never seen. Suppress a
+deliberate exception with `# noqa: SWAP003`. Composed into `stapel-verify`.
+
+Measured across the fleet on release: 34 raw hits, 3 after triage.
+
 ### `stapel-llms-txt` — generate the module's own `docs/llms.txt`
 
 ```bash
