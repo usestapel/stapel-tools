@@ -88,6 +88,102 @@ def test_unmodelled_construct_is_loud_under_strict():
         scan_source("{% weird %}", name="t.html", strict=True)
 
 
+# ── tag argument grammars ────────────────────────────────────────────────────
+# A tag's arguments are its own small grammar, not a list of expressions. The
+# scanner once approximated that ("an `=` means a kwarg, anything else is an
+# expression"), so every bare option flag was reported as a context variable:
+# `{% blocktranslate trimmed %}` demanded a `trimmed` that Django never binds
+# and no host can pass. Each option below is checked against Django's own
+# parser, so these are the real forms and not forms we found convenient.
+
+#: every option of the tags the scanner models, one source per option
+GRAMMAR_CASES = [
+    # (source, expected context reads, expected locals — readable, not context)
+    ("{% blocktranslate trimmed %}{{ code }}{% endblocktranslate %}", {"code"}, ""),
+    ("{% blocktranslate with n=user.name %}{{ n }}{% endblocktranslate %}", {"user"}, ""),
+    ("{% blocktranslate with a|upper as b and c as d %}{{ b }}{{ d }}"
+     "{% endblocktranslate %}", {"a", "c"}, ""),
+    ("{% blocktranslate count n=items|length %}{{ n }}{% plural %}{{ n }}"
+     "{% endblocktranslate %}", {"items"}, ""),
+    ('{% blocktranslate context "a greeting" %}{{ code }}{% endblocktranslate %}',
+     {"code"}, ""),
+    ("{% blocktranslate context ctx %}x{% endblocktranslate %}", {"ctx"}, ""),
+    ("{% blocktranslate asvar greeting %}hi{% endblocktranslate %}{{ greeting }}",
+     set(), "greeting"),
+    ('{% translate "hi" noop %}', set(), ""),
+    ('{% translate "hi" context "greeting" %}', set(), ""),
+    ('{% translate "hi" as greeting %}{{ greeting }}', set(), "greeting"),
+    ("{% translate subject %}", {"subject"}, ""),
+    ('{% include "x.html" only %}', set(), ""),
+    ('{% include "x.html" with a=b only %}', {"b"}, ""),
+    ("{% with total=count %}{{ total }}{% endwith %}", {"count"}, ""),
+    ("{% with person.method as total %}{{ total }}{% endwith %}", {"person"}, ""),
+    ("{% for row in rows reversed %}{{ row }}{% endfor %}", {"rows"}, ""),
+    ('{% now "Y" as year %}{{ year }}', set(), "year"),
+]
+
+
+@pytest.mark.parametrize("source,reads,_locals", GRAMMAR_CASES)
+def test_an_option_is_read_as_an_option_not_as_a_context_variable(source, reads, _locals):
+    """The defect this table exists for: `trimmed`, `asvar`, `context`, `count`,
+    `noop`, `only`, `reversed` are grammar, not variables a host can supply."""
+    scan = scan_source(source, name="t.html", strict=True)
+    assert set(scan.variables) == reads
+
+
+@pytest.mark.parametrize("source,_reads,local", GRAMMAR_CASES)
+def test_an_option_that_binds_a_name_binds_it_as_a_local(source, _reads, local):
+    """`asvar`/`as` store the tag's RESULT under a name that is readable after
+    the tag — a local, and never something the host is asked to pass in."""
+    if not local:
+        pytest.skip("this form binds nothing")
+    scan = scan_source(source, name="t.html", strict=True)
+    assert local not in scan.variables
+
+
+@pytest.mark.parametrize("source,_reads,_locals", GRAMMAR_CASES)
+def test_every_modelled_form_is_one_django_itself_accepts(source, _reads, _locals):
+    """The authority for the grammar is Django's parser, not our examples: if a
+    form here is not one Django compiles, the model is describing a language
+    nobody writes."""
+    from django.template import Engine
+
+    engine = Engine(
+        dirs=[], app_dirs=False,
+        libraries={"i18n": "django.templatetags.i18n"}, builtins=None,
+    )
+    engine.from_string("{% load i18n %}" + source)
+
+
+def test_an_option_word_the_grammar_does_not_know_is_refused_not_guessed():
+    """Django raises TemplateSyntaxError on an unknown option. The scanner
+    cannot raise (it scans other people's templates too), so it reports the
+    construct — which is loud under ``strict`` — rather than quietly turning
+    the word into a required context variable, the failure mode this whole
+    section replaced."""
+    scan = scan_source("{% blocktranslate bogus %}x{% endblocktranslate %}", name="t.html")
+    assert scan.variables == {}
+    assert scan.unknown_tags == ("blocktranslate(bogus)",)
+    with pytest.raises(EmitError, match="unmodelled template construct"):
+        scan_source("{% blocktranslate bogus %}x{% endblocktranslate %}", name="t.html",
+                    strict=True)
+
+
+def test_options_do_not_blind_the_scanner_to_the_block_it_opens():
+    """The fail-closed half: teaching the parser about options must not turn
+    a whole tag into a no-op. Everything the block really reads is still read,
+    and only the names the tag itself binds are excluded."""
+    scan = scan_source(
+        "{% blocktranslate with greeting=salutation count n=items|length "
+        'context "mail" trimmed asvar body %}'
+        "{{ greeting }}, {{ n }} of {{ total }}"
+        "{% endblocktranslate %}{{ body }}",
+        name="t.html",
+        strict=True,
+    )
+    assert set(scan.variables) == {"salutation", "items", "total"}
+
+
 # ── chain resolution ─────────────────────────────────────────────────────────
 
 def _tree(tmp_path: Path) -> Path:
@@ -202,6 +298,36 @@ def test_undeclared_required_read_aborts_emission(tmp_path):
             call_sites=[],
             limits=[],
         )
+
+
+def test_a_missing_variable_still_aborts_a_template_full_of_options(tmp_path):
+    """The gate must stay fail-closed across the grammar fix. This letter is
+    written entirely in the option forms that used to be misread; a variable
+    nothing declares still stops emission, and `trimmed` — which the emitter
+    once demanded — is not among the things it asks for."""
+    root = tmp_path / "templates"
+    root.mkdir()
+    (root / "letter.html").write_text(
+        '{% blocktranslate with who=user.name context "mail" trimmed asvar body %}'
+        "Hi {{ who }}, your code is {{ code }}.{% endblocktranslate %}{{ body }}"
+    )
+    route = Route(key="otp", template="letter.html", context={"caller": ["user", "code"]})
+
+    with pytest.raises(EmitError, match="no provenance declares") as excinfo:
+        build_document(
+            module="m", version="1", routing_key="k", template_root="templates",
+            template_dirs=[root],
+            routes=[Route(key="otp", template="letter.html", context={"caller": ["user"]})],
+            call_sites=[], limits=[],
+        )
+    assert "code" in str(excinfo.value)
+    assert "trimmed" not in str(excinfo.value)
+
+    doc = build_document(
+        module="m", version="1", routing_key="k", template_root="templates",
+        template_dirs=[root], routes=[route], call_sites=[], limits=[],
+    )
+    assert declared_for(doc, "letter.html") == {"user", "code"}
 
 
 def test_document_is_deterministic_and_declares_its_templates(tmp_path):

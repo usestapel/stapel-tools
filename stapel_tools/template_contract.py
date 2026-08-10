@@ -65,6 +65,13 @@ What it CANNOT derive, and says so in ``limits``:
   parsed, and an ``as <name>`` result is treated as a local, not a context
   variable.
 
+Each modelled tag's arguments are walked by that tag's own grammar (see
+``_BLOCKTRANSLATE_GRAMMAR`` and friends, read off Django's tag compilers), not
+by a generic "``=`` means a kwarg" approximation. An option word is grammar:
+``{% blocktranslate trimmed %}`` reads nothing named ``trimmed``, and an option
+this scanner has not been taught is reported like an unknown tag instead of
+being turned into a context variable no host could ever supply.
+
 Loud, never partial: a missing template file, a render call site that no
 longer matches the declared wiring, or a template that consumes a variable no
 provenance declares — each aborts emission with a message naming the thing.
@@ -84,6 +91,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,6 +121,49 @@ _IF_OPERATORS = {
 #: Filters that make a missing variable harmless — a variable whose every
 #: occurrence carries one is reported ``optional``.
 _DEFAULTING_FILTERS = {"default", "default_if_none"}
+
+# ── tag argument grammars ────────────────────────────────────────────────────
+# A Django tag's arguments are not a list of expressions: each tag has its own
+# small grammar of OPTIONS, and an option word is not a context read. Modelling
+# that generically ("anything with an ``=`` is a kwarg, anything else is an
+# expression") makes every bare flag look like a variable the host must pass —
+# ``{% blocktranslate trimmed %}`` demanded a ``trimmed``, which Django never
+# binds and no host can supply. The grammars below are read off each tag's own
+# compiler function: ``do_translate`` / ``do_block_translate`` in
+# ``django/templatetags/i18n.py``, ``do_include`` in
+# ``django/template/loader_tags.py``, ``do_with`` / ``do_for`` / ``now`` in
+# ``django/template/defaulttags.py``.
+
+#: A bare word. Reads nothing, binds nothing: ``only``, ``trimmed``, ``noop``.
+_FLAG = "flag"
+#: Takes the next bit as a NAME the tag binds — never a context read.
+_BIND = "bind"
+#: Takes the next bit as a filter expression: a real context read.
+_EXPR = "expr"
+#: Introduces a run of ``key=expr`` pairs.
+_KWARGS = "kwargs"
+#: ...same, also accepting the legacy ``expr as name [and expr as name]``.
+_KWARGS_LEGACY = "kwargs-legacy"
+
+#: ``{% blocktranslate %}`` / ``{% blocktrans %}`` — do_block_translate.
+_BLOCKTRANSLATE_GRAMMAR = {
+    "with": _KWARGS_LEGACY,
+    "count": _KWARGS_LEGACY,
+    "context": _EXPR,
+    "trimmed": _FLAG,
+    "asvar": _BIND,
+}
+#: ``{% translate %}`` / ``{% trans %}`` after the message — do_translate.
+_TRANSLATE_GRAMMAR = {"noop": _FLAG, "context": _EXPR, "as": _BIND}
+#: ``{% include %}`` after the template name — do_include. Note ``with`` here
+#: does NOT accept the legacy form (``support_legacy=False``).
+_INCLUDE_GRAMMAR = {"with": _KWARGS, "only": _FLAG}
+#: ``{% now %}`` after the format string — the ``as var`` assignment form.
+_NOW_GRAMMAR = {"as": _BIND}
+
+#: ``django.template.base.kwarg_re``, narrowed to the question asked here:
+#: is this bit a ``key=value`` assignment, and what are its two halves?
+_KWARG_RE = re.compile(r"(\w+)=(.+)$", re.DOTALL)
 
 REQUIRED = "required"
 OPTIONAL = "optional"
@@ -161,6 +212,23 @@ def _parser():
 
     engine = Engine(dirs=[], app_dirs=False, libraries={}, builtins=None)
     return Parser([], libraries=engine.template_libraries, builtins=engine.template_builtins)
+
+
+def _split_contents(contents: str) -> list[str]:
+    """Split a tag's contents into bits the way Django's own ``Token`` does.
+
+    Not ``str.split()``: a quoted argument holds together, so
+    ``{% blocktranslate context "a greeting" %}`` is three bits and not four,
+    and the option's argument stays one filter expression.
+    """
+    from django.template.base import Token, TokenType
+
+    try:
+        return Token(TokenType.BLOCK, contents).split_contents()
+    except ValueError:
+        # Unbalanced quotes: Django's lexer would raise on render. Fall back
+        # to the crude split so the scan still reports something.
+        return contents.split()
 
 
 def _filter_names(fexpr) -> set[str]:
@@ -238,7 +306,7 @@ class _Scanner:
 
     # -- tags ------------------------------------------------------------
     def tag(self, contents: str) -> None:
-        bits = contents.split()
+        bits = _split_contents(contents)
         if not bits:
             return
         tag, args = bits[0], bits[1:]
@@ -256,7 +324,9 @@ class _Scanner:
                     self.guarded_includes.add(included)
             else:
                 self.unknown.add("include(dynamic)")
-            self._kwargs(args[1:])
+            # ``with`` names bind inside the INCLUDED template, not here — the
+            # included template is scanned on its own and reports them there.
+            self._options(tag, args[1:], _INCLUDE_GRAMMAR)
         elif tag == "block":
             if args:
                 self.blocks.append(args[0])
@@ -268,11 +338,13 @@ class _Scanner:
         elif tag == "endif":
             self.if_depth = max(0, self.if_depth - 1)
         elif tag == "for":
-            # {% for a, b in seq reversed %}
+            # {% for a, b in seq reversed %} — `reversed` is a TRAILING flag.
+            if args and args[-1] == "reversed":
+                args = args[:-1]
             if "in" in args:
                 idx = args.index("in")
                 names = " ".join(args[:idx]).replace(",", " ").split()
-                rest = [a for a in args[idx + 1:] if a != "reversed"]
+                rest = args[idx + 1:]
                 if rest:
                     self.record(rest[0])
                 self.scopes.append(set(names) | {"forloop"})
@@ -280,14 +352,29 @@ class _Scanner:
                 self.scopes.append(set())
         elif tag == "endfor":
             self._pop()
-        elif tag in {"with", "blocktrans", "blocktranslate"}:
-            names = self._kwargs(args)
-            self.scopes.append(names)
+        elif tag == "with":
+            # The whole argument list is one assignment run.
+            inner, outer = self._options(tag, args, {}, bare_kwargs=True)
+            self.scopes[-1] |= outer
+            self.scopes.append(inner)
+        elif tag in {"blocktrans", "blocktranslate"}:
+            inner, outer = self._options(tag, args, _BLOCKTRANSLATE_GRAMMAR)
+            # `with`/`count` names are readable inside the block; `asvar` binds
+            # the RESULT, which is readable after it — a different scope.
+            self.scopes[-1] |= outer
+            self.scopes.append(inner)
         elif tag in {"endwith", "endblocktrans", "endblocktranslate"}:
             self._pop()
         elif tag in {"trans", "translate"}:
-            if args and args[0][:1] not in "\"'":
+            if args:
+                # A literal message records nothing: compile_filter resolves it
+                # to a literal, and a literal has no roots.
                 self.record(args[0])
+                _inner, outer = self._options(tag, args[1:], _TRANSLATE_GRAMMAR)
+                self.scopes[-1] |= outer
+        elif tag == "now":
+            _inner, outer = self._options(tag, args[1:], _NOW_GRAMMAR)
+            self.scopes[-1] |= outer
         elif tag in _STRUCTURAL_TAGS:
             pass
         else:
@@ -297,28 +384,94 @@ class _Scanner:
             if len(args) >= 2 and args[-2] == "as":
                 self.scopes[-1].add(args[-1])
 
-    def _kwargs(self, args: list[str]) -> set[str]:
-        """``key=expr`` pairs (and the legacy ``expr as name``); returns the
-        local names bound, having recorded the right-hand sides."""
-        names: set[str] = set()
+    def _options(
+        self,
+        tag: str,
+        args: list[str],
+        grammar: dict[str, str],
+        *,
+        bare_kwargs: bool = False,
+    ) -> tuple[set[str], set[str]]:
+        """Walk a tag's option list by that tag's DECLARED grammar.
+
+        Returns ``(inner, outer)`` — names bound for the tag's own block
+        (``with``/``count`` assignments) and names bound in the enclosing scope
+        (``asvar``/``as`` results). ``bare_kwargs`` is for the tag whose whole
+        argument list is an assignment run, ``{% with %}``.
+
+        A word the grammar does not know is NOT guessed at. Django's own parser
+        raises ``TemplateSyntaxError`` there; this one records it in
+        ``unknown_tags`` — loud under ``strict``, visible otherwise — because
+        the alternative is what this replaced: reporting the word as a context
+        variable the host is then told to supply.
+        """
+        inner: set[str] = set()
+        outer: set[str] = set()
         i = 0
         while i < len(args):
-            arg = args[i]
-            if arg == "only":
+            word = args[i]
+            kind = grammar.get(word)
+            if kind is None and bare_kwargs:
+                after = self._kwargs_run(args, i, inner, legacy=True)
+                if after == i:
+                    self.unknown.add(f"{tag}({word})")
+                    break
+                i = after
+            elif kind == _FLAG:
                 i += 1
-                continue
-            if arg == "as" and i + 1 < len(args):
-                names.add(args[i + 1])
+            elif kind == _BIND:
+                if i + 1 < len(args):
+                    outer.add(args[i + 1])
                 i += 2
-                continue
-            if "=" in arg:
-                key, _, value = arg.partition("=")
-                names.add(key)
-                self.record(value)
+            elif kind == _EXPR:
+                if i + 1 < len(args):
+                    self.record(args[i + 1])
+                i += 2
+            elif kind in {_KWARGS, _KWARGS_LEGACY}:
+                after = self._kwargs_run(args, i + 1, inner, legacy=kind == _KWARGS_LEGACY)
+                if after == i + 1:
+                    self.unknown.add(f"{tag}({word} with no assignment)")
+                    break
+                i = after
             else:
-                self.record(arg)
-            i += 1
-        return names
+                self.unknown.add(f"{tag}({word})")
+                break
+        return inner, outer
+
+    def _kwargs_run(self, args: list[str], i: int, names: set[str], *, legacy: bool) -> int:
+        """Consume an assignment run starting at ``i``; return the next index.
+
+        Mirrors ``django.template.base.token_kwargs``: the FIRST bit decides
+        whether the run is in the standard ``key=expr`` form or the legacy
+        ``expr as name`` one (the latter chained with ``and``), and the run
+        ends at the first bit that does not fit that form — which is how an
+        option word such as ``asvar`` after ``{% blocktranslate with a=b %}``
+        gets back to the option walker instead of being eaten as a value.
+        """
+        if i >= len(args):
+            return i
+        kwarg_form = _KWARG_RE.match(args[i]) is not None
+        if not kwarg_form and (not legacy or len(args) - i < 3 or args[i + 1] != "as"):
+            return i
+        while i < len(args):
+            if kwarg_form:
+                match = _KWARG_RE.match(args[i])
+                if match is None:
+                    return i
+                names.add(match[1])
+                self.record(match[2])
+                i += 1
+            else:
+                if len(args) - i < 3 or args[i + 1] != "as":
+                    return i
+                self.record(args[i])
+                names.add(args[i + 2])
+                i += 3
+                if i < len(args):
+                    if args[i] != "and":
+                        return i
+                    i += 1
+        return i
 
     def _pop(self) -> None:
         if len(self.scopes) > 1:

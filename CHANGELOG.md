@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.38.0] — 2026-08-10
+
+### Fixed — a template tag's options are grammar, not context variables
+
+`templates.json` is derived by walking each template with Django's own lexer,
+and the scanner modelled a tag's arguments as `key=expr` pairs plus the legacy
+`expr as name`, with a single special case (`only`, for `{% include %}`).
+Django's tags do not have that grammar. `{% blocktranslate trimmed %}` fell
+through to "then it must be an expression", so the emitted contract declared a
+**required context variable named `trimmed`** — a word Django binds nothing
+for and no host can supply. `asvar`, `context` and `count` were misread the
+same way. On a colleague's email-template branch four test failures were this,
+not his templates; the product's workaround was to subtract `trimmed` from the
+gate's expected set (with a guard test proving the subtraction had not neutered
+the gate) and let the other three keep failing loudly rather than widen the
+subtraction. Both can go.
+
+Each modelled tag now carries **its own grammar table**, read off Django's tag
+compilers rather than off the templates the fleet happens to ship —
+`do_translate` / `do_block_translate` in `django/templatetags/i18n.py`,
+`do_include` in `django/template/loader_tags.py`, `do_with` / `do_for` / `now`
+in `django/template/defaulttags.py`. An option is one of four things:
+
+* a bare **flag** — `trimmed`, `only`, `noop`, `reversed`: reads nothing, binds
+  nothing;
+* a **bind** — `asvar <name>`, `as <name>`: a local, readable after the tag,
+  never something the host is asked to pass in;
+* an **expression** — `context <expr>`: a real context read, including the
+  variable form `{% blocktranslate context ctx %}`;
+* a **kwargs run** — `with a=b c=d`, `count n=expr`, consumed exactly the way
+  `django.template.base.token_kwargs` consumes it, legacy
+  `expr as name and expr as name` included, ending at the first bit that does
+  not fit the form so a following option word reaches the option walker.
+
+Two more misreads of the same shape ride along: tag contents are now split the
+way Django's own `Token` splits them (`context "a greeting"` is one argument,
+not two), and `{% translate "x" as var %}` / `{% now "Y" as year %}` bind their
+result as a local instead of demanding it from the host.
+
+And the direction this fix must not take: an option word a tag's grammar does
+not know is **refused, not guessed** — recorded like an unknown tag, which is
+an abort under `strict`. Django raises `TemplateSyntaxError` on exactly those
+words; a denylist of known-bad option names would have reproduced the original
+defect one option later.
+
+The gate stays **fail-closed**, which is the property a parser fix can quietly
+destroy: a variable no provenance declares still aborts emission in a letter
+written entirely in these option forms
+(`test_a_missing_variable_still_aborts_a_template_full_of_options`), and that
+test was checked against a deliberately blinded scanner — it goes red the
+moment a block's reads start counting as locals. Every option form in the
+table is also compiled by Django's own parser in the same test run, so the
+grammar under test is Django's and not ours.
+
 ## [0.37.0] — 2026-08-10
 
 ### Fixed — the generated image now carries a decoder for every format the settings promise
