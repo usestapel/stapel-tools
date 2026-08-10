@@ -1760,9 +1760,14 @@ def _append_cdn_pip_requirement(reqs_path: Path):
         return
     comment = (
         "\n# stapel-cdn's image pipeline (auto-wired: cdn selected via "
-        "--modules) — the [images]\n# extra pulls pyvips, which needs the "
-        "system libvips-dev runtime lib baked into\n# this service's "
-        "Dockerfile (vips-builder stage, mirrors svc-stapel-studio's).\n"
+        "--modules) — the [images]\n# extra pulls pyvips, and libvips is a "
+        "SYSTEM library, not a wheel: this service's\n# Dockerfile builds "
+        "the pyvips wheel in its vips-builder stage and installs\n# "
+        "libvips42t64 plus the libheif codec plugins in the runtime stage. "
+        "Which\n# formats decode is a property of THAT image, not of this "
+        "line — see the\n# Dockerfile's apt line for the package behind "
+        "each ALLOWED_IMAGE_EXTENSIONS\n# entry, and stapel_cdn.checks.E004 "
+        "for what happens at boot when one is gone.\n"
     )
     with reqs_path.open("a", encoding="utf-8") as f:
         f.write(comment + entry + "\n")

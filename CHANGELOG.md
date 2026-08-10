@@ -1,5 +1,65 @@
 # Changelog
 
+## [0.37.0] — 2026-08-10
+
+### Fixed — the generated image now carries a decoder for every format the settings promise
+
+stapel-cdn 0.10 removed Pillow and made libvips the single decoder on the
+image path: validation and processing ask the same engine, so "declared
+allowed" and "actually decodable" can no longer drift apart *in code*. What
+they can still drift apart in is the **image**, and that is what
+`DOCKERFILE_CDN` emits.
+
+Measured in the built container (2026-08-10, arm64, libvips 8.16.1), one real
+file per format, full pixel pass — not read off a manpage:
+
+| ext | loader | before | after |
+|---|---|---|---|
+| .jpg/.jpeg | jpegload | OK | OK |
+| .png | pngload | OK | OK |
+| .gif | gifload | OK | OK |
+| .webp | webpload | OK | OK |
+| .bmp | **magickload** | OK | OK |
+| .heic/.heif | **heifload** | OK | OK |
+| .avif (not in the stock allowlist) | heifload | OK | OK |
+
+So nothing was missing — and that is the finding, not a clean bill of health.
+Every one of those loaders arrived as somebody else's transitive `Depends`:
+`libvips42t64` → `libheif1` → `libheif-plugin-libde265`, and `.bmp` only
+because libvips's ImageMagick module happens to be compiled in (libvips has no
+native BMP reader at all). Nothing in the Dockerfile said we needed any of it.
+A promise held by accident is held until the day it isn't, and the day it
+isn't, an iPhone photo is told it is an invalid file.
+
+The runtime stage now **names** them:
+
+```
+libvips42t64 libheif-plugin-libde265 libheif-plugin-dav1d
+```
+
+Naming them *is* the build-time gate — apt fails the build the day Debian
+renames or drops one, instead of the image quietly losing a format. Whether
+the assembled image honours a *host's own* `ALLOWED_IMAGE_EXTENSIONS` stays
+`stapel_cdn.checks.E004`, a system-check Error at boot; verified both ways in
+the container — silent for the stock allowlist, and still firing (2 findings,
+`.heic`/`.heif`) once `vips-heif.so` is removed, so it has not been defeated.
+
+Two changes ride along, for the same reason:
+
+* **the runtime stage installs `libvips42t64`, not `libvips-dev`.** Headers,
+  and the ~40 `-dev` packages behind them, are the `vips-builder` stage's
+  business. Same eight formats decodable: **662 MB → 331 MB.**
+* **both stages pin `python:3.12-slim-trixie`.** The floating tag moved
+  bookworm → trixie under the fleet. Both releases happen to decode all eight
+  (measured), but a Debian release is exactly the event that changes a decoder
+  set quietly, and version-named packages need a named suite to be named
+  against.
+
+No format is recommended for removal from the stock default: `.bmp` costs
+nothing extra (ImageMagick is a hard dependency of libvips itself, dropping
+`.bmp` would not remove a byte), and HEIC is the format an iPhone actually
+uploads.
+
 ## [0.36.0] — 2026-08-10
 
 ### Added — a generated project is born knowing when a template variable went missing

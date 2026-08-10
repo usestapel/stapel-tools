@@ -83,21 +83,57 @@ CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
 # headers (pkg-config), which needs a C compiler. Building the wheel in a
 # throwaway `vips-builder` stage keeps gcc/build-essential out of the
 # runtime image — mirrors svc-stapel-studio/Dockerfile (the verified
-# libvips container precedent): *system* libvips-dev bound by the pip
-# `images` extra (requirements.txt's stapel-cdn[images]), never a
-# bundled/vendored libvips (that rules out `pyvips[binary]`, which ships its
-# own separate libvips copy).
+# libvips container precedent): *system* libvips bound by the pip `images`
+# extra (requirements.txt's stapel-cdn[images]), never a bundled/vendored
+# libvips (that rules out `pyvips[binary]`, which ships its own separate
+# libvips copy).
+#
+# WHICH FORMATS DECODE is a property of THIS build of libvips, not of
+# libvips. Debian's libvips is modular (`vips-heif.so`, `vips-magick.so`
+# live in vips-modules-8.16/), and HEIC/AVIF decoding sits one level further
+# down again, in libheif's codec plugins. stapel-cdn 0.10 made libvips the
+# ONLY decoder on the image path — validation and processing now ask the
+# same engine — so STAPEL_CDN["ALLOWED_IMAGE_EXTENSIONS"] is a promise this
+# image either keeps or breaks, and `stapel_cdn.checks.E004` names the
+# formats it breaks at boot. This stage therefore NAMES every package the
+# stock allowlist (.jpg .jpeg .png .gif .webp .bmp .heic .heif) rests on
+# instead of inheriting them as somebody else's transitive Depends:
+#
+#   jpeg/png/gif/webp  libvips42t64 itself
+#   bmp                vips-magick.so + libmagickcore (libvips has no native
+#                      BMP reader at all — it goes through ImageMagick)
+#   heic/heif          vips-heif.so + libheif1 + libheif-plugin-libde265
+#   avif (not stock)   the same path via libheif-plugin-dav1d, which is a
+#                      few hundred KB and comes with the HEIC set anyway
+#
+# Measured 2026-08-10 in this image (python:3.12-slim-trixie, arm64,
+# libvips 8.16.1): all eight stock formats decode a real file end to end.
+#
+# The runtime stage installs libvips42t64 (the shared LIBRARY) and NOT
+# libvips-dev: headers, and the ~40 -dev packages behind them, are the
+# builder stage's business. Same eight formats, 331 MB instead of 662 MB.
+#
+# The base image is pinned to -trixie for the same reason the packages are
+# named: `python:3.12-slim` floated bookworm -> trixie under the fleet, and
+# a Debian release is exactly the event that changes a decoder set quietly.
+#
+# Naming the packages IS the build-time gate: apt fails the build the day
+# Debian renames or drops one of them, instead of the image quietly losing a
+# format. Whether the assembled image actually honours the deployment's OWN
+# ALLOWED_IMAGE_EXTENSIONS (a host may add to it) stays stapel-cdn's boot
+# check, E004 — a Django system-check Error, so a service that lost a decoder
+# refuses to start rather than telling an uploader their file is invalid.
 DOCKERFILE_CDN = """\
-FROM python:3.12-slim AS vips-builder
+FROM python:3.12-slim-trixie AS vips-builder
 RUN apt-get update && apt-get install -y --no-install-recommends build-essential libvips-dev pkg-config && rm -rf /var/lib/apt/lists/*
 RUN pip wheel --no-cache-dir --wheel-dir /wheels pyvips==3.1.1
 
-FROM python:3.12-slim
+FROM python:3.12-slim-trixie
 WORKDIR /app
-# libvips-dev: runtime dependency for stapel-cdn[images] (pyvips) — the
-# image upload/resize pipeline. No compiler needed here — pyvips arrives
-# precompiled from vips-builder above via --find-links.
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client libvips-dev && rm -rf /var/lib/apt/lists/*
+# libvips42t64 + the libheif codec plugins: the decoders behind
+# STAPEL_CDN["ALLOWED_IMAGE_EXTENSIONS"]. No compiler and no headers here —
+# pyvips arrives precompiled from vips-builder above via --find-links.
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client libvips42t64 libheif-plugin-libde265 libheif-plugin-dav1d && rm -rf /var/lib/apt/lists/*
 COPY --from=vips-builder /wheels /wheels
 COPY {{DIR}}/requirements.txt .
 RUN pip install --no-cache-dir --find-links=/wheels -r requirements.txt && rm -rf /wheels

@@ -218,7 +218,10 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
     # stapel_cdn needs pyvips (stapel-cdn's [images] extra) importable at
     # runtime, which needs the SYSTEM libvips built somewhere — the
     # multi-stage vips-builder Dockerfile mirrors svc-stapel-studio's own
-    # precedent. Every other service keeps the exact prior single-stage
+    # precedent. DOCKERFILE_CDN is the ONLY place in this package that spells
+    # an apt line for libvips; the decoder set behind
+    # ALLOWED_IMAGE_EXTENSIONS is settled there, once, for every generated
+    # project. Every other service keeps the exact prior single-stage
     # Dockerfile (regression: no cdn -> byte-identical).
     dockerfile_template = DOCKERFILE_CDN if ctx.get("HAS_CDN") else DOCKERFILE
     # Service conftest = shared outbox/mailtrap harness fixtures + api_client.

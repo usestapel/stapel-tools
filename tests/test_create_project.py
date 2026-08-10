@@ -936,6 +936,42 @@ class TestCdnAutoWiring:
         assert "pyvips==3.1.1" in dockerfile
         assert "--find-links=/wheels" in dockerfile
 
+    def test_cdn_dockerfile_installs_a_decoder_for_every_stock_format(self, tmp_path):
+        """The apt line, not a comment, is what makes the settings true.
+
+        stapel-cdn 0.10 made libvips the only decoder on the image path, so
+        every extension in its stock ALLOWED_IMAGE_EXTENSIONS is a promise
+        THIS image keeps or breaks. Measured in the built container
+        (2026-08-10, python:3.12-slim-trixie, libvips 8.16.1): jpeg/png/gif/
+        webp come from libvips42t64, .bmp only through ImageMagick's module,
+        .heic/.heif only through libheif plus its libde265 codec plugin. They
+        arrive as transitive Depends today; named here, apt fails the build
+        the day Debian stops shipping one, instead of the image silently
+        losing a format and stapel_cdn.checks.E004 finding out on the stand.
+        """
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
+        dockerfile = (proj / "svc-app" / "Dockerfile").read_text()
+        runtime_apt = [
+            line
+            for line in dockerfile.splitlines()
+            if "apt-get install" in line and "build-essential" not in line
+        ]
+        assert len(runtime_apt) == 1, runtime_apt
+        for package in (
+            "libvips42t64",             # jpeg/png/gif/webp + the vips-magick.so
+            "libheif-plugin-libde265",  # .heic/.heif — HEVC decode
+            "libheif-plugin-dav1d",     # .avif — AV1 decode
+        ):
+            assert package in runtime_apt[0], (package, runtime_apt[0])
+        # ...and NOT the -dev package: headers belong to vips-builder. 662 MB
+        # -> 331 MB, same eight formats decodable.
+        assert "libvips-dev" not in runtime_apt[0]
+        # Both stages pin the Debian suite: `python:3.12-slim` floated
+        # bookworm -> trixie under the fleet, and the decoder set is exactly
+        # what a Debian release changes quietly.
+        assert dockerfile.count("python:3.12-slim-trixie") == 2
+        assert "python:3.12-slim\n" not in dockerfile
+
     def test_cdn_mount_reports_no_ado001(self, tmp_path):
         """cdn's mount is a plain string literal — since the per-lib mismount
         fix (2026-07-20) every registered lib's mount is (see
