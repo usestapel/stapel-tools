@@ -316,3 +316,23 @@ def test_cli_dry_run_writes_nothing(tmp_path, capsys):
     assert po_prune.main([str(project), "--search-root", str(tmp_path / "nothing")]) == 0
     assert path.read_text(encoding="utf-8") == before
     assert "dry run" in capsys.readouterr().out
+
+
+def test_json_output_is_the_only_thing_on_stdout(tmp_path, capsys):
+    """--json is read by CI and by agents; a human sentence appended to the
+    document makes the whole payload unparseable."""
+    import json
+
+    project = make_project(tmp_path)
+    write_catalog(project, (
+        '#: app/views.py:1\nmsgid "Alive"\nmsgstr "Zhivo"\n'
+        '\n'
+        '#: app/views.py:9\nmsgid "Rewritten away"\nmsgstr "Ushlo"\n'
+    ))
+    assert po_prune.main([
+        str(project), "--json", "--mode", "heuristic", "--no-idempotence-check",
+    ]) == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["mode"] == "heuristic"
+    assert "dry run" in captured.err

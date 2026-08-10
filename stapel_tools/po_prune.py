@@ -635,16 +635,21 @@ def main(argv: Optional[list] = None) -> int:
     else:
         _print_report(project.resolve(), findings, idem, args.sample, sys.stdout, mode)
 
+    # Under --json the only thing on stdout is the document: this output is
+    # read by CI and by agents, and a human sentence appended to it makes the
+    # whole payload unparseable. The same sentence goes to stderr instead.
+    stream = sys.stderr if args.json else sys.stdout
     if args.apply:
         buckets = ("dead", "foreign", "shadow") if args.relocate_applied else ("dead",)
         removed = apply_prune(project, findings, buckets=buckets)
         total = sum(removed.values())
         print(f"\nstapel-po-prune: removed {total} entr(ies) from "
-              f"{len(removed)} catalogue(s). Review with `git diff`.")
+              f"{len(removed)} catalogue(s). Review with `git diff`.", file=stream)
     else:
         counts = _summarise(findings)
         print(f"\nstapel-po-prune: dry run — {counts.get('dead', 0)} entr(ies) "
-              f"would be removed. Nothing written. Re-run with --apply.")
+              f"would be removed. Nothing written. Re-run with --apply.",
+              file=stream)
     return 0
 
 

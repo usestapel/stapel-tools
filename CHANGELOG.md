@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.39.1] — 2026-08-11
+
+### Fixed — `stapel-po-prune --json` emitted a human sentence after the document
+
+The dry-run summary ("N entries would be removed") was printed to stdout after
+the JSON payload, so `json.loads` on the output raised `Extra data` — found by
+using the flag for exactly what it is for. Machine output is now the only thing
+on stdout; the sentence goes to stderr, where it is still visible to a person
+running the command by hand.
+
 ## [0.39.0] — 2026-08-11
 
 ### Added — the canonical i18n command is ours now, and it cannot silently un-translate
