@@ -424,6 +424,67 @@ with `# noqa: SWAP004`.
 
 Measured across the fleet on release: 34 raw hits, 3 after triage.
 
+### `stapel-makemessages` / `stapel-po-lint` / `stapel-po-prune` — the gettext seam
+
+```bash
+make messages                  # extract + gate (the command to reach for)
+stapel-po-lint .               # the gate alone — CI, pre-commit
+stapel-po-prune . --sample 20  # product-side dry run; --apply to rewrite
+```
+
+`makemessages` is what everybody reaches for the moment they add a translatable
+string, and run bare it demotes every entry whose source it could not find.
+gettext skips both demotions: **obsolete** (`#~`, parked at the end of the file)
+and **fuzzy** (left among the live entries, still carrying a translation, still
+looking translated). Fuzzy is the dangerous one — a `python-format` →
+`python-brace-format` flag flip produces it with no edit to the msgid at all —
+and a suite that asserts almost no strings stays green while the product
+reverts to its source language.
+
+`stapel-makemessages` runs the extraction with the ignores Django does not
+apply itself, runs the gate on the result, and **restores the catalogues
+byte-for-byte if anything was demoted**. `--accept-losses` keeps the result
+when the demotion is the point.
+
+`stapel-po-lint` is the gate on its own, and is composed into `stapel-verify`:
+
+| rule | level | what |
+| --- | --- | --- |
+| PO001 | error | fuzzy entry — gettext skips it, the file still shows a translation |
+| PO002 | error | obsolete (`#~`) entry — its translation is switched off |
+| PO003 | warning | empty `msgstr` — ships the source language |
+| PO004 | warning | unowned entry — no `#:` reference resolves to a file in this tree |
+
+`--max-fuzzy N` / `--max-obsolete N` let a known count stand during a sweep, so
+the gate still fails when the count *rises*.
+
+PO004 states the rule as a rule: **a catalogue is a projection of its own
+sources; it is never a place to park somebody else's strings.** It applies only
+to catalogues that are projections — at least one `#:` reference resolving to a
+real file — so a hand-authored library catalogue whose `#:` slot holds
+translation keys (`#: notification.otp_code.subject`) is never judged on
+ownership. PO001/PO002 apply to every catalogue.
+
+`stapel-po-prune` is the product-side fixer. It asks `makemessages` — run in a
+scratch copy — what the tree actually contains, then sorts every entry:
+
+* `sourced` — the extraction found it. Kept.
+* `shadow` — the extraction found it, but an installed package owns the same
+  msgid; it survives only because something in the tree quotes the literal.
+* `foreign` — the extraction did not find it and a library owns it.
+* `dead` — nobody owns it. **Removed** on `--apply`.
+
+`foreign` and `shadow` are never deleted blindly — deleting them hands the
+string back to the library default. They are reported with the override
+rewritten into the owning library's own seam (for stapel-notifications,
+`STAPEL_NOTIFICATIONS["TEXT"]`, keyed by translation key, read out of the
+library's catalogue and key registry), and removed only with
+`--relocate-applied`.
+
+Dry run is the default and it proves idempotence rather than claiming it:
+it applies to a scratch copy, classifies again, and reports what a second
+apply would remove.
+
 ### `stapel-llms-txt` — generate the module's own `docs/llms.txt`
 
 ```bash

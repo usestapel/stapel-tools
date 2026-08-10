@@ -627,7 +627,7 @@ SVC_MAKEFILE = """\
 # {{TITLE}} service ({{DIR}}) — controls.
 PYTHON ?= python
 
-.PHONY: controls lint test boot-smoke
+.PHONY: controls lint test boot-smoke messages messages-check
 
 controls: lint boot-smoke test
 

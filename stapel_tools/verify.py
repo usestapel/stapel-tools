@@ -55,6 +55,15 @@ Linters composed (in this order)
   ``stapel-verify .``, so a project that already exists — including one whose
   nginx conf was hand-maintained and never came from the scaffold — picks the
   gate up on its next stapel-tools upgrade, with nothing to regenerate.
+* ``stapel_tools.po_lint``         — PO-codes (gettext catalogue gate: no
+  fuzzy, no obsolete, and no entry parked for a string this tree does not own.
+  Composed HERE for the same reason as the nginx rules — every generated
+  project's pre-commit already runs ``stapel-verify .``, so a project picks the
+  gate up on its next stapel-tools upgrade with nothing to regenerate — and it
+  is silent by design in a project that ships no ``locale/`` at all. The class
+  it closes: a bare ``makemessages`` demotes every entry whose source it cannot
+  find, gettext skips fuzzy and obsolete alike, and a suite that asserts almost
+  no strings stays green while the product reverts to its source language.
 * ``stapel_tools.env_address_lint`` — EADDR-codes (the "address that belongs
   to the environment, frozen into a file that outlives it" class:
   ``docs/pending/env-address-class-v2.md``). EADDR001 catches a literal
@@ -94,6 +103,7 @@ from . import (
     lint,
     migration_lint,
     nginx_cache_lint,
+    po_lint,
     surface_lint,
     swap_lint,
     url_lint,
@@ -194,6 +204,13 @@ def run_env_address_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-env-address-lint", errors, warnings, _to_dicts(findings), notes)
 
 
+def run_po_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = po_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-po-lint", errors, warnings, _to_dicts(findings), notes)
+
+
 def run_frontend_delivery_lint(project: Path) -> LinterReport:
     notes: list[str] = []
     findings = frontend_delivery_lint.lint_project(project, notes=notes)
@@ -225,6 +242,7 @@ def verify_project(
         run_nginx_cache_lint(project),
         run_env_address_lint(project),
         run_frontend_delivery_lint(project),
+        run_po_lint(project),
     ]
 
 

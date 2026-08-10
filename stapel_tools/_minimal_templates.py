@@ -328,7 +328,7 @@ MINIMAL_MAKEFILE = """\
 # Override the interpreter: make controls PYTHON=/path/to/python
 PYTHON ?= python
 
-.PHONY: controls lint test boot-smoke openapi run migration-lint release-manifest
+.PHONY: controls lint test boot-smoke openapi run migration-lint release-manifest messages messages-check
 
 controls: lint boot-smoke test
 

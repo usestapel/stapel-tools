@@ -1,5 +1,85 @@
 # Changelog
 
+## [0.39.0] — 2026-08-11
+
+### Added — the canonical i18n command is ours now, and it cannot silently un-translate
+
+`makemessages` is the first thing anybody reaches for the moment they add a
+translatable string, and run bare over a product tree it will demote every
+entry whose source it could not find. Demotion has two forms and gettext skips
+both: **obsolete** (`#~`, parked at the end of the file, at least visible) and
+**fuzzy** (left *among the live entries*, still carrying its translation, still
+looking translated, and dropped from the `.mo` all the same). Fuzzy is produced
+by changes as small as a format-flag flip — `python-format` to
+`python-brace-format`, with no edit to the msgid at all.
+
+Measured on meettoday's `backend/`: a bare run takes 100 live msgids to 64 per
+locale, 40 obsolete and 5 fuzzy, and the one string that flips to fuzzy is the
+passcode subject — after which `gettext("Your {company_name} verification code:
+{code}")` under `ru` returns the *library's* default instead of the product's
+branded one. Two tests caught that; the other 40 demotions per locale nobody
+asserts anywhere, so the suite would have gone green on a product that had
+quietly reverted to its source language.
+
+Three commands, one rule.
+
+**`stapel-po-lint`** — the gate. `PO001` fuzzy and `PO002` obsolete are errors
+(both are entries gettext will skip); `PO003` untranslated and `PO004` unowned
+are warnings. `--max-fuzzy N` / `--max-obsolete N` let a known count stand
+while a sweep runs, so the gate still fails the moment the count *rises*. It is
+composed into **`stapel-verify`**, which every generated project's pre-commit
+already runs — so a project picks the gate up on its next stapel-tools upgrade
+with nothing to regenerate, and stays silent in a project that ships no
+`locale/` at all.
+
+`PO004` states the general rule as a rule: **a catalogue is a projection of its
+own sources; it is never a place to park somebody else's strings.** A library's
+strings live in the library's catalogue and ship inside its wheel, where
+Django's app-locale discovery merges them at load; a product translates its own
+templates and its own code. The check applies only to catalogues that *are*
+projections, and the discriminator is mechanical: at least one `#:` reference
+resolving to a real file in the tree. A hand-authored library catalogue whose
+`#:` slot holds translation keys instead (`#: notification.otp_code.subject` —
+how this fleet's own catalogues are written) resolves nothing and is never
+judged on ownership. `PO001`/`PO002` apply to every catalogue regardless:
+gettext skips fuzzy and obsolete whoever wrote the file.
+
+**`stapel-makemessages`** — the wrapper, so the command people reach for is
+ours. It runs the extraction with the ignores Django does not apply itself,
+then runs the gate on the result, and **restores the catalogues byte-for-byte
+if anything was demoted**. A run that would silently un-translate strings
+leaves no trace in the working tree; it leaves a report. `--accept-losses` is
+the deliberate escape hatch for when strings really are being retired.
+
+**`stapel-po-prune`** — the product-side fixer, dry-run by default. It asks
+`makemessages` (run inside a scratch copy, so the real catalogues are never
+touched) what the tree actually contains, and sorts every entry into `sourced`,
+`shadow` (the extraction finds it, but an installed package owns the same
+msgid — it survives only because something quotes the literal), `foreign` (the
+extraction does not find it and a library owns it) and `dead` (nobody owns it).
+Only `dead` is removed. `foreign` and `shadow` are reported *with the override
+rewritten into the owning library's documented seam* — for stapel-notifications
+that is `STAPEL_NOTIFICATIONS["TEXT"]`, keyed by translation key, which the
+tool reads out of the library's own catalogue and key registry rather than
+asking anybody to type it. Deleting them instead would hand the string back to
+the library default, silently.
+
+Asking the extractor rather than grepping the sources is the difference between
+right and plausible: a `{% blocktranslate %}` msgid is not a literal anybody
+typed (`{{ name }}` extracts as `%(name)s`), so a source scan calls live
+entries dead. The scan survives as `--mode heuristic` for trees where Django
+cannot be run, it errs toward keeping entries, and the report always names the
+mode it used. `--mode extract` refuses to degrade quietly.
+
+The rewrite deletes whole entry blocks out of the raw text, so every surviving
+byte is untouched and the result reads as a plain deletion diff. The dry run
+**proves** idempotence rather than claiming it: it applies to a scratch copy,
+classifies again, and reports what a second apply would remove.
+
+`make messages` / `make messages-check` are wired into the scaffold's Makefiles
+(minimal preset and per-service) so a generated project is born reaching for
+the wrapper instead of the bare tool.
+
 ## [0.38.0] — 2026-08-10
 
 ### Fixed — a template tag's options are grammar, not context variables

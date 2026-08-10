@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.38.0"
+version = "0.39.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -34,6 +34,9 @@ stapel-env-address-lint = "stapel_tools.env_address_lint:main"
 stapel-frontend-delivery-lint = "stapel_tools.frontend_delivery_lint:main"
 stapel-swap-lint = "stapel_tools.swap_lint:main"
 stapel-doc-lint = "stapel_tools.doc_lint:main"
+stapel-po-lint = "stapel_tools.po_lint:main"
+stapel-po-prune = "stapel_tools.po_prune:main"
+stapel-makemessages = "stapel_tools.makemessages:main"
 stapel-surface-lint = "stapel_tools.surface_lint:main"
 stapel-registry-check = "stapel_tools.registry_check:main"
 stapel-verify = "stapel_tools.verify:main"
