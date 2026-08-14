@@ -27,9 +27,9 @@ Rules
 -----
 MIG001  destructive operation (RemoveField, DeleteModel, RenameField,
         RenameModel, AlterField that narrows: null→NOT NULL or max_length
-        shrink) in a migration without the ``# stapel: contract-phase``
-        marker → ERROR. Destructive schema changes ship one release AFTER
-        the code stopped using the target (expand rN → contract rN+1).
+        shrink) in a migration carrying neither phase marker → ERROR.
+        Two markers license a destructive operation, and they mean
+        different things — see "Choosing a phase marker" below.
 MIG002  with ``--base-sha <sha of the previous release>``: a destructive
         operation in a migration file that did NOT exist at the base sha,
         whose target (removed field / deleted or renamed model / renamed
@@ -50,13 +50,53 @@ MIG004  AddField that is NOT NULL (no ``null=True``) without ``default`` /
         ManyToManyField is exempt (no column on the model's table).
         Suppress with ``# noqa: MIG004`` on the AddField line (e.g. a table
         provably empty in every deployment).
+MIG005  both ``# stapel: contract-phase`` and ``# stapel: cutover-phase``
+        on one file → ERROR. The two markers assert incompatible things
+        about the same release; an author who writes both does not know
+        which claim they are making, so neither licenses anything and the
+        destructive operations are reported by MIG001 as well.
 MIG101  ``operations`` is not a static list — cannot analyze → WARNING.
 MIG102  ``# stapel: irreversible`` marker on a migration whose operations
         are all reversible — stale marker needlessly lowers the app's
         reversible_floor → WARNING.
 
-Markers are file-level comment lines: ``# stapel: contract-phase`` and
-``# stapel: irreversible`` anywhere in the migration file.
+Markers are file-level comment lines anywhere in the migration file:
+``# stapel: contract-phase``, ``# stapel: cutover-phase`` and
+``# stapel: irreversible``.
+
+Choosing a phase marker
+-----------------------
+``# stapel: contract-phase`` — the destructive change ships one release
+AFTER the code stopped using the target (expand rN → contract rN+1). The
+target is dead code by the time this migration runs. This is the default
+shape and the only one safe under a rolling deploy, where old and new code
+run against the same schema at the same time.
+
+``# stapel: cutover-phase`` — deletion-driven cutover: the SAME migration
+carries the data out (a RunPython that moves the rows somewhere else) and
+then removes the target, in ONE release. Code stops using the target and
+the target dies together. Safe ONLY where a deployment never runs old and
+new code against the same schema simultaneously — a stop-the-world deploy
+(``docker compose up -d``, which is what this fleet uses). Under rolling
+or blue/green deploys the old process would keep writing to a table that
+has already been drained and dropped: there, split the work and use
+contract-phase.
+
+The marker is not a bare assertion. MACHINE-CHECKED: the file must contain
+a data-carrying ``RunPython`` — forward code that is not
+``RunPython.noop`` — positioned BEFORE the destructive operation in the
+same ``operations`` list (copy first, drop second; the reverse order is a
+deletion with no data path). A destructive operation with no data-carrying
+step before it is still MIG001, marker or not. NOT CHECKED, and therefore
+still the author's assertion: that the RunPython carries the rows of THIS
+target (the callable's body is out of AST reach), and that the deployment
+model is stop-the-world. ``RunSQL`` does not count as the data path: from
+the AST a copying INSERT…SELECT and a destructive DDL string look alike.
+
+``cutover-phase`` is not a synonym for ``contract-phase`` and not a
+general licence for destructive migrations: it buys exactly one thing, the
+right to destroy in the same release as the code change, and only because
+the data path out of the target is in the same file.
 
 reversible_floor semantics (shared with the manifest builder)
 -------------------------------------------------------------
@@ -88,6 +128,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 MARKER_CONTRACT_PHASE = "contract-phase"
+MARKER_CUTOVER_PHASE = "cutover-phase"
 MARKER_IRREVERSIBLE = "irreversible"
 _MARKER_RE = re.compile(r"#\s*stapel:\s*([a-z][a-z\-]*)")
 
@@ -158,6 +199,7 @@ class Op:
     field: Optional[FieldInfo] = None
     fields: list = _dc_field(default_factory=list)  # CreateModel: [(name, FieldInfo)]
     has_reverse: Optional[bool] = None           # RunPython / RunSQL
+    forward_noop: Optional[bool] = None          # RunPython: forward is a noop
 
 
 @dataclass
@@ -255,6 +297,20 @@ def _has_reverse(call: ast.Call, kwname: str) -> bool:
     return not (isinstance(reverse, ast.Constant) and reverse.value is None)
 
 
+def _is_noop(node) -> bool:
+    """``migrations.RunPython.noop`` / a bare ``noop`` / ``None`` — a step
+    that moves nothing. Anything else is assumed to do work."""
+    if node is None:
+        return True
+    if isinstance(node, ast.Constant) and node.value is None:
+        return True
+    if isinstance(node, ast.Attribute):
+        return node.attr == "noop"
+    if isinstance(node, ast.Name):
+        return node.id == "noop"
+    return False
+
+
 def _parse_operation(node) -> tuple[list, bool]:
     """Parse one element of the operations list → (ops, analyzable)."""
     if not isinstance(node, ast.Call):
@@ -297,7 +353,11 @@ def _parse_operation(node) -> tuple[list, bool]:
                    new_name=_str_arg(node, 1, "new_name"))], True
 
     if kind == "RunPython":
-        return [Op(kind, line, has_reverse=_has_reverse(node, "reverse_code"))], True
+        return [Op(
+            kind, line,
+            has_reverse=_has_reverse(node, "reverse_code"),
+            forward_noop=_is_noop(_arg(node, 0, "code")),
+        )], True
 
     if kind == "RunSQL":
         return [Op(kind, line, has_reverse=_has_reverse(node, "reverse_sql"))], True
@@ -519,6 +579,24 @@ def _noqa(lines: list, lineno: int, rule: str) -> bool:
     return rule in listed
 
 
+def _cutover_covered(migration: MigrationScan) -> set:
+    """``id()`` of every operation preceded, in the same ``operations`` list,
+    by a data-carrying RunPython — the part of a ``cutover-phase`` claim the
+    AST can actually verify. Copy first, drop second: a destructive op that
+    runs BEFORE the data path (or with no data path at all) destroys rows
+    nothing carried out, which is what the marker promises did not happen.
+    Identity keys because Op is an unhashable dataclass; the objects stay
+    alive on ``migration.ops``."""
+    covered = set()
+    carried = False
+    for op in migration.ops:
+        if carried:
+            covered.add(id(op))
+        if op.kind == "RunPython" and op.forward_noop is False:
+            carried = True
+    return covered
+
+
 def _destructive_ops(migration: MigrationScan, state: dict) -> list:
     """(op, base_ref_target, description) triples; mutates ``state`` — the
     per-app {(model, field): FieldInfo} map built across migrations in order."""
@@ -630,15 +708,50 @@ def lint_app(
                 f"release, or provide default/db_default",
             ))
 
-        # MIG001 — destructive without contract-phase marker
-        if destructive and MARKER_CONTRACT_PHASE not in migration.markers:
+        # MIG005 — the two phase markers claim incompatible things
+        contract_phase = MARKER_CONTRACT_PHASE in migration.markers
+        cutover_phase = MARKER_CUTOVER_PHASE in migration.markers
+        if contract_phase and cutover_phase:
+            violations.append(Violation(
+                path, 1, "MIG005",
+                f"'# stapel: {MARKER_CONTRACT_PHASE}' and "
+                f"'# stapel: {MARKER_CUTOVER_PHASE}' contradict each other: "
+                f"the first says the code stopped using the target one "
+                f"release AGO, the second says it stops in THIS release and "
+                f"the data is carried out here; keep exactly one",
+            ))
+            # An author who wrote both does not know which claim they are
+            # making — neither claim licenses anything.
+            contract_phase = cutover_phase = False
+
+        # MIG001 — destructive without a phase marker that holds
+        if destructive and not contract_phase:
+            covered = _cutover_covered(migration) if cutover_phase else set()
             for op, _target, description in destructive:
+                if id(op) in covered:
+                    continue
+                hint = (
+                    f"when that holds, mark the file "
+                    f"'# stapel: {MARKER_CONTRACT_PHASE}'; a deletion-driven "
+                    f"cutover (the data carried out and the target dropped in "
+                    f"ONE release, safe only under stop-the-world deploys) is "
+                    f"'# stapel: {MARKER_CUTOVER_PHASE}' and needs a "
+                    f"data-carrying RunPython BEFORE this operation"
+                )
+                if cutover_phase:
+                    hint = (
+                        f"the file is marked '# stapel: {MARKER_CUTOVER_PHASE}' "
+                        f"but no data-carrying RunPython precedes this "
+                        f"operation — a cutover carries the rows out first and "
+                        f"destroys second; add the data path, or use "
+                        f"'# stapel: {MARKER_CONTRACT_PHASE}' and ship the "
+                        f"destruction one release later"
+                    )
                 violations.append(Violation(
                     path, op.line, "MIG001",
                     f"{description} is destructive — expand/contract: it may "
                     f"only ship one release AFTER the code stopped using the "
-                    f"target; when that holds, mark the file "
-                    f"'# stapel: {MARKER_CONTRACT_PHASE}'",
+                    f"target; {hint}",
                 ))
 
         # MIG003 — irreversible data op without marker

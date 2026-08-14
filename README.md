@@ -302,13 +302,32 @@ stapel-migration-lint . --strict             # warnings become errors
 Static (AST) analysis — no Django settings needed, so it runs on customer
 project checkouts at release cut AND on `stapel-*` module repos in CI.
 Rules: MIG001 destructive op (`RemoveField`/`DeleteModel`/`Rename*`/narrowing
-`AlterField`) requires the `# stapel: contract-phase` file marker (destructive
-changes ship one release after the code stopped using the target); MIG002
-with `--base-sha` the destroyed target must not be referenced by the app's
-code at the previous release's sha; MIG003 `RunPython`/`RunSQL` without a
-reverse requires `# stapel: irreversible` (lowers the app's
-`reversible_floor` in release.json); MIG004 NOT NULL `AddField` without
-`default`/`db_default` on an existing model (breaks N-1 rollback).
+`AlterField`) requires a phase marker on the file (see below); MIG002 with
+`--base-sha` the destroyed target must not be referenced by the app's code at
+the previous release's sha; MIG003 `RunPython`/`RunSQL` without a reverse
+requires `# stapel: irreversible` (lowers the app's `reversible_floor` in
+release.json); MIG004 NOT NULL `AddField` without `default`/`db_default` on an
+existing model (breaks N-1 rollback); MIG005 both phase markers on one file
+(contradictory claims — neither licenses the destructive op).
+
+**Two phase markers, two different claims** — pick one, never both:
+
+| marker | claim | machine-checked |
+|---|---|---|
+| `# stapel: contract-phase` | the code stopped using the target one release AGO (expand rN → contract rN+1); the target is already dead code when this migration runs | nothing beyond the marker — pure assertion |
+| `# stapel: cutover-phase` | deletion-driven cutover: THIS migration carries the data out and then removes the target, in one release | a data-carrying `RunPython` (forward code is not `RunPython.noop`) must appear **before** the destructive op in the same `operations` list |
+
+`contract-phase` is the default shape and the only one safe under a rolling
+deploy. `cutover-phase` is safe only where a deployment never runs old and
+new code against the same schema at once — a stop-the-world deploy
+(`docker compose up -d`, what this fleet does); under rolling/blue-green the
+old process would keep writing to a table already drained and dropped. It is
+not a synonym for `contract-phase` and not a general licence to destroy: a
+`cutover-phase` file whose destructive op has no data path before it is still
+MIG001. What stays the author's assertion: that the `RunPython` carries THIS
+target's rows (the callable's body is out of AST reach) and that the deploy
+is stop-the-world. `RunSQL` does not count as the data path — from the AST a
+copying `INSERT…SELECT` and a destructive DDL string look the same.
 
 ### `stapel-adoption-lint` — honesty gate for stapel-module adoption
 

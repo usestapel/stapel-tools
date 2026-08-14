@@ -27,8 +27,8 @@ def make_migration(app_dir, name, operations, marker=None, extra_body=""):
     mig_dir.mkdir(parents=True, exist_ok=True)
     (mig_dir / "__init__.py").write_text("")
     lines = []
-    if marker:
-        lines.append(f"# stapel: {marker}")
+    for one in [marker] if isinstance(marker, str) else (marker or []):
+        lines.append(f"# stapel: {one}")
     lines.append(HEADER)
     lines.append("    dependencies = []\n")
     if extra_body:
@@ -157,6 +157,116 @@ class TestDestructiveMarker:
         violations, _ = run_lint(tmp_path)
         assert rules(violations) == ["MIG001"]
         assert violations[0].path.endswith("0003_narrow.py")
+
+
+# ---------------------------------------------------------------------------
+# MIG001 / MIG005 — cutover-phase, the second legitimate shape
+# ---------------------------------------------------------------------------
+
+DELETE_ORDER = "migrations.DeleteModel(name='Order')"
+CARRY_OUT = "migrations.RunPython(carry_out, migrations.RunPython.noop)"
+
+
+class TestCutoverPhase:
+    def test_cutover_with_data_path_passes(self, tmp_path):
+        # The shape the marker exists for: rows carried out, then the table
+        # dropped — one release, one migration.
+        app = make_app(tmp_path)
+        make_migration(app, "0001_initial", [CREATE_ORDER])
+        make_migration(
+            app, "0002_cutover", [CARRY_OUT, DELETE_ORDER],
+            marker="cutover-phase",
+        )
+        violations, _ = run_lint(tmp_path)
+        assert violations == []
+
+    def test_cutover_without_data_path_still_errors(self, tmp_path):
+        # The marker cannot be claimed by typing it: no RunPython, no cutover.
+        app = make_app(tmp_path)
+        make_migration(app, "0001_initial", [CREATE_ORDER])
+        make_migration(app, "0002_cutover", [DELETE_ORDER], marker="cutover-phase")
+        violations, _ = run_lint(tmp_path)
+        assert rules(violations) == ["MIG001"]
+        assert "no data-carrying RunPython precedes" in violations[0].message
+
+    def test_cutover_data_path_after_destruction_errors(self, tmp_path):
+        # Drop first, copy second — the data path is dead by the time it runs.
+        app = make_app(tmp_path)
+        make_migration(app, "0001_initial", [CREATE_ORDER])
+        make_migration(
+            app, "0002_cutover", [DELETE_ORDER, CARRY_OUT],
+            marker="cutover-phase",
+        )
+        violations, _ = run_lint(tmp_path)
+        assert rules(violations) == ["MIG001"]
+
+    def test_cutover_noop_forward_is_not_a_data_path(self, tmp_path):
+        app = make_app(tmp_path)
+        make_migration(app, "0001_initial", [CREATE_ORDER])
+        make_migration(
+            app, "0002_cutover",
+            ["migrations.RunPython(migrations.RunPython.noop, "
+             "migrations.RunPython.noop)", DELETE_ORDER],
+            marker="cutover-phase",
+        )
+        violations, _ = run_lint(tmp_path)
+        assert rules(violations) == ["MIG001"]
+
+    def test_cutover_does_not_cover_runsql(self, tmp_path):
+        # RunSQL is not accepted as the data path: from the AST a copying
+        # INSERT…SELECT and a destructive DDL string look identical.
+        app = make_app(tmp_path)
+        make_migration(app, "0001_initial", [CREATE_ORDER])
+        make_migration(
+            app, "0002_cutover",
+            ["migrations.RunSQL('INSERT INTO other SELECT * FROM shop_order', "
+             "reverse_sql='DELETE FROM other')", DELETE_ORDER],
+            marker="cutover-phase",
+        )
+        violations, _ = run_lint(tmp_path)
+        assert rules(violations) == ["MIG001"]
+
+    def test_cutover_covers_only_ops_after_the_data_path(self, tmp_path):
+        app = make_app(tmp_path)
+        make_migration(app, "0001_initial", [CREATE_ORDER])
+        make_migration(
+            app, "0002_cutover",
+            ["migrations.RemoveField(model_name='order', name='note')",
+             CARRY_OUT, DELETE_ORDER],
+            marker="cutover-phase",
+        )
+        violations, _ = run_lint(tmp_path)
+        assert rules(violations) == ["MIG001"]
+        assert "RemoveField 'order.note'" in violations[0].message
+
+    def test_both_phase_markers_is_a_contradiction(self, tmp_path):
+        # Neither claim is licensed: the author does not know which one they
+        # are making, so the destructive op is reported too.
+        app = make_app(tmp_path)
+        make_migration(app, "0001_initial", [CREATE_ORDER])
+        make_migration(
+            app, "0002_cutover", [CARRY_OUT, DELETE_ORDER],
+            marker=["contract-phase", "cutover-phase"],
+        )
+        violations, _ = run_lint(tmp_path)
+        assert rules(violations) == ["MIG005", "MIG001"]
+        assert all(v.level == "error" for v in violations)
+        assert "contradict each other" in violations[0].message
+
+    def test_destructive_with_no_marker_at_all_still_errors(self, tmp_path):
+        # Non-vacuity: the data path alone licenses nothing.
+        app = make_app(tmp_path)
+        make_migration(app, "0001_initial", [CREATE_ORDER])
+        make_migration(app, "0002_cutover", [CARRY_OUT, DELETE_ORDER])
+        violations, _ = run_lint(tmp_path)
+        assert rules(violations) == ["MIG001"]
+        assert "stapel: cutover-phase" in violations[0].message
+
+    def test_scan_sees_the_cutover_marker(self, tmp_path):
+        app = make_app(tmp_path)
+        make_migration(app, "0001_x", [CREATE_ORDER], marker="cutover-phase")
+        scan = scan_migration_file(app / "migrations" / "0001_x.py")
+        assert scan.markers == {"cutover-phase"}
 
 
 # ---------------------------------------------------------------------------

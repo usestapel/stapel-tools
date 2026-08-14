@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.40.0] — 2026-08-14
+
+### Added — `# stapel: cutover-phase`, the second legitimate shape of a destructive migration
+
+MIG001 knew one way for a destructive operation to be legitimate: it shipped
+one release after the code stopped using the target (`# stapel:
+contract-phase`). There is a second, and stapel-workspaces has one — a
+deletion-driven cutover, where the same migration carries the rows out (a
+`RunPython` replaying `WorkspaceAuditEvent` through the event-store facade)
+and then drops the table. Code stops using the target and the target dies in
+one release, so `contract-phase` on that file would assert something false;
+splitting it across two releases would be ceremony around a table that has no
+readers left either way.
+
+`# stapel: cutover-phase` says what actually happens, and it has to earn
+itself: the linter requires a data-carrying `RunPython` — forward code that is
+not `RunPython.noop` — positioned **before** the destructive operation in the
+same `operations` list. Copy first, drop second; a file that only destroys is
+still MIG001 no matter what comment it carries, and so is a destructive
+operation that runs before the data path. `RunSQL` is not accepted as the data
+path: from the AST a copying `INSERT…SELECT` and a destructive DDL string look
+identical.
+
+What stays the author's assertion, stated plainly rather than implied: that
+the `RunPython` carries *this* target's rows (the callable's body is out of
+AST reach), and that the deployment is stop-the-world — old and new code never
+running against the same schema at once (`docker compose up -d`, which is what
+this fleet does). Under a rolling or blue/green deploy the shape is unsafe:
+the old process keeps writing to a table already drained and dropped. There,
+`contract-phase` and two releases remain the only correct answer. The marker
+is not a synonym for `contract-phase` and not a general licence to destroy.
+
+### Added — MIG005: both phase markers on one file is a contradiction, not a stronger claim
+
+`contract-phase` says the code stopped using the target one release ago;
+`cutover-phase` says it stops in this one. An author who writes both does not
+know which claim they are making, so neither licenses anything: MIG005 reports
+the contradiction and MIG001 still reports the destructive operations.
+
 ## [0.39.1] — 2026-08-11
 
 ### Fixed — `stapel-po-prune --json` emitted a human sentence after the document
