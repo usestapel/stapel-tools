@@ -172,7 +172,15 @@ def _is_guarded(line: str, has_set_e: bool) -> bool:
         return True
     if "||" in stripped or "&&" in stripped:
         return True
-    if stripped.startswith(("if ", "if(", "while ", "until ", "!")):
+    if stripped.startswith(("if ", "if(", "while ", "until ", "!", "exec ")):
+        # ``exec`` replaces the shell, so the payload's status IS the script's.
+        return True
+    if stripped.endswith("&"):
+        # A backgrounded long-running process (a dev server). Its status is not
+        # readable at this point by construction, so demanding one would push
+        # authors toward a worse script rather than a better one — and this
+        # rule is about PREPARATION steps that fail silently, not about
+        # servers.
         return True
     return bool(re.search(r"\bexit\b", stripped) and "$?" in stripped)
 

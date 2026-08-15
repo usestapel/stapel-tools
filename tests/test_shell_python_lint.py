@@ -200,6 +200,28 @@ def test_an_explicit_failure_handler_satisfies_it(tmp_path):
     assert lint_tree(root) == []
 
 
+def test_a_backgrounded_server_is_not_a_preparation_step(tmp_path):
+    """A ``&``-backgrounded long-running process has no readable status at
+    that point by construction. This rule is about preparation steps that fail
+    silently, not about servers — demanding a guard here would push authors
+    toward a worse script."""
+    root = _repo(tmp_path, {
+        "dev_runserver.sh": (
+            "#!/bin/sh\n"
+            "python manage.py runserver 0.0.0.0:8000 --noreload &\n"
+            "SERVER_PID=$!\n"
+        ),
+    })
+    assert lint_tree(root) == []
+
+
+def test_exec_is_the_script_s_own_status(tmp_path):
+    root = _repo(tmp_path, {
+        "entrypoint.sh": "#!/bin/sh\nexec python manage.py runserver\n",
+    })
+    assert lint_tree(root) == []
+
+
 def test_a_commented_out_invocation_is_not_a_finding(tmp_path):
     root = _repo(tmp_path, {"bootstrap.sh": "#!/bin/sh\n# python manage.py migrate\n"})
     assert lint_tree(root) == []
