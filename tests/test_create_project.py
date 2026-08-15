@@ -21,7 +21,19 @@ def _pip_entry(key: str) -> str:
     return f"{pypi_name}>={info['pin']}"
 
 
-def _create(tmp_path, name, project_type, broker=None, task_broker=None, modules=None):
+# stapel-gdpr declares DATA_OWNERS required (docs/capabilities.json
+# required_settings) and generation is refused without it: an app installed
+# with no data-owner inventory cannot pass its own boot check.
+GDPR_CONFIG = {"gdpr": {
+    "DATA_OWNERS": ["auth", "profiles"],
+    "DATA_OWNERS_VERSION": "2026-01-01.1",
+}}
+
+
+def _create(tmp_path, name, project_type, broker=None, task_broker=None, modules=None,
+            module_config=None):
+    if module_config is None and modules and "gdpr" in modules:
+        module_config = GDPR_CONFIG
     create_project(
         name=name,
         project_type=project_type,
@@ -35,6 +47,7 @@ def _create(tmp_path, name, project_type, broker=None, task_broker=None, modules
         init_git=False,
         broker=broker,
         task_broker=task_broker,
+        module_config=module_config,
     )
     return tmp_path / name
 
@@ -631,7 +644,12 @@ class TestModuleConfig:
         config = {
             # A real axis from stapel-gdpr's capabilities.json — the module
             # gained one (2026-07-19), so unknown keys now fail the seam.
-            "gdpr": {"REMOTE_DELETION_SERVICES": ["profiles"]},
+            "gdpr": {
+                "REMOTE_DELETION_SERVICES": ["profiles"],
+                # Required by the module (capabilities.json required_settings).
+                "DATA_OWNERS": ["auth", "profiles"],
+                "DATA_OWNERS_VERSION": "2026-01-01.1",
+            },
             "auth": {"AUTH_PASSWORD_LOGIN": True},
         }
         proj = self._create(

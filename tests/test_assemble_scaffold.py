@@ -22,6 +22,14 @@ from stapel_tools.create_project import STAPEL_LIBS
 
 PROOF_LIBS = ["auth", "notifications", "gdpr", "profiles"]
 
+# stapel-gdpr declares DATA_OWNERS required (docs/capabilities.json
+# required_settings); generating without it is refused, because a project
+# that installs the app and never names its data owners cannot boot.
+GDPR_CONFIG = {"gdpr": {
+    "DATA_OWNERS": ["auth", "profiles"],
+    "DATA_OWNERS_VERSION": "2026-01-01.1",
+}}
+
 
 def _importable(module: str) -> bool:
     return importlib.util.find_spec(module) is not None
@@ -60,7 +68,7 @@ class TestWiringAndGaps:
     def test_known_and_unknown_libs_mixed(self, tmp_path):
         result = assemble_scaffold(
             "app", libs=["auth", "ghost-module", "gdpr"],
-            output_dir=tmp_path, verify=False,
+            config=GDPR_CONFIG, output_dir=tmp_path, verify=False,
         )
         assert result.libs_applied == ["auth", "gdpr"]
         assert result.libs_unknown == ["ghost-module"]
@@ -78,13 +86,15 @@ class TestWiringAndGaps:
 
     def test_duplicate_libs_deduped(self, tmp_path):
         result = assemble_scaffold(
-            "app", libs=["auth", "auth", "gdpr"], output_dir=tmp_path, verify=False
+            "app", libs=["auth", "auth", "gdpr"], config=GDPR_CONFIG,
+            output_dir=tmp_path, verify=False,
         )
         assert result.libs_applied == ["auth", "gdpr"]
 
     def test_libs_wired_into_requirements_apps_and_urls(self, tmp_path):
         result = assemble_scaffold(
-            "app", libs=["auth", "gdpr"], output_dir=tmp_path, verify=False
+            "app", libs=["auth", "gdpr"], config=GDPR_CONFIG,
+            output_dir=tmp_path, verify=False,
         )
         settings = (result.project_dir / "config" / "settings.py").read_text()
         urls = (result.project_dir / "config" / "urls.py").read_text()
@@ -145,20 +155,22 @@ class TestRegistryPins:
 class TestIdempotency:
     def test_same_inputs_produce_byte_identical_trees(self, tmp_path):
         a = assemble_scaffold(
-            "app", libs=["auth", "gdpr"], output_dir=tmp_path / "a", verify=False
+            "app", libs=["auth", "gdpr"], config=GDPR_CONFIG,
+            output_dir=tmp_path / "a", verify=False,
         )
         b = assemble_scaffold(
-            "app", libs=["auth", "gdpr"], output_dir=tmp_path / "b", verify=False
+            "app", libs=["auth", "gdpr"], config=GDPR_CONFIG,
+            output_dir=tmp_path / "b", verify=False,
         )
         assert _tree(a.project_dir) == _tree(b.project_dir)
 
     def test_lib_order_in_call_does_not_change_output(self, tmp_path):
         a = assemble_scaffold(
-            "app", libs=["auth", "gdpr", "notifications"],
+            "app", libs=["auth", "gdpr", "notifications"], config=GDPR_CONFIG,
             output_dir=tmp_path / "a", verify=False,
         )
         b = assemble_scaffold(
-            "app", libs=["notifications", "auth", "gdpr"],
+            "app", libs=["notifications", "auth", "gdpr"], config=GDPR_CONFIG,
             output_dir=tmp_path / "b", verify=False,
         )
         assert _tree(a.project_dir) == _tree(b.project_dir)
@@ -167,7 +179,8 @@ class TestIdempotency:
 class TestInstalledAppsOrder:
     def test_core_outbox_precedes_feature_libs_precedes_local_app(self, tmp_path):
         result = assemble_scaffold(
-            "shop", libs=["auth", "gdpr"], output_dir=tmp_path, verify=False
+            "shop", libs=["auth", "gdpr"], config=GDPR_CONFIG,
+            output_dir=tmp_path, verify=False,
         )
         settings = (result.project_dir / "config" / "settings.py").read_text()
         i_core = settings.index("stapel_core.django.outbox")
@@ -228,7 +241,17 @@ class TestFourLibProof:
     and both static gates come back green — in seconds, offline."""
 
     def test_proof_project_assembles_and_is_green(self, tmp_path):
-        result = assemble_scaffold("proof", libs=PROOF_LIBS, output_dir=tmp_path)
+        # The owners are the four libs' actually-registered GDPRProviders —
+        # gdpr.E002 rejects an inventory that omits a store already wired in,
+        # so the config that makes this project green is the true one.
+        result = assemble_scaffold(
+            "proof", libs=PROOF_LIBS,
+            config={"gdpr": {
+                "DATA_OWNERS": ["auth", "notifications", "profile"],
+                "DATA_OWNERS_VERSION": "2026-01-01.1",
+            }},
+            output_dir=tmp_path,
+        )
 
         assert result.libs_unknown == []
         assert set(result.libs_applied) == set(PROOF_LIBS)

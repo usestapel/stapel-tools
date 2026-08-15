@@ -16,9 +16,21 @@ from stapel_tools.config_manifest import (
 )
 from stapel_tools.create_project import create_project
 
+# stapel-gdpr declares DATA_OWNERS required (docs/capabilities.json
+# required_settings) and generation is refused without it: an app installed
+# with no data-owner inventory cannot pass its own boot check.
+GDPR_CONFIG = {"gdpr": {
+    "DATA_OWNERS": ["auth", "profiles"],
+    "DATA_OWNERS_VERSION": "2026-01-01.1",
+}}
+
 
 def _assemble(tmp_path, slug="proj", libs=None):
-    r = assemble_scaffold(slug, libs=libs or ["auth"], output_dir=tmp_path, verify=False)
+    libs = libs or ["auth"]
+    config = GDPR_CONFIG if "gdpr" in libs else None
+    r = assemble_scaffold(
+        slug, libs=libs, config=config, output_dir=tmp_path, verify=False
+    )
     return r.project_dir
 
 
