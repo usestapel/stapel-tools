@@ -782,7 +782,7 @@ deploy/deploy.sh <env-file>   # refuses a dev/default env — see deploy/check-e
 
 def _write_agents_and_checks(
     project_dir: Path, slug: str, has_frontend: bool, has_media: bool = False,
-    presenter_manage_dir: str | None = None,
+    presenter_manage_dir: str | None = None, has_boot_contract: bool = False,
 ):
     """AGENTS.md (base OSS coding rules, §57 item 4) + `.pre-commit-config.yaml`
     (§57 item 5) — every project type. ``presenter_manage_dir`` (relative to
@@ -793,6 +793,7 @@ def _write_agents_and_checks(
     from ._agents_template import AGENTS_MD, FRONTEND_SECTION, MEDIA_RENDER_SECTION
     from ._compose_templates import render_tokens
     from ._precommit_templates import (
+        BOOT_CONTRACT_HOOK,
         PRE_COMMIT_CONFIG_BACKEND_ONLY,
         PRE_COMMIT_CONFIG_WITH_FRONTEND,
         presenter_catalog_hook,
@@ -814,6 +815,8 @@ def _write_agents_and_checks(
     )
     if presenter_manage_dir is not None:
         config += presenter_catalog_hook(presenter_manage_dir)
+    if has_boot_contract:
+        config += BOOT_CONTRACT_HOOK
     _write(project_dir / ".pre-commit-config.yaml", config)
 
 
@@ -937,19 +940,64 @@ def _write_env_local(
 
 def _write_deploy_scripts(project_dir: Path):
     """``deploy/`` — prod/stage deploy scripts with the hard dev-env gate
-    (owner decision, §57 revision — see _deploy_templates.py). Emitted for
-    every project type that ships a prod compose (monolith/microservices)."""
-    from ._deploy_templates import CHECK_ENV_SH, DEPLOY_SH, PREFLIGHT_SH
+    (owner decision, §57 revision — see _deploy_templates.py) and the
+    post-condition gate that checks the RESULT of ``up`` rather than the
+    intention behind it. Emitted for every project type that ships a prod
+    compose (monolith/microservices)."""
+    from ._deploy_templates import (
+        CHECK_ENV_SH,
+        DEPLOY_SH,
+        PREFLIGHT_SH,
+        SMOKE_SERVICES_SH,
+        VERIFY_STAND_STATE_SH,
+    )
 
-    check_env = project_dir / "deploy" / "check-env.sh"
-    deploy = project_dir / "deploy" / "deploy.sh"
-    preflight = project_dir / "deploy" / "preflight.sh"
-    _write(check_env, CHECK_ENV_SH)
-    _write(deploy, DEPLOY_SH)
-    _write(preflight, PREFLIGHT_SH)
-    check_env.chmod(0o755)
-    deploy.chmod(0o755)
-    preflight.chmod(0o755)
+    scripts = {
+        "check-env.sh": CHECK_ENV_SH,
+        "deploy.sh": DEPLOY_SH,
+        "preflight.sh": PREFLIGHT_SH,
+        "verify-stand-state.sh": VERIFY_STAND_STATE_SH,
+        "smoke-services.sh": SMOKE_SERVICES_SH,
+    }
+    for name, content in scripts.items():
+        path = project_dir / "deploy" / name
+        _write(path, content)
+        path.chmod(0o755)
+
+
+def _write_boot_contract(project_dir: Path):
+    """``scripts/`` — the step runner every image bakes in, the canonical
+    schema probe, and the meta-gate that keeps the next service from being
+    written without them (see _boot_templates.py)."""
+    from .new_service import _ensure_boot_contract_files
+
+    _ensure_boot_contract_files(project_dir)
+
+
+def _write_monitoring(project_dir: Path):
+    """Prometheus scrape config + Grafana provisioning (datasource and the
+    alert rules) + the opt-in monitoring compose overlay that reads them.
+
+    The rule set is deliberately four facts, not one — see
+    _monitoring_templates.py for the noDataState reasoning."""
+    from ._monitoring_templates import (
+        GRAFANA_ALERT_RULES_YAML,
+        GRAFANA_DATASOURCE_YAML,
+        MONITORING_COMPOSE_YML,
+        PROMETHEUS_YML,
+    )
+
+    configs = project_dir / "service-configs"
+    _write(configs / "prometheus" / "prometheus.yml", PROMETHEUS_YML)
+    _write(
+        configs / "grafana" / "provisioning" / "datasources" / "prometheus.yaml",
+        GRAFANA_DATASOURCE_YAML,
+    )
+    _write(
+        configs / "grafana" / "provisioning" / "alerting" / "rules.yaml",
+        GRAFANA_ALERT_RULES_YAML,
+    )
+    _write(project_dir / "docker-compose.monitoring.yml", MONITORING_COMPOSE_YML)
 
 
 def _append_prod_nginx_locations(project_dir: Path, upstream_service: str, prefixes: list[str]):
@@ -1358,6 +1406,11 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         "TITLE": ctx["title"], "DIR_NAME": dir_name,
     }))
     _write_shared_infra(project_dir, frontends)
+    # Before scaffold_service: the service Dockerfile COPYs the step runner,
+    # and _update_prometheus appends this service's scrape job to the file
+    # written here.
+    _write_boot_contract(project_dir)
+    _write_monitoring(project_dir)
     # Local-nginx canon (§57): a SEPARATE directory from service-configs/nginx/
     # (prod) — docker-compose.local.yml's `nginx` service override points its
     # conf.d AND templates mounts here instead. Contains only a *.template
@@ -1387,6 +1440,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         project_dir, slug, has_frontend=True,
         has_media=bool({"cdn", "profiles"} & set(feature_libs or [])),
         presenter_manage_dir=ctx["service_dir_name"],
+        has_boot_contract=True,
     )
     from ._precommit_templates import README_CHECKS_SECTION_WITH_FRONTEND
     _write(project_dir / "README.md", ROOT_README_MD.format(
@@ -1412,7 +1466,17 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
             "Deploy ONLY via `deploy/deploy.sh [env-file]` — it hard-refuses "
             "a default/dev env (the committed `.env.local`, placeholder "
             "secrets, `DEBUG=true`, mock providers; see "
-            "`deploy/check-env.sh`). Generate a real env per stand "
+            "`deploy/check-env.sh`), and AFTER `up` it refuses to accept a "
+            "deployment that is not in the state it claims: nothing "
+            "restarting beyond the baseline it took before `up`, nothing "
+            "unhealthy, nothing dead, and no service running behind its own "
+            "migrations (`deploy/verify-stand-state.sh`, then "
+            "`deploy/smoke-services.sh`). Each service boots through "
+            "`scripts/bootstrap_lib.sh`, whose steps are classified "
+            "`require`/`optional` and whose closer asserts the schema is at "
+            "head — `scripts/verify_boot_contract.sh` (a pre-commit hook) "
+            "keeps the next service from being written without it. "
+            "Generate a real env per stand "
             "(`.env.example` is the shape). nginx serves the built frontend "
             "(populated by the one-shot `frontend-build` service) as static "
             f"files with an SPA fallback, and proxies `/{slug}/` "
@@ -1622,8 +1686,11 @@ def _create_microservices(project_dir: Path, ctx: dict, broker: str, task_broker
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", "")
     _write_shared_infra(project_dir, frontends)
+    _write_boot_contract(project_dir)
+    _write_monitoring(project_dir)
     _write_deploy_scripts(project_dir)
-    _write_agents_and_checks(project_dir, ctx["slug"], has_frontend=False)
+    _write_agents_and_checks(project_dir, ctx["slug"], has_frontend=False,
+                             has_boot_contract=True)
     from ._precommit_templates import README_CHECKS_SECTION_BACKEND_ONLY
     _write(project_dir / "README.md", ROOT_README_MD.format(
         title=ctx["title"],
@@ -1639,7 +1706,13 @@ def _create_microservices(project_dir: Path, ctx: dict, broker: str, task_broker
         prod_note=(
             "Deploy ONLY via `deploy/deploy.sh [env-file]` — it hard-refuses "
             "a default/dev env (placeholder secrets, `DEBUG=true`, mock "
-            "providers; see `deploy/check-env.sh`). nginx proxies each "
+            "providers; see `deploy/check-env.sh`), and after `up` it refuses "
+            "a deployment that is not in the state it claims "
+            "(`deploy/verify-stand-state.sh`, `deploy/smoke-services.sh`). "
+            "Each service boots through `scripts/bootstrap_lib.sh` "
+            "(`require`/`optional` steps, schema-at-head closer); "
+            "`scripts/verify_boot_contract.sh` checks every service has it. "
+            "nginx proxies each "
             "service's own `/<slug>/` prefix — see "
             "`service-configs/nginx/nginx.conf`."
         ),
@@ -1914,8 +1987,19 @@ def create_project(
         from ._module_config import validate_module_config
 
         # Fail before any file is written: unknown module, or a key outside the
-        # module's capabilities.json axes+extension surface, is a hard error.
+        # module's capabilities.json axes+extension+required surface, is a hard
+        # error.
         validate_module_config(module_config, selected=[*modules, "core"])
+
+    # A library that raises a boot-fatal check when a setting is missing is
+    # dead on arrival if the scaffold installs the app and emits nothing —
+    # which is what happened to both example apps (stapel_gdpr installed,
+    # STAPEL_GDPR nowhere, gdpr.E001 on first boot). The refusal belongs here,
+    # while the person who chose the library is still in the room. Runs even
+    # with no module_config at all: "supplied nothing" is the failing case.
+    from ._module_config import check_required_settings
+
+    check_required_settings([*modules, "core"], module_config)
 
     slug = _slugify(name)
     project_dir = output_dir / name

@@ -40,6 +40,21 @@ Two files, both POSIX sh (no bashisms — runs on any stand):
   site down (env-address-class-v2.md §3.5's own distinction). No
   ``PREFLIGHT_TARGETS`` set -> nothing to probe (a project with no
   host-network dependency), exits 0.
+
+- ``deploy/verify-stand-state.sh [env-file]`` — the POST-condition gate.
+  Everything above runs BEFORE ``up`` and therefore verifies an intention;
+  this one runs after and verifies the RESULT. Nothing restarting beyond a
+  baseline captured before ``up`` and compared as a DELTA (a lifetime restart
+  counter reported as "since this deploy" is a false claim), nothing
+  unhealthy, nothing dead non-zero, and no service running behind its own
+  migrations. ``--baseline`` writes the snapshot; the same script owns both
+  ends so the format cannot drift.
+
+- ``deploy/smoke-services.sh [host]`` — probes every declared service's
+  ``/api/health/`` through the stand's own nginx and makes the result the
+  verdict. Two traps it is built not to have: a loop that ``set -e``s out on
+  the first unreachable service (reporting two of eight while exiting zero),
+  and a check whose subject is absent reading as healthy.
 """
 
 CHECK_ENV_SH = """\
@@ -234,9 +249,309 @@ sh "$SCRIPT_DIR/preflight.sh" "$ENV_FILE"
 echo "deploy: building images (docker-compose.yml, env: $ENV_FILE)..."
 docker compose --env-file "$ENV_FILE" -f docker-compose.yml build
 
+# Restart baseline, taken BEFORE anything is restarted. RestartCount is
+# lifetime-of-container, so without this snapshot the post-condition gate can
+# only report a number it cannot attribute to this deploy.
+sh "$SCRIPT_DIR/verify-stand-state.sh" --baseline "$ENV_FILE"
+
 echo "deploy: starting services..."
 docker compose --env-file "$ENV_FILE" -f docker-compose.yml up -d --remove-orphans
 
+# Post-condition: is the deployment in the state it claims to be in? Nothing
+# above this line looks at the RESULT of `up` - they all ran before it.
+sh "$SCRIPT_DIR/verify-stand-state.sh" "$ENV_FILE"
+sh "$SCRIPT_DIR/smoke-services.sh" "${SMOKE_HOST:-localhost}"
+
 echo "deploy: done. Status:"
 docker compose --env-file "$ENV_FILE" -f docker-compose.yml ps
+"""
+
+VERIFY_STAND_STATE_SH = """\
+#!/bin/sh
+# deploy/verify-stand-state.sh - the POST-`up` deployment gate: is the
+# deployment in the state it claims to be in?
+#
+# A healthcheck answers "did the process bind a port". That can pass every ten
+# seconds for twelve hours on a stand whose service is serving 500s because a
+# migration failed at boot, and it says nothing at all about a worker that
+# never started. This is what looks.
+#
+# Three questions, all answered against the RUNNING stack:
+#
+#   1. Did the containers settle? A container whose health is still `starting`
+#      has not answered anything yet, so the verdict waits for it (bounded).
+#   2. Is any container restarting, unhealthy, or dead non-zero? Restarts are
+#      counted as a DELTA against a baseline taken before `up` - a lifetime
+#      counter reported as "since this deploy" is a claim the gate did not
+#      measure, which is the same defect it exists to catch.
+#   3. Is any service running on a schema behind its own code? Asked with
+#      `manage.py migrate --check` INSIDE each container, so the verdict comes
+#      from the code that is actually running. No --skip-checks anywhere: it
+#      silences every check, not the one in the way.
+#
+# Usage:
+#   deploy/verify-stand-state.sh --baseline [env-file]   snapshot before `up`
+#   deploy/verify-stand-state.sh [env-file]              the gate, after `up`
+#
+# Env: DOCKER, COMPOSE_FILE, SERVICES_CONF, SERVICE_PREFIX, MAX_RESTARTS,
+#      SETTLE_TIMEOUT (seconds), RESTART_BASELINE (snapshot path).
+#
+# Deliberately not `set -e`: this gate reports every failure it finds. A gate
+# that stops at the first problem tells you about one of four.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+
+MODE="check"
+if [ "${1:-}" = "--baseline" ]; then
+    MODE="baseline"
+    shift
+fi
+ENV_FILE="${1:-.env}"
+
+DOCKER="${DOCKER:-docker}"
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}"
+SERVICES_CONF="${SERVICES_CONF:-$PROJECT_ROOT/services.conf}"
+SERVICE_PREFIX="${SERVICE_PREFIX:-svc-}"
+# A container may restart once or twice while a dependency comes up. Three
+# restarts SINCE THE BASELINE is a loop, not a race.
+MAX_RESTARTS="${MAX_RESTARTS:-3}"
+SETTLE_TIMEOUT="${SETTLE_TIMEOUT:-180}"
+RESTART_BASELINE="${RESTART_BASELINE:-${TMPDIR:-/tmp}/stapel-restart-baseline-$(basename "$PROJECT_ROOT")}"
+
+compose() { $DOCKER compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" "$@"; }
+
+container_ids() { compose ps --all -q 2>/dev/null; }
+
+INSPECT_FMT='{{.Id}} {{.Name}} {{.State.Status}} {{.RestartCount}} {{.State.ExitCode}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}'
+
+# ── baseline mode ────────────────────────────────────────
+if [ "$MODE" = "baseline" ]; then
+    ids="$(container_ids)"
+    {
+        echo "# taken $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+        if [ -n "$ids" ]; then
+            # Keyed on container ID, not name: a container recreated by the
+            # deploy keeps its name but gets a fresh ID and a zeroed count, so
+            # it is simply absent here and correctly reads as zero.
+            $DOCKER inspect --format '{{.Id}} {{.Name}} {{.RestartCount}}' $ids 2>/dev/null
+        fi
+    } > "$RESTART_BASELINE"
+    echo "[gate] restart baseline written to $RESTART_BASELINE"
+    exit 0
+fi
+
+failures=0
+fail() {
+    failures=$((failures + 1))
+    echo "  FAIL: $*" >&2
+}
+
+# ── service list ─────────────────────────────────────────
+# Read it, then assert the count: a loop that silently stops halfway is the
+# defect this gate exists to catch, so it must not have it.
+services="$(sed 's/#.*//; s/[[:space:]]//g' "$SERVICES_CONF" 2>/dev/null | grep -v '^$')"
+declared="$(printf '%s\\n' "$services" | grep -c '^..*$')"
+service_count=0
+for s in $services; do service_count=$((service_count + 1)); done
+if [ "$service_count" -ne "$declared" ]; then
+    echo "REFUSING: parsed $service_count services from $SERVICES_CONF, file declares $declared" >&2
+    exit 1
+fi
+echo "[gate] $service_count service(s) declared: $services"
+
+ids="$(container_ids)"
+if [ -z "$ids" ]; then
+    echo "REFUSING: no containers in this compose project" >&2
+    exit 1
+fi
+
+# ── 1. settle ────────────────────────────────────────────
+# `starting` is not a verdict; judging it would flag every deploy. Bounded, and
+# running out of time is itself a failure - not a reason to judge anyway.
+echo "[gate] waiting for healthchecks to settle (max ${SETTLE_TIMEOUT}s)"
+waited=0
+settled=0
+while :; do
+    starting="$($DOCKER inspect --format "$INSPECT_FMT" $ids 2>/dev/null | grep -c ' starting$')"
+    if [ "$starting" = "0" ]; then
+        settled=1
+        break
+    fi
+    [ "$waited" -ge "$SETTLE_TIMEOUT" ] && break
+    sleep 5
+    waited=$((waited + 5))
+    ids="$(container_ids)"
+done
+if [ "$settled" -ne 1 ]; then
+    fail "healthchecks did not settle within ${SETTLE_TIMEOUT}s ($starting container(s) still starting)"
+fi
+
+# ── 2. container state ───────────────────────────────────
+echo "[gate] container state"
+baseline_taken=""
+if [ -f "$RESTART_BASELINE" ]; then
+    baseline_taken="$(sed -n '1s/^# taken //p' "$RESTART_BASELINE")"
+fi
+if [ -n "$baseline_taken" ]; then
+    echo "[gate]   restart delta measured against the baseline taken $baseline_taken"
+else
+    # Not silently skipped, and not reported as something it is not. Without a
+    # baseline the only honest statement about a restart count is its lifetime
+    # value, which no deploy can be blamed for.
+    echo "[gate]   restart-delta check NOT ARMED: no baseline at $RESTART_BASELINE"
+    echo "[gate]   lifetime restart counts are reported below as context only"
+    echo "[gate]   (deploy.sh takes the baseline; run this script with --baseline before \\`up\\`)"
+fi
+
+states="${TMPDIR:-/tmp}/stapel-stand-state.$$"
+$DOCKER inspect --format "$INSPECT_FMT" $ids > "$states" 2>/dev/null
+checked=0
+while read -r id name status restarts exitcode health; do
+    [ -n "${id:-}" ] || continue
+    checked=$((checked + 1))
+    name="${name#/}"
+
+    before=0
+    if [ -n "$baseline_taken" ]; then
+        before="$(awk -v want="$id" '$1 == want {print $3; exit}' "$RESTART_BASELINE")"
+        before="${before:-0}"
+    fi
+    delta=$((restarts - before))
+    [ "$delta" -lt 0 ] && delta=0
+
+    case "$status" in
+        restarting)
+            fail "$name is restarting now (lifetime restart count $restarts)" ;;
+        exited|dead)
+            # A one-shot writer (frontend-build) exits 0 by design; anything
+            # else is a container that did not survive the deploy.
+            if [ "$exitcode" != "0" ]; then
+                fail "$name is $status with exit code $exitcode"
+            fi ;;
+        running)
+            if [ "$health" = "unhealthy" ]; then
+                fail "$name is running but unhealthy"
+            fi
+            if [ -n "$baseline_taken" ]; then
+                if [ "$delta" -ge "$MAX_RESTARTS" ]; then
+                    fail "$name restarted $delta times since the baseline at $baseline_taken (crash loop; lifetime $restarts)"
+                fi
+            elif [ "$restarts" -gt 0 ]; then
+                echo "  note: $name has $restarts lifetime restarts"
+                echo "        (no baseline: this deploy is not implicated either way)"
+            fi ;;
+    esac
+done < "$states"
+rm -f "$states"
+echo "[gate]   inspected $checked containers"
+
+# ── 3. schema drift ──────────────────────────────────────
+# A container answering 200 on a schema behind its code is the defect that
+# started this. Asked of every service, and a service that cannot answer is a
+# failure too - "could not check" is not "fine".
+echo "[gate] schema at head"
+for s in $services; do
+    out="$(compose exec -T "${SERVICE_PREFIX}${s}" python manage.py migrate --check 2>&1)"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        fail "${SERVICE_PREFIX}${s}: schema behind code, or a system check failed (exit $rc)"
+        echo "$out" | tail -5 | sed 's/^/        /' >&2
+    else
+        echo "  ok:   ${SERVICE_PREFIX}${s} at head"
+    fi
+done
+
+if [ "$failures" -ne 0 ]; then
+    echo "[gate] REFUSING TO ACCEPT THIS DEPLOY: $failures problem(s)" >&2
+    exit 1
+fi
+echo "[gate] deployment is in the state it claims"
+"""
+
+SMOKE_SERVICES_SH = """\
+#!/bin/sh
+# deploy/smoke-services.sh - probe /api/health/ on every declared service and
+# make the result the VERDICT.
+#
+# Two traps this is built not to have, both seen in hand-written smoke loops:
+#
+#   * `code="$(curl ...)"` under `set -e` - a service whose curl cannot connect
+#     ends the script mid-loop. The remaining services are never probed, and
+#     their absence from the output reads as "not printed" rather than "not
+#     checked". Hence the probed-count assertion at the end.
+#   * nothing ever compares the code to anything. A wall of 502s must not be a
+#     successful deploy.
+#
+# Usage: deploy/smoke-services.sh [host]      # default localhost (the stand
+#                                             # itself, through its own nginx)
+# Env:   SERVICES_CONF, CURL_TIMEOUT (default 10)
+#
+# Exit 0 only if every declared service answered 200 with a schema probe in
+# the body.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+
+TARGET_HOST="${1:-localhost}"
+SERVICES_CONF="${SERVICES_CONF:-$PROJECT_ROOT/services.conf}"
+CURL_TIMEOUT="${CURL_TIMEOUT:-10}"
+
+services="$(sed 's/#.*//; s/[[:space:]]//g' "$SERVICES_CONF" 2>/dev/null | grep -v '^$')"
+declared="$(printf '%s\\n' "$services" | grep -c '^..*$')"
+
+if [ "$declared" -eq 0 ]; then
+    echo "smoke: $SERVICES_CONF declares no services - nothing to probe."
+    exit 0
+fi
+
+body="${TMPDIR:-/tmp}/stapel-smoke-body.$$"
+trap 'rm -f "$body"' EXIT
+
+failures=0
+probed=0
+for s in $services; do
+    path="/$s/api/health/"
+    # `|| true`: a failed curl must not end the loop. The status is discarded
+    # on purpose - %{http_code} is 000 on a connection failure, which IS the
+    # verdict, and it is checked below.
+    code="$(curl -sk --max-time "$CURL_TIMEOUT" -o "$body" -w '%{http_code}' "https://$TARGET_HOST$path" 2>/dev/null || true)"
+    code="${code:-000}"
+    if [ "$code" = "000" ]; then
+        code="$(curl -s --max-time "$CURL_TIMEOUT" -o "$body" -w '%{http_code}' "http://$TARGET_HOST$path" 2>/dev/null || true)"
+        code="${code:-000}"
+    fi
+    probed=$((probed + 1))
+
+    verdict="ok"
+    if [ "$code" != "200" ]; then
+        verdict="FAIL (http $code)"
+    elif ! grep -q '"schema"' "$body"; then
+        # Presence only. A check whose subject is absent is indistinguishable
+        # from a check that passes, so the key has to be there - that is how a
+        # container still running a pre-probe image gets caught.
+        #
+        # The VERDICT is deliberately not read here.
+        # deploy/verify-stand-state.sh asks `manage.py migrate --check` inside
+        # each container, which is the authority: it uses the code that is
+        # actually running. Two mechanisms answering the same question is how
+        # they come to disagree.
+        verdict="FAIL (no schema probe in health body - stale image?)"
+    fi
+    [ "$verdict" = "ok" ] || failures=$((failures + 1))
+    printf "  %-16s %-28s %s  %s\\n" "$s" "$path" "$code" "$verdict"
+done
+
+if [ "$probed" -ne "$declared" ]; then
+    echo "SMOKE INCOMPLETE: probed $probed of $declared services" >&2
+    exit 1
+fi
+if [ "$failures" -ne 0 ]; then
+    echo "SMOKE FAILED: $failures of $declared services are not serving correctly" >&2
+    exit 1
+fi
+echo "OK: $declared/$declared services healthy and serving a schema probe"
 """

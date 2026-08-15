@@ -327,8 +327,11 @@ class TestEntrypointCanon:
     def test_bootstrap_sh_has_no_custom_python_or_model_imports(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
         script = (proj / "svc-app" / "bootstrap.sh").read_text()
+        # The steps live in bootstrap.sh, the shared helpers in the step
+        # runner it sources (scripts/bootstrap_lib.sh) — both are the canon.
+        runner = (proj / "scripts" / "bootstrap_lib.sh").read_text()
         assert "python manage.py migrate --noinput" in script
-        assert "python manage.py createsuperuser --noinput" in script
+        assert "python manage.py createsuperuser --noinput" in runner
         assert "python manage.py collectstatic" in script
         # never a hand-rolled Python import/model reference as a real
         # statement (only prose in comments describing the bug this avoids)
@@ -342,11 +345,14 @@ class TestEntrypointCanon:
 
     def test_createsuperuser_is_gated_and_idempotent(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
-        script = (proj / "svc-app" / "bootstrap.sh").read_text()
-        assert 'DJANGO_SUPERUSER_USERNAME' in script
-        assert 'DJANGO_SUPERUSER_PASSWORD' in script
+        runner = (proj / "scripts" / "bootstrap_lib.sh").read_text()
+        assert 'DJANGO_SUPERUSER_USERNAME' in runner
+        assert 'DJANGO_SUPERUSER_PASSWORD' in runner
         # tolerates "already exists" without failing the whole boot
-        assert "createsuperuser --noinput || " in script
+        assert "createsuperuser --noinput ||" in runner
+        # and the step itself is optional — a missing admin account is an
+        # inconvenience, not a wrong service.
+        assert 'optional "superuser"' in (proj / "svc-app" / "bootstrap.sh").read_text()
 
 
 class TestAgentsAndPrecommitCanon:

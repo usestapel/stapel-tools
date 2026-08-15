@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from ._boot_templates import SCHEMA_HEALTH_PY
 from ._templates import (
     ADMIN_PY,
     APP_PY,
@@ -242,6 +243,10 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / "config" / "asgi.py": render(ASGI_PY, ctx),
         root / d / "config" / "wsgi.py": render(WSGI_PY, ctx),
         root / d / "config" / "urls.py": render(URLS_PY, ctx),
+        # Byte-identical to scripts/service_schema_health.py; the boot-contract
+        # gate compares them. The copy is the delivery — it has to import in
+        # the image, under a local bind mount, and in a native test run.
+        root / d / "config" / "schema_health.py": SCHEMA_HEALTH_PY,
         root / d / "config" / "settings" / "__init__.py": "",
         root / d / "config" / "settings" / "base.py": render(BASE_SETTINGS, ctx),
         root / d / "config" / "settings" / "dev.py": render(DEV_SETTINGS, ctx),
@@ -281,6 +286,36 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
 # ---------------------------------------------------------------------------
 # Config file updates
 # ---------------------------------------------------------------------------
+
+
+def _ensure_boot_contract_files(root: Path):
+    """Root-level boot-contract files every service depends on.
+
+    Written if absent rather than overwritten: the step runner is baked into
+    images by ``COPY scripts/bootstrap_lib.sh``, so a service added to a
+    project generated before this contract existed would otherwise produce a
+    Dockerfile that cannot build.
+    """
+    from ._boot_templates import (
+        BOOTSTRAP_LIB_SH,
+        SCHEMA_HEALTH_PY,
+        VERIFY_BOOT_CONTRACT_SH,
+    )
+
+    scripts = {
+        "bootstrap_lib.sh": (BOOTSTRAP_LIB_SH, False),
+        "service_schema_health.py": (SCHEMA_HEALTH_PY, False),
+        "verify_boot_contract.sh": (VERIFY_BOOT_CONTRACT_SH, True),
+    }
+    for name, (content, executable) in scripts.items():
+        path = root / "scripts" / name
+        if path.exists():
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        if executable:
+            path.chmod(0o755)
+        print(f"  created scripts/{name}")
 
 
 def _update_services_conf(root: Path, slug: str):
@@ -727,6 +762,7 @@ def scaffold_service(
         print(f"  created {path.relative_to(root)}")
 
     print("\nUpdating project configs...")
+    _ensure_boot_contract_files(root)
     _update_services_conf(root, slug)
     _update_stapel_services(root, slug, title)
     _update_compose_base(root, slug, dir_name)

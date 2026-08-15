@@ -155,6 +155,22 @@ repos:
         always_run: true
 """ + _CONFIG_MANIFEST_HOOK + _RESERVED_PATHS_HOOK + _API_DOCS_HOOK + _GEN_CLIENT_HOOK + _TOKENS_HOOK
 
+# boot-contract (deployment layer): the require/optional verbs, the
+# schema-at-head closer, the baked-in step runner and the registered schema
+# probe, checked for every service in services.conf. Emitted only for project
+# types that ship containers — an unenforced convention decays, and this is
+# the mechanism that keeps the NEXT service from being written the old way.
+BOOT_CONTRACT_HOOK = """
+  - repo: local
+    hooks:
+      - id: boot-contract
+        name: verify_boot_contract.sh (bootstrap/probe contract per service)
+        entry: sh scripts/verify_boot_contract.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+"""
+
 # ── README "Checks" section (dropped in verbatim, no tokens) ───────────────
 README_CHECKS_SECTION_BACKEND_ONLY = """\
 ## Checks

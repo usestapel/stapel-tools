@@ -1,5 +1,88 @@
 # Changelog
 
+## [0.41.0] — 2026-08-16
+
+### Added — a boot contract that cannot lie
+
+The generated `bootstrap.sh` used a blanket `set -e`. Both shapes a
+hand-written bootstrap ends up in are wrong: without `set -e` a failed
+`migrate` is stepped over and the server starts on a schema its code does not
+match (healthy container, 500s on every affected endpoint); with `set -e` a
+failed `collectstatic` takes the whole API down over one asset, someone
+deletes the flag, and the first shape is back.
+
+So the scaffold now emits `scripts/bootstrap_lib.sh`, a POSIX-sh step runner
+with two verbs — `require` (failure makes the service *wrong*) and `optional`
+(failure makes it *ugly*) — and a closer, `bootstrap_done`, that asserts the
+END STATE with `migrate --check` instead of trusting the step statuses.
+Statuses get lost to a pipe, a subshell or a later edit; "bootstrap succeeded
+on an unmigrated database" is no longer expressible. The classification
+travels with the generator: migrations are `require`, collectstatic and the
+superuser are `optional`, each with the reason on the line. Every service
+Dockerfile bakes the runner in.
+
+### Added — a deploy gate that checks the result, not the intention
+
+`deploy/check-env.sh` and `deploy/preflight.sh` both run before `up`, so they
+verify an intention. `deploy/verify-stand-state.sh` runs after and verifies
+the result: healthchecks settled, nothing restarting, nothing unhealthy,
+nothing dead non-zero, and no service running behind its own migrations
+(`migrate --check` inside each container — the code that is actually running).
+Restarts are a DELTA against a baseline the same script writes before `up`
+(`--baseline`, called from `deploy.sh`); a lifetime restart counter reported
+as "since this deploy" is a claim nothing measured, and without a baseline the
+check says NOT ARMED rather than blaming anyone.
+
+`deploy/smoke-services.sh` probes every declared service and makes the result
+the verdict — no `set -e` to end the loop on the first unreachable service,
+a probed-count assertion so a short run cannot pass as a clean one, and a
+required `"schema"` key in the health body so a check whose subject is absent
+cannot read as healthy.
+
+### Added — monitoring that can say "wrong", not only "absent"
+
+`service-configs/grafana/provisioning/alerting/rules.yaml`,
+`service-configs/prometheus/prometheus.yml`, a pinned Prometheus datasource
+and an opt-in `docker-compose.monitoring.yml` that reads them.
+
+Five rules, not two. Container Down and Service Down stay exactly as they are:
+an OOM kill does not crash-loop, and reachability is the only thing that
+catches it. Container Restarting is keyed on `changes(container_start_time_
+seconds)` — monotonic while the fault lasts, so a container coming back every
+minute produces one alert instead of hundreds of threshold crossings. Schema
+Behind Code reads `stapel_schema_at_head`, emitted only when the state was
+determined, and Schema Probe Cannot Answer reads `stapel_schema_probe_ok`,
+emitted always: two facts, two sentences, and the second never borrows the
+first's words. Containers are selected by compose label rather than by a name
+list, which cannot be silent about a service nobody added to it.
+
+`noDataState` is `NoData` on every rule but one. A dead exporter must not turn
+the board green (`OK`), and must not fire a rule's own summary for something
+it never measured (`Alerting`); Grafana's `NoData` raises its own
+`DatasourceNoData` alert. The exception is Schema Behind Code, whose series is
+deliberately absent when the schema state is undetermined — there absence is
+designed, and the gap is closed by the probe-blind rule.
+
+### Added — the meta-gate
+
+`scripts/verify_boot_contract.sh`, emitted into every containerised project
+and wired as a pre-commit hook, checks each service in `services.conf`: the
+runner is sourced, no blanket `set -e`, migrations are `require`, no
+`manage.py` step escapes the verbs, the Dockerfile bakes the runner in, the
+compose command chains `bootstrap.sh` with `&&`, and the schema probe is
+present, unmodified and registered. `tests/test_boot_contract.py` runs it
+against a generated project and watches every check go red.
+
+### Added — a schema-drift probe on `/api/health/` and `/api/metrics/`
+
+`config/schema_health.py` per service, byte-identical to
+`scripts/service_schema_health.py`. Three states, not two: a bool would turn
+"I could not reach the database" into "the schema is behind", so every service
+would report drift during a database restart. `stapel_schema_at_head` is
+emitted only when the state was determined; `stapel_schema_probe_ok` always.
+Registered non-critical: a 503 on drift would pull every backend out of
+rotation during a rolling migration.
+
 ## [0.40.0] — 2026-08-14
 
 ### Added — `# stapel: cutover-phase`, the second legitimate shape of a destructive migration

@@ -15,6 +15,11 @@ Placeholders:
                  (only non-default capability axes; "" when no module_config)
 """
 
+# Entrypoint canon (§57 owner directive, live-run postmortem): migrate +
+# createsuperuser through Django's OWN --noinput flow + collectstatic, with
+# every step classified require/optional — see _boot_templates.py.
+from ._boot_templates import BOOTSTRAP_SH  # noqa: F401  (re-exported)
+
 MANAGE_PY = """\
 #!/usr/bin/env python
 import os
@@ -31,44 +36,15 @@ if __name__ == "__main__":
     main()
 """
 
-BOOTSTRAP_SH = """\
-#!/bin/sh
-# Entrypoint canon (§57 owner directive, live-run postmortem): migrate +
-# createsuperuser through Django's OWN --noinput flow (env DJANGO_SUPERUSER_*,
-# stdlib since Django 3.0) + collectstatic. NO project-specific Python here —
-# a live run found a hand-rolled entrypoint.sh that imported a model deleted
-# in a later migration to build a superuser by hand, breaking on every
-# rebuild. This script never imports a model; it only shells out to
-# manage.py, so it can never go stale against the schema.
-set -e
-DB_HOST_DIRECT="${POSTGRES_HOST_DIRECT:-db}"
-DB_PORT_DIRECT="${POSTGRES_PORT_DIRECT:-5432}"
-echo "Waiting for database..."
-until pg_isready -h "$DB_HOST_DIRECT" -p "$DB_PORT_DIRECT" -U "$POSTGRES_USER"; do sleep 1; done
-echo "Applying migrations..."
-POSTGRES_HOST="$DB_HOST_DIRECT" POSTGRES_PORT="$DB_PORT_DIRECT" python manage.py migrate --noinput
-
-# Optional, idempotent: only runs when the standard Django superuser env vars
-# are set (DJANGO_SUPERUSER_USERNAME/EMAIL/PASSWORD — read natively by
-# `createsuperuser --noinput`, no custom flag plumbing here). `|| true`
-# because Django's own command exits non-zero when the username already
-# exists — that is "nothing to do", not a bootstrap failure.
-if [ -n "${DJANGO_SUPERUSER_USERNAME:-}" ] && [ -n "${DJANGO_SUPERUSER_PASSWORD:-}" ]; then
-    echo "Ensuring Django superuser '$DJANGO_SUPERUSER_USERNAME' exists..."
-    python manage.py createsuperuser --noinput || echo "  (already exists — skipping)"
-fi
-
-echo "Collecting static..."
-python manage.py collectstatic --noinput --clear --verbosity 0
-echo "Bootstrap done."
-"""
-
 DOCKERFILE = """\
 FROM python:3.12-slim
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends postgresql-client && rm -rf /var/lib/apt/lists/*
 COPY {{DIR}}/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# The bootstrap step runner (require/optional/bootstrap_done) — bootstrap.sh
+# sources it from here.
+COPY scripts/bootstrap_lib.sh /usr/local/lib/stapel-bootstrap.sh
 # stapel_core is vendored as a git submodule at the project root
 COPY stapel_core ./stapel_core
 COPY {{DIR}} .
@@ -137,6 +113,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends postgresql-clie
 COPY --from=vips-builder /wheels /wheels
 COPY {{DIR}}/requirements.txt .
 RUN pip install --no-cache-dir --find-links=/wheels -r requirements.txt && rm -rf /wheels
+# The bootstrap step runner (require/optional/bootstrap_done) — bootstrap.sh
+# sources it from here.
+COPY scripts/bootstrap_lib.sh /usr/local/lib/stapel-bootstrap.sh
 # stapel_core is vendored as a git submodule at the project root
 COPY stapel_core ./stapel_core
 COPY {{DIR}} .
@@ -207,8 +186,14 @@ from stapel_core.django.api.routers import OptionalSlashRouter
 from stapel_core.django.openapi.mcp import build_mcp_schema_view
 from stapel_core.django.openapi.swagger import get_dev_urls
 
+from .schema_health import register_schema_check
+
 url_prefix = settings.URL_PREFIX
 service_name = settings.SERVICE_NAME
+
+# Schema drift on /api/health/ (named, non-critical) and /api/metrics/. A
+# service that is up on a schema behind its code is invisible without this.
+register_schema_check()
 
 admin.site.site_header = f"{service_name} Admin"
 admin.site.site_title = f"{service_name} Admin"
