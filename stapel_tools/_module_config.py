@@ -16,6 +16,7 @@ capabilities.json) warns and passes through.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import sys
 from pathlib import Path
@@ -34,13 +35,77 @@ def capabilities_path(module: str, workspace_root: Path | None = None) -> Path:
     return root / f"stapel-{module}" / "docs" / "capabilities.json"
 
 
+def _installed_capabilities_path(module: str) -> Path | None:
+    """``docs/capabilities.json`` inside the INSTALLED distribution, if any.
+
+    Every swept module ships the artifact as package data, so a scaffold run
+    from a plain ``pip install stapel-tools stapel-gdpr`` — no workspace
+    checkout in sight — can still read a module's declarations. Without this
+    the required-settings gate below would be silently skipped in exactly the
+    environment a real project generates in, which is the shape of defect the
+    gate exists to end.
+    """
+    spec = importlib.util.find_spec(f"stapel_{module.replace('-', '_')}")
+    origin = getattr(spec, "origin", None) if spec is not None else None
+    if not origin:
+        return None
+    return Path(origin).resolve().parent / "docs" / "capabilities.json"
+
+
+def capabilities_doc(module: str, workspace_root: Path | None = None) -> dict | None:
+    """The module's ``docs/capabilities.json``, or ``None`` when unreadable.
+
+    Workspace sibling first (a checkout is the newest truth when one exists),
+    installed distribution second.
+    """
+    candidates = [capabilities_path(module, workspace_root)]
+    if workspace_root is None:
+        installed = _installed_capabilities_path(module)
+        if installed is not None:
+            candidates.append(installed)
+    for path in candidates:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+    return None
+
+
+def required_settings(module: str, workspace_root: Path | None = None) -> list[dict]:
+    """What installing this module makes MANDATORY (capabilities.json §required_settings).
+
+    A library that raises a boot-fatal system check when a setting is missing
+    has a requirement, and a requirement nobody can read is a project that is
+    dead on arrival: ``stapel_gdpr`` raises ``gdpr.E001`` when
+    ``STAPEL_GDPR["DATA_OWNERS"]`` is empty, and both example apps in this
+    workspace were installed with the app and no such setting anywhere.
+
+    Each entry carries enough SHAPE for a generator to emit a correct
+    placeholder (``key``, ``kind``, ``example``) and enough PROSE for a human
+    to know what to put there (``why``, ``unset_check``).
+    """
+    doc = capabilities_doc(module, workspace_root)
+    if not doc:
+        return []
+    return [
+        entry
+        for entry in doc.get("required_settings", [])
+        if isinstance(entry, dict) and "key" in entry
+    ]
+
+
 def known_config_keys(module: str, workspace_root: Path | None = None) -> set[str] | None:
-    """The module's axes + extension surface from its capabilities.json, or
-    ``None`` when the artifact is absent/unreadable (module not yet swept)."""
-    path = capabilities_path(module, workspace_root)
-    try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    """The module's configurable keys from its capabilities.json, or ``None``
+    when the artifact is absent/unreadable (module not yet swept).
+
+    Axes + extension surface + REQUIRED settings. The last one is not a
+    refinement: without it ``validate_module_config`` hard-rejected the very
+    keys a module declares mandatory — a caller supplying ``DATA_OWNERS`` was
+    refused because it is not an axis, so the scaffold could not have fixed
+    the dead-on-arrival project even if it tried.
+    """
+    doc = capabilities_doc(module, workspace_root)
+    if doc is None:
         return None
     axes = {a["key"] for a in doc.get("axes", []) if isinstance(a, dict) and "key" in a}
     extensions = {
@@ -48,7 +113,8 @@ def known_config_keys(module: str, workspace_root: Path | None = None) -> set[st
         for e in doc.get("extension_points", [])
         if isinstance(e, dict) and "name" in e
     }
-    return axes | extensions
+    required = {entry["key"] for entry in required_settings(module, workspace_root)}
+    return axes | extensions | required
 
 
 def validate_module_config(
@@ -96,6 +162,101 @@ def validate_module_config(
                 "capabilities.json axes/extension surface. Known keys: "
                 + ", ".join(sorted(known))
             )
+
+
+#: Placeholder value per declared ``kind``, for a module that declares a
+#: required setting without an ``example``. The generator must be able to emit
+#: something of the right SHAPE even then — a placeholder of the wrong type is
+#: a second defect layered on the first.
+_PLACEHOLDER_BY_KIND = {
+    "list": [],
+    "dict": {},
+    "str": "",
+    "string": "",
+    "bool": False,
+    "int": 0,
+    "secret": "",
+}
+
+
+def _placeholder_for(entry: dict):
+    if "example" in entry:
+        return entry["example"]
+    return _PLACEHOLDER_BY_KIND.get(entry.get("kind", "str"), "")
+
+
+def render_required_placeholder_block(module: str, entries: list[dict]) -> str:
+    """A paste-ready ``STAPEL_<MOD> = {...}`` block for unsatisfied requirements.
+
+    The refusal below is only actionable if it hands back the thing that fixes
+    it. Shape comes from ``kind``/``example``, the ``# why`` comment from the
+    declaration's prose.
+    """
+    mod_u = module.replace("-", "_")
+    lines = [f"STAPEL_{mod_u.upper()} = {{"]
+    for entry in entries:
+        why = entry.get("why")
+        if why:
+            lines.append(f"    # {why}")
+        lines.append(f'    "{entry["key"]}": {_placeholder_for(entry)!r},')
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def check_required_settings(
+    selected: list[str],
+    module_config: dict[str, dict] | None,
+    *,
+    workspace_root: Path | None = None,
+) -> None:
+    """Refuse to generate a project whose libraries are dead on arrival.
+
+    ``stapel_gdpr`` raises the boot-fatal ``gdpr.E001`` when
+    ``STAPEL_GDPR["DATA_OWNERS"]`` is empty; the scaffold installed the app
+    and never emitted the setting, so BOTH example apps in this workspace
+    could not run ``manage.py check``. The failure belongs at generation time,
+    where the person who chose the library is still in the room — not at first
+    boot in production, where the only signal is a service that will not start.
+
+    A module that declares nothing is passed through: silence in
+    capabilities.json means "this library has no mandatory settings", which is
+    true of most of them.
+    """
+    provided = module_config or {}
+    problems: list[str] = []
+    for module in selected:
+        entries = required_settings(module, workspace_root)
+        if not entries:
+            continue
+        supplied = provided.get(module) or {}
+        missing = [
+            entry for entry in entries
+            if entry["key"] not in supplied
+            or supplied[entry["key"]] in (None, "", [], {}, ())
+        ]
+        if not missing:
+            continue
+        names = ", ".join(entry["key"] for entry in missing)
+        detail = "\n".join(
+            f"    - {entry['key']}: {entry.get('why', 'declared required by the module')}"
+            + (f" (unset → {entry['unset_check']})" if entry.get("unset_check") else "")
+            for entry in missing
+        )
+        problems.append(
+            f"stapel-{module} declares {names} required, and this project supplies "
+            f"no value:\n{detail}\n"
+            f"  Installing the app without it produces a project that fails "
+            f"`manage.py check` on first boot. Supply it via module_config "
+            f"(--module-config), e.g.:\n\n"
+            + "\n".join(
+                "    " + line
+                for line in render_required_placeholder_block(module, missing).splitlines()
+            )
+        )
+    if problems:
+        raise SystemExit(
+            "Error: required module settings are missing.\n\n" + "\n\n".join(problems)
+        )
 
 
 def render_settings_block(module_config: dict[str, dict] | None) -> str:

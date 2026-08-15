@@ -1,5 +1,60 @@
 # Changelog
 
+## [Unreleased]
+
+### A library that requires a setting says so, and the scaffold reads it
+
+`stapel_gdpr` raises the boot-fatal `gdpr.E001` when
+`STAPEL_GDPR["DATA_OWNERS"]` is empty, and **both example apps in this
+workspace were dead on arrival**: the scaffold installed the app and emitted
+the setting nowhere. It could not have fixed that even if it had tried —
+`validate_module_config` hard-rejected unknown keys, and `DATA_OWNERS` is not
+an axis, so a caller supplying it was refused.
+
+`capabilities.json` grows a **`required_settings`** section: one entry per
+setting installing the module makes mandatory, with enough shape (`kind`,
+`example`) for a generator to emit a correct placeholder and enough prose
+(`why`, `unset_check`) for a human to know what to put there.
+
+*Why there and not `CONFIG.MD`*: CONFIG.MD is env/vault scoped — its rows carry
+a `Source` column, `get_config(key)` routes reads through it, and `config-lint`
+(CFG001–CFG003) checks env keys against a project's reads. `DATA_OWNERS` is not
+an env key: it is a container-shaped key in a Django settings namespace, and
+stapel-core now *refuses* to read such a key from the environment at all.
+Declaring it in CONFIG.MD would declare it env-sourced, which is false by
+construction. `capabilities.json` is already the contract for the
+`STAPEL_<MOD>` namespace — `axes` are keys in exactly that dict, and
+`_module_config` already reads the file to accept or reject caller-supplied
+keys — so the declaration and its reader land in one place. It is also already
+emitted and drift-gated by `make contract`.
+
+`create_project` now refuses to generate a project whose selected libraries
+declare required settings the caller supplied no value for. The refusal names
+each key, the check it prevents, and hands back the paste-ready
+`STAPEL_<MOD> = {...}` block. It lands **before any file is written**, and it
+runs with no `module_config` at all — "supplied nothing" is the failing case.
+Declarations resolve from a workspace sibling *or* the installed distribution,
+so the gate is not silently skipped in a plain `pip install` checkout.
+
+### `stapel_tools.shell_python_lint` — SH001/SH002
+
+`iron-auth/bootstrap.sh` ran a heredoc beginning `from common.django.openid
+import ...`, a module deleted at the stapel migration. It failed on every boot
+for months and nobody knew, because the script did not stop on error.
+
+Full import resolution is not statically decidable — `sys.path` is assembled at
+runtime and third-party distributions live in an environment no static tool can
+see. The shape the incident actually had *is* decidable, and it is the common
+one:
+
+- **SH001** — an embedded payload (`python -c`, a heredoc, `manage.py shell
+  <<EOF`) imports `a.b.c` where `a` is a package **in this repository** and
+  `a.b.c` is not. Third-party and stdlib imports are not examined at all, so
+  the rule has no false-positive story.
+- **SH002** — an embedded payload whose exit status nothing reads. Accepts
+  either discipline: a `set -e` flag, the per-step `require`/`optional` verbs
+  the generated boot contract uses, or an explicit `|| ...` guard.
+
 ## [0.41.0] — 2026-08-16
 
 ### Added — a boot contract that cannot lie
