@@ -37,7 +37,6 @@ import io
 import json
 import logging
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -101,8 +100,8 @@ def main() -> int:
     print("e2e: migrate...")
     call_command("migrate", "--noinput", verbosity=0)
 
-    # Capture the whole log stream — the mock OTP provider LOGS the code
-    # (stapel_auth/otp/services.py), which is exactly what a developer reads.
+    # Capture the whole log stream — not for the code (see below), but to prove
+    # the mock branch is the one that ran.
     log_buffer = io.StringIO()
     handler = logging.StreamHandler(log_buffer)
     handler.setLevel(logging.INFO)
@@ -127,16 +126,24 @@ def main() -> int:
     )
     assert r.status_code in (200, 201), (r.status_code, r.content[:500])
 
+    # The code comes from the setting, not from the log. In mock mode it is
+    # MOCK_OTP_CODE by construction, and stapel-auth stopped printing it with
+    # 0.22.1 — logging a live credential to say what the setting already says.
+    # Scraping it back out of the log would ask the library to keep doing that.
+    #
+    # What the log is still good for is proving the mock branch ran at all: a
+    # deployment with mock mode off would otherwise sail past this gate on a
+    # code that happens to match nothing.
     log_text = log_buffer.getvalue()
-    match = re.search(
-        rf"[Vv]erification code for {re.escape(email)}[:\s]+(\w+)", log_text
-    )
-    assert match, (
-        "OTP code not found in the log — the mock-provider canon is broken "
+    assert "Mock OTP mode" in log_text, (
+        "the mock OTP branch did not run — this gate verifies with "
+        "MOCK_OTP_CODE, which only means anything in mock mode "
         f"(captured log follows):\n{log_text[-2000:]}"
     )
-    code = match.group(1)
-    print(f"e2e: OTP code found in log: {code}")
+    from stapel_auth.conf import auth_settings
+
+    code = auth_settings.MOCK_OTP_CODE
+    print(f"e2e: OTP code from MOCK_OTP_CODE: {code}")
 
     print("e2e: verify email OTP (registration)...")
     r = client.post(

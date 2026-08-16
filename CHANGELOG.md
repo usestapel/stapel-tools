@@ -2,6 +2,28 @@
 
 ## [Unreleased]
 
+## [0.41.2] — 2026-08-16
+
+### Fixed — the live-circle gate stops reading a credential out of the log
+
+`e2e_live_circle.py` got its one-time code by regex over the captured log
+stream, because the mock OTP provider used to print it. stapel-auth stopped
+printing it — in mock mode the code is `MOCK_OTP_CODE` by construction, so the
+log line was spending a live credential to say what the setting already says.
+The gate went red on a library that had just become more careful, which is the
+wrong way round.
+
+It now reads `auth_settings.MOCK_OTP_CODE` directly. The log is still captured
+and still asserted on, for the thing it can actually attest: that the mock
+branch is the branch that ran. Without that check a deployment with mock mode
+off would sail past the gate on a code matching nothing.
+
+### Note
+
+0.41.1 was tagged but never published — its `e2e-generated-project` job failed
+on the above. Its contents (the boot-smoke tier fixes, and the scaffold floor
+moving to stapel-core >=0.29.0) ship here.
+
 ## [0.41.0] — 2026-08-16
 
 ### A library that requires a setting says so, and the scaffold reads it
