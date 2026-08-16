@@ -577,10 +577,21 @@ boot without one — resolved via ``os.environ`` directly (get_config()'s own
 contract), NOT via django.conf.settings, so a plain Python assignment here
 would not satisfy it. This gate must run standalone (no shell-sourced .env,
 no docker) straight after `stapel-assemble`/`create-project`, so it seeds
-``os.environ`` with its OWN insecure dev-only fallback (only when unset —
-never overrides a real secret already exported) rather than depending on
-dev.py's (which would also pull in django-debug-toolbar's INSTALLED_APPS
-entry — see above).
+``os.environ`` itself (only when unset — never overrides a real secret
+already exported) rather than depending on dev.py's (which would also pull
+in django-debug-toolbar's INSTALLED_APPS entry — see above).
+
+What it seeds is FRESHLY GENERATED per process, not a constant. This tier
+runs with DEBUG=False, which is exactly when stapel_core's prodguard demands
+a real secret: it rejects anything empty, shorter than 50 characters, or
+starting with `django-insecure-`/`change_me` (prodguard.E001). A constant
+chosen to slip past that rule would satisfy the gate while being precisely
+what the gate exists to forbid — and, sitting in a template every generated
+project carries, it is the kind of value that eventually reaches a real
+deploy. A random per-process value cannot: it satisfies the gate by BEING
+what the gate asks for, it dies with the process, and there is nothing to
+copy. Nothing is weakened by it — this module serves no traffic and its
+DATABASES is Django's `dummy` backend.
 
 FRONTEND_URL is the same story one setting over: base.py reads it from the
 environment with no fallback (a default there would leak into prod — see its
@@ -593,8 +604,9 @@ asks for.
 Never point real traffic at this module — it has no usable database.
 \"\"\"
 import os
+import secrets
 
-os.environ.setdefault("SECRET_KEY", "django-insecure-boot-smoke-only")
+os.environ.setdefault("SECRET_KEY", secrets.token_urlsafe(48))
 os.environ.setdefault("JWT_SECRET_KEY", os.environ["SECRET_KEY"])
 
 from .base import *  # noqa: E402,F401,F403
