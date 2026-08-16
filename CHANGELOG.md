@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.41.0] — 2026-08-16
+
 ### A library that requires a setting says so, and the scaffold reads it
 
 `stapel_gdpr` raises the boot-fatal `gdpr.E001` when
@@ -55,7 +57,20 @@ one:
   either discipline: a `set -e` flag, the per-step `require`/`optional` verbs
   the generated boot contract uses, or an explicit `|| ...` guard.
 
-## [0.41.0] — 2026-08-16
+### Fixed — three things the release itself was carrying
+
+- `stapel-shell-python-lint` is registered as a console script. The module's
+  own `argparse` already announced itself under that name, but nothing put it
+  on `PATH`, so the lint shipped uninvocable.
+- The library scaffold emitted `stapel-core>=0.3.0,<0.4` into every generated
+  `pyproject.toml` — a floor so far behind that a freshly scaffolded library
+  resolved a core predating the whole mandate/scope surface. Now
+  `>=0.27.0,<1.0`. The same defect class the gate this release adds exists to
+  catch.
+- `test_emit_errors_writes_valid_registry` asserted the exact key set of an
+  error entry, so stapel-core 0.26.0 adding `owner` turned the CI red. It now
+  requires the five and tolerates `owner`, because this tool reads artifacts
+  from cores on both sides of that change.
 
 ### Added — a boot contract that cannot lie
 

@@ -126,8 +126,11 @@ def test_emit_errors_writes_valid_registry(tmp_path):
     errors = json.loads(out.read_text())
     assert isinstance(errors, list)
     assert error_count == len(errors) >= 1
+    # `owner` is emitted per entry from stapel-core 0.26.0 on; older cores do
+    # not carry it, and this tool has to read both.
     for entry in errors:
-        assert set(entry) == {"code", "status", "params", "remediation", "en"}
+        assert {"code", "status", "params", "remediation", "en"} <= set(entry)
+        assert set(entry) <= {"code", "status", "params", "remediation", "en", "owner"}
         assert isinstance(entry["code"], str)
         assert isinstance(entry["status"], int)
         assert isinstance(entry["params"], list)
