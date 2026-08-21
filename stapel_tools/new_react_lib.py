@@ -8,11 +8,14 @@ primitive IMPORTED from `@stapel/core` (never copied), namespaced query keys,
 generated backend error map with en fallbacks, and the self-describing
 `manifest.json` / `llms.txt` — each generated surface under a drift gate.
 
-Fork-free (workspace rule): the four codegen drivers already live parametrized
-by env in the stapel-react monorepo (`scripts/gen-{flows,errors,manifest,api}.mjs`).
+Fork-free (workspace rule): the codegen drivers already live parametrized
+by env in the stapel-react monorepo (`scripts/gen-{flows,errors,events,manifest,api}.mjs`).
 This scaffold does NOT copy them — the generated package.json wires them via env
-knobs (FLOW_MODULE, ERRORS_* , MANIFEST_*). A pair owns three per-package gates
-(flows / errors / manifest); `gen:api` is the core-owned shared schema.
+knobs (FLOW_MODULE, ERRORS_*, EVENTS_*, MANIFEST_*, API_*). `schema.ts` is
+package-LOCAL per pair now (each pair's own `src/api/generated/schema.ts`,
+produced from ITS backend's own `docs/schema.json` — no longer core-owned), so
+`gen:api` is enumerated per pair in the root `gen:*` aggregates exactly like the
+other drivers.
 
 The package is written under ``<react-dir>/packages/<module>-react``. The
 backend supplies two artifact families:
@@ -173,7 +176,7 @@ def build_context(
         "PKG_NAME": f"@stapel/{module}-react",
         "BACKEND": backend,
         "PATH_PREFIX": path_prefix,
-        "ERRORS_SOURCE": f"../{backend}/docs/errors.json",
+        "ERRORS_SOURCE": f"${{SIBLING_ROOT:-..}}/{backend}/docs/errors.json",
         "TITLE": title,
         "DESC": desc or default_desc,
         "CORE_PEER": core_peer,
@@ -232,6 +235,16 @@ def root_gen_invocations(ctx: dict) -> list[dict]:
     pkg = ctx["PKG_DIR"]
     return [
         {
+            "name": "api",
+            "cmd": (
+                f"API_SCHEMA=${{SIBLING_ROOT:-..}}/{ctx['BACKEND']}/docs/schema.json "
+                f"API_OUT=packages/{pkg}/src/api/generated/schema.ts "
+                f"node scripts/gen-api.mjs"
+            ),
+            "path": f"packages/{pkg}/src/api/generated/schema.ts",
+            "check_inline": True,
+        },
+        {
             "name": "flows",
             "cmd": f"FLOW_MODULE={ctx['MODULE']} node scripts/gen-flows.mjs",
             "path": f"packages/{pkg}/src/flows/generated",
@@ -240,7 +253,7 @@ def root_gen_invocations(ctx: dict) -> list[dict]:
         {
             "name": "errors",
             "cmd": (
-                f"AUTH_ERRORS_JSON=../{ctx['BACKEND']}/docs/errors.json "
+                f"AUTH_ERRORS_JSON=${{SIBLING_ROOT:-..}}/{ctx['BACKEND']}/docs/errors.json "
                 f"ERRORS_OUT=packages/{pkg}/src/i18n/generated "
                 f"ERRORS_CONST={ctx['UPPER']}_ERRORS "
                 f"ERRORS_TYPE_PREFIX={ctx['CAMEL']} node scripts/gen-errors.mjs"
@@ -268,7 +281,7 @@ def root_gen_invocations(ctx: dict) -> list[dict]:
                 f"MANIFEST_PKG_DIR=packages/{pkg} "
                 f"MANIFEST_MODULE={ctx['BACKEND']} "
                 f"MANIFEST_TAGPREFIX={ctx['PATH_PREFIX']} "
-                f"MANIFEST_BACKEND_PYPROJECT=../{ctx['BACKEND']}/pyproject.toml "
+                f"MANIFEST_BACKEND_PYPROJECT=${{SIBLING_ROOT:-..}}/{ctx['BACKEND']}/pyproject.toml "
                 f"node scripts/gen-manifest.mjs"
             ),
             "path": f"packages/{pkg}/manifest.json packages/{pkg}/llms.txt",

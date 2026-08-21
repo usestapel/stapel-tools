@@ -256,14 +256,15 @@ export type {
 API_TYPES_TS = """/**
  * Wire types for the {{BACKEND}} HTTP contract — **derived from the generated
  * OpenAPI surface** (frontend-standard §2/§3), never hand-maintained. The
- * single source of truth is `components["schemas"]` from `@stapel/core`
- * (`packages/core/src/generated/schema.ts`, produced by `pnpm gen:api` from the
- * unified all-modules OpenAPI). Alias the schemas this pair uses under local
- * names here; do NOT write parallel response bodies. Where drf-spectacular +
+ * single source of truth is `components["schemas"]` from this pair's own
+ * package-LOCAL generated schema (`./generated/schema.js`, produced by
+ * `pnpm gen:api` from {{BACKEND}}'s OWN `docs/schema.json` — the §17-native
+ * per-module contract). Alias the schemas this pair uses under local names
+ * here; do NOT write parallel response bodies. Where drf-spectacular +
  * openapi-typescript under-describe the runtime, apply a small documented
  * correction (see auth-react `api/types.ts` for the three canonical patterns).
  */
-import type { components } from "@stapel/core";
+import type { components } from "./generated/schema.js";
 
 /** The generated schema table — the one source of truth for wire shapes. */
 export type Schemas = components["schemas"];
@@ -1033,7 +1034,7 @@ individual core providers (`StapelConfigProvider` + `QueryClientProvider` +
 
 ```
 src/
-  api/        typed client — thin adapter over @stapel/core `components`
+  api/        typed client — thin adapter over this pair's own generated `components`
   model/      query keys, runtime wiring, context/hooks
   flows/      toFlowError + zero-flow registry shim (machines + generated
               registry arrive with the backend's first @flow_step)
@@ -1047,6 +1048,7 @@ demo/         first-class demos (compiled, product-linted, smoke-rendered)
 
 | Surface | Path | Gate |
 |---|---|---|
+| Typed API schema | `src/api/generated/schema.ts`, from {{BACKEND}}'s own `docs/schema.json` | `pnpm gen:api:check` |
 | Flow registry | none — zero-flow module (`src/flows/registry.ts` shim); `gen:flows` emits `src/flows/generated/` once the backend documents flows | `pnpm gen:flows:check` |
 | Backend error map + en bundle | `src/i18n/generated/` | `pnpm gen:errors:check` |
 | Typed-event registry | `src/analytics/generated/events.json` | `pnpm gen:events:check` |
@@ -1056,8 +1058,9 @@ demo/         first-class demos (compiled, product-linted, smoke-rendered)
 These drift gates run at the **monorepo root** (`pnpm gen` / `pnpm gen:check`) —
 the etalon's env-parametrized `scripts/gen-*.mjs` drivers are shared, not forked.
 `stapel-new-react-lib` wired this pair into the root `gen`/`gen:check` aggregates
-at scaffold time (one env-parametrized invocation per driver). The typed
-`schema.ts` is core-owned (`pnpm gen:api`); design tokens are tokens-owned
+at scaffold time (one env-parametrized invocation per driver, including
+`gen:api`). The typed `schema.ts` is package-LOCAL, generated from
+{{BACKEND}}'s own `docs/schema.json`; design tokens are tokens-owned
 (`pnpm gen:tokens`).
 
 ## Guardrails
@@ -1083,10 +1086,12 @@ generated `llms.txt` (agent context) and `manifest.json` (machine catalog).
 
 ## Layers
 
-- **api/** — `create{{CAMEL}}Api(client)`; types are aliases over the generated
-  `components["schemas"]` from `@stapel/core` (never parallel hand-written
-  bodies). Named typed operations arrive with gen-api v2 (`core-typed-ops`);
-  hand-authored, un-generatable surface lives in `api/extensions.ts`.
+- **api/** — `create{{CAMEL}}Api(client)`; types are aliases over the
+  package-LOCAL generated `components["schemas"]` (`src/api/generated/schema.ts`,
+  produced by `pnpm gen:api` from {{BACKEND}}'s own `docs/schema.json`; never
+  parallel hand-written bodies). Named typed operations arrive with gen-api v2
+  (`core-typed-ops`); hand-authored, un-generatable surface lives in
+  `api/extensions.ts`.
 - **model/** — `{{MODULE}}QueryKeys` (single key factory, `["{{MODULE}}"]`
   namespace), `create{{CAMEL}}Runtime`, React context/hooks. Declare the
   persist/optimistic policy here as you add read hooks and mutations.

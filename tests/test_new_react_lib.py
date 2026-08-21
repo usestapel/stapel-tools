@@ -60,7 +60,9 @@ class TestContext:
         assert ctx["PKG_NAME"] == "@stapel/notifications-react"
         assert ctx["PKG_DIR"] == "notifications-react"
         # gen-errors reads the backend's docs/errors.json artifact, not errors.py.
-        assert ctx["ERRORS_SOURCE"] == "../stapel-notifications/docs/errors.json"
+        # SIBLING_ROOT-relative, not a hardcoded `../` (bug: broke a prior run
+        # whose sibling checkouts weren't laid out one directory up).
+        assert ctx["ERRORS_SOURCE"] == "${SIBLING_ROOT:-..}/stapel-notifications/docs/errors.json"
         # default core peer floor (no react-dir wired) — the module-factory minor
         # (slim wave §21/S2: the pair binds createModuleRuntime/createModuleContext)
         assert ctx["CORE_PEER"] == ">=0.4.0 <1.0.0"
@@ -86,6 +88,17 @@ class TestFilePlan:
         _, plan = self._plan()
         for layer in LAYER_DIRS:
             assert any(rel.startswith(layer + "/") for rel in plan), layer
+
+    def test_api_types_import_package_local_schema(self):
+        """Bug: the template imported `components` straight from `@stapel/core`,
+        which no longer re-exports a generated schema (see packages/core/src/
+        index.ts in stapel-react) — every live pair (e.g. forms-react) imports
+        its OWN package-local `./generated/schema.js`, produced by `pnpm gen:api`
+        from the pair's own backend `docs/schema.json`."""
+        _, plan = self._plan()
+        types_ts = plan["src/api/types.ts"]
+        assert 'import type { components } from "./generated/schema.js";' in types_ts
+        assert '"@stapel/core"' not in types_ts
 
     def test_no_unrendered_placeholders(self):
         for module in ("notifications", "billing", "profiles", "workspaces"):
@@ -352,6 +365,8 @@ class TestAnalyticsMarker:
 # A minimal root package.json mirroring the etalon's root gen:* shape.
 def _root_scripts():
     return {
+        "gen:api": "node scripts/gen-api.mjs",
+        "gen:api:check": "node scripts/gen-api.mjs && git diff --exit-code -- packages/auth-react/src/api/generated/schema.ts",
         "gen:flows": "node scripts/gen-flows.mjs",
         "gen:flows:check": "node scripts/gen-flows.mjs && git diff --exit-code -- packages/auth-react/src/flows/generated",
         "gen:errors": "node scripts/gen-errors.mjs",
@@ -382,16 +397,30 @@ class TestRootGenPatch:
         assert ok
         scripts = json.loads((tmp_path / "package.json").read_text())["scripts"]
         # each driver's :check now diffs the pair's generated path
-        for name in ("flows", "errors", "events", "demos", "manifest"):
+        for name in ("api", "flows", "errors", "events", "demos", "manifest"):
             assert "packages/notifications-react" in scripts[f"gen:{name}:check"], name
         # correct env knobs are wired (fork-free — shared drivers)
+        assert (
+            "API_SCHEMA=${SIBLING_ROOT:-..}/stapel-notifications/docs/schema.json"
+            in scripts["gen:api"]
+        )
+        assert (
+            "API_OUT=packages/notifications-react/src/api/generated/schema.ts"
+            in scripts["gen:api"]
+        )
         assert "FLOW_MODULE=notifications" in scripts["gen:flows"]
-        assert "AUTH_ERRORS_JSON=../stapel-notifications/docs/errors.json" in scripts["gen:errors"]
+        assert (
+            "AUTH_ERRORS_JSON=${SIBLING_ROOT:-..}/stapel-notifications/docs/errors.json"
+            in scripts["gen:errors"]
+        )
         assert "ERRORS_CONST=NOTIFICATIONS_ERRORS" in scripts["gen:errors"]
         assert "EVENTS_PKG_DIR=packages/notifications-react" in scripts["gen:events"]
         assert "DEMOS_PKG_DIR=packages/notifications-react" in scripts["gen:demos"]
         assert "MANIFEST_MODULE=stapel-notifications" in scripts["gen:manifest"]
-        assert "MANIFEST_BACKEND_PYPROJECT=../stapel-notifications/pyproject.toml" in scripts["gen:manifest"]
+        assert (
+            "MANIFEST_BACKEND_PYPROJECT=${SIBLING_ROOT:-..}/stapel-notifications/pyproject.toml"
+            in scripts["gen:manifest"]
+        )
 
     def test_inline_check_reruns_gen_but_demos_does_not_double(self, tmp_path):
         _write_root(tmp_path, _root_scripts())
@@ -472,13 +501,28 @@ class TestScaffold:
             backend="stapel-billing", path_prefix="/billing/api/",
         )
         root = json.loads((react / "package.json").read_text())["scripts"]
-        assert "../stapel-billing/docs/errors.json" in root["gen:errors"]
+        assert "${SIBLING_ROOT:-..}/stapel-billing/docs/errors.json" in root["gen:errors"]
+        assert "${SIBLING_ROOT:-..}/stapel-billing/docs/schema.json" in root["gen:api"]
         assert "MANIFEST_TAGPREFIX=/billing/api/" in root["gen:manifest"]
 
 
 class TestRootGenInvocations:
-    def test_covers_all_five_drivers(self):
+    def test_covers_all_six_drivers(self):
+        """`api` must be enrolled alongside the other five — a scaffolded pair
+        without it never gets its own `src/api/generated/schema.ts` wired into
+        the root `gen:api`/`gen:api:check` aggregates."""
         ctx = build_context("notifications", "Notifications",
                             "stapel-notifications", "/notifications/api/")
         names = {d["name"] for d in root_gen_invocations(ctx)}
-        assert names == {"flows", "errors", "events", "demos", "manifest"}
+        assert names == {"api", "flows", "errors", "events", "demos", "manifest"}
+
+    def test_api_invocation_is_sibling_root_relative(self):
+        ctx = build_context("billing", "Billing", "stapel-billing", "/billing/api/")
+        api = next(d for d in root_gen_invocations(ctx) if d["name"] == "api")
+        assert api["cmd"] == (
+            "API_SCHEMA=${SIBLING_ROOT:-..}/stapel-billing/docs/schema.json "
+            "API_OUT=packages/billing-react/src/api/generated/schema.ts "
+            "node scripts/gen-api.mjs"
+        )
+        assert api["path"] == "packages/billing-react/src/api/generated/schema.ts"
+        assert api["check_inline"] is True
