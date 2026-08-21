@@ -2,6 +2,54 @@
 
 ## [Unreleased]
 
+## [0.42.0] — 2026-08-21
+
+### `stapel-index-lint` — the gate against "indexed silently, read by nothing"
+
+The legacy marketplace's search died in one boring way: fields were written
+into the index and read by no query. `features_search` was built on every
+publish and never queried. `description_en` was populated and never searched.
+`geohash` was stored and never used for proximity. Nothing failed, and nothing
+was noticed for years — because writing a field and reading a field are
+different files, and nothing connected them.
+
+`stapel-search` answers that with its index contract as DATA (`docs/index.json`:
+one row per indexed field, carrying its source, the named query capabilities
+that READ it, and the pytest node id that proves the round trip). This release
+adds the static half of enforcing it, fleet-wide.
+
+* **`stapel_tools/index_lint.py`** — five rules, the `surface_lint` idiom
+  (rule codes, `--json`, `--strict`, exit 1):
+  * **IDX001** (error) a field on an index model that `docs/index.json` does
+    not account for. The map is explicit, so adding a column forces a
+    decision — indexed value with a read path and a test, or bookkeeping that
+    says so. "I'll wire the query later" stops being expressible.
+  * **IDX002** (error) a query read path some shipped backend does not answer.
+    Each backend declares `READ_PATH_IMPL = {read_path: symbol}`; the rule
+    checks the promise is registered AND that the named symbol exists in that
+    module. A backend may answer `capability:<name>` instead when its engine
+    resolves the question natively (Meilisearch has no geohash column) — a
+    declared, reviewable difference rather than a silent one. Modules setting
+    `IS_STUB = True` are skipped: a rule that forces a stub to grow a fake
+    implementation manufactures the defect it audits.
+  * **IDX003** (error) a declared proving test that does not resolve.
+  * **IDX004** (warning) a document field pulled from the source that lands in
+    no index field — dead haulage. A warning, because a mapper legitimately
+    reads more than it indexes.
+  * **IDX005** (warning) a field `kind` outside the closed vocabulary.
+* **Composed into `stapel-verify`**, so every generated project's pre-commit
+  picks it up on the next stapel-tools upgrade with nothing to regenerate —
+  and it is **silent by design** in a project that ships no `docs/index.json`.
+* Waivers are explicit and named, never silence (the
+  `adoption_checks.py:26-45` canon): `# stapel: index-waived <field> — <reason>`.
+* Level follows the reader's power to act (`adoption_checks.py:53-66`): errors
+  in the library that owns the index, warnings in a consuming project that
+  merely installed somebody else's backend.
+
+The boundary is SUR004's, restated because it is the same one: these rules
+prove **the promise was not dropped on the floor**, not that the branch is
+right. Only the round-trip suite does that.
+
 ## [0.41.2] — 2026-08-16
 
 ### Fixed — the live-circle gate stops reading a credential out of the log

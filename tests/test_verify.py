@@ -174,6 +174,7 @@ def test_every_linter_contributes_a_finding(tmp_path):
         "stapel-swap-lint",
         "stapel-doc-lint",
         "stapel-surface-lint",
+        "stapel-index-lint",
         "stapel-nginx-cache-lint",
         "stapel-env-address-lint",
         "stapel-frontend-delivery-lint",
@@ -227,6 +228,13 @@ def test_every_linter_contributes_a_finding(tmp_path):
     assert fed_rules == {"FED001"}
     assert by_name["stapel-frontend-delivery-lint"].errors == 1
 
+    # index-lint is SILENT here, and that is the assertion: the fixture ships
+    # no docs/index.json, so it declares no search index, and a linter that
+    # complained about a missing artifact nobody promised is a linter people
+    # disable.
+    assert by_name["stapel-index-lint"].errors == 0
+    assert by_name["stapel-index-lint"].findings == []
+
     total_errors = sum(r.errors for r in reports)
     # R006, ADO001, ADO002, URL001, CFG001, MIG001, SUR001, NGX001, NGX003,
     # FED001
@@ -262,7 +270,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 12 linters." in out
+    assert "All clean across 13 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -272,7 +280,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     assert code == 1
     assert payload["ok"] is False
     assert payload["errors"] == 10
-    assert len(payload["linters"]) == 12
+    assert len(payload["linters"]) == 13
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
@@ -283,6 +291,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
         "stapel-swap-lint",
         "stapel-doc-lint",
         "stapel-surface-lint",
+        "stapel-index-lint",
         "stapel-nginx-cache-lint",
         "stapel-env-address-lint",
         "stapel-frontend-delivery-lint",

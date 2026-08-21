@@ -38,6 +38,17 @@ Linters composed (in this order)
   consumer gets and a fix the product can no longer receive)
 * ``stapel_tools.doc_lint``        — DOC001 (§55 DOC-FIELD: model field docs,
   warning-level while the legacy sweep is in progress)
+* ``stapel_tools.index_lint``      — IDX-codes (the search-index contract:
+  a field stored on an index model that ``docs/index.json`` does not account
+  for, a declared query read path some shipped backend does not answer, a
+  declared proving test that does not resolve, and a document field pulled
+  from the source that lands nowhere. Composed HERE for the same reason as
+  the nginx rules: a project picks the gate up on its next stapel-tools
+  upgrade with nothing to regenerate — and it is silent by design in a
+  project that ships no ``docs/index.json`` at all. The class it closes:
+  ``features_search``, ``description_en`` and ``geohash`` were written into
+  the legacy index and read by no query, for years, because writing a field
+  and reading a field are different files and nothing connected them.)
 * ``stapel_tools.surface_lint``    — SUR-codes (pre-merge gate against
   reinventing what the fleet already publishes: a permission class the project
   re-declares under a published name, a displaced symbol used where its
@@ -100,6 +111,7 @@ from . import (
     doc_lint,
     env_address_lint,
     frontend_delivery_lint,
+    index_lint,
     lint,
     migration_lint,
     nginx_cache_lint,
@@ -181,6 +193,13 @@ def run_doc_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-doc-lint", errors, warnings, _to_dicts(violations))
 
 
+def run_index_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = index_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-index-lint", errors, warnings, _to_dicts(findings), notes)
+
+
 def run_surface_lint(project: Path, search_roots: list[Path]) -> LinterReport:
     notes: list[str] = []
     findings = surface_lint.lint_project(
@@ -239,6 +258,7 @@ def verify_project(
         run_swap_lint(project),
         run_doc_lint(project),
         run_surface_lint(project, search_roots),
+        run_index_lint(project),
         run_nginx_cache_lint(project),
         run_env_address_lint(project),
         run_frontend_delivery_lint(project),
