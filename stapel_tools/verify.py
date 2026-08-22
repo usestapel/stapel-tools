@@ -75,6 +75,8 @@ Linters composed (in this order)
   it closes: a bare ``makemessages`` demotes every entry whose source it cannot
   find, gettext skips fuzzy and obsolete alike, and a suite that asserts almost
   no strings stays green while the product reverts to its source language.
+* ``stapel_tools.exposure_lint``   — EXP-codes (a private client name must
+  not reach a public stapel-*/@stapel/* tree; list lives OUTSIDE the repo)
 * ``stapel_tools.env_address_lint`` — EADDR-codes (the "address that belongs
   to the environment, frozen into a file that outlives it" class:
   ``docs/pending/env-address-class-v2.md``). EADDR001 catches a literal
@@ -110,6 +112,7 @@ from . import (
     config_lint,
     doc_lint,
     env_address_lint,
+    exposure_lint,
     frontend_delivery_lint,
     index_lint,
     lint,
@@ -223,6 +226,13 @@ def run_env_address_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-env-address-lint", errors, warnings, _to_dicts(findings), notes)
 
 
+def run_exposure_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = exposure_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-exposure-lint", errors, warnings, _to_dicts(findings), notes)
+
+
 def run_po_lint(project: Path) -> LinterReport:
     notes: list[str] = []
     findings = po_lint.lint_project(project, notes=notes)
@@ -263,6 +273,7 @@ def verify_project(
         run_env_address_lint(project),
         run_frontend_delivery_lint(project),
         run_po_lint(project),
+        run_exposure_lint(project),
     ]
 
 

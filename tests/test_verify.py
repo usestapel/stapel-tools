@@ -160,8 +160,16 @@ def make_clean_project(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_every_linter_contributes_a_finding(tmp_path):
+def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
     proj = make_dirty_project(tmp_path)
+    # exposure lint: a public distribution carrying a private name
+    names = tmp_path / "private-names"
+    names.write_text("acme\n", encoding="utf-8")
+    monkeypatch.setenv("STAPEL_PRIVATE_NAMES_FILE", str(names))
+    (proj / "pyproject.toml").write_text(
+        '[project]\nname = "stapel-dirty"\nversion = "0.0.1"\n', encoding="utf-8"
+    )
+    (proj / "NOTES.md").write_text("found on the acme fleet\n", encoding="utf-8")
     reports = verify_project(proj)
 
     by_name = {r.name: r for r in reports}
@@ -179,7 +187,11 @@ def test_every_linter_contributes_a_finding(tmp_path):
         "stapel-env-address-lint",
         "stapel-frontend-delivery-lint",
         "stapel-po-lint",
+        "stapel-exposure-lint",
     }
+
+    assert by_name["stapel-exposure-lint"].errors >= 1
+    assert {f["rule"] for f in by_name["stapel-exposure-lint"].findings} == {"EXP001"}
 
     assert by_name["stapel-lint"].errors >= 1
     rules = {f["rule"] for f in by_name["stapel-lint"].findings}
@@ -237,8 +249,8 @@ def test_every_linter_contributes_a_finding(tmp_path):
 
     total_errors = sum(r.errors for r in reports)
     # R006, ADO001, ADO002, URL001, CFG001, MIG001, SUR001, NGX001, NGX003,
-    # FED001
-    assert total_errors == 10
+    # FED001, EXP001
+    assert total_errors == 11
 
 
 def test_clean_project_reports_all_zero(tmp_path):
@@ -270,7 +282,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 13 linters." in out
+    assert "All clean across 14 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -280,7 +292,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     assert code == 1
     assert payload["ok"] is False
     assert payload["errors"] == 10
-    assert len(payload["linters"]) == 13
+    assert len(payload["linters"]) == 14
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
@@ -296,6 +308,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
         "stapel-env-address-lint",
         "stapel-frontend-delivery-lint",
         "stapel-po-lint",
+        "stapel-exposure-lint",
     }
     for entry in payload["linters"]:
         assert "errors" in entry

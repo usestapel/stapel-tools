@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-08-22
+
+### New gate: `stapel-exposure-lint` — a private client name must not reach a public tree
+
+EXP001 (a private name in a tracked text file of a public `stapel-*` /
+`@stapel/*` project) and EXP002 (in the message of a commit not yet on any
+remote; `--commits`, what the library pre-push hook passes). The names are
+private too, so the list lives outside every repository —
+`~/.stapel/private-names` or `$STAPEL_PRIVATE_NAMES_FILE`; with no list the
+lint notes that and checks nothing, because a runner without the file must
+not pretend it did. A private project (a client fleet, a studio checkout) is
+"not applicable", never a failure for containing its own name. Generated
+artifacts are NOT skipped: `docs/schema.json` carries docstrings into the
+published wheel, and that is the hit that matters.
+
+Why a gate: ten public repos were found carrying a client's name in
+changelogs, docstrings, test fixtures and one published schema, plus sixteen
+commit messages that cannot be scrubbed without rewriting history — the
+second such sweep. `stapel-verify` composes the lint; the library template's
+`.githooks/pre-push` runs it with `--commits` when the tool is on PATH.
+
 ## [0.43.0] — 2026-08-22
 
 ### A generated service states its identity-trust mode instead of inheriting it
