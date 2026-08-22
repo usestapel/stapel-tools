@@ -270,6 +270,44 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "")
 # do not rename without updating both sides.
 STAPEL_AUTH_SERVICE_PREFIX = os.getenv("STAPEL_AUTH_SERVICE_PREFIX", "")
 
+# ─── Identity trust: whose users are these? ─────────────────────────────────
+# What happens when a VALID token names a user_id this database has no row
+# for. There are exactly two roles and this service must state which it is:
+#
+#   ISSUER   — it mints the tokens and owns the user table (it installs
+#              stapel_auth). An unknown subject in a token it signed itself is
+#              a STALE token; materialising a row from it would forge an
+#              account nobody registered. -> False
+#   CONSUMER — it verifies a neighbouring auth service's tokens and has no
+#              sign-up of its own. The local row is a shadow copy keyed by the
+#              issuer's id; refusing to create it answers 401 to every user
+#              who registered after this service last saw them. -> True
+#
+# This service is a {{IDENTITY_ROLE}}, hence the value below. Flip it the day
+# the roles swap — i.e. if this service starts (or stops) being the one that
+# issues tokens and owns the accounts.
+#
+# Stated here ALWAYS, in both roles, on purpose. stapel-core flipped this
+# default in a MINOR release (0.24: True -> False) and every service that had
+# never answered the question changed mode on a version bump with no boot-time
+# signal: seven of eight services began answering 401 to every new sign-up,
+# visible only as "JWT Auth Failed - User creation failed" once per request
+# (app.ironmemo.com, 2026-08-15..16). A service must say which it is, and keep
+# saying it across core versions — stapel-config-lint CFG007 refuses one that
+# mounts Stapel JWT auth and leaves this line out.
+JWT_CREATE_USERS_FROM_TOKEN = {{JWT_CREATE_USERS_FROM_TOKEN}}
+
+# Base the OAuth callback URL is built on — the value registered with Google /
+# GitHub / any provider as an allowed redirect_uri. NOT derived from the
+# request: build_absolute_uri() reads Host and X-Forwarded-Proto, so behind a
+# proxy whose forwarded header the deployment has not opted into trusting
+# (STAPEL_TRUST_PROXY_SSL_HEADER, see .env) it composes http:// and the
+# provider refuses the handshake — the second half of the same 2026-08-16
+# incident. A contract with a third party is configuration, not a header.
+# Empty = fall back to the request-derived URI (fine for a single-origin dev
+# run; set it on every stand).
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
+
 INSTALLED_APPS = COMMON_INSTALLED_APPS + [{{STAPEL_APPS}}
     "apps.{{MODULE}}",
 ]{{STAPEL_MODULE_CONFIG}}
@@ -334,6 +372,19 @@ from .base import *  # noqa
 
 DEBUG = True
 ALLOWED_HOSTS += ["dev.{{SLUG}}.local"]
+
+# ─── Cookie transport, stated for the plain-HTTP tier ───────────────────────
+# prod.py forces all three to True; this tier serves over plain HTTP (including
+# dev.{{SLUG}}.local just added above, a LAN IP, an http staging host), so all
+# three are False — and SAID so rather than inherited. A browser silently drops
+# a Secure cookie on a non-localhost http origin, and the failure has no error
+# in it: the admin login form 403s on a CSRF cookie that was never stored, and
+# a successful JWT login is followed by an anonymous next request. These are
+# exactly the defaults stapel-core has been moving (#349), and a tier that
+# never states them changes behaviour on a library bump.
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
+JWT_COOKIE_SECURE = False
 
 # Local machine: run Celery tasks INLINE (no broker/worker required for the
 # local stack to be complete — a lib's .delay() executes eagerly; errors are
@@ -436,9 +487,15 @@ CSRF_COOKIE_SECURE = True
 JWT_COOKIE_SECURE = True
 
 # ─── Transport hardening (security-programme.md SEC-4 / gap B1) ───────────
-# SECURE_PROXY_SSL_HEADER (set in the common library settings) already trusts
-# X-Forwarded-Proto from nginx; override via env only if TLS terminates
-# somewhere else entirely.
+# SECURE_PROXY_SSL_HEADER is NOT set by the library on its own — since
+# stapel-core 0.24 it is opt-in, and the deployment states the opt-in with
+# STAPEL_TRUST_PROXY_SSL_HEADER in .env (the generated stack sets it True
+# because nginx is the only way in and it overwrites X-Forwarded-Proto
+# itself). Nothing here can decide that: this file cannot know what is in
+# front of the process. Without the opt-in every absolute URI this service
+# builds comes out http:// behind an https proxy — which is how OAuth
+# redirect_uri stopped matching what Google and GitHub had registered
+# (2026-08-16).
 SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True").lower() == "true"
 
 # HSTS ramp: start conservative — 1 day, no subdomains, no preload — and

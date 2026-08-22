@@ -80,6 +80,35 @@ CFG006  (error) A key the library OFFERS — a row of the dict handed to
         unambiguous. Suppress a deliberately reserved knob with
         ``# noqa: CFG006`` on the key's line.
 
+CFG007  (error) **In a service checkout**, the project mounts Stapel JWT
+        authentication and never states ``JWT_CREATE_USERS_FROM_TOKEN``. That
+        setting decides what a VALID token naming an unknown ``user_id`` does:
+        create the local shadow row (this service CONSUMES a neighbouring auth
+        service's tokens — ``True``) or refuse it as stale (this service ISSUES
+        the tokens and owns the user table — ``False``). Both are correct; only
+        one is correct for a given service, and nothing but the service knows
+        which.
+
+        Caught live (app.ironmemo.com, 2026-08-15..16): stapel-core flipped the
+        library default in a MINOR release (0.24, ``True`` -> ``False``) and
+        every service that had never stated it changed identity mode on a
+        version bump, with no boot-time signal. Seven of eight began answering
+        401 to every user who signed up after the deploy — the only trace was
+        "JWT Auth Failed - User creation failed", once per request. The library
+        default is not the defect; a service letting a default answer a question
+        about whose users these are, is.
+
+        A "mount" is any of: a star-import of ``stapel_core.django.settings``
+        (which brings ``REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES'] =
+        JWTCookieAuthentication` with it — the exact shape the incident had),
+        ``stapel_auth`` in ``INSTALLED_APPS``, or naming a
+        ``stapel_core.django.jwt`` authentication class. The answer counts from
+        ANY module of the settings package. Reported once per project, on the
+        mount. Suppress with an EXPLICIT ``# noqa: CFG007`` on the mount's line
+        — a bare ``# noqa`` does not, because every real settings module
+        already carries one on its star-import (for F403) and honouring it as a
+        blanket would switch this rule off exactly where it belongs.
+
 ``os.environ.setdefault(...)`` is a write, not a read (manage.py / wsgi set
 DJANGO_SETTINGS_MODULE that way) and is never flagged.
 
@@ -455,6 +484,158 @@ def collect_key_mentions(project: Path) -> set[str]:
     return mentions
 
 
+# ---------------------------------------------------------------------------
+# CFG007 — identity trust must be stated, not inherited
+# ---------------------------------------------------------------------------
+
+#: the setting that answers "whose users are these?"
+IDENTITY_TRUST_KEY = "JWT_CREATE_USERS_FROM_TOKEN"
+
+#: star-importing this module inherits stapel-core's REST_FRAMEWORK block,
+#: whose DEFAULT_AUTHENTICATION_CLASSES is JWTCookieAuthentication. A NAMED
+#: import from the same module (``get_common_templates``, the minimal preset)
+#: borrows one helper and inherits nothing — it is deliberately not a mount.
+_CORE_SETTINGS_MODULE = "stapel_core.django.settings"
+#: dotted path of the JWT authentication classes core ships
+_CORE_JWT_PATH = "stapel_core.django.jwt"
+#: the app that IS the issuer half of the same machinery
+_AUTH_APP = "stapel_auth"
+
+
+def _settings_package(py: Path) -> Path:
+    """The unit CFG007 answers for: one settings package, not the whole tree.
+
+    ``config/settings/base.py`` and ``config/settings/prod.py`` are one
+    package; so are ``settings.py`` and ``settings_prod.py`` side by side.
+    Two services in one checkout (``svc-a/config/settings``,
+    ``svc-b/config/settings``) are two — the microservices topology the rule
+    exists for, where `stapel-verify .` runs at the repo root and a service
+    that answered must not answer for its neighbour that did not.
+    """
+    return py.parent
+
+
+def _assigned_strings(tree: ast.AST, names: frozenset[str]) -> Iterable[tuple[str, int]]:
+    """String constants that live INSIDE an assignment to one of *names*.
+
+    Scoped on purpose: a bare walk over every string in a settings module
+    reports ``LOGGING = {"loggers": {"stapel_auth": ...}}`` as "stapel_auth is
+    installed". Only ``INSTALLED_APPS`` decides what is installed and only
+    ``REST_FRAMEWORK`` decides what authenticates.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets, value = node.targets, node.value
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            targets, value = [node.target], node.value
+        else:
+            continue
+        if value is None or not any(
+            isinstance(t, ast.Name) and t.id in names for t in targets
+        ):
+            continue
+        for sub in ast.walk(value):
+            if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                yield sub.value, sub.lineno
+
+
+_INSTALLED_APPS = frozenset({"INSTALLED_APPS"})
+_REST_FRAMEWORK = frozenset({"REST_FRAMEWORK"})
+
+
+def find_jwt_auth_mounts(project: Path) -> list[tuple[Path, str, int, str]]:
+    """Every settings package that mounts Stapel JWT authentication.
+
+    Returns ``(package, path, line, what)`` — one entry per settings package,
+    carrying the earliest evidence in path order so the finding lands on
+    ``base.py`` rather than on whichever tier sorted first by chance. Only
+    settings modules are read: a view that imports an authentication class is
+    using the mount, it is not the place that decides it, and reporting there
+    would send the reader to the wrong file.
+    """
+    by_package: dict[Path, tuple[Path, str, int, str]] = {}
+    for py in sorted(_walk_py(project)):
+        if not _is_settings_file(py):
+            continue
+        package = _settings_package(py)
+        if package in by_package:
+            continue
+        try:
+            src = py.read_text(encoding="utf-8")
+            tree = ast.parse(src, filename=str(py))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        lines = src.splitlines()
+        candidates: list[tuple[int, str]] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == _CORE_SETTINGS_MODULE:
+                if any(a.name == "*" for a in node.names):
+                    candidates.append((
+                        node.lineno,
+                        f"`from {_CORE_SETTINGS_MODULE} import *` brings "
+                        f"REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES'] = "
+                        f"JWTCookieAuthentication with it",
+                    ))
+        for value, lineno in _assigned_strings(tree, _INSTALLED_APPS):
+            if value == _AUTH_APP or value.startswith(_AUTH_APP + "."):
+                candidates.append((lineno, f"'{_AUTH_APP}' is installed"))
+        for value, lineno in _assigned_strings(tree, _REST_FRAMEWORK):
+            if value.startswith(_CORE_JWT_PATH):
+                candidates.append((lineno, f"'{value}' is wired as an authentication class"))
+        for lineno, what in sorted(candidates):
+            raw = lines[lineno - 1] if 0 < lineno <= len(lines) else ""
+            suppressed = _noqa_rules(raw)
+            # Only a suppression that NAMES CFG007 counts, unlike every other
+            # rule here. A blanket noqa on `from ...settings import *` is
+            # universal in Django settings modules and means F403 — honouring it
+            # as a blanket would switch this rule off in every real service,
+            # starting with the ones the incident happened to.
+            if suppressed and "CFG007" in suppressed:
+                continue
+            by_package[package] = (package, str(py), lineno, what)
+            break
+    return list(by_package.values())
+
+
+def find_jwt_auth_mount(project: Path) -> Optional[tuple[str, int, str]]:
+    """The first mount in path order, or None — see :func:`find_jwt_auth_mounts`."""
+    mounts = find_jwt_auth_mounts(project)
+    if not mounts:
+        return None
+    _package, path, lineno, what = min(mounts, key=lambda m: m[1])
+    return path, lineno, what
+
+
+def states_identity_trust(package: Path) -> bool:
+    """True when some settings module IN THIS PACKAGE assigns ``JWT_CREATE_USERS_FROM_TOKEN``.
+
+    Any tier counts: a package that answers in ``prod.py`` has answered. The
+    VALUE is deliberately not inspected — both are right for some service, and
+    a linter that preferred one would be back to deciding for the product.
+    *package* is what :func:`_settings_package` returns; passing a project
+    root still works for a single-service checkout whose settings sit at the
+    root, and answers False for a tree whose settings live deeper — which is
+    the point: the neighbour's answer is not this service's answer.
+    """
+    for py in _walk_py(package):
+        if not _is_settings_file(py) or _settings_package(py) != package:
+            continue
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            targets: list[ast.AST] = []
+            if isinstance(node, ast.Assign):
+                targets = list(node.targets)
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                targets = [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id == IDENTITY_TRUST_KEY:
+                    return True
+    return False
+
+
 def _pyproject_name(project: Path) -> Optional[str]:
     pyproject = project / "pyproject.toml"
     try:
@@ -583,6 +764,37 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
                 f"sets it in a deployment changes nothing. Wire it, or drop "
                 f"the row; suppress a deliberate reservation with "
                 f"'# noqa: CFG006'",
+            ))
+
+    # ------------------------------------------------------------------ CFG007
+    # Placed above the early exits for the same reason as CFG006: a generated
+    # project has no CONFIG.MD yet, and the incident this closes happened in a
+    # project that had none either. A rule that switches off exactly where the
+    # defect lives is not a rule.
+    #
+    # Library checkouts are exempt: stapel-core's own test settings star-import
+    # its own defaults, and a library has no product to have users of.
+    if library_distribution(project) is None:
+        for package, mount_path, mount_line, what in find_jwt_auth_mounts(project):
+            if states_identity_trust(package):
+                continue
+            findings.append(Finding(
+                mount_path, mount_line, "CFG007",
+                f"this service mounts Stapel JWT authentication ({what}) but "
+                f"never states {IDENTITY_TRUST_KEY}, so whose users these are "
+                f"is answered by whatever stapel-core happens to default to. "
+                f"Say it in the settings module: "
+                f"{IDENTITY_TRUST_KEY} = False if this service is the ISSUER — "
+                f"it mints the tokens and owns the user table (it installs "
+                f"stapel_auth), so an unknown subject in a token it signed "
+                f"itself is stale and must not forge an account; "
+                f"{IDENTITY_TRUST_KEY} = True if it is a CONSUMER of a "
+                f"neighbouring auth service's tokens — the local row "
+                f"is a shadow copy, and refusing to create it answers 401 to "
+                f"everyone who signed up since. The default flipped in a minor "
+                f"release once already (core 0.24) and moved seven services "
+                f"into the other mode overnight; suppress a deliberate "
+                f"exception with '# noqa: CFG007'",
             ))
 
     config_md = find_config_md(project)

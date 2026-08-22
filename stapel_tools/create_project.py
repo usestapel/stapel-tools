@@ -1587,6 +1587,12 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     # STAPEL_AUTH here unconditionally would also collide with the
     # module_config-rendered STAPEL_AUTH block (A5) — left as a follow-up
     # gap, not silently wired.
+    # Identity trust decided from the ROLE, exactly as new_service.make_context
+    # does for the service presets (#349): a project that installs stapel_auth
+    # IS the token issuer and must refuse an unknown subject; one that does not
+    # consumes a neighbour's tokens and must shadow it. Never omitted, so no
+    # future stapel-core default can answer this for the project silently.
+    is_token_issuer = "auth" in feature_modules
     render_ctx = {
         **ctx,
         "MODULE": module,
@@ -1594,6 +1600,8 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
         "STAPEL_APPS": stapel_apps_block,
         "STAPEL_URL_INCLUDES": url_includes,
         "STAPEL_MODULE_CONFIG": render_settings_block(module_config),
+        "JWT_CREATE_USERS_FROM_TOKEN": "False" if is_token_issuer else "True",
+        "IDENTITY_ROLE": "token ISSUER" if is_token_issuer else "token CONSUMER",
     }
 
     def r(s):

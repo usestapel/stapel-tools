@@ -64,6 +64,7 @@ if _IS_PROD:
     DEBUG = False
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
+    JWT_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True").lower() == "true"
     # HSTS ramp — conservative default, no subdomains/preload; raise once
     # HTTPS is verified stable (see the monolith/microservices prod.py
@@ -72,6 +73,16 @@ if _IS_PROD:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = False
     SECURE_HSTS_PRELOAD = False
     SECURE_CONTENT_TYPE_NOSNIFF = True
+else:
+    # Stated, not inherited (#349). This tier serves over plain HTTP, and a
+    # browser silently drops a Secure cookie on a non-localhost http origin:
+    # the admin login form 403s on a CSRF cookie that was never stored, and a
+    # successful JWT login is followed by an anonymous next request — no error
+    # anywhere. Leaving the non-prod branch silent is how a library default
+    # flip reaches a running project without a line of local change.
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+    JWT_COOKIE_SECURE = False
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -105,6 +116,38 @@ INSTALLED_APPS = [
 # / get_user_model(), never django.contrib.auth's own User — this must point
 # at the Stapel model for those modules to work at all.
 AUTH_USER_MODEL = "users.User"
+
+# ─── Identity trust: whose users are these? ─────────────────────────────────
+# What happens when a VALID token names a user_id this database has no row
+# for. There are exactly two roles and this project must state which it is:
+#
+#   ISSUER   — it mints the tokens and owns the user table (it installs
+#              stapel_auth). An unknown subject in a token it signed itself is
+#              a STALE token; materialising a row from it would forge an
+#              account nobody registered. -> False
+#   CONSUMER — it verifies a neighbouring auth service's tokens and has no
+#              sign-up of its own. The local row is a shadow copy keyed by the
+#              issuer's id; refusing to create it answers 401 to every user
+#              who registered after this project last saw them. -> True
+#
+# This project is a {{IDENTITY_ROLE}}, hence the value below. Flip it the day
+# the roles swap.
+#
+# Stated ALWAYS, in both roles, on purpose: stapel-core flipped this default in
+# a MINOR release (0.24: True -> False) and every service that had never
+# answered the question changed mode on a version bump with no boot-time
+# signal — seven of eight began answering 401 to every new sign-up
+# (app.ironmemo.com, 2026-08-15..16). stapel-config-lint CFG007 refuses a
+# project that mounts Stapel JWT auth and leaves this line out.
+JWT_CREATE_USERS_FROM_TOKEN = {{JWT_CREATE_USERS_FROM_TOKEN}}
+
+# Base the OAuth callback URL is built on — the value registered with the
+# provider as an allowed redirect_uri. NOT derived from the request:
+# build_absolute_uri() reads Host and X-Forwarded-Proto, and this preset sets
+# no SECURE_PROXY_SSL_HEADER at all, so behind an https proxy it composes
+# http:// and the provider refuses the handshake. A contract with a third
+# party is configuration, not a header.
+OAUTH_CALLBACK_BASE_URL = os.getenv("OAUTH_CALLBACK_BASE_URL", "")
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",

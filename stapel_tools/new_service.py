@@ -35,13 +35,13 @@ from ._templates import (
     MANAGE_PY,
     MODELS_PY,
     PROD_SETTINGS,
-    TEST_SETTINGS,
     PYTEST_INI,
     REQUIREMENTS_TXT,
     SERVICE_YML,
     SVC_MAKEFILE,
     SVC_PYPROJECT,
     TEST_MODELS_PY,
+    TEST_SETTINGS,
     URLS_PY,
     VERSION_TXT,
     WSGI_PY,
@@ -118,6 +118,15 @@ def make_context(
         return f'\n    path(f"{{url_prefix}}api/", include("{app}.urls")),'
 
     url_includes = "".join(_url_include(app) for app in apps)
+    # Identity trust, decided from the service's ROLE rather than left to
+    # whatever stapel-core defaults to this month (#349). A service that
+    # installs stapel_auth IS the issuer: it mints the tokens and owns the user
+    # table, so an unknown subject in one of its own tokens is stale and must
+    # never materialise a row. Every other service is a consumer of a
+    # neighbouring auth service's tokens and keeps a shadow row per subject —
+    # refusing to create it answers 401 to everyone who signed up since.
+    # Rendered as a Python literal into settings/base.py, never omitted.
+    is_token_issuer = "stapel_auth" in apps
     dev_mock_providers = ""
     if "stapel_auth" in apps:
         from ._local_env_templates import DEV_MOCK_OTP_BLOCK
@@ -135,6 +144,8 @@ def make_context(
         "STAPEL_APPS": stapel_apps_block,
         "STAPEL_URL_INCLUDES": url_includes,
         "STAPEL_MODULE_CONFIG": render_settings_block(module_config),
+        "JWT_CREATE_USERS_FROM_TOKEN": "False" if is_token_issuer else "True",
+        "IDENTITY_ROLE": "token ISSUER" if is_token_issuer else "token CONSUMER",
         # Not a render() token (no template spells "{{HAS_CDN}}") — a plain
         # string flag generate_service_files() branches on to pick the
         # libvips-enabled Dockerfile variant (cdn-scaffold-autowire.md).

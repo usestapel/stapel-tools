@@ -880,6 +880,27 @@ SITE_URL={url}
 # config/settings/dev.py, never in the shared settings base.
 FRONTEND_URL={url}
 
+# ─── Reverse proxy: what the process is allowed to believe ──────────────────
+# STAPEL_TRUST_PROXY_SSL_HEADER makes Django believe X-Forwarded-Proto
+# (SECURE_PROXY_SSL_HEADER). Since stapel-core 0.24 it is OPT-IN, and the opt-in
+# belongs here rather than in settings, because only the deployment knows what
+# sits in front of the process.
+#
+# Turn it on ONLY when the single way in is a reverse proxy that OVERWRITES the
+# header itself. This stack qualifies by construction: nginx is the only
+# container publishing a port, and it sets `proxy_set_header X-Forwarded-Proto
+# $scheme` on every location, so a client-supplied value never survives. Put
+# the app container on a public port, or add a proxy that merely PASSES the
+# header through, and this must go back to False — otherwise any client can
+# forge `X-Forwarded-Proto: https`, and Django will treat a plain-HTTP request
+# as secure: Secure cookies get set over cleartext and SECURE_SSL_REDIRECT
+# stops redirecting.
+#
+# Left unstated it is False, and behind an https proxy EVERY absolute URI this
+# stack builds comes out http:// — which is how the OAuth redirect_uri stopped
+# matching what Google and GitHub had registered (2026-08-16).
+STAPEL_TRUST_PROXY_SSL_HEADER=True
+
 # ─── Service navigation (admin-suite AS-4) ──────────────────────────────────
 # The admin/Swagger "Services" menu is driven by this deploy-config env-JSON.
 # A monolith is a single service (one admin); the menu's "All Services"
@@ -897,6 +918,14 @@ EMAIL_HOST_PASSWORD=
 # ─── OAuth (optional) ───────────────────────────────────────────────────────
 GOOGLE_OAUTH2_KEY=
 GOOGLE_OAUTH2_SECRET=
+# The origin the provider callback is built on — it must equal, byte for byte,
+# the redirect URI registered in the provider's console. Stated here and NOT
+# derived from the request: build_absolute_uri() reads Host and
+# X-Forwarded-Proto, so a proxy misconfiguration silently turns the callback
+# into http:// and the provider refuses the handshake with redirect_uri_mismatch
+# (Google and GitHub, both, 2026-08-16). A contract with a third party is
+# configuration; a request header is not.
+OAUTH_CALLBACK_BASE_URL={url}
 
 # ─── Run command ────────────────────────────────────────────────────────────
 RUN_CMD=gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
@@ -1049,6 +1078,33 @@ SITE_URL={url}
 # DEBUG=False and no value. The dev value lives in .env.local /
 # config/settings/dev.py, never in the shared settings base.
 FRONTEND_URL={url}
+
+# ─── Reverse proxy: what the processes are allowed to believe ───────────────
+# STAPEL_TRUST_PROXY_SSL_HEADER makes Django believe X-Forwarded-Proto
+# (SECURE_PROXY_SSL_HEADER). Since stapel-core 0.24 it is OPT-IN, and the opt-in
+# belongs here rather than in settings, because only the deployment knows what
+# sits in front of the processes. Shared verbatim by every service (compose
+# passes the same .env to all).
+#
+# Turn it on ONLY when the single way in is a reverse proxy that OVERWRITES the
+# header itself. This stack qualifies by construction: nginx is the only
+# container publishing a port, and it sets `proxy_set_header X-Forwarded-Proto
+# $scheme` on every location, so a client-supplied value never survives. Put a
+# service container on a public port, or add a proxy that merely PASSES the
+# header through, and this must go back to False — otherwise any client can
+# forge `X-Forwarded-Proto: https`, and Django will treat a plain-HTTP request
+# as secure: Secure cookies get set over cleartext and SECURE_SSL_REDIRECT
+# stops redirecting.
+#
+# Left unstated it is False, and behind an https proxy EVERY absolute URI these
+# services build comes out http:// — which is how the OAuth redirect_uri stopped
+# matching what Google and GitHub had registered (2026-08-16).
+STAPEL_TRUST_PROXY_SSL_HEADER=True
+
+# Base the auth service builds OAuth redirect_uri on — the value registered
+# with the provider. Configuration, not a request header (see the line above
+# for how a header got it wrong). Empty when no OAuth provider is wired.
+OAUTH_CALLBACK_BASE_URL={url}
 
 # ─── Frontend delivery ──────────────────────────────────────────────────────
 # This project's frontend lives in its OWN repository, so compose cannot build

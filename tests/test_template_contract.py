@@ -21,7 +21,6 @@ from stapel_tools.template_contract import (
     scan_source,
 )
 
-
 # ── the template scanner ─────────────────────────────────────────────────────
 
 def test_reads_variables_through_djangos_own_parser():

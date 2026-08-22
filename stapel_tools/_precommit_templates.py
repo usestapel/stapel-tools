@@ -183,7 +183,7 @@ pre-commit install
 ```
 
 Every commit then runs `stapel-verify .` (composes every backend linter this
-project ships: R001-R008, SWAP001-004, CFG000-005, URL001, ADO-codes,
+project ships: R001-R008, SWAP001-004, CFG000-007, URL001, ADO-codes,
 MIG-codes, DOC001, NGX001-004 — see `AGENTS.md`) plus the regenerator/drift
 gates:
 `stapel-config-manifest . --check` (CONFIG.MD) and `stapel-docs . --check`

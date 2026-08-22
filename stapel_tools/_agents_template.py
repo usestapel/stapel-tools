@@ -154,7 +154,7 @@ invents output from nothing.
 
 `stapel-verify` runs `stapel_tools.lint` (R001-R008), `adoption_lint`
 (module actually mounted, no shadow routes — ADO-codes), `url_lint`
-(URL001), `config_lint` (CFG000-005), `migration_lint` (MIG-codes,
+(URL001), `config_lint` (CFG000-007), `migration_lint` (MIG-codes,
 expand/contract), `swap_lint` (SWAP001/SWAP002), `doc_lint` (DOC001) and
 `nginx_cache_lint` (NGX001-004) in one pass — no reimplemented rules, pure
 composition. A green run is required before calling backend work done; a

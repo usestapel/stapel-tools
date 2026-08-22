@@ -2,6 +2,94 @@
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-08-22
+
+### A generated service states its identity-trust mode instead of inheriting it
+
+Two production outages on the same day (app.ironmemo.com, 2026-08-15..16; task
+#349) were one defect: **stapel-core flipped two defaults in a minor release
+and no product had ever stated them**, so every service silently changed mode
+on a version bump.
+
+* `JWT_CREATE_USERS_FROM_TOKEN` `True` → `False`. A valid token naming a
+  `user_id` the local database had never seen stopped materialising the shadow
+  row and started being refused as stale. Seven of eight services began
+  answering 401 to every user who signed up after the deploy; the only trace
+  was `JWT Auth Failed - User creation failed`, once per request.
+* `SECURE_PROXY_SSL_HEADER` unconditional → opt-in behind
+  `STAPEL_TRUST_PROXY_SSL_HEADER`. Behind the https proxy
+  `request.build_absolute_uri()` began composing `http://`, the OAuth
+  `redirect_uri` stopped matching what Google and GitHub had registered, and
+  both providers refused the handshake.
+
+Neither new default is wrong — both are the safer ones. The defect is that the
+service let a library default answer a question about whose users these are.
+The scaffold now answers it, by role:
+
+* **`config/settings/base.py` always states `JWT_CREATE_USERS_FROM_TOKEN`**,
+  with `False` for a service that installs `stapel_auth` (it ISSUES the tokens
+  and owns the user table — an unknown subject in a token it signed itself is
+  stale and must not forge an account) and `True` for every other service (it
+  CONSUMES a neighbouring auth service's tokens — the local row is a shadow
+  copy). Both roles are spelled out in the comment above the line, in every
+  preset: monolith, microservices and minimal, through `stapel-create-project`
+  and through `stapel-new-service` alike.
+* **The deploy env states the proxy.** `.env`/`.env.example` carry
+  `STAPEL_TRUST_PROXY_SSL_HEADER=True` with the precondition written out — only
+  where the single way in is a proxy that OVERWRITES the header, which this
+  stack satisfies by construction (nginx is the only container publishing a
+  port and sets `X-Forwarded-Proto $scheme` on every location). The prod
+  settings template no longer claims the library "already trusts" the header;
+  since core 0.24 that sentence was false.
+* **`OAUTH_CALLBACK_BASE_URL`** is emitted next to the OAuth credentials in the
+  monolith env and read in `base.py`. A contract with a third party is
+  configuration; deriving it from a request header is what broke it.
+
+### New rule: CFG007 — identity trust must be stated, not inherited
+
+`stapel-config-lint` (and therefore `stapel-verify`, which composes it) fails a
+service that mounts Stapel JWT authentication and never states
+`JWT_CREATE_USERS_FROM_TOKEN`. A mount is a star-import of
+`stapel_core.django.settings` (which brings
+`DEFAULT_AUTHENTICATION_CLASSES = JWTCookieAuthentication` with it — the shape
+the incident actually had), `stapel_auth` in `INSTALLED_APPS`, or a
+`stapel_core.django.jwt` authentication class named directly. The answer counts
+from any tier of the settings package, and the message carries both roles so
+the value can be picked from the error alone.
+
+CFG007 answers **per settings package**, not per checkout: in a microservices
+repo `stapel-verify .` runs at the root, and a service that stated the setting
+must not answer for the neighbour that did not — that false negative is the
+incident's own topology. And "installed" means a member of `INSTALLED_APPS`,
+"wired" means a string inside `REST_FRAMEWORK`; a `LOGGING` block naming the
+`stapel_auth` logger mounts nothing. Both were caught in review before the
+first release of the rule and are pinned by tests.
+
+The microservices `.env.example` also carries `OAUTH_CALLBACK_BASE_URL`, since
+the generated `svc-auth` reads it; the emitted AGENTS/pre-commit/library texts
+now say `CFG000-007`.
+
+Unlike every other rule here, a blanket `# noqa` does NOT suppress it — a bare
+one sits on the star-import of every real Django settings module (for F403),
+and honouring it would switch the rule off exactly where it belongs. Only an
+explicit `# noqa: CFG007` counts.
+
+This exists as a fleet rule and not a per-product script on purpose: the same
+check was written by hand in one product's `verify_boot_contract.sh` while
+every other repo in the fleet stayed silent.
+
+### Also stated: cookie transport, in the tiers that never said it
+
+Found by sweeping the templates for the same class. `SESSION_COOKIE_SECURE`,
+`CSRF_COOKIE_SECURE` and `JWT_COOKIE_SECURE` were stated only in the prod tier;
+dev/local/test inherited them, and the newer stapel-core defaults them to
+`True`. A Secure cookie on a plain-HTTP non-localhost origin — `dev.<slug>.local`,
+which the dev tier itself adds to `ALLOWED_HOSTS`, a LAN IP, an http staging
+host — is silently dropped by the browser: the admin login form 403s on a CSRF
+cookie that was never stored, and a successful JWT login is followed by an
+anonymous next request. All three are now `False` in the dev tier and in the
+minimal preset's non-prod branch, explicitly.
+
 ## [0.42.0] — 2026-08-21
 
 ### `stapel-index-lint` — the gate against "indexed silently, read by nothing"

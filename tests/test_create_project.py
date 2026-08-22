@@ -191,11 +191,17 @@ class TestModuleWiring:
         proj = _create(tmp_path, "app", "minimal", modules=["core"])
         # stapel_core (outbox app) is always present; no FEATURE module
         # (stapel_auth, stapel_billing, ...) may sneak in unrequested.
+        #
+        # Matched as the WIRING, not as the bare name: settings.py carries prose
+        # that names stapel_auth on purpose (the JWT_CREATE_USERS_FROM_TOKEN
+        # role comment explains which value an issuer picks), and a substring
+        # test would read a comment as an installed app.
         settings = (proj / "config" / "settings.py").read_text()
         urls = (proj / "config" / "urls.py").read_text()
         for key in ("auth", "billing", "cdn", "notifications", "profiles",
                     "translate", "workspaces", "gdpr"):
-            assert f"stapel_{key}" not in settings
+            assert f'"stapel_{key}",' not in settings
+            assert f'include("stapel_{key}.urls")' not in urls
             assert f"stapel_{key}" not in urls
 
     def test_monolith_wires_module_everywhere(self, tmp_path):
