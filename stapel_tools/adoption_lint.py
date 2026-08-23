@@ -54,13 +54,16 @@ ADO005  (error) A **gdpr data owner is installed but cannot answer**. A library
         delivery is worth. So for every such library named in
         ``INSTALLED_APPS``, two things must hold, and each is its own finding:
 
-        1. the service's deploy runs a ``consume_actions`` process — the
-           compose fragment for this service (``docker-compose*.yml`` for a
-           monolith, ``<svc>.yml`` next to ``services.conf`` in the fleet
-           shape ``scripts/verify_boot_contract.sh`` walks). Without it the
-           library is installed, migrated, healthy — and never delivered to,
-           so every erasure request against it runs out its clock as a
-           TIMEOUT on a silent owner;
+        1. **when the service's actions ride a broker** (``STAPEL_COMM
+           ["ACTION_TRANSPORT"]`` is anything but ``inprocess``), its deploy
+           runs a ``consume_actions`` process — the compose fragment for this
+           service (``docker-compose*.yml`` for a monolith, ``<svc>.yml``
+           next to ``services.conf`` in the fleet shape
+           ``scripts/verify_boot_contract.sh`` walks). Without it the library
+           is installed, migrated, healthy — and never delivered to, so every
+           erasure request against it runs out its clock as a TIMEOUT on a
+           silent owner. In-process delivery calls the handler in the
+           emitting process and needs no consumer, so it is not asked for;
         2. the gdpr host (the service that installs ``stapel_gdpr``, this one
            or a sibling in the same fleet) lists the library's owner name in
            ``STAPEL_GDPR["DATA_OWNERS"]``, *with the subject types the library
@@ -837,6 +840,62 @@ def read_services_conf(path: Path) -> list[str]:
     return names
 
 
+#: The action transport that needs no consumer process: handlers are called
+#: in the emitting process. Anything else ("bus", "nats", "kafka", …) puts a
+#: broker between the emit and the handler, and the handler side of that is a
+#: ``consume_actions`` process or nothing.
+INPROCESS_TRANSPORT = "inprocess"
+
+
+def _literal_or_getenv_default(node: Optional[ast.AST]) -> Optional[str]:
+    """A settings value that is either a literal or ``os.getenv("X", "lit")``
+    — the shape the generated settings use for every transport."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Call) and _call_name(node.func) in ("getenv", "environ"):
+        if len(node.args) > 1:
+            return _literal_or_getenv_default(node.args[1])
+    return None
+
+
+def declared_action_transports(settings_files: Iterable[Path]) -> set[str]:
+    """Every ``STAPEL_COMM["ACTION_TRANSPORT"]`` declared in these settings.
+
+    Empty means nothing declares one, which is stapel-core's default
+    (``inprocess``) — not an unknown.
+    """
+    transports: set[str] = set()
+    for path in settings_files:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            names = {t.id for t in node.targets if isinstance(t, ast.Name)}
+            if "STAPEL_COMM" not in names or not isinstance(node.value, ast.Dict):
+                continue
+            for key, value in zip(node.value.keys, node.value.values):
+                if not (isinstance(key, ast.Constant)
+                        and key.value == "ACTION_TRANSPORT"):
+                    continue
+                resolved = _literal_or_getenv_default(value)
+                transports.add(resolved if resolved is not None else "?")
+    return transports
+
+
+def needs_action_consumer(settings_files: Iterable[Path]) -> bool:
+    """True when some settings module puts a broker between an emitted action
+    and its handler. In-process delivery needs no consumer, so demanding one
+    would be a gate reporting a defect that does not exist; a transport this
+    linter could not read ("?") is not a declaration of one either."""
+    return any(
+        transport not in (INPROCESS_TRANSPORT, "?")
+        for transport in declared_action_transports(settings_files)
+    )
+
+
 def deploy_runs_consume_actions(deploy_files: Iterable[Path]) -> bool:
     """True when some deploy file starts the action consumer. Commented lines
     do not count — the emitted service fragment ships a commented
@@ -1140,7 +1199,12 @@ def lint_project(
         )
         data_owners, host_path = parse_data_owners(host_settings)
 
-        if not deploy_files:
+        if not needs_action_consumer(settings_files):
+            # In-process delivery (stapel-core's default, and every monolith):
+            # the handler runs in the emitting process, so there is no
+            # consumer process to look for.
+            runs_consumer = True
+        elif not deploy_files:
             notes.append(
                 "stapel-adoption-lint: no compose/deploy file found for this "
                 "service (docker-compose*.yml, or a <svc>.yml next to "

@@ -421,6 +421,7 @@ def make_fleet(
     data_owners=None,
     gdpr_host=True,
     commented_consumer=False,
+    action_transport="bus",
 ):
     """The fleet shape stapel-tools emits: ``services.conf`` at the root,
     ``svc-<name>/`` service directories, ``svc-<name>.yml`` compose fragments.
@@ -431,6 +432,12 @@ def make_fleet(
     (fleet / "services.conf").write_text("\n".join(services) + "\n")
 
     app = make_project(fleet, name="svc-app", installed_apps=apps)
+    if action_transport is not None:
+        app_settings = app / "config" / "settings.py"
+        app_settings.write_text(
+            app_settings.read_text()
+            + f'\nSTAPEL_COMM = {{"ACTION_TRANSPORT": "{action_transport}"}}\n'
+        )
     fragment = [
         "services:",
         "  svc-app:",
@@ -593,6 +600,10 @@ class TestGdprOwnerReachable:
         make_gdpr_owner(tmp_path, "widget", owner="widget",
                         subject_types=("account",))
         proj = make_project(tmp_path, installed_apps=["stapel_widget"])
+        settings = proj / "config" / "settings.py"
+        settings.write_text(
+            settings.read_text() + '\nSTAPEL_COMM = {"ACTION_TRANSPORT": "bus"}\n'
+        )
         notes = []
         findings = lint_project(proj, search_roots=[tmp_path], notes=notes)
         assert ado005(findings) == []
@@ -639,11 +650,64 @@ class TestGdprOwnerReachable:
         )
         settings = proj / "config" / "settings.py"
         settings.write_text(
-            settings.read_text() + '\nSTAPEL_GDPR = {"DATA_OWNERS": {}}\n'
+            settings.read_text()
+            + '\nSTAPEL_COMM = {"ACTION_TRANSPORT": "bus"}\n'
+            + '\nSTAPEL_GDPR = {"DATA_OWNERS": {}}\n'
         )
         findings = ado005(lint_project(proj, search_roots=[tmp_path]))
         assert {"consume_actions" in f.message for f in findings} == {True, False}
         assert len(findings) == 2
+
+    def test_inprocess_delivery_needs_no_consumer(self, tmp_path):
+        # stapel-core's default and every monolith: the handler runs in the
+        # emitting process. Demanding a consumer process there would be a gate
+        # reporting a defect that does not exist — which is how the e2e
+        # generated project first met this rule.
+        make_gdpr_owner(tmp_path, "widget", owner="widget",
+                        subject_types=("account",))
+        _, app = make_fleet(
+            tmp_path,
+            apps=["stapel_widget"],
+            consumer=False,
+            action_transport="inprocess",
+            data_owners={"widget": ["account"]},
+        )
+        assert ado005(lint_project(app, search_roots=[tmp_path])) == []
+
+    def test_undeclared_transport_is_inprocess(self, tmp_path):
+        make_gdpr_owner(tmp_path, "widget", owner="widget",
+                        subject_types=("account",))
+        _, app = make_fleet(
+            tmp_path,
+            apps=["stapel_widget"],
+            consumer=False,
+            action_transport=None,     # no STAPEL_COMM at all
+            data_owners={"widget": ["account"]},
+        )
+        assert ado005(lint_project(app, search_roots=[tmp_path])) == []
+
+    def test_transport_from_getenv_default_is_read(self, tmp_path):
+        # The generated settings write every transport as
+        # os.getenv("STAPEL_ACTION_TRANSPORT", "<broker default>").
+        make_gdpr_owner(tmp_path, "widget", owner="widget",
+                        subject_types=("account",))
+        _, app = make_fleet(
+            tmp_path,
+            apps=["stapel_widget"],
+            consumer=False,
+            action_transport=None,
+            data_owners={"widget": ["account"]},
+        )
+        settings = app / "config" / "settings.py"
+        settings.write_text(
+            settings.read_text()
+            + "\nimport os\n"
+            + 'STAPEL_COMM = {"ACTION_TRANSPORT": '
+            + 'os.getenv("STAPEL_ACTION_TRANSPORT", "bus")}\n'
+        )
+        findings = ado005(lint_project(app, search_roots=[tmp_path]))
+        assert len(findings) == 1
+        assert "consume_actions" in findings[0].message
 
     def test_monolith_shape_clean(self, tmp_path):
         make_gdpr_owner(tmp_path, "widget", owner="widget",

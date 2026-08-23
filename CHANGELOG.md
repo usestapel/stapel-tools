@@ -24,7 +24,12 @@ owner a reachable one, for every library in `INSTALLED_APPS` that ships
 `schemas/consumes/gdpr.erasure.requested.json` (shipping the consume-contract
 IS the declaration of participation — no second registry to keep in sync):
 
-1. **A consumer runs in this service's deploy.** The compose fragment is
+1. **A consumer runs in this service's deploy — when the service's actions
+   ride a broker.** `STAPEL_COMM["ACTION_TRANSPORT"]` decides: in-process
+   delivery (stapel-core's default, and every monolith) calls the handler in
+   the emitting process, so no consumer process exists to look for and none
+   is demanded. The toolchain's own e2e generated project was the first thing
+   this rule met, and it was right to stay silent there. The compose fragment is
    located the way the rest of the toolchain locates deploy files: the
    project's own `docker-compose*.yml` for a monolith, and for a fleet
    service the sibling `<svc>.yml` next to `services.conf` — the layout
