@@ -185,6 +185,23 @@ def build_context(
     }
 
 
+def nav_manifest_json(ctx: dict) -> str:
+    """The pair's own ``nav-manifest.json``, byte-identical to what
+    ``scripts/gen-nav-manifest.mjs`` writes for the same (empty) declaration:
+    ``JSON.stringify({package, version, entries}, null, 2)`` + a newline.
+
+    Emitting it here rather than telling the operator to run ``pnpm gen:nav``
+    is what makes the scaffold's output ALREADY GREEN under the monorepo's own
+    drift gate — a scaffold whose first act is to redden `gen:nav:check` is a
+    scaffold everyone learns to run with the gate switched off. ``version``
+    is the scaffold's own ``0.0.0`` (PACKAGE_JSON above); the generator reads
+    the same field, so the two agree by construction until the first
+    changeset moves both."""
+    return json.dumps(
+        {"package": ctx["PKG_NAME"], "version": "0.0.0", "entries": []}, indent=2
+    ) + "\n"
+
+
 def file_plan(ctx: dict) -> dict:
     """Relative path (within the package dir) -> rendered content."""
     module = ctx["MODULE"]
@@ -208,6 +225,12 @@ def file_plan(ctx: dict) -> dict:
         # module without flows, so the public flow surface is hand-preserved.
         "src/flows/registry.ts": render(T.FLOWS_REGISTRY_TS, ctx),
         f"src/headless/{ctx['CAMEL']}Provider.tsx": render(T.PROVIDER_TSX, ctx),
+        # Scripted-fullstack navigation (spec §3.8): the declaration and its
+        # generated projection ship together, so the pair is enrolled in the
+        # nav contract from its first commit instead of being retrofitted
+        # into it once per pair.
+        "src/nav/manifest.ts": render(T.NAV_MANIFEST_TS, ctx),
+        "nav-manifest.json": nav_manifest_json(ctx),
         "src/i18n/keys.ts": render(T.I18N_KEYS_TS, ctx),
         "src/i18n/errorsMap.ts": render(T.ERRORS_MAP_TS, ctx),
         # demo layer (first-class code: compiled, product-linted, smoke-rendered)
@@ -288,6 +311,94 @@ def root_gen_invocations(ctx: dict) -> list[dict]:
             "check_inline": True,
         },
     ]
+
+
+# ── the nav aggregate (spec §3.8) ────────────────────────────────────────────
+# `gen:nav` is the ONE driver that cannot be enumerated by appending: every
+# invocation carries the FULL package set in `NAV_PACKAGES`, because the
+# driver rebuilds the monorepo's ROOT aggregate on each run (that is what
+# removes the bootstrap ordering problem — see gen-nav-manifest.mjs's own
+# header). Appending a new invocation while leaving the existing ones' lists
+# alone would make the aggregate depend on WHICH invocation ran last, i.e. on
+# nothing anyone can read. So this pair of helpers rebuilds the whole script
+# from the package list instead.
+_NAV_DRIVER = "node --experimental-strip-types scripts/gen-nav-manifest.mjs"
+_NAV_DIFF_SEP = " && git diff --exit-code -- nav-manifest.json "
+
+
+def nav_gen_script(packages: list[str]) -> str:
+    """The root `gen:nav` script for *packages* (dirs, e.g.
+    ``packages/auth-react``), in the given order."""
+    csv = ",".join(packages)
+    return " && ".join(
+        f"NAV_PACKAGES={csv} NAV_PKG_DIR={pkg} {_NAV_DRIVER}" for pkg in packages
+    )
+
+
+def nav_check_script(packages: list[str]) -> str:
+    """The root `gen:nav:check` script: regenerate, then diff the root
+    aggregate AND every package's own projection — a pair whose manifest was
+    hand-edited has to fail here, not at a container's build."""
+    diffed = " ".join(f"{pkg}/nav-manifest.json" for pkg in packages)
+    return f"{nav_gen_script(packages)}{_NAV_DIFF_SEP}{diffed}"
+
+
+def nav_packages_from(script: str) -> list[str]:
+    """The package list a `gen:nav` script already carries. Read from the
+    FIRST `NAV_PACKAGES=` assignment — every invocation carries the same list
+    by construction (and if they ever disagree, the first one is the one this
+    function's caller is about to overwrite anyway)."""
+    marker = "NAV_PACKAGES="
+    if marker not in script:
+        return []
+    csv = script.split(marker, 1)[1].split(" ", 1)[0]
+    return [p for p in (part.strip() for part in csv.split(",")) if p]
+
+
+def patch_root_nav(react_dir: Path, ctx: dict) -> tuple[bool, list[str]]:
+    """Enroll this pair in the root `gen:nav`/`gen:nav:check` scripts and, by
+    the same edit, in `NAV_PACKAGES` (the two are the same list — the aggregate
+    IS the enrollment). Idempotent: a pair already in the list is a no-op.
+
+    Returns ``(patched_ok, changed_script_keys)``; ``(False, [])`` on any
+    unexpected shape, so the caller prints exact instructions rather than
+    half-editing the monorepo's root."""
+    root_pkg = react_dir / "package.json"
+    try:
+        data = json.loads(root_pkg.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False, []
+    scripts = data.get("scripts")
+    if not isinstance(scripts, dict) or "gen:nav" not in scripts or "gen:nav:check" not in scripts:
+        return False, []
+
+    packages = nav_packages_from(scripts["gen:nav"])
+    if not packages:
+        return False, []
+    pkg_dir = f"packages/{ctx['PKG_DIR']}"
+    if pkg_dir in packages:
+        return True, []
+    packages.append(pkg_dir)
+    scripts["gen:nav"] = nav_gen_script(packages)
+    scripts["gen:nav:check"] = nav_check_script(packages)
+    root_pkg.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return True, ["gen:nav", "gen:nav:check"]
+
+
+def _root_nav_instructions(ctx: dict) -> str:
+    """Human-readable fallback for the nav aggregate, printed when the root
+    package.json cannot be patched safely."""
+    pkg_dir = f"packages/{ctx['PKG_DIR']}"
+    return (
+        "Enroll this pair in the ROOT package.json nav aggregate by hand:\n"
+        f"  gen:nav / gen:nav:check  — add `{pkg_dir}` to EVERY invocation's "
+        "NAV_PACKAGES list, add one more invocation with "
+        f"NAV_PKG_DIR={pkg_dir}, and add `{pkg_dir}/nav-manifest.json` to the "
+        "check script's `git diff` paths. Every invocation carries the full "
+        "list on purpose — the driver rebuilds the root aggregate each run."
+    )
 
 
 def _root_gen_instructions(ctx: dict) -> str:
@@ -394,6 +505,9 @@ def scaffold_react_lib(
 
     # Delta 7: enumerate the pair in the root gen/gen:check aggregates.
     patched, changed = patch_root_gen(react_dir, ctx)
+    # Spec §3.8: and in the nav aggregate, which is enumerated differently
+    # (the full package list per invocation) — see patch_root_nav.
+    nav_patched, nav_changed = patch_root_nav(react_dir, ctx)
     if patched:
         if changed:
             print(
@@ -409,6 +523,13 @@ def scaffold_react_lib(
             "\nCould not patch the root package.json automatically.\n"
             + _root_gen_instructions(ctx)
         )
+    if nav_patched:
+        if nav_changed:
+            print("  gen:nav\n  gen:nav:check   (NAV_PACKAGES rebuilt with this pair)")
+        else:
+            print("Root package.json already enrolls this pair in NAV_PACKAGES.")
+    else:
+        print("\nCould not patch the nav aggregate automatically.\n" + _root_nav_instructions(ctx))
 
     print(
         f"\nDone. Next steps (run from the stapel-react monorepo root):\n"

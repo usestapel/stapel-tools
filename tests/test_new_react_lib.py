@@ -9,7 +9,12 @@ from stapel_tools.new_react_lib import (
     core_peer_range,
     file_plan,
     module_flow_count,
+    nav_check_script,
+    nav_gen_script,
+    nav_manifest_json,
+    nav_packages_from,
     patch_root_gen,
+    patch_root_nav,
     root_gen_invocations,
     scaffold_react_lib,
 )
@@ -32,6 +37,8 @@ REQUIRED = [
     "src/flows/registry.ts",
     "src/i18n/keys.ts",
     "src/i18n/errorsMap.ts",
+    "src/nav/manifest.ts",
+    "nav-manifest.json",
     "demo/_harness.tsx",
     "test/pair.test.ts",
     "test/errorsBundle.test.ts",
@@ -363,8 +370,18 @@ class TestAnalyticsMarker:
 
 
 # A minimal root package.json mirroring the etalon's root gen:* shape.
+_NAV_DRIVER = "node --experimental-strip-types scripts/gen-nav-manifest.mjs"
+
+
 def _root_scripts():
     return {
+        "gen:nav": (
+            f"NAV_PACKAGES=packages/auth-react NAV_PKG_DIR=packages/auth-react {_NAV_DRIVER}"
+        ),
+        "gen:nav:check": (
+            f"NAV_PACKAGES=packages/auth-react NAV_PKG_DIR=packages/auth-react {_NAV_DRIVER}"
+            " && git diff --exit-code -- nav-manifest.json packages/auth-react/nav-manifest.json"
+        ),
         "gen:api": "node scripts/gen-api.mjs",
         "gen:api:check": "node scripts/gen-api.mjs && git diff --exit-code -- packages/auth-react/src/api/generated/schema.ts",
         "gen:flows": "node scripts/gen-flows.mjs",
@@ -526,3 +543,103 @@ class TestRootGenInvocations:
         )
         assert api["path"] == "packages/billing-react/src/api/generated/schema.ts"
         assert api["check_inline"] is True
+
+
+class TestNavManifestEmission:
+    """A5 (storefront spec §3.8): a pair declares its nav surface from its
+    first commit, and the declaration ships with the projection the monorepo's
+    drift gate diffs."""
+
+    def _ctx(self):
+        return build_context("notifications", "Notifications",
+                             "stapel-notifications", "/notifications/api/")
+
+    def test_manifest_ts_declares_an_empty_entry_list(self):
+        plan = file_plan(self._ctx())
+        src = plan["src/nav/manifest.ts"]
+        assert 'import type { NavEntry } from "@stapel/core";' in src
+        # EMPTY on purpose: a scaffolded pair ships no ./default subpath, so
+        # any entry would name a component that does not resolve — and it
+        # would resolve at the CONTAINER's import, two repositories from the
+        # mistake. The file's own docstring has to say so.
+        assert "export const navEntries: readonly NavEntry[] = [];" in src
+        assert "Why this list is empty" in src
+
+    def test_nav_manifest_json_matches_what_the_driver_would_write(self):
+        """Byte-for-byte the shape of `JSON.stringify({...}, null, 2) + "\n"`,
+        so a freshly scaffolded pair is ALREADY green under `pnpm
+        gen:nav:check`. A scaffold whose first act is to redden a gate is a
+        scaffold everyone learns to run with the gate switched off."""
+        text = nav_manifest_json(self._ctx())
+        assert text.endswith("\n")
+        assert json.loads(text) == {
+            "package": "@stapel/notifications-react",
+            "version": "0.0.0",
+            "entries": [],
+        }
+        assert text == json.dumps(json.loads(text), indent=2) + "\n"
+
+    def test_package_json_publishes_the_manifest(self):
+        pkg = json.loads(file_plan(self._ctx())["package.json"])
+        assert pkg["exports"]["./nav-manifest.json"] == "./nav-manifest.json"
+        assert "nav-manifest.json" in pkg["files"]
+
+
+class TestRootNavPatch:
+    def _ctx(self):
+        return build_context("notifications", "Notifications",
+                             "stapel-notifications", "/notifications/api/")
+
+    def test_enrolls_the_pair_in_every_invocation_not_just_a_new_one(self, tmp_path):
+        """`gen:nav` is the one driver that cannot be enumerated by appending:
+        every invocation carries the FULL package set, because the driver
+        rebuilds the ROOT aggregate on each run. Appending an invocation while
+        leaving the existing lists alone would make the aggregate depend on
+        which invocation ran last."""
+        _write_root(tmp_path, _root_scripts())
+        ok, changed = patch_root_nav(tmp_path, self._ctx())
+        assert ok
+        assert changed == ["gen:nav", "gen:nav:check"]
+        scripts = json.loads((tmp_path / "package.json").read_text())["scripts"]
+        gen = scripts["gen:nav"]
+        # two invocations, and BOTH carry both packages
+        assert gen.count("NAV_PKG_DIR=") == 2
+        assert gen.count("NAV_PACKAGES=packages/auth-react,packages/notifications-react") == 2
+        assert "NAV_PKG_DIR=packages/notifications-react" in gen
+        # the check diffs the root aggregate AND every package's projection
+        assert "git diff --exit-code -- nav-manifest.json" in scripts["gen:nav:check"]
+        assert "packages/notifications-react/nav-manifest.json" in scripts["gen:nav:check"]
+
+    def test_idempotent(self, tmp_path):
+        _write_root(tmp_path, _root_scripts())
+        patch_root_nav(tmp_path, self._ctx())
+        first = (tmp_path / "package.json").read_text()
+        ok, changed = patch_root_nav(tmp_path, self._ctx())
+        assert ok and changed == []
+        assert (tmp_path / "package.json").read_text() == first
+
+    def test_falls_back_when_the_aggregate_is_missing(self, tmp_path):
+        scripts = _root_scripts()
+        del scripts["gen:nav"]
+        del scripts["gen:nav:check"]
+        _write_root(tmp_path, scripts)
+        ok, changed = patch_root_nav(tmp_path, self._ctx())
+        assert ok is False and changed == []
+
+    def test_round_trips_the_package_list(self):
+        packages = ["packages/a-react", "packages/b-react"]
+        assert nav_packages_from(nav_gen_script(packages)) == packages
+        assert nav_packages_from(nav_check_script(packages)) == packages
+
+    def test_scaffold_enrolls_the_new_pair(self, tmp_path):
+        (tmp_path / "packages").mkdir()
+        _write_root(tmp_path, _root_scripts())
+        core = tmp_path / "packages" / "core"
+        core.mkdir()
+        (core / "package.json").write_text(json.dumps({"version": "0.15.0"}))
+        target = scaffold_react_lib("billing", "Billing", tmp_path)
+        assert (target / "nav-manifest.json").is_file()
+        assert (target / "src" / "nav" / "manifest.ts").is_file()
+        scripts = json.loads((tmp_path / "package.json").read_text())["scripts"]
+        assert "packages/billing-react" in scripts["gen:nav"]
+        assert "packages/billing-react/nav-manifest.json" in scripts["gen:nav:check"]

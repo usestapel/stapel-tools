@@ -58,6 +58,7 @@ PACKAGE_JSON = """{
     },
     "./manifest": "./manifest.json",
     "./manifest.json": "./manifest.json",
+    "./nav-manifest.json": "./nav-manifest.json",
     "./llms.txt": "./llms.txt",
     "./package.json": "./package.json"
   },
@@ -69,6 +70,7 @@ PACKAGE_JSON = """{
     "MODULE.md",
     "CHANGELOG.md",
     "manifest.json",
+    "nav-manifest.json",
     "llms.txt"
   ],
   "scripts": {
@@ -455,6 +457,72 @@ export function flowEndpoints(id: {{CAMEL}}FlowId): readonly FlowEndpoint[] {
     | undefined;
   return spec ? spec.steps.flatMap((s) => s.endpoints) : [];
 }
+"""
+
+# ── src/nav/manifest.ts (scripted-fullstack navigation, spec §3.8) ────────────
+# Every pair declares its navigable screens HERE, and `scripts/gen-nav-
+# manifest.mjs` turns the declaration into `nav-manifest.json` (this package's
+# own slice) plus the monorepo's root aggregate. A pair that ships no
+# declaration at all cannot join a scaffolded route tree or a shell menu — and
+# adding the file later means also editing NAV_PACKAGES, seven `gen:*`
+# aggregates and the mirror in stapel-tools by hand, which is exactly the
+# per-pair rediscovery the scaffold exists to end.
+#
+# The list starts EMPTY, and that is the honest shape: a fresh pair ships no
+# `./default` subpath and therefore no `component.export` that resolves. An
+# entry pointing at a component that does not exist would pass gen:nav's
+# structural validation and fail at the container's `import`, which is the
+# worst possible place to learn it. Empty means "declared, nothing to mount
+# yet"; the drift gate is live from day one, so the FIRST real entry is
+# gated the moment it is written.
+NAV_MANIFEST_TS = """/**
+ * {{PKG_NAME}}'s contribution to the scripted-fullstack navigation contract
+ * (`@stapel/core`'s `NavEntry` / `PackageNavManifest`).
+ *
+ * `scripts/gen-nav-manifest.mjs` reads `navEntries` below, stamps
+ * `package`/`version` from this package's own `package.json`, and writes
+ * `packages/{{PKG_DIR}}/nav-manifest.json` plus this package's slice of the
+ * monorepo's root aggregate. `resolveNav` (`@stapel/shell-react`) is what
+ * turns that aggregate plus a host's override file into the tree a shell
+ * renders and a container mounts routes from.
+ *
+ * ── Why this list is empty ──────────────────────────────────────────────────
+ *
+ * A scaffolded pair has no `./default` subpath yet, so there is no
+ * `component.export` that would resolve. An entry naming a component that
+ * does not exist passes the generator's structural validation and fails at
+ * the CONTAINER's import — two repositories away from the mistake. Empty
+ * says "this pair declares the surface and owns nothing on it yet", and the
+ * drift gate (`pnpm gen:nav:check`, plus stapel-tools'
+ * `scripts/check_nav_manifest_sync.py`) is live from the first commit.
+ *
+ * ── Adding the first screen ────────────────────────────────────────────────
+ *
+ * 1. Ship the component from `./default` (or another declared subpath).
+ * 2. Add an entry below. `surface` is the authorization axis and should be
+ *    DECLARED, not left to the `requiresAuth ? "member" : "public"`
+ *    derivation: a screen that later gains `requiresAuth` for an unrelated
+ *    reason must not silently drop out of a public container's tree.
+ * 3. `pnpm gen:nav` — never hand-edit `nav-manifest.json`.
+ *
+ * ```ts
+ * {
+ *   id: "{{MODULE}}.overview",              // globally unique, "<module>.<screen>"
+ *   labelKey: "{{MODULE}}.nav.overview",    // a key, never a literal
+ *   icon: "AppstoreOutlined",
+ *   route: { path: "{{MODULE}}" },          // relative: a child of the member area
+ *   component: { export: "{{CAMEL}}Overview", subpath: "default" },
+ *   placement: { level: "top" },
+ *   menuVisibleDefault: true,
+ *   requiresAuth: true,
+ *   surface: "member",
+ *   order: 10,
+ * }
+ * ```
+ */
+import type { NavEntry } from "@stapel/core";
+
+export const navEntries: readonly NavEntry[] = [];
 """
 
 # ── src/i18n/keys.ts ──────────────────────────────────────────────────────────
