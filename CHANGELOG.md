@@ -2,6 +2,98 @@
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-08-23
+
+### ADO005 — an installed gdpr data owner that cannot answer an erasure
+
+The deletion-lifecycle wave (`tasks/deletion-lifecycle-design.md` §2) built
+one machine: an erasure request fans out to every declared data owner, and
+the request is only DELETED when each owner sends a receipt. The inventory
+that started the wave found the failure mode this gate exists for — two
+owner libraries installed, migrated and healthy in a live fleet, and
+unreachable: nothing in their deploy ran a `consume_actions` process, and
+one of them was absent from `STAPEL_GDPR["DATA_OWNERS"]` besides. Neither
+gap fails a test, a boot, or a health probe. The first makes every request
+against that owner run out its clock as a TIMEOUT; the second is worse —
+the orchestrator never creates a part for an owner it does not know, so the
+request reaches DELETED with that owner's rows untouched. A receipt for work
+nobody did.
+
+`stapel-adoption-lint` now reads the two obligations that make an installed
+owner a reachable one, for every library in `INSTALLED_APPS` that ships
+`schemas/consumes/gdpr.erasure.requested.json` (shipping the consume-contract
+IS the declaration of participation — no second registry to keep in sync):
+
+1. **A consumer runs in this service's deploy.** The compose fragment is
+   located the way the rest of the toolchain locates deploy files: the
+   project's own `docker-compose*.yml` for a monolith, and for a fleet
+   service the sibling `<svc>.yml` next to `services.conf` — the layout
+   `scripts/verify_boot_contract.sh` walks. A service's OWN fragment is the
+   whole answer there; reading the root stack would let one service's
+   consumer certify all the others. Commented lines do not count (the
+   emitted fragment ships a commented `serve_functions` worker, and a gate
+   satisfied by a comment is a gate that lies).
+2. **The gdpr host lists the owner, with the subject types the library
+   claims.** The owner name and its subject types are read from the
+   library's own `erasure.py`/`gdpr.py` — `OWNER`/`SUBJECT_TYPES` or
+   `GDPR_OWNER`/`GDPR_SUBJECT_TYPES`, both spellings live in the fleet —
+   through the indirections real libraries use (`SUBJECT_TYPES` as a tuple
+   of module constants, `OWNER = SomeProvider.section`). The name is never
+   guessed from the package: `stapel-cdn` answers to `media`,
+   `stapel-profiles` to `profile`. The host is this service when it installs
+   `stapel_gdpr`, otherwise the sibling service in the same fleet that does.
+   Both the 0.5.0 map and the legacy plain list (which means `["account"]`)
+   are read, so an owner claiming `workspace` under a legacy list is a
+   finding, not a silent pass.
+
+Each half is skipped with a stderr note when its input is not discoverable —
+no compose file at all, no service running `stapel_gdpr`, a computed
+`STAPEL_GDPR`. Unreadable is not the same as missing, and this linter does
+not invent findings out of what it could not parse.
+
+Module docstring documents the rule and its parsing limits; `stapel-verify`
+composes it unchanged (ADO-codes). Covered by 15 tests over a fixture fleet
+(`services.conf` + `svc-app/` + `svc-app.yml` + a `svc-gdpr` host): missing
+consumer, commented consumer, owner absent from `DATA_OWNERS`, subject type
+not claimed, legacy list form, an owner name that differs from the package
+name, both constant spellings, indirect constants, a non-owner module, the
+monolith shape, and each skip note.
+
+### The library CI template installs the extras its tests need
+
+Two library releases were burned in one day (0.14.0 and 0.16.0 of two owner
+libs) on the same defect: a beat-schedule test imported `celery`, CI had
+installed the base package, and the suite failed at COLLECTION — green code,
+red run, a version number spent to find out. The class fix belongs to the
+template, not to the two repos that hit it:
+
+* `_library_templates.CI_YML` — the install step no longer reads
+  `pip install ".[all]" || pip install .`, which hid a genuine resolution
+  failure behind its own fallback. It now asks `pyproject.toml` whether an
+  `all` extra is declared and installs `.[all]` or `.` accordingly, so a
+  broken extra fails loudly and a package without extras is unaffected.
+* `_library_templates.TEST_PING` — the scaffold suite ships the documented
+  pattern for the case that has no extra to install: a periodic callable is
+  plain Python any scheduler can invoke, the `crontab` the factory builds is
+  not, so the test guards it with `pytest.importorskip("celery")` rather
+  than widening the package's runtime dependency to make a test pass.
+
+**Existing libraries: re-sync your `ci.yml` install step.** The step is not
+regenerated for you (most repos have since added steps of their own). Print
+the canonical block and replace the `- name: Install` step with it:
+
+```sh
+python -c "from stapel_tools import _library_templates as T; \
+  b = T.CI_YML.split('      # Optional dependencies')[1]; \
+  print('      # Optional dependencies' + b.split('      - name: Lint')[0])"
+```
+
+Find the repos that still carry the old step:
+
+```sh
+grep -rl 'pip install .*\[all\]" || pip install' ~/Projects/stapel/*/.github/workflows/ci.yml
+```
+
 ## [0.45.0] — 2026-08-23
 
 ### A public storefront container is now generated, not written by hand
