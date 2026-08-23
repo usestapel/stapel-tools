@@ -732,12 +732,16 @@ def scaffold_service(
     blocks into settings/base.py (non-default capability axes only; validated
     against the module's docs/capabilities.json when the sibling checkout has
     one). Transports default to whatever broker the project's .env declares."""
+    from ._gdpr_owners import inject_derived_data_owners
     from ._module_config import validate_module_config
 
-    validate_module_config(
-        module_config,
-        selected=[app.removeprefix("stapel_") for app in (stapel_apps or [])],
-    )
+    selected_modules = [app.removeprefix("stapel_") for app in (stapel_apps or [])]
+    validate_module_config(module_config, selected=selected_modules)
+    # Same law as create_project: a service that installs stapel_gdpr needs the
+    # inventory of stores its erasures are certified against, and every owner
+    # library in the service publishes its own name and subjects. Derived, not
+    # asked for — a store missing from the map is silent retention.
+    module_config = inject_derived_data_owners(module_config, selected_modules)
     cwd = Path.cwd()
     root = project_root or find_project_root(cwd) or cwd
     if action_transport is None or function_transport is None or task_dispatch is None:

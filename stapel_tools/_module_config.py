@@ -259,6 +259,49 @@ def check_required_settings(
         )
 
 
+#: Prose the GENERATED settings must carry for keys whose consequence is not
+#: visible from the value. A reader who opens settings.py has to be able to
+#: tell what happens if the value is wrong — and for the gdpr inventory, "wrong"
+#: means an erasure that certifies itself while the data is still on disk.
+_SETTING_COMMENTS: dict[tuple[str, str], tuple[str, ...]] = {
+    ("gdpr", "DATA_OWNERS"): (
+        "Every store that holds personal data, and the subject types it can",
+        "erase. Derived at generation time from the libraries this project",
+        "selected: each one declares its own owner name and subjects (see",
+        "stapel-<lib>/erasure.py or gdpr.py) — this map is a fact about the",
+        "selection, not a preference.",
+        "The law: an erasure is only proven complete when EVERY store listed",
+        "here returns a receipt. A store that holds personal data and is",
+        "missing from this map is never asked and never waited for, so the",
+        "closure reports DELETED while the data is still there — silent",
+        "retention, with a receipt saying otherwise.",
+        "So add an entry for every store stapel-tools cannot see (search",
+        "indexes, warehouses, third-party processors, your own apps), and",
+        "bump DATA_OWNERS_VERSION when you do.",
+    ),
+    ("gdpr", "DATA_OWNERS_VERSION"): (
+        "Stamped onto every closure, so an audit can tell which inventory",
+        "certified a given erasure. Bump it whenever DATA_OWNERS changes.",
+    ),
+}
+
+
+def _setting_comment(module: str, key: str) -> tuple[str, ...]:
+    return _SETTING_COMMENTS.get((module, key), ())
+
+
+def _render_value(value, indent: int = 4) -> str:
+    """``repr`` for a short value; one entry per line for a mapping that would
+    run off the page (the derived DATA_OWNERS map is a dozen entries wide, and
+    a settings file nobody can read is a settings file nobody edits)."""
+    text = repr(value)
+    if len(text) + indent + 8 <= 88 or not isinstance(value, dict) or not value:
+        return text
+    pad = " " * (indent + 4)
+    body = "".join(f"{pad}{k!r}: {v!r},\n" for k, v in value.items())
+    return "{\n" + body + " " * indent + "}"
+
+
 def render_settings_block(module_config: dict[str, dict] | None) -> str:
     """Render the ``{{STAPEL_MODULE_CONFIG}}`` settings fragment.
 
@@ -284,7 +327,8 @@ def render_settings_block(module_config: dict[str, dict] | None) -> str:
             f"STAPEL_{mod_u.upper()} = {{",
         ]
         for key, value in config.items():
-            lines.append(f'    "{key}": {value!r},')
+            lines.extend(f"    # {line}" for line in _setting_comment(module, key))
+            lines.append(f'    "{key}": {_render_value(value)},')
         lines.append("}")
         parts.append("\n".join(lines))
     if not parts:

@@ -2,6 +2,62 @@
 
 ## [Unreleased]
 
+## [0.48.0] — 2026-08-24
+
+### The gdpr data-owner inventory is derived from the selection, not asked for
+
+stapel-studio's scaffold-assembly task calls
+`assemble_scaffold(slug, libs=[...], config=None)` — no per-module config,
+because a static assembler has nobody to ask. Every selection containing
+`gdpr` died there on this repo's own gate: "required module settings are
+missing", `STAPEL_GDPR["DATA_OWNERS"]`. That is one e2e wall and seven unit
+failures in studio, and the fault was here: the generator installed
+`stapel_gdpr` plus the libraries that hold the data, and emitted no inventory
+tying them together.
+
+Asking the caller was never the answer. `DATA_OWNERS` is not an opinion — it
+is a FACT about the selection, and every participating library already
+publishes it. `stapel_tools/_gdpr_owners.py` reads it, and
+`create_project`/`new_service` emit the map plus a dated
+`DATA_OWNERS_VERSION` into the generated settings, with the law written
+beside it: an erasure is only proven complete when every store listed there
+returns a receipt, so a store missing from the map is never asked, never
+waited for, and the closure reports DELETED while the data is still on disk.
+
+Two participation shapes are read, both from the library itself:
+
+* the erasure-request contract — a library that ships
+  `schemas/consumes/gdpr.erasure.requested.json` and declares
+  `OWNER`/`SUBJECT_TYPES` (or `GDPR_OWNER`/`GDPR_SUBJECT_TYPES`) in its
+  `erasure.py`/`gdpr.py`. This is ADO005's detection exactly, IMPORTED from
+  `adoption_lint` rather than forked, so the linter and the generator can
+  never disagree about who an owner is;
+* the in-process `GDPRProvider` — `apps.py` registers a provider class of the
+  library's own and the class carries a `section`. Leaving these out is not a
+  cosmetic gap: stapel-gdpr's `gdpr.E002` refuses to boot on a registered
+  provider absent from the map, so a `gdpr`+`chat` project would have failed
+  `manage.py check` just as surely as an empty inventory did.
+
+Where both apply the erasure contract wins — it carries the real subject
+types, and the two declarations agree on the name by design. Names are the
+libraries' own and are not package names: `stapel-cdn` answers to `media`,
+`stapel-profiles` to `profile`, `stapel-translate` to `translations`. A
+library that plainly participates but whose constant cannot be read is a hard
+generation failure naming that library — never a guessed name and never an
+example placeholder, because a guessed owner is the silent-retention defect
+with a different spelling. `stapel-gdpr` itself is not an owner: it registers
+whatever `GDPR_PROVIDERS` names, not a store of its own.
+
+A caller-supplied inventory is never overwritten — an operator who wrote one
+knows about stores this generator cannot see (search indexes, warehouses,
+third-party processors). Nothing is invented when no selected library owns a
+store: an empty map is the exact state `gdpr.E001` fires on, so the
+required-settings gate still refuses, with the fix attached.
+
+`tests/test_assemble_scaffold.py::TestFourLibProof` now runs with no config
+at all — studio's call shape — and its `manage.py check` gate is what proves
+the derived map right.
+
 ## [0.47.0] — 2026-08-23
 
 ### Nav mirror drift closed, gdpr-react and video-react registered

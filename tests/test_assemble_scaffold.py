@@ -241,16 +241,14 @@ class TestFourLibProof:
     and both static gates come back green — in seconds, offline."""
 
     def test_proof_project_assembles_and_is_green(self, tmp_path):
-        # The owners are the four libs' actually-registered GDPRProviders —
-        # gdpr.E002 rejects an inventory that omits a store already wired in,
-        # so the config that makes this project green is the true one.
+        # No config at all — studio_orchestrator's exact call shape. The gdpr
+        # inventory used to be hand-written here (auth/notifications/profile,
+        # the four libs' actually-registered owners, because gdpr.E002 rejects
+        # an inventory that omits a store already wired in); it is now DERIVED
+        # from the same libraries, and `manage.py check` below is what proves
+        # the derivation right.
         result = assemble_scaffold(
-            "proof", libs=PROOF_LIBS,
-            config={"gdpr": {
-                "DATA_OWNERS": ["auth", "notifications", "profile"],
-                "DATA_OWNERS_VERSION": "2026-01-01.1",
-            }},
-            output_dir=tmp_path,
+            "proof", libs=PROOF_LIBS, output_dir=tmp_path,
         )
 
         assert result.libs_unknown == []

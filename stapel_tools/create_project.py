@@ -2254,6 +2254,17 @@ def create_project(
         # error.
         validate_module_config(module_config, selected=[*modules, "core"])
 
+    # The gdpr inventory is a FACT about the selection, not a question for the
+    # caller: every participating library publishes its own owner name and
+    # subject types, so the generator reads them and emits the map. Before the
+    # gate below, because a derived map satisfies it — that is the whole point
+    # (stapel-studio's scaffold-assembly task calls assemble_scaffold with
+    # config=None and had no map to hand over, so every gdpr project it tried
+    # to generate was refused).
+    from ._gdpr_owners import inject_derived_data_owners
+
+    module_config = inject_derived_data_owners(module_config, [*modules, "core"])
+
     # A library that raises a boot-fatal check when a setting is missing is
     # dead on arrival if the scaffold installs the app and emits nothing —
     # which is what happened to both example apps (stapel_gdpr installed,
