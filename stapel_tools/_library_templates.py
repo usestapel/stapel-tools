@@ -539,6 +539,28 @@ class TestPingEndpoint:
 class TestPingFunction:
     def test_call_in_process(self):
         assert call("{{SLUG}}.ping", {}) == {"greeting": "pong"}
+
+
+class TestOptionalDependency:
+    """The house pattern for a test that needs an OPTIONAL dependency.
+
+    The live case is a beat schedule: a ``get_{{SLUG_U}}_beat_schedule()``
+    factory builds ``celery.schedules.crontab`` objects, but celery is NOT a
+    dependency of this package — a host on any other scheduler installs
+    none, and the periodic callable itself is plain Python that any scheduler
+    can invoke. A test that imports celery unguarded therefore fails at
+    COLLECTION wherever the base package is installed, which turns a green
+    library red and costs a release number to notice.
+
+    So: guard the import with ``importorskip``, never widen the runtime
+    dependency to make a test pass, and keep whatever the factory produces
+    (the schedule's keys, its task names) asserted in a test that does not
+    need the scheduler at all.
+    """
+
+    def test_optional_dependency_is_guarded(self):
+        crontab = pytest.importorskip("celery.schedules").crontab
+        assert crontab(hour=3, minute=0) is not None
 '''
 
 MODULE_MD = '''# {{NAME_DASH}} — MODULE.md
@@ -848,8 +870,21 @@ jobs:
       - name: Install stapel-core
         run: pip install git+https://github.com/usestapel/stapel-core.git
 
-      - name: Install
-        run: pip install ".[all]" || pip install .
+      # Optional dependencies are NOT optional for the test job: a test that
+      # imports celery, boto3 or a vendor SDK fails at collection when CI
+      # installed the base package only — a red run on green code, and two
+      # release numbers burned before anyone reads the traceback.
+      # `pip install ".[all]" || pip install .` hid a genuine resolution
+      # failure behind the fallback, so the extra is chosen from
+      # pyproject.toml instead of from whether the first install crashed.
+      - name: Install (with the `all` extra when this package declares one)
+        run: |
+          if python -c "import sys, tomllib; sys.exit(0 if 'all' in tomllib.load(open('pyproject.toml', 'rb')).get('project', {}).get('optional-dependencies', {}) else 1)"; then
+            echo "pyproject declares an [all] extra — installing it"
+            pip install ".[all]"
+          else
+            pip install .
+          fi
 
       - name: Lint
         run: |
