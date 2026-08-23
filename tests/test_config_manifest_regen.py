@@ -36,14 +36,26 @@ def _assemble(tmp_path, slug="proj", libs=None):
 
 class TestLibsFromExistingConfigMd:
     def test_recovers_lib_list_core_first(self, tmp_path):
-        # Only stapel-core ships a CONFIG.MD today (per-module sweep is the
-        # next wave — collect_lib_entries's own docstring) — auth/gdpr
-        # contribute no '## stapel-<lib>' section to recover from yet, so
-        # this only proves "core" round-trips; the mechanism generalizes
-        # the moment a lib ships its own CONFIG.MD.
+        """Recovery is self-describing: whichever libs contributed a
+        `## stapel-<lib>` section come back, core first.
+
+        This used to assert exactly `["core"]`, because core was the only lib
+        shipping a CONFIG.MD — and the comment here said so, adding that "the
+        mechanism generalizes the moment a lib ships its own CONFIG.MD".
+        stapel-gdpr now does, and the snapshot went red on a change in ANOTHER
+        repository. So the assertion is the INVARIANT instead: core first, the
+        rest sorted, and a lib comes back if and only if it actually
+        contributed a section. That cannot rot when the next lib ships one."""
         proj = _assemble(tmp_path, libs=["auth", "gdpr"])
         libs = libs_from_existing_config_md(proj)
-        assert libs == ["core"]
+        config_md = (proj / "CONFIG.MD").read_text()
+
+        assert libs[0] == "core", "core sorts first by create_project's convention"
+        assert libs[1:] == sorted(libs[1:])
+        assert set(libs) <= {"core", "auth", "gdpr"}
+        for lib in ("core", "auth", "gdpr"):
+            contributed = f"## stapel-{lib}" in config_md
+            assert (lib in libs) is contributed, lib
 
     def test_empty_when_no_config_md(self, tmp_path):
         empty = tmp_path / "nothing"

@@ -92,6 +92,15 @@ mirror entirely — and every scaffolded project inherited the stale menu.
   failure. It used to be a silent skip, which is the exact shape of the bug
   the gate exists for.
 
+### Fixed: a CONFIG.MD recovery test that pinned a snapshot of another repo
+
+`test_recovers_lib_list_core_first` asserted `["core"]` because core was the
+only lib shipping a CONFIG.MD — and said so in a comment that added "the
+mechanism generalizes the moment a lib ships its own". stapel-gdpr now does,
+and the snapshot went red on a change in another repository. The assertion is
+now the invariant (core first, the rest sorted, a lib comes back if and only
+if it contributed a section), which cannot rot when the next lib ships one.
+
 ### `FRONTEND_REACT_LIBS` re-pinned against the live registry, and seven pairs added
 
 `attributes`, `categories`, `cdn`, `chat`, `listings`, `reviews`, `search` join
