@@ -153,7 +153,8 @@ invents output from nothing.
     npx eslint .              # frontend/, if this project has one
 
 `stapel-verify` runs `stapel_tools.lint` (R001-R008), `adoption_lint`
-(module actually mounted, no shadow routes — ADO-codes), `url_lint`
+(module actually mounted, no shadow routes, an installed gdpr data owner
+reachable by an erasure — ADO-codes), `url_lint`
 (URL001), `config_lint` (CFG000-007), `migration_lint` (MIG-codes,
 expand/contract), `swap_lint` (SWAP001/SWAP002), `doc_lint` (DOC001) and
 `nginx_cache_lint` (NGX001-004) in one pass — no reimplemented rules, pure

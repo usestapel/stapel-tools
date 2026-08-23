@@ -349,7 +349,16 @@ ADO002 (error) a project-owned urlpattern whose route (params normalized, so
 but the branch is not `main`/`master` nor merged into it. ADO004 (warning) a
 `requirements` pin never imported anywhere (dead pin, e.g. `PyJWT`→`jwt`);
 stapel modules, settings-configured packages, and an entry-point-only
-runtime/tooling allowlist are exempt.
+runtime/tooling allowlist are exempt. ADO005 (error) an installed **gdpr data
+owner** (a library shipping `schemas/consumes/gdpr.erasure.requested.json`)
+that cannot answer an erasure: no `consume_actions` process in the service's
+deploy (`docker-compose*.yml`, or the `<svc>.yml` fragment next to
+`services.conf`), or the owner name the library declares in its
+`erasure.py`/`gdpr.py` (`OWNER`/`GDPR_OWNER` — `stapel-cdn` answers to
+`media`, `stapel-profiles` to `profile`) missing from
+`STAPEL_GDPR["DATA_OWNERS"]` on the gdpr host, or listed there without the
+subject types the library claims. Both halves skip with a stderr note when
+their input is not discoverable.
 
 ### `stapel-surface-lint` — pre-merge gate against reinventing what the fleet ships
 

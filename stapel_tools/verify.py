@@ -20,7 +20,8 @@ Linters composed (in this order)
 * ``stapel_tools.lint``            — R-codes (StapelResponse/ErrorResponse
   discipline, flow attachment, i18n doc links)
 * ``stapel_tools.adoption_lint``   — ADO-codes (module actually mounted, no
-  shadow routes, migration shipped on main, no dead requirement pins)
+  shadow routes, migration shipped on main, no dead requirement pins, an
+  installed gdpr data owner reachable by an erasure)
 * ``stapel_tools.url_lint``        — URL001 (bare ``URLField()`` truncation
   trap)
 * ``stapel_tools.config_lint``     — CFG-codes (config-in-one-place law)

@@ -48,6 +48,37 @@ ADO004  (warning) A ``requirements`` pin is never imported anywhere in the
         is a small set of entry-point-only runtime/tooling packages (servers,
         DB drivers, test/lint tools) that are legitimately never imported.
 
+ADO005  (error) A **gdpr data owner is installed but cannot answer**. A library
+        that ships ``schemas/consumes/gdpr.erasure.requested.json`` has an
+        erasure subscriber, and a subscriber is worth exactly what its
+        delivery is worth. So for every such library named in
+        ``INSTALLED_APPS``, two things must hold, and each is its own finding:
+
+        1. the service's deploy runs a ``consume_actions`` process — the
+           compose fragment for this service (``docker-compose*.yml`` for a
+           monolith, ``<svc>.yml`` next to ``services.conf`` in the fleet
+           shape ``scripts/verify_boot_contract.sh`` walks). Without it the
+           library is installed, migrated, healthy — and never delivered to,
+           so every erasure request against it runs out its clock as a
+           TIMEOUT on a silent owner;
+        2. the gdpr host (the service that installs ``stapel_gdpr``, this one
+           or a sibling in the same fleet) lists the library's owner name in
+           ``STAPEL_GDPR["DATA_OWNERS"]``, *with the subject types the library
+           claims*. The owner name and subject types are read from the
+           library's own ``erasure.py``/``gdpr.py``
+           (``OWNER``/``SUBJECT_TYPES`` or ``GDPR_OWNER``/
+           ``GDPR_SUBJECT_TYPES``; they differ per library —
+           ``stapel-cdn`` answers to ``media``, ``stapel-profiles`` to
+           ``profile``). An owner absent from the map gets no
+           ``ErasurePart``, which means the orchestrator marks the request
+           DELETED while that owner's rows are untouched — a receipt for work
+           nobody did.
+
+        Each half is skipped, with a stderr note, when its input is not
+        discoverable (no compose file at all; no service installs
+        ``stapel_gdpr``; a computed ``STAPEL_GDPR``) — unreadable is not the
+        same as missing, and a gate must not invent findings.
+
 Deliberate parsing limitations (what we do NOT try to catch)
 ------------------------------------------------------------
 * **Mounts** are recognized only from ``include("<pkg>.urls")`` *string*
@@ -70,6 +101,14 @@ Deliberate parsing limitations (what we do NOT try to catch)
   skipped for it (a stderr note, never a false error).
 * **ADO004** only decides "dead" for a dist whose import name(s) we could
   resolve; an unresolvable, non-stapel, non-allowlisted dist is left alone.
+* **ADO005** reads the deploy as text: any mention of ``consume_actions`` in
+  a compose file that belongs to this service satisfies the consumer half.
+  Which compose *service* carries it, and whether that service is actually
+  started by the stand, is out of scope here (the delivery gates own that).
+  Run against a fleet ROOT (the directory holding ``services.conf``) the
+  check degrades to "somewhere in this fleet", because at that granularity
+  the INSTALLED_APPS of every service are one union — lint the service
+  directories to keep the finding per-service.
 
 Exit codes: 0 clean (warnings allowed), 1 errors present (``--strict`` promotes
 warnings to errors), 2 usage/environment errors.
@@ -589,6 +628,319 @@ def load_module_schema_paths(
 
 
 # ---------------------------------------------------------------------------
+# ADO005 — a gdpr owner library needs a consumer process and a part
+# ---------------------------------------------------------------------------
+
+#: The file whose presence in a library's package IS its declaration "I am a
+#: gdpr data owner": the consumed-action contract for the erasure request.
+#: A library that ships it has a subscriber that only ever runs inside an
+#: action-consuming process.
+GDPR_CONSUMES_ERASURE = ("schemas", "consumes", "gdpr.erasure.requested.json")
+
+#: Where an owner library declares its identity, and under which names. Both
+#: spellings are live in the fleet (``OWNER``/``SUBJECT_TYPES`` in recordings,
+#: cdn, docs, agent; ``GDPR_OWNER``/``GDPR_SUBJECT_TYPES`` in workspaces,
+#: profiles, notifications), in either file.
+GDPR_DECL_FILES = ("erasure.py", "gdpr.py")
+GDPR_OWNER_CONSTANTS = ("OWNER", "GDPR_OWNER")
+GDPR_SUBJECT_CONSTANTS = ("SUBJECT_TYPES", "GDPR_SUBJECT_TYPES")
+
+#: The management command that drains the action transport. A deploy without
+#: one delivers no action to any subscriber, however correctly installed.
+CONSUME_ACTIONS_CMD = "consume_actions"
+
+#: The service list at the root of the fleet shape stapel-tools emits
+#: (``services.conf`` + ``<prefix><svc>/`` directories + ``<prefix><svc>.yml``
+#: compose fragments) — the same file ``scripts/verify_boot_contract.sh``
+#: iterates.
+FLEET_SERVICES_CONF = "services.conf"
+
+#: Compose files a project owns directly (monolith shape, and the root
+#: stack of a fleet).
+DEPLOY_GLOBS = (
+    "docker-compose*.yml",
+    "docker-compose*.yaml",
+    "compose*.yml",
+    "compose*.yaml",
+    "deploy/docker-compose*.yml",
+    "deploy/docker-compose*.yaml",
+)
+
+
+@dataclass
+class GdprOwner:
+    """What an owner library claims: the name it answers to in
+    ``STAPEL_GDPR["DATA_OWNERS"]`` and the subject types it can erase."""
+
+    pkg: str
+    owner: Optional[str]
+    subject_types: tuple[str, ...]
+    decl: Optional[str]  # file the constants were read from
+
+
+def _string_env(tree: ast.AST) -> tuple[dict[str, str], dict[str, str]]:
+    """Module-level ``NAME = "literal"`` bindings, and ``Class.attr = "literal"``
+    class attributes — enough to resolve the two indirections real owner
+    libraries use (``SUBJECT_TYPES = (SUBJECT_ACCOUNT, ...)`` in recordings,
+    ``OWNER = AgentGDPRProvider.section`` in agent)."""
+    consts: dict[str, str] = {}
+    attrs: dict[str, str] = {}
+    for node in getattr(tree, "body", []):
+        if isinstance(node, ast.Assign):
+            if (
+                isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        consts[target.id] = node.value.value
+        elif isinstance(node, ast.ClassDef):
+            for stmt in node.body:
+                if not isinstance(stmt, ast.Assign):
+                    continue
+                if not (
+                    isinstance(stmt.value, ast.Constant)
+                    and isinstance(stmt.value.value, str)
+                ):
+                    continue
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name):
+                        attrs[f"{node.name}.{target.id}"] = stmt.value.value
+    return consts, attrs
+
+
+def _resolve_str(
+    node: Optional[ast.AST], consts: dict[str, str], attrs: dict[str, str]
+) -> Optional[str]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return consts.get(node.id)
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        return attrs.get(f"{node.value.id}.{node.attr}")
+    return None
+
+
+def _resolve_str_seq(
+    node: Optional[ast.AST], consts: dict[str, str], attrs: dict[str, str]
+) -> tuple[str, ...]:
+    if not isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return ()
+    out = []
+    for el in node.elts:
+        value = _resolve_str(el, consts, attrs)
+        if value is not None:
+            out.append(value)
+    return tuple(out)
+
+
+def _gdpr_decl_dir(pkg: str, search_roots: list[Path]) -> Optional[Path]:
+    """Directory that ships the erasure consume-contract for ``pkg`` — the
+    installed package, or the sibling ``stapel-<mod>`` checkout."""
+    mod_dir = locate_module_dir(pkg, search_roots)
+    if mod_dir is not None and mod_dir.joinpath(*GDPR_CONSUMES_ERASURE).is_file():
+        return mod_dir
+    short = module_short(pkg)
+    for root in search_roots:
+        cand = root / f"stapel-{short}"
+        if cand.joinpath(*GDPR_CONSUMES_ERASURE).is_file():
+            return cand
+    return None
+
+
+def read_gdpr_owner(pkg: str, search_roots: list[Path]) -> Optional[GdprOwner]:
+    """The owner declaration of an installed library, or None when the library
+    does not participate in the gdpr protocol at all."""
+    decl_dir = _gdpr_decl_dir(pkg, search_roots)
+    if decl_dir is None:
+        return None
+    owner: Optional[str] = None
+    subjects: tuple[str, ...] = ()
+    source: Optional[str] = None
+    for fname in GDPR_DECL_FILES:
+        path = decl_dir / fname
+        if not path.is_file():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        consts, attrs = _string_env(tree)
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            names = {t.id for t in node.targets if isinstance(t, ast.Name)}
+            if owner is None and names & set(GDPR_OWNER_CONSTANTS):
+                owner = _resolve_str(node.value, consts, attrs)
+                if owner is not None:
+                    source = fname
+            if not subjects and names & set(GDPR_SUBJECT_CONSTANTS):
+                subjects = _resolve_str_seq(node.value, consts, attrs)
+        if owner is not None and subjects:
+            break
+    return GdprOwner(pkg=canon_dist(pkg), owner=owner, subject_types=subjects,
+                     decl=source)
+
+
+def find_deploy_files(project: Path) -> list[Path]:
+    """Compose/deploy files that describe how THIS service runs.
+
+    Two shapes, both emitted by stapel-tools: a monolith owns its
+    ``docker-compose*.yml``; a fleet service is a ``<prefix><svc>/`` directory
+    whose compose fragment is the sibling ``<prefix><svc>.yml`` next to
+    ``services.conf`` (the layout ``scripts/verify_boot_contract.sh`` walks).
+    A fleet ROOT (the directory that holds ``services.conf``) resolves to the
+    root stack plus every service fragment it lists.
+    """
+    found: set[Path] = set()
+    for pattern in DEPLOY_GLOBS:
+        found.update(p for p in project.glob(pattern) if p.is_file())
+
+    parent = project.parent
+    if (parent / FLEET_SERVICES_CONF).is_file():
+        fragments = [
+            parent / f"{project.name}{suffix}" for suffix in (".yml", ".yaml")
+        ]
+        fragments = [p for p in fragments if p.is_file()]
+        if fragments:
+            # This service's OWN fragment is the whole answer: the root stack
+            # is the union of every service, so reading it here would let one
+            # service's consumer certify all the others.
+            found.update(fragments)
+        else:
+            for pattern in DEPLOY_GLOBS:
+                found.update(p for p in parent.glob(pattern) if p.is_file())
+
+    conf = project / FLEET_SERVICES_CONF
+    if conf.is_file():
+        for svc in read_services_conf(conf):
+            for prefix in ("svc-", ""):
+                for suffix in (".yml", ".yaml"):
+                    frag = project / f"{prefix}{svc}{suffix}"
+                    if frag.is_file():
+                        found.add(frag)
+    return sorted(found)
+
+
+def read_services_conf(path: Path) -> list[str]:
+    """Service names from a fleet ``services.conf`` (one per line, ``#``
+    comments) — the same parse the boot-contract gate does in sh."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    names = []
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if line:
+            names.append(line)
+    return names
+
+
+def deploy_runs_consume_actions(deploy_files: Iterable[Path]) -> bool:
+    """True when some deploy file starts the action consumer. Commented lines
+    do not count — the emitted service fragment ships a commented
+    ``serve_functions`` worker, and a gate satisfied by a comment is the kind
+    of gate that lies."""
+    for path in deploy_files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for line in text.splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            if CONSUME_ACTIONS_CMD in line:
+                return True
+    return False
+
+
+def parse_data_owners(
+    settings_files: Iterable[Path],
+) -> tuple[Optional[dict[str, tuple[str, ...]]], Optional[Path]]:
+    """``STAPEL_GDPR["DATA_OWNERS"]`` as ``{owner: subject types}``.
+
+    Both declared shapes are read: the 0.5.0 map, and the legacy plain list
+    (which means ``["account"]`` for every name). Returns ``(None, path)``
+    when ``STAPEL_GDPR`` is present but the value is computed rather than
+    literal — unparseable is not the same as missing, and a gate must not
+    invent a finding out of what it could not read.
+    """
+    host: Optional[Path] = None
+    for path in settings_files:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            names = {t.id for t in node.targets if isinstance(t, ast.Name)}
+            if "STAPEL_GDPR" not in names:
+                continue
+            host = path
+            if not isinstance(node.value, ast.Dict):
+                return None, host
+            for key, value in zip(node.value.keys, node.value.values):
+                if not (isinstance(key, ast.Constant) and key.value == "DATA_OWNERS"):
+                    continue
+                if isinstance(value, ast.Dict):
+                    owners: dict[str, tuple[str, ...]] = {}
+                    for okey, oval in zip(value.keys, value.values):
+                        if not (isinstance(okey, ast.Constant)
+                                and isinstance(okey.value, str)):
+                            return None, host
+                        owners[okey.value] = _resolve_str_seq(oval, {}, {})
+                    return owners, host
+                if isinstance(value, (ast.List, ast.Tuple)):
+                    legacy = _resolve_str_seq(value, {}, {})
+                    return {name: ("account",) for name in legacy}, host
+                return None, host
+            # STAPEL_GDPR declared, DATA_OWNERS absent: no owner has a part.
+            return {}, host
+    return None, host
+
+
+def find_gdpr_host_settings(
+    project: Path, own_installed: set[str], own_settings: list[Path]
+) -> tuple[list[Path], Optional[str]]:
+    """Settings files of the service that runs stapel_gdpr — this project, or
+    a sibling service in the same fleet. Returns (files, service label)."""
+    if any(canon_dist(app) == "stapel_gdpr" for app in own_installed):
+        return own_settings, None
+    parent = project.parent
+    if not (parent / FLEET_SERVICES_CONF).is_file():
+        return [], None
+    for sibling in sorted(p for p in parent.iterdir() if p.is_dir()):
+        if sibling == project:
+            continue
+        files = find_settings_files(sibling)
+        if not files:
+            continue
+        installed, _ = parse_settings(files)
+        if any(canon_dist(app) == "stapel_gdpr" for app in installed):
+            return files, sibling.name
+    return [], None
+
+
+def _installed_app_anchor(
+    settings_files: Iterable[Path], pkg: str, fallback: str
+) -> tuple[str, int]:
+    """Where the project names this app, so the finding points at the line
+    that created the obligation."""
+    needle = canon_dist(pkg)
+    for path in settings_files:
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeDecodeError):
+            continue
+        for lineno, line in enumerate(lines, 1):
+            if needle in line:
+                return str(path), lineno
+    return fallback, 1
+
+
+# ---------------------------------------------------------------------------
 # imports actually present in the project (ADO004)
 # ---------------------------------------------------------------------------
 
@@ -770,6 +1122,100 @@ def lint_project(
                         f"forking the wire contract",
                     ))
                     break
+
+    # ------------------------------------------------------------------ ADO005
+    installed_canon = {canon_dist(a) for a in installed_apps}
+    gdpr_owners = []
+    for pkg in sorted(installed_canon):
+        if not is_stapel_module(pkg):
+            continue
+        decl = read_gdpr_owner(pkg, search_roots)
+        if decl is not None:
+            gdpr_owners.append(decl)
+
+    if gdpr_owners:
+        deploy_files = find_deploy_files(project)
+        host_settings, host_label = find_gdpr_host_settings(
+            project, installed_apps, settings_files
+        )
+        data_owners, host_path = parse_data_owners(host_settings)
+
+        if not deploy_files:
+            notes.append(
+                "stapel-adoption-lint: no compose/deploy file found for this "
+                "service (docker-compose*.yml, or a <svc>.yml next to "
+                "services.conf) — the ADO005 consumer check is skipped"
+            )
+            runs_consumer = True
+        else:
+            runs_consumer = deploy_runs_consume_actions(deploy_files)
+
+        if not host_settings:
+            notes.append(
+                "stapel-adoption-lint: no service in this project or fleet "
+                "installs stapel_gdpr — the ADO005 DATA_OWNERS check is skipped"
+            )
+        elif data_owners is None:
+            notes.append(
+                f"stapel-adoption-lint: STAPEL_GDPR in "
+                f"{host_path or '(settings)'} is not a literal this linter can "
+                f"read — the ADO005 DATA_OWNERS check is skipped"
+            )
+
+        for decl in gdpr_owners:
+            anchor, line = _installed_app_anchor(
+                settings_files, decl.pkg, urlconf_anchor
+            )
+            if not runs_consumer:
+                where = ", ".join(str(p) for p in deploy_files)
+                findings.append(Finding(
+                    anchor, line, "ADO005",
+                    f"'{decl.pkg}' is installed and is a gdpr data owner (it "
+                    f"ships schemas/consumes/gdpr.erasure.requested.json) but "
+                    f"no '{CONSUME_ACTIONS_CMD}' process runs in this service's "
+                    f"deploy ({where}) — its erasure subscriber is never "
+                    f"delivered to, so every erasure request times out on a "
+                    f"silent owner; add a consume_actions service/command to "
+                    f"the compose",
+                ))
+            if data_owners is None:
+                continue
+            if decl.owner is None:
+                notes.append(
+                    f"stapel-adoption-lint: '{decl.pkg}' declares gdpr "
+                    f"participation but its OWNER/GDPR_OWNER constant is not a "
+                    f"literal this linter can read — DATA_OWNERS membership not "
+                    f"checked for it"
+                )
+                continue
+            host_where = str(host_path) if host_path else "the gdpr host settings"
+            if host_label:
+                host_where += f" (service '{host_label}')"
+            if decl.owner not in data_owners:
+                findings.append(Finding(
+                    anchor, line, "ADO005",
+                    f"'{decl.pkg}' is installed and is a gdpr data owner but "
+                    f"'{decl.owner}' is not listed in STAPEL_GDPR"
+                    f"[\"DATA_OWNERS\"] in {host_where} — the orchestrator "
+                    f"creates no part for it, so its data survives an erasure "
+                    f"that reports itself complete; add "
+                    f"\"{decl.owner}\": {list(decl.subject_types) or ['account']}",
+                ))
+                continue
+            missing = [
+                subject for subject in decl.subject_types
+                if subject not in data_owners[decl.owner]
+            ]
+            if missing:
+                findings.append(Finding(
+                    anchor, line, "ADO005",
+                    f"owner '{decl.owner}' ({decl.pkg}) is listed in "
+                    f"STAPEL_GDPR[\"DATA_OWNERS\"] in {host_where} without the "
+                    f"subject type(s) the library claims: "
+                    f"{', '.join(missing)} — an erasure of those subjects "
+                    f"never reaches this owner; declare "
+                    f"\"{decl.owner}\": {list(decl.subject_types)}",
+                ))
 
     # ------------------------------------------------------------------ ADO003
     state = git_branch_state(project)
