@@ -188,6 +188,20 @@ IRONMEMO_FILES = {
     "scripts/env.stand.template": "IMAGE_TAG_AUTH=iron-auth:local\n",
 }
 
+#: the same served/excluded entry location as IRONMEMO_CONF, but as
+#: a client fleet actually ships its route table: a bare `include`d fragment
+#: (`locations.inc`), never a `*.conf` of its own. Before CONF_GLOBS covered
+#: `*.inc` a project shaped like this reported "found no nginx conf" and
+#: FED001/FED005 never ran (found 2026-08-22).
+LOCATIONS_INC_ENTRY = """\
+  location / {
+    root /frontend-react;
+    try_files $uri $uri/ /index.html =404;
+    expires off;
+    add_header Cache-Control "no-cache, must-revalidate" always;
+  }
+"""
+
 
 # ---------------------------------------------------------------------------
 # the incident
@@ -239,6 +253,34 @@ class TestIronmemoIncident:
         target = project(tmp_path, files, dirs=["frontend-react", "frontend-kmp"])
         findings = by_rule(fdl.lint_project(target), "FED001")
         assert findings and all(".gitlab-ci.yml" in f.message for f in findings)
+
+    def test_locations_inc_only_gets_real_coverage(self, tmp_path):
+        """A route table that lives ENTIRELY in `locations.inc` — no `*.conf`
+        anywhere in the tree — must still get FED001. Before CONF_GLOBS
+        covered `*.inc` this project reported "found no nginx conf" and
+        nothing ran."""
+        files = {
+            "service-configs/nginx/locations.inc": LOCATIONS_INC_ENTRY,
+            "docker-compose.base.yml": IRONMEMO_COMPOSE,
+            "scripts/deploy_stand.sh": IRONMEMO_DEPLOY,
+            ".gitlab-ci.yml": IRONMEMO_CI,
+            "scripts/env.stand.template": "IMAGE_TAG_AUTH=iron-auth:local\n",
+        }
+        target = project(tmp_path, files, dirs=["frontend-react"])
+        notes = []
+        findings = by_rule(fdl.lint_project(target, notes=notes), "FED001")
+        assert findings and all("/frontend-react" in f.message for f in findings)
+        assert not any("found no nginx conf" in note for note in notes)
+
+    def test_no_nginx_at_all_is_a_note_not_silence(self, tmp_path):
+        """A project with no nginx conf under ANY of the known layouts
+        (service-configs/nginx*/, nginx/, deploy/nginx/) must say so, not
+        report zero findings and let that read as clean."""
+        target = project(tmp_path, {})
+        notes = []
+        findings = fdl.lint_project(target, notes=notes)
+        assert findings == []
+        assert any("found no nginx conf" in note for note in notes)
 
     def test_the_canon_shape_is_clean(self, tmp_path):
         """§57: a one-shot writer fills a named volume, nginx mounts it ro.

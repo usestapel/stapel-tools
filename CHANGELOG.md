@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+## [0.46.1] — 2026-08-23
+
+### nginx cache/frontend-delivery lints now read `*.inc` route tables
+
+The storefront wave's fleet read found the actual defect: `stapel-nginx-
+cache-lint` and `stapel-frontend-delivery-lint` both globbed only
+`service-configs/nginx*/**/*.conf(.template)`, so a fleet whose whole route
+table lives in an `include`d fragment (a client fleet's
+`service-configs/nginx/locations.inc`, shared verbatim between the plain-HTTP
+and TLS server blocks) got ZERO coverage from either gate — every `location`
+block, and the cache-canon headers on it, went unread. `stapel-verify`
+printed "no issues" having checked nothing.
+
+Both lints' `CONF_GLOBS` now include `*.inc` alongside `*.conf` and
+`*.conf.template`, for every layout each gate already recognized
+(`service-configs/nginx*/`, `nginx/`, and — frontend-delivery-lint only —
+`deploy/nginx/`). The overlapping portion of the two gates' globs, which had
+already drifted apart once (frontend-delivery-lint gained `deploy/nginx/`
+and cache-lint gained the bare `nginx/*.conf` meettoday fix, each without
+the other), is now one constant: `frontend_delivery_lint.CONF_GLOBS` is
+`nginx_cache_lint.CONF_GLOBS` extended with the `deploy/nginx/` patterns,
+instead of a second hand-maintained copy.
+
+Verified read-only against a real client fleet checkout: `locations.inc`
+and `proxy-headers.inc` are now discovered (previously only `nginx.conf`
+was), 17 `location` blocks in `locations.inc` are now parsed and checked by
+`stapel-nginx-cache-lint` (previously 0) — the fleet's cache canon is
+compliant, so the finding count is 0 both before and after, but the "0" now
+means read-and-clean rather than never-read.
+
 ## [0.46.0] — 2026-08-23
 
 ### ADO005 — an installed gdpr data owner that cannot answer an erasure

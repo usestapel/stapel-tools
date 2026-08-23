@@ -812,8 +812,10 @@ def lint_conf(path: Path, src: Optional[str] = None) -> list[Finding]:
 CONF_GLOBS = (
     "service-configs/nginx*/**/*.conf",
     "service-configs/nginx*/**/*.conf.template",
+    "service-configs/nginx*/**/*.inc",
     "service-configs/nginx*/*.conf",
     "service-configs/nginx*/*.conf.template",
+    "service-configs/nginx*/*.inc",
     # meettoday keeps its confs in a plain `nginx/` directory, not the
     # scaffold's `service-configs/nginx/`. Until this line existed, this gate
     # had NEVER checked meettoday: it reported "no nginx conf found" and the
@@ -824,8 +826,18 @@ CONF_GLOBS = (
     # gates disagreed about where a project's nginx lives.)
     "nginx/**/*.conf",
     "nginx/**/*.conf.template",
+    "nginx/**/*.inc",
     "nginx/*.conf",
     "nginx/*.conf.template",
+    "nginx/*.inc",
+    # a fleet can also split its route table out of the top-level conf into
+    # an `include`d fragment (`locations.inc`, `proxy-headers.inc`, ...). A
+    # conf-only glob never sees that file, so every NGX rule that walks
+    # `location` blocks silently checks zero of them and `stapel-verify`
+    # prints "no issues" having read nothing — a gate that is green because
+    # it is blind, not because the fleet is clean. (Found 2026-08-22 on a
+    # client fleet whose entire cache/route table lives in
+    # service-configs/nginx/locations.inc.)
 )
 
 

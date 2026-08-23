@@ -158,6 +158,7 @@ from typing import Iterable, Optional
 # location classifiers and the noqa machinery are the ones stapel-nginx-cache-
 # lint already runs over these same confs. Two parsers over one conf language
 # is exactly how two gates end up disagreeing about what the conf says.
+from . import nginx_cache_lint as _nginx_cache_lint
 from .nginx_cache_lint import (
     Block,
     Directive,
@@ -509,14 +510,17 @@ def load_compose(path: Path) -> ComposeFile:
 # ---------------------------------------------------------------------------
 
 #: both layouts a stapel project uses for its nginx confs: the microservice
-#: `service-configs/nginx*/` tree and the monolith `nginx/` tree.
-CONF_GLOBS = (
-    "service-configs/nginx*/**/*.conf",
-    "service-configs/nginx*/**/*.conf.template",
-    "nginx/**/*.conf",
-    "nginx/**/*.conf.template",
+#: `service-configs/nginx*/` tree and the monolith `nginx/` tree. The
+#: service-configs/nginx*/ and nginx/ portion is NOT re-declared here — it
+#: was a byte-for-byte duplicate of stapel-nginx-cache-lint's CONF_GLOBS
+#: (including the same *.conf/*.conf.template/*.inc split), which is how the
+#: two gates drifted apart before: this lint added `deploy/nginx/` and the
+#: sibling added `*.inc` for locations.inc-style includes, each without the
+#: other. One constant, extended with this lint's `deploy/nginx/` layout.
+CONF_GLOBS = _nginx_cache_lint.CONF_GLOBS + (
     "deploy/nginx/**/*.conf",
     "deploy/nginx/**/*.conf.template",
+    "deploy/nginx/**/*.inc",
 )
 
 COMPOSE_GLOBS = ("docker-compose*.yml", "docker-compose*.yaml", "compose*.yml", "compose*.yaml")

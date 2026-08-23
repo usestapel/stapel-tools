@@ -66,6 +66,28 @@ server {
 }
 """
 
+#: the same defect, but as a client fleet actually ships it: a bare fragment
+#: (`service-configs/nginx/locations.inc`) `include`d from inside a
+#: `server { ... }` block, never itself wrapped in one and never matching
+#: `*.conf` — the shape that let the fleet's whole route table go unread by
+#: this gate (found 2026-08-22).
+LOCATIONS_INC_BROKEN = """\
+  # React frontend - main site at root
+  location / {
+    root /frontend-react;
+    try_files $uri $uri/ /index.html =404;
+    expires 1d;
+    add_header Cache-Control "public, must-revalidate";
+  }
+
+  # React static assets
+  location ~* ^/(static|assets)/.*\\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+    root /frontend-react;
+    expires 30d;
+    add_header Cache-Control "public, immutable";
+  }
+"""
+
 #: the canon the scaffold now emits — must be entirely clean
 CANON = """\
 server {
@@ -514,6 +536,20 @@ class TestProjectAndCLI:
         notes = []
         assert ncl.lint_project(tmp_path, notes=notes) == []
         assert notes and "no nginx conf found" in notes[0]
+
+    def test_locations_inc_only_gets_real_coverage(self, tmp_path):
+        """A client fleet's whole route table lives in `locations.inc`, never a
+        `*.conf`. Before CONF_GLOBS included `*.inc` this project reported
+        "no nginx conf found" — a gate that read nothing and called it clean.
+        Drop ONLY the fragment (no sibling `*.conf` at all) and require the
+        real defect it carries to fire."""
+        conf_dir = tmp_path / "service-configs" / "nginx"
+        conf_dir.mkdir(parents=True)
+        (conf_dir / "locations.inc").write_text(LOCATIONS_INC_BROKEN)
+        notes = []
+        findings = ncl.lint_project(tmp_path, notes=notes)
+        assert _rules(findings) == ["NGX001", "NGX003"]
+        assert notes == []
 
     def test_cli_exit_1_on_the_defect(self, tmp_path, capsys):
         _write_project(tmp_path, IRONMEMO_BROKEN)
