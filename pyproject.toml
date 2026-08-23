@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.44.0"
+version = "0.45.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -67,6 +67,15 @@ stapel-storefront = "stapel_tools.storefront:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["stapel_tools*"]
+
+[tool.pytest.ini_options]
+markers = [
+    # The integration gate in tests/test_public_surface.py: it installs a real
+    # npm tree and runs tsc/vite/eslint over the generated container. Opt-in
+    # via STAPEL_SLOW_TESTS=1 (it needs network and minutes), selectable with
+    # `-m slow`.
+    "slow: needs network and minutes; opt in with STAPEL_SLOW_TESTS=1",
+]
 
 [tool.ruff]
 line-length = 100

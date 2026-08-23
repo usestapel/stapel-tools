@@ -2,6 +2,123 @@
 
 ## [Unreleased]
 
+## [0.45.0] — 2026-08-23
+
+### A public storefront container is now generated, not written by hand
+
+`stapel-frontend-repo-init --surface public --pairs <csv>` writes the SOURCE
+half of a split-repo frontend, next to the delivery half it already wrote.
+Before this, a microservice fleet's frontend repository got a Dockerfile, a
+publish script and a CI job — and not one line of React — so the container
+(providers, route tree, access gate, nav resolution) was hand-written per
+product, and every copy drifted from the pairs it mounted.
+
+What it emits, and what each piece is FOR:
+
+* `src/modules.tsx` — one runtime, one provider and one catalogue per pair,
+  `baseUrl` `/<key>/api/v1/`, a single `<StapelProvider>` carrying every
+  client. It reads an L0 pair (no client, no provider — `@stapel/attributes-react`,
+  whose backend has no HTTP surface at all) off the registry's shape rather
+  than off a flag someone has to set.
+* `src/mandateSource.ts` — this container's `MandateSource`, so the mandate
+  axis works without `@stapel/workspaces-react` (mounting the multi-tenant
+  metaphor inside an anonymous marketplace to answer one boolean). Every arm
+  of `MandateState` is produced by a named branch, and the arm that is NOT
+  produced — `"guest"`, a principal a storefront has no way to be — says so in
+  writing, because a reader has to tell "impossible here" from "forgotten".
+* `src/nav.generated.ts` — the installed manifests plus the container's own
+  `account.root`, resolved through `resolvePublicNav`/`resolveMemberNav`.
+  Never `resolveNav(…, {audience})`: the option is optional and its default
+  does not filter, so a container that forgets it mounts every member screen
+  and every one of them answers 403.
+* `src/routes.tsx` — `<PublicShell/>` as the layout route, public routes as
+  siblings, `/account` and the absolute member routes inside `<MemberGate/>`.
+* `src/MemberGate.tsx` — `matchMandate`'s five arms, each rendering something
+  DIFFERENT and none of them nothing: `<Outlet/>`, `/login?next=`, a skeleton
+  for the wait, and an explained error with a retry for the outage. An outage
+  deliberately does not redirect to sign-in — bouncing someone to a login form
+  because a backend hiccuped tells them they are logged out when they are not.
+* `stapel.theme.json` + `gen:tokens`, `stapel.nav.json`, `reserved-paths.json`
+  (never a bare module root — `location /listings` is a prefix match, and a
+  bare rule makes a listing page answer JSON), `vite.config.ts` with the
+  fleet's sub-surface proxy table, `eslint.config.js` that actually POINTS the
+  two data-driven guardrails at data, and the dist-carrier delivery half.
+
+**A declared screen the generator cannot honestly mount gets a page that NAMES
+the absence** — the entry id, the component, the package and the exact prop
+names — never a broken mount and never silence. Two things trigger it today:
+a cross-pair slot (`ListingComposerPage` needs the chosen category's feature
+schema, which lives in another pair; passing `[]` would not read as "not wired
+yet", it would read as "this category has no attributes"), and a deployment
+fact the generator was not told (`--doc-type`, the search doc type — a guessed
+one sends every search to a type the backend refuses, from a page that looks
+perfectly wired).
+
+`--realtime` is a documented switch, not a silent one: there is no
+`@stapel/realtime` package (stapel-realtime is a Python library; its browser
+half is not built), so the flag turns on `@stapel/chat-react`'s OWN socket
+transport and the generated README says exactly that. Without it the chat
+runtime is given `realtime: { socketUrl: null }` — the WSGI answer, stated
+rather than discovered.
+
+### `stapel-new-react-lib` enrolls a pair in the nav contract from its first commit
+
+The scaffold now writes `src/nav/manifest.ts` and `nav-manifest.json`, and
+enrolls the pair in the root `gen:nav`/`gen:nav:check` aggregates —
+`NAV_PACKAGES` and the enrollment are the same list, because the driver
+rebuilds the monorepo's root aggregate on every run. Appending an invocation
+while leaving the existing lists alone would make the aggregate depend on
+which invocation ran last.
+
+The entry list starts EMPTY, and that is the honest shape: a fresh pair ships
+no `./default` subpath, so any entry would name a component that resolves at
+the CONTAINER's import — two repositories from the mistake. The emitted JSON
+is byte-identical to what `gen-nav-manifest.mjs` writes, so a freshly
+scaffolded pair is already green under `pnpm gen:nav:check`; a scaffold whose
+first act is to redden a gate is one everyone learns to run with the gate off.
+
+### The nav-manifest drift gate was wired into nothing, and now is
+
+`scripts/check_nav_manifest_sync.py` has been in this repo since the
+scripted-navigation wave with no Makefile, no CI step and no hook calling it.
+The mirror it guards had drifted accordingly: `@stapel/auth-react` pinned at
+0.10.1 against a published 0.16.0, with `auth.qr_confirm` missing from the
+mirror entirely — and every scaffolded project inherited the stale menu.
+
+* `make check` (new `Makefile`) and a CI step now run it; it reads the sibling
+  checkout through `$SIBLING_ROOT`, the same convention the generated `gen:*`
+  invocations already spell as `${SIBLING_ROOT:-..}`.
+* A registered pair whose real `nav-manifest.json` is MISSING is now a
+  failure. It used to be a silent skip, which is the exact shape of the bug
+  the gate exists for.
+
+### `FRONTEND_REACT_LIBS` re-pinned against the live registry, and seven pairs added
+
+`attributes`, `categories`, `cdn`, `chat`, `listings`, `reviews`, `search` join
+the registry with their pinned minors and their nav mirrors; `auth` 0.10.1 →
+0.16.0 (plus the `auth.qr_confirm` entry), `profiles` 0.12.0 → 0.18.2,
+`notifications` 0.6.0 → 0.9.1, `billing`/`calendar`/`recordings`/`workspaces`
+to their published minors, `@stapel/core` 0.11.0 → 0.15.0 (the mandate seam
+and the repeated-query-key encoder the wave-4 pairs bind), `@stapel/shell-react`
+0.2.0 → 0.5.0 (the minor that ships `PublicShell`; it is also published now,
+so the ahead-of-npm note is gone), antd 6.6.1, tokens-antd 0.5.0,
+react-router 7.18.2.
+
+Consequences inside the monolith scaffold, both of which were latent bugs the
+moment those pairs became registrable:
+
+* an L0 pair no longer `KeyError`s the module registry — it contributes a
+  catalogue and nothing else;
+* the `cdn: <other>Runtime.client` stopgap (from the months when no
+  `@stapel/cdn-react` existed) is not emitted when the real pair is selected,
+  where it would have shadowed the real client with a borrowed one.
+
+`NAV_ENTRY_MOUNTS` (`_frontend_templates`) is the one table saying how each
+declared screen is mounted, read off the components' own prop interfaces; a
+test asserts it covers every registered nav entry, so a new screen arrives as
+a failing test rather than as a page saying "this build does not know about
+me".
+
 ## [0.44.0] — 2026-08-22
 
 ### New gate: `stapel-exposure-lint` — a private client name must not reach a public tree
