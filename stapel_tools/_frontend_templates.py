@@ -1298,6 +1298,11 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
         "option_props": {"defaultType": "doc_type"},
     },
     "search.ranking": {},
+    # gdpr-react 0.1.0 — PrivacyPane/PrivacyAdminPane: every prop optional.
+    "account.privacy": {},
+    "admin.privacy": {},
+    # video-react 0.1.0 — ScopeUsagePane: every prop optional.
+    "admin.usage": {},
     # the container's own.
     "account.root": {"local": "AccountHome"},
 }

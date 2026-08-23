@@ -817,10 +817,15 @@ class TestFrontendReactWiring:
     def test_only_non_react_paired_libs_produce_the_prior_clean_shell(self, tmp_path):
         """Regression: a selection with zero react-paired modules must not
         gain modules.tsx, must not switch App.tsx templates, and
-        package.json's dependencies stay exactly {react, react-dom}."""
+        package.json's dependencies stay exactly {react, react-dom}.
+
+        This test used to use "gdpr", which was the same shape until
+        `@stapel/gdpr-react` shipped and FRONTEND_REACT_LIBS registered it —
+        the subject moved to "currencies", still genuinely pairless with an
+        empty `requires` list (so nothing it pulls in is paired either)."""
         import json
 
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "gdpr", "translate"])
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "currencies", "translate"])
         frontend = proj / "frontend"
         assert not (frontend / "src" / "modules.tsx").exists()
         app_tsx = (frontend / "src" / "App.tsx").read_text()
@@ -922,11 +927,16 @@ class TestFrontendNavWiring:
         test): no --auth, no --landing, no selected pair with nav entries
         -> App.tsx/main.tsx are the EXACT prior clean-shell output, and no
         routing artifact (routes.tsx/nav.generated.ts/ProtectedRoute.tsx/
-        stapel.nav.json/LandingPage.tsx) exists at all."""
+        stapel.nav.json/LandingPage.tsx) exists at all.
+
+        Uses "currencies" rather than "gdpr" for the same reason as
+        TestFrontendReactWiring's sibling regression test above: "gdpr" is
+        now react-paired (FRONTEND_REACT_LIBS), so it no longer fits a test
+        about the NO-nav-pair shell."""
         import stapel_tools._frontend_templates as F
         from stapel_tools._compose_templates import render_tokens
 
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "gdpr", "translate"])
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "currencies", "translate"])
         frontend = proj / "frontend"
         app_tsx = (frontend / "src" / "App.tsx").read_text()
         expected_app_tsx = render_tokens(F.APP_TSX, {"SLUG": "app", "TITLE": "App"})

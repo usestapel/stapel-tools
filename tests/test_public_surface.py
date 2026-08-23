@@ -332,8 +332,8 @@ class TestProjectFiles:
         for key in STOREFRONT_PAIRS:
             info = FRONTEND_REACT_LIBS[key]
             assert deps[info["package"]] == f'^{info["version"]}'
-        assert deps["@stapel/shell-react"].startswith("^0.5.")
-        assert deps["@stapel/core"].startswith("^0.15.")
+        assert deps["@stapel/shell-react"].startswith("^0.6.")
+        assert deps["@stapel/core"].startswith("^0.17.")
         assert deps["react-router"].startswith("^7.")
 
     def test_vite_proxy_never_claims_a_bare_module_root(self):

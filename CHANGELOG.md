@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-08-23
+
+### Nav mirror drift closed, gdpr-react and video-react registered
+
+`tests/test_nav_manifest_sync.py::test_the_live_mirror_is_in_sync` had gone
+red: `create_project.FRONTEND_REACT_LIBS` pinned nine published pairs behind
+the wave that actually shipped. Every pin now matches the live npm registry
+— billing 0.7.1→0.8.0, categories/chat/listings/reviews 0.2.0→0.3.1,
+cdn/search 0.2.0→0.3.0, `FRONTEND_SHELL_REACT_VERSION` 0.5.0→0.6.0,
+`FRONTEND_REACT_CORE_DEPS["@stapel/core"]` 0.15.0→0.17.0, and
+`FRONTEND_IMAGE_VERSION` 0.2.0→0.3.0 (auth, attributes, calendar,
+notifications, profiles, recordings and workspaces were already current).
+
+Two new pairs join the registry, each with its nav mirror copied
+byte-exact from the sibling `stapel-react` checkout's `nav-manifest.json`:
+`gdpr-react` 0.1.0 (`account.privacy` under the member account menu,
+`admin.privacy` under the admin menu) and `video-react` 0.1.0
+(`admin.usage`, call-metering usage under the admin menu). Their `default`
+components (`PrivacyPane`, `PrivacyAdminPane`, `ScopeUsagePane`) take no
+required props, so each gets an empty `NAV_ENTRY_MOUNTS` recipe alongside
+the other zero-prop screens.
+
+Registering gdpr as a react-paired module retired the two frontend-scaffold
+regression tests that used it as their "genuinely pairless" example
+(`test_only_non_react_paired_libs_produce_the_prior_clean_shell`,
+`test_no_flags_no_nav_module_scaffold_is_byte_identical_to_app_tsx`) —
+both now use `currencies`, which still has an empty `requires` list and no
+published react pair, matching the precedent already set when
+`attributes-react` shipped and the pairless-lib test moved to `vault`.
+
 ## [0.46.1] — 2026-08-23
 
 ### nginx cache/frontend-delivery lints now read `*.inc` route tables

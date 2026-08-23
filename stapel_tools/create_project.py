@@ -400,8 +400,8 @@ STAPEL_LIBS = {
 # pairs (stapel-react/packages/*-react), keyed by the SAME STAPEL_LIBS key so
 # a project's `--modules` selection drives BOTH sides by construction. Only
 # modules with an actual published pair are listed here; any other selected
-# lib (e.g. "gdpr", "tasks") scaffolds a plain frontend with zero wiring —
-# see `_write_frontend_scaffold`.
+# lib (e.g. "currencies", "tasks") scaffolds a plain frontend with zero
+# wiring — see `_write_frontend_scaffold`.
 #
 # ONE key here has no STAPEL_LIBS entry: "search". `@stapel/search-react` is
 # published and carries a nav manifest, but stapel-search is not in this
@@ -515,7 +515,7 @@ FRONTEND_REACT_LIBS = {
     },
     "billing": {
         "package": "@stapel/billing-react",
-        "version": "0.7.1",
+        "version": "0.8.0",
         "provider": "BillingProvider",
         "create_runtime": "createBillingRuntime",
         "register_i18n": "registerBillingI18n",
@@ -529,7 +529,7 @@ FRONTEND_REACT_LIBS = {
     },
     "categories": {
         "package": "@stapel/categories-react",
-        "version": "0.2.0",
+        "version": "0.3.1",
         "provider": "CategoriesProvider",
         "create_runtime": "createCategoriesRuntime",
         "register_i18n": "registerCategoriesI18n",
@@ -566,14 +566,14 @@ FRONTEND_REACT_LIBS = {
         # menu item leading nowhere would be worse than its absence
         # (storefront spec §13.6 item 8).
         "package": "@stapel/cdn-react",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "provider": "CdnProvider",
         "create_runtime": "createCdnRuntime",
         "register_i18n": "registerCdnI18n",
     },
     "chat": {
         "package": "@stapel/chat-react",
-        "version": "0.2.0",
+        "version": "0.3.1",
         "provider": "ChatProvider",
         "create_runtime": "createChatRuntime",
         "register_i18n": "registerChatI18n",
@@ -592,9 +592,42 @@ FRONTEND_REACT_LIBS = {
             },
         ],
     },
+    "gdpr": {
+        "package": "@stapel/gdpr-react",
+        "version": "0.1.0",
+        "provider": "GdprProvider",
+        "create_runtime": "createGdprRuntime",
+        "register_i18n": "registerGdprI18n",
+        "nav": [
+            {
+                "id": "account.privacy",
+                "labelKey": "gdpr.privacy.heading",
+                "icon": "SafetyCertificateOutlined",
+                "route": {"path": "privacy"},
+                "component": {"export": "PrivacyPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 90,
+            },
+            {
+                "id": "admin.privacy",
+                "labelKey": "gdpr.admin.heading",
+                "icon": "AuditOutlined",
+                "route": {"path": "privacy"},
+                "component": {"export": "PrivacyAdminPane", "subpath": "default/admin"},
+                "placement": {"level": "submenu", "parentId": "admin.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 40,
+            },
+        ],
+    },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.2.0",
+        "version": "0.3.1",
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -702,7 +735,7 @@ FRONTEND_REACT_LIBS = {
         # No nav manifest either — reviews render inside a listing page and a
         # seller page, never on a route of their own (§13.8 item 11).
         "package": "@stapel/reviews-react",
-        "version": "0.2.0",
+        "version": "0.3.1",
         "provider": "ReviewsProvider",
         "create_runtime": "createReviewsRuntime",
         "register_i18n": "registerReviewsI18n",
@@ -710,7 +743,7 @@ FRONTEND_REACT_LIBS = {
     "search": {
         # No STAPEL_LIBS entry — see the dict docstring.
         "package": "@stapel/search-react",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "provider": "SearchProvider",
         "create_runtime": "createSearchRuntime",
         "register_i18n": "registerSearchI18n",
@@ -741,6 +774,27 @@ FRONTEND_REACT_LIBS = {
             },
         ],
     },
+    "video": {
+        "package": "@stapel/video-react",
+        "version": "0.1.0",
+        "provider": "VideoProvider",
+        "create_runtime": "createVideoRuntime",
+        "register_i18n": "registerVideoI18n",
+        "nav": [
+            {
+                "id": "admin.usage",
+                "labelKey": "video.usage.heading",
+                "icon": "ClockCircleOutlined",
+                "route": {"path": "usage"},
+                "component": {"export": "ScopeUsagePane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "admin.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 30,
+            },
+        ],
+    },
     "workspaces": {
         "package": "@stapel/workspaces-react",
         "version": "0.17.0",
@@ -763,7 +817,7 @@ FRONTEND_REACT_CORE_DEPS = {
     # as `>=0.3.0 <1.0.0` does not catch either — npm installs happily and
     # the generated frontend fails at BUILD time on a missing export, or
     # worse, at RUNTIME on a silently dropped filter.
-    "@stapel/core": "0.15.0",
+    "@stapel/core": "0.17.0",
     "@tanstack/react-query": "5.102.0",
 }
 # Only pulled in when >=1 selected module's registry entry has
@@ -800,13 +854,13 @@ FRONTEND_ROUTER_DEPS = {
 # project with routing active but no nav-bearing module (e.g. `--landing`
 # alone never needs the shell).
 FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
-FRONTEND_SHELL_REACT_VERSION = "0.5.0"
+FRONTEND_SHELL_REACT_VERSION = "0.6.0"
 
 # The source-agnostic image renderer — added whenever a media source is wired
 # (cdn, or a profiles avatar), so <Image meta={...image}> can render the
 # StapelImage descriptor the backend denormalizes (AGENTS.md §7).
 FRONTEND_IMAGE_PACKAGE = "@stapel/image"
-FRONTEND_IMAGE_VERSION = "0.2.0"
+FRONTEND_IMAGE_VERSION = "0.3.0"
 
 
 # Broker per project type: minimal never gets one, microservices requires one
