@@ -35,6 +35,28 @@ jobs:
           pip install ruff --quiet
           ruff check . --select E,F,W --ignore E501
 
+      # The nav-manifest mirror gate (spec §3.8). FRONTEND_REACT_LIBS[key]
+      # ["nav"] is a hand-pinned copy of each pair's own nav-manifest.json,
+      # and until this step existed the script that checks it was wired into
+      # nothing: the mirror drifted five minors of auth-react without a word,
+      # and every scaffolded project inherited the stale menu. It needs the
+      # sibling stapel-react checkout, so it is fetched here and SIBLING_ROOT
+      # points at the directory holding both — the same `${SIBLING_ROOT:-..}`
+      # convention the generated gen:* invocations use. The script SKIPS with
+      # exit 0 when that checkout is absent, so a fork without access to it
+      # is not blocked; on this repo the checkout is always there, which is
+      # what makes the gate real here.
+      - name: Fetch the sibling stapel-react checkout
+        uses: actions/checkout@v4
+        with:
+          repository: usestapel/stapel-react
+          path: siblings/stapel-react
+
+      - name: Nav-manifest mirror is in sync with the real pairs
+        env:
+          SIBLING_ROOT: ${{ github.workspace }}/siblings
+        run: python scripts/check_nav_manifest_sync.py
+
       - name: Tests with coverage
         run: |
           pip install pytest pytest-cov pytest-django "django<6.1" djangorestframework "psycopg[binary]" "stapel-core @ git+https://github.com/usestapel/stapel-core.git" "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" --quiet
