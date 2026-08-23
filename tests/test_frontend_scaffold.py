@@ -831,15 +831,21 @@ class TestFrontendReactWiring:
         assert pkg["dependencies"] == {"react": "^19.1.0", "react-dom": "^19.1.0"}
 
     def test_headless_lib_with_no_react_pair_scaffolds_with_zero_frontend_wiring(self, tmp_path):
-        """attributes (http=False, no @stapel/attributes-react package
-        exists) must not appear anywhere in the frontend wiring surface."""
+        """vault (http=False, no @stapel/vault-react package exists) must not
+        appear anywhere in the frontend wiring surface.
+
+        This test used to use `attributes`, which was the same shape until
+        `@stapel/attributes-react` shipped — the pair now exists, so the
+        subject moved to a lib that is still genuinely pairless. That IS the
+        maintenance this test asks for; the invariant it guards (a lib with no
+        pair contributes nothing to the frontend) has not moved."""
         import json
 
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "attributes", "billing"])
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "vault", "billing"])
         pkg = json.loads((proj / "frontend" / "package.json").read_text())
-        assert not any("attributes" in dep for dep in pkg["dependencies"])
+        assert not any("vault" in dep for dep in pkg["dependencies"])
         modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
-        assert "attributes" not in modules_tsx.lower()
+        assert "vault" not in modules_tsx.lower()
 
 
 class TestFrontendNavWiring:
@@ -1054,7 +1060,7 @@ class TestFrontendNavWiring:
 
         proj = _create(tmp_path, "app", "monolith", modules=["core"], want_landing=True)
         pkg = json.loads((proj / "frontend" / "package.json").read_text())
-        assert pkg["dependencies"]["react-router"] == "^7.18.1"
+        assert pkg["dependencies"]["react-router"] == "^7.18.2"
         assert not pkg["dependencies"]["react-router"].startswith("^8")
 
 
@@ -1103,10 +1109,35 @@ class TestCdnFrontendAutoWiring:
     here as this feature's own numeric gate, not because they needed new
     code."""
 
-    def test_cdn_client_registered_in_modules_provider(self, tmp_path):
+    def test_cdn_client_is_the_real_pair_now_that_one_exists(self, tmp_path):
+        """`@stapel/cdn-react` 0.2.0 exists, so selecting the cdn backend
+        wires the REAL pair — its own runtime and its own client under the
+        `cdn` key. The old stopgap (`cdn: <other>Runtime.client`, from the
+        months when no pair existed) must NOT also be emitted: it would
+        shadow the real client with a borrowed one."""
         proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles", "cdn"])
         modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
-        assert "cdn: profilesRuntime.client," in modules_tsx
+        assert 'createCdnRuntime({ baseUrl: "/cdn/api/v1/" })' in modules_tsx
+        assert "<CdnProvider runtime={cdnRuntime}>" in modules_tsx
+        # The borrowed client is gone.
+        assert "cdn: profilesRuntime.client," not in modules_tsx
+        # Registry order makes cdn the provider's DEFAULT client here, and
+        # `useStapelClient("cdn")` falls through to the default when no
+        # per-module override is present (core config.tsx:55-62) — so the seam
+        # resolves to the real cdn client either way.
+        assert "client={cdnRuntime.client}" in modules_tsx
+
+    def test_l0_pair_contributes_a_catalogue_and_no_provider(self, tmp_path):
+        """`@stapel/attributes-react` is L0 — stapel-attributes has no HTTP
+        surface at all, so the pair ships no client, no queries and no
+        provider. The registry says so by carrying no `create_runtime`, and
+        the generated registry must read that rather than crash on it (it
+        used to `KeyError` the moment such a pair was registered)."""
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "attributes", "profiles"])
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert "registerAttributesI18n(i18n);" in modules_tsx
+        assert "attributesRuntime" not in modules_tsx
+        assert "AttributesProvider" not in modules_tsx
 
     def test_avatar_url_for_helper_written_and_wired_into_profile_settings(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles", "cdn"])
@@ -1122,14 +1153,16 @@ class TestCdnFrontendAutoWiring:
         assert 'import { avatarUrlFor } from "./lib/cdn.js";' in routes
         assert "<ProfileSettings avatarUrlFor={avatarUrlFor} />" in routes
 
-    def test_cdn_without_profiles_registers_client_but_no_avatar_helper(self, tmp_path):
+    def test_cdn_without_profiles_wires_the_pair_but_no_avatar_helper(self, tmp_path):
         """cdn selected alongside a react-paired module OTHER than profiles:
-        the stopgap client still registers (any future consumer can call
-        useStapelClient("cdn")), but there is no ProfileSettings to wire an
+        the cdn pair wires normally (any consumer can call
+        `useStapelClient("cdn")`), but there is no ProfileSettings to wire an
         avatarUrlFor prop into, so lib/cdn.ts is never written."""
         proj = _create(tmp_path, "app", "monolith", modules=["core", "billing", "cdn"])
         modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
-        assert "cdn: billingRuntime.client," in modules_tsx
+        assert 'createCdnRuntime({ baseUrl: "/cdn/api/v1/" })' in modules_tsx
+        assert "<CdnProvider runtime={cdnRuntime}>" in modules_tsx
+        assert "cdn: billingRuntime.client," not in modules_tsx
         assert not (proj / "frontend" / "src" / "lib" / "cdn.ts").exists()
 
     def test_stapel_image_dep_added_when_media_wired(self, tmp_path):

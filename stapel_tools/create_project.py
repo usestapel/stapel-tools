@@ -403,9 +403,18 @@ STAPEL_LIBS = {
 # lib (e.g. "gdpr", "tasks") scaffolds a plain frontend with zero wiring —
 # see `_write_frontend_scaffold`.
 #
-# Pins verified 2026-07-19 against BOTH the sibling stapel-react checkout's
+# ONE key here has no STAPEL_LIBS entry: "search". `@stapel/search-react` is
+# published and carries a nav manifest, but stapel-search is not in this
+# file's backend registry, so a monolith cannot select it and the filter in
+# `_frontend_react_entries` never sees it. It is listed anyway because this
+# dict is ALSO the pair registry `stapel-frontend-repo-init --surface public`
+# reads (a storefront names its pairs directly, not through a lib selection),
+# and because the nav mirror below is what the drift gate checks. Splitting it
+# into a second registry would mean two places to pin one package.
+#
+# Pins verified 2026-08-23 against BOTH the sibling stapel-react checkout's
 # `packages/<key>-react/package.json` `version` AND the live
-# `npm view @stapel/<key>-react version` (identical for all seven — the
+# `npm view @stapel/<key>-react version` (identical for every entry — the
 # workspace checkout is not ahead of its own last publish for these
 # packages). `@stapel/core`/`@tanstack/react-query`/`antd`/
 # `@stapel/tokens-antd` pins come from the live npm registry (the ACTUAL
@@ -416,11 +425,17 @@ STAPEL_LIBS = {
 #
 # Every pair's `create<Module>Runtime` takes the SAME generic
 # `CreateModuleRuntimeOptions` shape from `@stapel/core` (just `baseUrl` —
-# confirmed by reading each pair's `src/model/runtime.ts`) EXCEPT auth's,
-# which accepts extra optional session-lifecycle callbacks the generated
-# scaffold deliberately leaves unset (no invented routes) — so the
-# `baseUrl: "/<key>/api/v1/"` call shape below is uniform across all seven,
-# never module-specific codegen.
+# confirmed by reading each pair's `src/model/runtime.ts`; chat/listings/
+# reviews/cdn add OPTIONAL fields on top, and the scaffold leaves them unset
+# except where a flag says otherwise) EXCEPT auth's, which accepts extra
+# optional session-lifecycle callbacks the generated scaffold deliberately
+# leaves unset (no invented routes) — so the `baseUrl: "/<key>/api/v1/"` call
+# shape below is uniform, never module-specific codegen.
+#
+# `attributes` is the one L0 pair: `@stapel/attributes-react` has no client,
+# no queries and no backend HTTP surface at all (stapel-attributes is a
+# library, not a service), so it carries NO `provider`/`create_runtime` — only
+# `register_i18n`. `render_modules_tsx` reads the absence rather than a flag.
 #
 # `default_component` names the ONE headless pair's `./default` (antd skin)
 # export that is genuinely mountable with **zero required props** (read off
@@ -432,23 +447,28 @@ STAPEL_LIBS = {
 # `workspaceId`) are wired provider-only, same as pairs with no `/default`
 # subpath at all (billing, calendar, recordings — genuinely headless, no
 # antd peer dep). Absent key = no default component to mount.
+#
+# `nav` is a MANUALLY PINNED MIRROR of that pair's own `nav-manifest.json`
+# (the same discipline as the version pins). Drift between mirror and real
+# file is caught by `scripts/check_nav_manifest_sync.py` — wired into
+# `make check` and CI, never left to a reader. WHICH nav entries a generator
+# can actually MOUNT is a separate question, answered once in
+# `_frontend_templates.NAV_ENTRY_MOUNTS`; an entry whose component needs a
+# prop generation cannot fabricate gets a placeholder page that NAMES the
+# absence, never a broken mount and never silence.
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.10.1",
+        "version": "0.16.0",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
         "default_component": "AuthPanel",
-        # Scripted-fullstack navigation (P1) — a MANUALLY PINNED MIRROR of
-        # this pair's own `nav-manifest.json` (verified 2026-07-20 against
-        # the sibling stapel-react checkout's
-        # packages/auth-react/nav-manifest.json — not yet on npm, see the
-        # FRONTEND_SHELL_REACT_VERSION comment below). Drift between this
-        # mirror and the real file is caught by
-        # scripts/check_nav_manifest_sync.py, never silently. auth.login is
-        # `menuVisibleDefault: false` (a sign-in screen is never a menu
-        # tab); auth.security nests under profiles.settings (dropped by
+        # auth.login is `menuVisibleDefault: false` (a sign-in screen is never
+        # a menu tab); auth.qr_confirm declares `surface: "public"` while
+        # ALSO requiring auth — the fleet's first entry proving the two axes
+        # are independent (a signed-in phone confirms a signed-out desktop);
+        # auth.security nests under profiles.settings (dropped by
         # resolveNav's own orphan rule when profiles isn't installed).
         "nav": [
             {
@@ -463,6 +483,18 @@ FRONTEND_REACT_LIBS = {
                 "order": 0,
             },
             {
+                "id": "auth.qr_confirm",
+                "labelKey": "auth.nav.qr_confirm",
+                "icon": "QrcodeOutlined",
+                "route": {"path": "/qr-confirm"},
+                "component": {"export": "QrConfirmPanel", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": True,
+                "surface": "public",
+                "order": 1,
+            },
+            {
                 "id": "auth.security",
                 "labelKey": "auth.nav.security",
                 "icon": "SafetyCertificateOutlined",
@@ -475,30 +507,155 @@ FRONTEND_REACT_LIBS = {
             },
         ],
     },
+    "attributes": {
+        # L0 — no client, no provider, no runtime. See the dict docstring.
+        "package": "@stapel/attributes-react",
+        "version": "0.2.0",
+        "register_i18n": "registerAttributesI18n",
+    },
     "billing": {
         "package": "@stapel/billing-react",
-        "version": "0.5.0",
+        "version": "0.7.1",
         "provider": "BillingProvider",
         "create_runtime": "createBillingRuntime",
         "register_i18n": "registerBillingI18n",
     },
     "calendar": {
         "package": "@stapel/calendar-react",
-        "version": "0.5.0",
+        "version": "0.6.1",
         "provider": "CalendarProvider",
         "create_runtime": "createCalendarRuntime",
         "register_i18n": "registerCalendarI18n",
     },
+    "categories": {
+        "package": "@stapel/categories-react",
+        "version": "0.2.0",
+        "provider": "CategoriesProvider",
+        "create_runtime": "createCategoriesRuntime",
+        "register_i18n": "registerCategoriesI18n",
+        "nav": [
+            {
+                "id": "categories.catalog",
+                "labelKey": "categories.catalog.title",
+                "icon": "AppstoreOutlined",
+                "route": {"path": "/c"},
+                "component": {"export": "CatalogPage", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": True,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 5,
+            },
+            {
+                "id": "categories.category",
+                "labelKey": "categories.category.title",
+                "icon": "FolderOpenOutlined",
+                "route": {"path": "/c/:slug"},
+                "component": {"export": "CategoryPage", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 6,
+            },
+        ],
+    },
+    "cdn": {
+        # No nav manifest, deliberately: the uploader is drawn INSIDE another
+        # pair's screen (listing composer, profile settings), so a "Uploads"
+        # menu item leading nowhere would be worse than its absence
+        # (storefront spec §13.6 item 8).
+        "package": "@stapel/cdn-react",
+        "version": "0.2.0",
+        "provider": "CdnProvider",
+        "create_runtime": "createCdnRuntime",
+        "register_i18n": "registerCdnI18n",
+    },
+    "chat": {
+        "package": "@stapel/chat-react",
+        "version": "0.2.0",
+        "provider": "ChatProvider",
+        "create_runtime": "createChatRuntime",
+        "register_i18n": "registerChatI18n",
+        "nav": [
+            {
+                "id": "chat.conversations",
+                "labelKey": "chat.nav.conversations",
+                "icon": "MessageOutlined",
+                "route": {"path": "chat"},
+                "component": {"export": "ConversationListPanel", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 25,
+            },
+        ],
+    },
+    "listings": {
+        "package": "@stapel/listings-react",
+        "version": "0.2.0",
+        "provider": "ListingsProvider",
+        "create_runtime": "createListingsRuntime",
+        "register_i18n": "registerListingsI18n",
+        "nav": [
+            {
+                "id": "listings.detail",
+                "labelKey": "listings.nav.detail",
+                "icon": "TagOutlined",
+                "route": {"path": "/l/:id"},
+                "component": {"export": "ListingDetailPane", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 10,
+            },
+            {
+                "id": "listings.compose",
+                "labelKey": "listings.nav.compose",
+                "icon": "PlusOutlined",
+                "route": {"path": "/new"},
+                "component": {"export": "ListingComposerPage", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 20,
+            },
+            {
+                "id": "listings.mine",
+                "labelKey": "listings.nav.mine",
+                "icon": "ProfileOutlined",
+                "route": {"path": "listings"},
+                "component": {"export": "MyListingsPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 10,
+            },
+            {
+                "id": "listings.favorites",
+                "labelKey": "listings.nav.favorites",
+                "icon": "HeartOutlined",
+                "route": {"path": "favorites"},
+                "component": {"export": "FavoritesPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 20,
+            },
+        ],
+    },
     "notifications": {
         "package": "@stapel/notifications-react",
-        "version": "0.6.0",
+        "version": "0.9.1",
         "provider": "NotificationsProvider",
         "create_runtime": "createNotificationsRuntime",
         "register_i18n": "registerNotificationsI18n",
         "default_component": "NotificationFeedList",
-        # Mirror of packages/notifications-react/nav-manifest.json (verified
-        # 2026-07-20) — see the auth entry's comment above for the mirror
-        # discipline this follows.
         "nav": [
             {
                 "id": "notifications.feed",
@@ -515,14 +672,11 @@ FRONTEND_REACT_LIBS = {
     },
     "profiles": {
         "package": "@stapel/profiles-react",
-        "version": "0.12.0",
+        "version": "0.18.2",
         "provider": "ProfilesProvider",
         "create_runtime": "createProfilesRuntime",
         "register_i18n": "registerProfilesI18n",
         "default_component": "ProfileSettings",
-        # Mirror of packages/profiles-react/nav-manifest.json (verified
-        # 2026-07-20) — see the auth entry's comment above for the mirror
-        # discipline this follows.
         "nav": [
             {
                 "id": "profiles.settings",
@@ -539,31 +693,78 @@ FRONTEND_REACT_LIBS = {
     },
     "recordings": {
         "package": "@stapel/recordings-react",
-        "version": "0.4.0",
+        "version": "0.5.1",
         "provider": "RecordingsProvider",
         "create_runtime": "createRecordingsRuntime",
         "register_i18n": "registerRecordingsI18n",
     },
+    "reviews": {
+        # No nav manifest either — reviews render inside a listing page and a
+        # seller page, never on a route of their own (§13.8 item 11).
+        "package": "@stapel/reviews-react",
+        "version": "0.2.0",
+        "provider": "ReviewsProvider",
+        "create_runtime": "createReviewsRuntime",
+        "register_i18n": "registerReviewsI18n",
+    },
+    "search": {
+        # No STAPEL_LIBS entry — see the dict docstring.
+        "package": "@stapel/search-react",
+        "version": "0.2.0",
+        "provider": "SearchProvider",
+        "create_runtime": "createSearchRuntime",
+        "register_i18n": "registerSearchI18n",
+        "nav": [
+            {
+                "id": "search.results",
+                "labelKey": "search.results.title",
+                "icon": "SearchOutlined",
+                "route": {"path": "/s"},
+                "component": {"export": "SearchPage", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 10,
+            },
+            {
+                "id": "search.ranking",
+                "labelKey": "search.ranking.title",
+                "icon": "OrderedListOutlined",
+                "route": {"path": "/ranking-disclosure"},
+                "component": {"export": "RankingDisclosurePane", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 11,
+            },
+        ],
+    },
     "workspaces": {
         "package": "@stapel/workspaces-react",
-        "version": "0.7.0",
+        "version": "0.17.0",
         "provider": "WorkspacesProvider",
         "create_runtime": "createWorkspacesRuntime",
         "register_i18n": "registerWorkspacesI18n",
     },
 }
-
 # Support packages the generated app needs alongside any FRONTEND_REACT_LIBS
-# selection — pins from the live npm registry (2026-07-19), see the
+# selection — pins from the live npm registry (2026-08-23), see the
 # FRONTEND_REACT_LIBS docstring above for why npm (not the sibling
 # checkout's workspace pin) is the source of truth here.
 FRONTEND_REACT_CORE_DEPS = {
-    # 0.11.0, not 0.8.1: `@stapel/notifications-react` 0.6.1 imports
-    # `useErrorText`, which core only exports from 0.11.0. A peer range this
-    # wide (`>=0.3.0 <1.0.0`) does not catch that — npm installs happily and
-    # the generated frontend fails at BUILD time on a missing export.
-    "@stapel/core": "0.11.0",
-    "@tanstack/react-query": "5.101.2",
+    # 0.15.0, not 0.11.0: the wave-4 pairs bind two core surfaces that only
+    # exist from 0.15.0 — the mandate seam (`MandateProvider`/`useMandate`,
+    # which `@stapel/listings-react` declares as its peer floor) and the
+    # query encoder that APPENDS a repeated key (`f.<slug>` is OR-within-slug
+    # for `@stapel/search-react`; the symbol set did not change, only the
+    # behaviour, so a peer range could not have caught it). A range as wide
+    # as `>=0.3.0 <1.0.0` does not catch either — npm installs happily and
+    # the generated frontend fails at BUILD time on a missing export, or
+    # worse, at RUNTIME on a silently dropped filter.
+    "@stapel/core": "0.15.0",
+    "@tanstack/react-query": "5.102.0",
 }
 # Only pulled in when >=1 selected module's registry entry has
 # "default_component" set (i.e. the scaffold actually imports a `/default`
@@ -571,8 +772,8 @@ FRONTEND_REACT_CORE_DEPS = {
 # headless-only ones (billing/calendar/recordings), so a project selecting
 # only those stays antd-free.
 FRONTEND_REACT_ANTD_DEPS = {
-    "antd": "6.5.1",
-    "@stapel/tokens-antd": "0.4.0",
+    "antd": "6.6.1",
+    "@stapel/tokens-antd": "0.5.0",
 }
 
 # Scripted-fullstack navigation (P1) — router deps for the generated
@@ -583,23 +784,23 @@ FRONTEND_REACT_ANTD_DEPS = {
 # view react-router version` dist-tag is a v8 major (verified 2026-07-20:
 # `8.2.0`), which would silently pull an incompatible major; the pin below
 # is the latest v7 release instead (`npm view "react-router@^7" version` ->
-# `7.18.1`, matching stapel-react's own shell-react devDependency pin).
+# `7.18.2`, matching stapel-react's own shell-react devDependency range).
 FRONTEND_ROUTER_DEPS = {
-    "react-router": "7.18.1",
+    "react-router": "7.18.2",
 }
 
-# `@stapel/shell-react` is NOT YET published to npm (`npm view
-# @stapel/shell-react version` 404s, verified 2026-07-20) — the pin below is
-# taken from the sibling stapel-react checkout's own
-# packages/shell-react/package.json `version` ONLY (ahead-of-npm, the same
-# discipline STAPEL_LIBS' `ahead_of_pypi` flag documents on the backend
-# side — see that dict's module docstring). Replace with the live npm pin
-# the day this package publishes. Added to deps whenever any selected pair
-# contributes nav entries (`nav_wired_pairs` in `_write_frontend_scaffold`)
-# — never for a project with routing active but no nav-bearing module
-# (e.g. `--landing` alone never needs the shell).
+# `@stapel/shell-react` — published since 0.5.0 (`npm view
+# @stapel/shell-react version` -> `0.5.0`, verified 2026-08-23; it 404'd at
+# the 0.2.0 pin, which is why this constant used to carry an ahead-of-npm
+# note). 0.5.0 is the minor that ships `PublicShell` and the two
+# audience-named resolvers (`resolvePublicNav`/`resolveMemberNav`) the public
+# storefront generator emits — a lower pin installs a shell with no public
+# chrome at all. Added to deps whenever any selected pair contributes nav
+# entries (`nav_wired_pairs` in `_write_frontend_scaffold`) — never for a
+# project with routing active but no nav-bearing module (e.g. `--landing`
+# alone never needs the shell).
 FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
-FRONTEND_SHELL_REACT_VERSION = "0.2.0"
+FRONTEND_SHELL_REACT_VERSION = "0.5.0"
 
 # The source-agnostic image renderer — added whenever a media source is wired
 # (cdn, or a profiles avatar), so <Image meta={...image}> can render the

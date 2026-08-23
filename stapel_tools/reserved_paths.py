@@ -69,17 +69,29 @@ def modules_from_existing(prefixes: list[str]) -> list[str]:
     return mods
 
 
-def regenerate(prefixes: list[str]) -> list[str]:
-    """Re-render ``reservedPathPrefixes`` from the module set already
-    committed in *prefixes*, against stapel-tools' CURRENT sub-surface
-    definition."""
+def reserved_prefixes_for(modules: list[str]) -> list[str]:
+    """``reservedPathPrefixes`` for a module set: the framework-wide fixed
+    entries plus each module's named sub-surfaces, in order, deduplicated.
+
+    The ONE place that shape is spelled outside ``create_project`` (which
+    renders nginx and the Vite proxy off the same sub-surface list). A bare
+    module root is never emitted — roots belong to the frontend SPA by canon,
+    which is what makes ``/listings/12345`` a listing page instead of a JSON
+    document from the backend."""
     out = list(_FIXED)
-    for mod in modules_from_existing(prefixes):
+    for mod in modules:
         for sub in _MODULE_SUB_SURFACES:
             entry = f"/{mod}/{sub}"
             if entry not in out:
                 out.append(entry)
     return out
+
+
+def regenerate(prefixes: list[str]) -> list[str]:
+    """Re-render ``reservedPathPrefixes`` from the module set already
+    committed in *prefixes*, against stapel-tools' CURRENT sub-surface
+    definition."""
+    return reserved_prefixes_for(modules_from_existing(prefixes))
 
 
 def main(argv: list[str] | None = None) -> int:
