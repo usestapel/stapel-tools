@@ -36,7 +36,6 @@ from stapel_tools.lint_profile import (
     render_toml,
 )
 
-
 # ── 1. absent file: the generated-project case is untouched ────────────────
 
 def test_no_profile_file_means_the_full_arsenal(tmp_path):

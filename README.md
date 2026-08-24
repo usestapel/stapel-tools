@@ -388,6 +388,44 @@ target's rows (the callable's body is out of AST reach) and that the deploy
 is stop-the-world. `RunSQL` does not count as the data path — from the AST a
 copying `INSERT…SELECT` and a destructive DDL string look the same.
 
+### `stapel-api-lint` — HTTP surface versioning gate (§60)
+
+```bash
+stapel-api-lint .                            # diff against the newest reachable v<semver> tag
+stapel-api-lint . --base-ref v0.6.2          # diff against a specific release
+stapel-api-lint . --json                     # machine output
+stapel-api-lint . --strict                   # warnings (SCHEMA001) become errors
+```
+
+Diffs the committed `docs/schema.json` at a baseline git ref against the one
+in the working tree and classifies the diff as additive or breaking, per
+`docs/pending/api-versioning.md` §3. The contract pipeline's drift gate
+already tells you the schema *changed*; nothing until now decided whether the
+change breaks a caller — the author did, from memory, at release time.
+
+Canon: `/<mod>/api/v1/…`, the version segment right after `api/`, one counter
+per module. **Breaking** = an endpoint removed/renamed; a field removed,
+renamed or retyped; a required-status flip in the direction that hurts
+(optional→required in a REQUEST, required→optional in a RESPONSE — the
+opposite flip on each side is a strengthening and stays additive); a response
+status code disappearing; an operation's auth contract changing; an enum value
+removed (always), or added to an enum marked `x-stapel-closed-enum`. Enums are
+OPEN by default: adding a value is additive and clients must ignore what they
+do not know.
+
+| rule | level | what it holds |
+|---|---|---|
+| API001 | error | a breaking diff must be carried by BOTH a sufficient version bump (pre-1.0 minor, post-1.0 major — library-standard §1.4) AND a `docs/UPGRADE.json` record of `kind: "api_change"` for the new version |
+| API002 | error | a breaking change may not land in place: `vN+1` must appear beside the frozen `vN`, and `urls.py` must still mount `urls_vN.py` — a version in the schema but not in the URLconf is documented, not served |
+| API003 | error | a `vN` present at the baseline may not disappear before its `x-stapel-sunset` date (or with no sunset ever declared — a window that never opened cannot have closed) |
+| SCHEMA001 | warning | `docs/schema.json`'s `info.version` must equal the package version; today every module emits the drf-spectacular placeholder `"0.0.0"` |
+
+No baseline (no git repo, no `v<semver>` tag, or no schema at that ref) means
+API001-003 do not run, and the linter says so in a note rather than inventing
+a "before". A repo with no `docs/schema.json` has no HTTP contract to check
+and is silent. Composed into `stapel-verify`, which forwards its `--base-sha`
+as the baseline ref.
+
 ### `stapel-adoption-lint` — honesty gate for stapel-module adoption
 
 ```bash

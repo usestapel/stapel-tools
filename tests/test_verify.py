@@ -48,6 +48,10 @@ def make_dirty_project(tmp_path):
     - NGX001 + NGX003 (nginx-cache-lint): the app.ironmemo.com SPA cache
       defect — an entry document carrying BOTH ``expires 1d`` AND an explicit
       ``add_header Cache-Control``.
+    - SCHEMA001 (api-lint, warning): an emitted ``docs/schema.json`` whose
+      ``info.version`` is the drf-spectacular placeholder rather than the
+      package version. API001-003 need a git baseline, which a tmp_path
+      fixture has no business faking — they have their own suite.
     """
     workspace = tmp_path
     module = workspace / "stapel-verifyfixture"
@@ -91,6 +95,12 @@ def make_dirty_project(tmp_path):
         "    path(\"verifyfixture/ping\", login_view),\n"
         "]\n"
     )
+    (proj / "docs").mkdir()
+    (proj / "docs" / "schema.json").write_text(json.dumps({
+        "openapi": "3.0.3",
+        "info": {"title": "", "version": "0.0.0"},
+        "paths": {"/proj/api/v1/ping": {"get": {"responses": {"200": {}}}}},
+    }))
     (proj / "requirements.txt").write_text("stapel_verifyfixture\nPyJWT\n")
     (proj / "permissions.py").write_text(
         "from rest_framework import permissions\n\n\n"
@@ -177,6 +187,7 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
         "stapel-lint",
         "stapel-adoption-lint",
         "stapel-url-lint",
+        "stapel-api-lint",
         "stapel-config-lint",
         "stapel-migration-lint",
         "stapel-swap-lint",
@@ -204,6 +215,11 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
 
     url_rules = {f["rule"] for f in by_name["stapel-url-lint"].findings}
     assert "URL001" in url_rules
+
+    api_rules = {f["rule"] for f in by_name["stapel-api-lint"].findings}
+    assert api_rules == {"SCHEMA001"}
+    assert by_name["stapel-api-lint"].warnings == 1
+    assert by_name["stapel-api-lint"].errors == 0
 
     cfg_rules = {f["rule"] for f in by_name["stapel-config-lint"].findings}
     assert "CFG001" in cfg_rules
@@ -282,7 +298,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 14 linters." in out
+    assert "All clean across 15 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -292,12 +308,13 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     assert code == 1
     assert payload["ok"] is False
     assert payload["errors"] == 10
-    assert len(payload["linters"]) == 14
+    assert len(payload["linters"]) == 15
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
         "stapel-adoption-lint",
         "stapel-url-lint",
+        "stapel-api-lint",
         "stapel-config-lint",
         "stapel-migration-lint",
         "stapel-swap-lint",

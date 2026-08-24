@@ -24,6 +24,10 @@ Linters composed (in this order)
   installed gdpr data owner reachable by an erasure)
 * ``stapel_tools.url_lint``        — URL001 (bare ``URLField()`` truncation
   trap)
+* ``stapel_tools.api_lint``        — API001-003 + SCHEMA001 (HTTP surface
+                                     versioning: a breaking OpenAPI diff must
+                                     carry a bump, an UPGRADE.json record and a
+                                     vN+1 mounted beside the frozen vN)
 * ``stapel_tools.config_lint``     — CFG-codes (config-in-one-place law)
 * ``stapel_tools.migration_lint``  — MIG-codes (expand/contract discipline)
 * ``stapel_tools.swap_lint``       — SWAP001/SWAP002/SWAP003/SWAP004 (§55
@@ -112,8 +116,11 @@ Usage
                   [--run-native] [--json]
 
 ``--workspace`` and ``--base-sha`` are forwarded to the sub-linters that
-accept them (adoption-lint and surface-lint, migration-lint respectively);
-the other linters ignore what does not apply to them.
+accept them (adoption-lint and surface-lint; migration-lint and api-lint
+respectively — for api-lint the ref is the baseline whose committed
+``docs/schema.json`` the current one is diffed against, defaulting to the
+newest reachable ``v<semver>`` tag when not given); the other linters
+ignore what does not apply to them.
 
 Exit codes: 0 all clean (warnings allowed), 1 any linter reported at least one
 error (or a native gate came back non-zero), 2 usage/environment error (bad
@@ -131,6 +138,7 @@ from typing import Callable, Optional
 
 from . import (
     adoption_lint,
+    api_lint,
     config_lint,
     doc_lint,
     env_address_lint,
@@ -209,6 +217,13 @@ def run_url_lint(project: Path) -> LinterReport:
     violations = url_lint.lint_paths([str(project)])
     errors, warnings = _count(violations)
     return LinterReport("stapel-url-lint", errors, warnings, _to_dicts(violations))
+
+
+def run_api_lint(project: Path, base_ref: Optional[str]) -> LinterReport:
+    notes: list[str] = []
+    findings = api_lint.lint_project(project, base_ref=base_ref, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-api-lint", errors, warnings, _to_dicts(findings), notes)
 
 
 def run_config_lint(project: Path) -> LinterReport:
@@ -307,6 +322,7 @@ COMPOSED_LINTERS: tuple[str, ...] = (
     "stapel-lint",
     "stapel-adoption-lint",
     "stapel-url-lint",
+    "stapel-api-lint",
     "stapel-config-lint",
     "stapel-migration-lint",
     "stapel-swap-lint",
@@ -419,6 +435,7 @@ def verify_project(
         ("stapel-lint", lambda: run_lint(project)),
         ("stapel-adoption-lint", lambda: run_adoption_lint(project, search_roots)),
         ("stapel-url-lint", lambda: run_url_lint(project)),
+        ("stapel-api-lint", lambda: run_api_lint(project, base_sha)),
         ("stapel-config-lint", lambda: run_config_lint(project)),
         ("stapel-migration-lint", lambda: run_migration_lint(project, base_sha)),
         ("stapel-swap-lint", lambda: run_swap_lint(project)),
@@ -579,7 +596,9 @@ def main(argv: Optional[list] = None) -> int:
     parser.add_argument(
         "--base-sha", metavar="SHA",
         help="Git sha of the previous release — forwarded to "
-             "stapel-migration-lint's MIG002 base-sha check.",
+             "stapel-migration-lint's MIG002 base-sha check and as "
+             "stapel-api-lint's schema baseline (default: newest "
+             "reachable v<semver> tag).",
     )
     parser.add_argument(
         "--run-native", action="store_true",

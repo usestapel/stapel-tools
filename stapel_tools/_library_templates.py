@@ -34,7 +34,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "stapel-core>=0.29.0,<1.0",
+    "stapel-core>=0.37.0,<1.0",
 ]
 
 [project.urls]
@@ -252,52 +252,38 @@ __all__ = [
 VIEWS = '''"""DRF views for {{NAME_DASH}}.
 
 Presenter-canonical from birth (§55): a view resolves its presenter through
-``get_presenter`` (see ``presenters.py``) and returns
-``StapelResponse(Serializer(presenter.present(...)))`` — it never
-instantiates a ``dto.py`` dataclass itself (SWAP002) and never imports the
-concrete presenter class (SWAP001).
+``get_presenter`` (see ``presenters.py``) and returns the presented DTO
+through its response seam — it never instantiates a ``dto.py`` dataclass
+itself (SWAP002) and never imports the concrete presenter class (SWAP001).
+
+The serializer seam comes from the core, not from a copy: ``StapelAPIView``
+is ``APIView`` + ``SerializerSeamMixin`` + the two thin-view moves
+(``validated_request_data`` / ``serialized_response``), shipped once in
+``stapel_core.django.api.views`` since stapel-core 0.37.0. A generated
+library inherits it; it does not re-derive it. Twenty-four hand-written
+copies of the same four-line mixin is what that primitive was extracted to
+end, and a scaffold that keeps embedding one would keep minting the
+twenty-fifth.
 """
 from drf_spectacular.utils import extend_schema
 from rest_framework import permissions
-from rest_framework.views import APIView
-from stapel_core.django.api.errors import StapelResponse
+from stapel_core.django.api.views import StapelAPIView
 
 from .presenters import get_ping_presenter
 from .serializers import PingResponseSerializer
 
 
-class SerializerSeamMixin:
-    """Overridable serializer seam for every {{NAME_DASH}} APIView.
-
-    Host projects can swap the request/response serializer of any view by
-    subclassing and setting ``request_serializer_class`` /
-    ``response_serializer_class`` (or overriding the getters for
-    per-request decisions) — no need to rewrite the HTTP method bodies.
-    """
-
-    request_serializer_class = None
-    response_serializer_class = None
-
-    def get_request_serializer_class(self):
-        return self.request_serializer_class
-
-    def get_response_serializer_class(self):
-        return self.response_serializer_class
-
-
 @extend_schema(tags=["{{TITLE}}"])
-class PingView(SerializerSeamMixin, APIView):
+class PingView(StapelAPIView):
     """Scaffold example — replace with real views, keep both seams
-    (serializer mixin + presenter indirection)."""
+    (the inherited serializer seam + presenter indirection)."""
 
     permission_classes = [permissions.AllowAny]
     response_serializer_class = PingResponseSerializer
 
     @extend_schema(responses={200: PingResponseSerializer})
     def get(self, request):
-        response_cls = self.get_response_serializer_class()
-        dto = get_ping_presenter()().present()
-        return StapelResponse(response_cls(dto))
+        return self.serialized_response(get_ping_presenter()().present())
 '''
 
 URLS = '''"""Root URLconf for {{NAME_DASH}} — v1 canon mount (api-versioning.md §2).
@@ -590,8 +576,11 @@ State for every registry-style key whether it MERGES over built-ins
 
 ### Serializer seams (`views.py`)
 
-`SerializerSeamMixin` — subclass a view, set
-`request_serializer_class` / `response_serializer_class`, remount the URL.
+Views inherit `StapelAPIView` (`stapel_core.django.api.views`, core
+>=0.37.0), which carries `SerializerSeamMixin`. Subclass a view, set
+`request_serializer_class` / `response_serializer_class`, remount the URL —
+no HTTP method body is ever copied, and this library defines no seam of its
+own.
 
 | View | Request serializer | Response serializer |
 |---|---|---|

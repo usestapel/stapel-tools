@@ -2,6 +2,62 @@
 
 ## [Unreleased]
 
+## [0.51.0] — 2026-08-24
+
+### The library scaffold inherits the core serializer seam instead of embedding one
+
+`stapel-core` 0.37.0 shipped `SerializerSeamMixin` + `StapelAPIView` in
+`stapel_core.django.api.views` — extracted because twenty-three modules had
+each hand-written the same four-line mixin, and the twenty-fourth definition
+was this template. A scaffold that keeps embedding a copy is not a leftover:
+it is the machine that mints the twenty-fifth. Generated `views.py` now does
+`from stapel_core.django.api.views import StapelAPIView` and the example view
+inherits it (`self.serialized_response(...)` in place of the hand-rolled
+`StapelResponse(response_cls(dto))`); the scaffold's stapel-core floor moves
+`>=0.29.0` -> `>=0.37.0`, since a library inheriting the primitive must pin
+the release that ships it. Generated MODULE.md documents the inherited seam
+rather than a local one. The existing end-to-end gate — the generated repo's
+own pytest suite, run for real — covers the new import.
+
+Removing the local copies from the 21 libraries that already carry one is a
+separate wave; this change only stops new ones from being created.
+
+### `stapel-api-lint` — the classifier the HTTP surface never had (§60, api-versioning.md §3)
+
+Everything around this gate already existed and none of it closed the hole.
+The contract pipeline emits `docs/schema.json` and checks it is byte-identical
+to the committed copy — a drift gate says the file *changed*, never that the
+change breaks a caller. Semver discipline says "minor = breaking" — but
+nothing decided whether an HTTP diff was breaking; the author did, from
+memory, at release time. Measured on the fleet the first time it ran:
+`stapel-listings` 0.6.2 → 0.7.1 made `geohash_draft` required on POST and PUT
+`/listings/api/v1/listings/` and shipped it with no upgrade record — six
+request-side breaking changes nobody had a mechanism to notice.
+
+API001 holds a breaking diff to BOTH a sufficient version bump and a
+`docs/UPGRADE.json` `kind: api_change` record. API002 forbids reshaping `vN`
+in place — `vN+1` goes beside the frozen one, and `urls.py` must still mount
+`urls_vN.py`, because a version in the schema but not in the URLconf is
+documented rather than served. API003 refuses to let a version disappear
+before its `x-stapel-sunset` date, or with no sunset ever declared. SCHEMA001
+(warning) reports `info.version` still carrying the drf-spectacular
+placeholder `"0.0.0"` instead of the package version.
+
+Required-status is read per direction, which is the difference between a gate
+people use and one they route around: optional→required breaks a REQUEST,
+required→optional breaks a RESPONSE, and the opposite flip on each side is a
+strengthening that stays additive. Nullability reads the same way. Enums are
+open by default (adding a value is additive); `x-stapel-closed-enum` marks the
+role/permission/billing vocabularies where an old client's exhaustive mapping
+is a security answer, not a display glitch.
+
+No `oasdiff` dependency: the rule set is five bullets wide, and the point is
+that the classifier agrees with a written policy rather than with another
+tool's idea of compatibility. Composed into `stapel-verify` (15 linters now),
+which forwards `--base-sha` as the schema baseline; on the `python` surface,
+so a project that turns that surface off is ungated here on the record.
+
+
 ## [0.50.2] — 2026-08-24
 
 `stapel-verify`'s closing line counted linters that never ran: "All clean

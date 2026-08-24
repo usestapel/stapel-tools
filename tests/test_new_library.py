@@ -101,6 +101,30 @@ class TestScaffold:
         # hooks are executable
         assert (target / ".githooks/pre-push").stat().st_mode & 0o100
 
+    def test_generated_views_inherit_the_core_seam_instead_of_copying_it(self, tmp_path):
+        """stapel-core 0.37.0 extracted `SerializerSeamMixin` / `StapelAPIView`
+        precisely because twenty-three modules plus this template had each
+        hand-written the same four-line mixin. A scaffold that still embeds a
+        copy is not a leftover — it is the machine that mints the next one, so
+        the absence of a local definition is the thing worth asserting."""
+        target = scaffold_library("search", "Search", tmp_path, git=False)
+        views = (target / "views.py").read_text()
+
+        assert "from stapel_core.django.api.views import StapelAPIView" in views
+        assert "class PingView(StapelAPIView):" in views
+        assert "class SerializerSeamMixin" not in views
+        # the seam is inherited, so the view still names its serializer the
+        # same way a host project overrides it
+        assert "response_serializer_class = PingResponseSerializer" in views
+
+        # a library that inherits the core primitive must pin the release that
+        # ships it, or the scaffold generates an ImportError against core 0.36
+        py = (target / "pyproject.toml").read_text()
+        assert '"stapel-core>=0.37.0,<1.0"' in py
+
+        module_md = (target / "MODULE.md").read_text()
+        assert "StapelAPIView" in module_md
+
     def test_scaffold_library_kind(self, tmp_path):
         target = scaffold_library("attributes", "Attributes", tmp_path,
                                   kind="library", git=False)
