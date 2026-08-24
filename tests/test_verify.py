@@ -40,6 +40,10 @@ def make_dirty_project(tmp_path):
       ``/verifyfixture/ping`` operation.
     - ADO004 (adoption-lint, warning): a dead ``PyJWT`` pin never imported.
     - URL001 (url-lint): a bare ``models.URLField()`` with no max_length.
+    - AUTHZ001 + AUTHZ002 (authz-lint): a ``LoginView`` subclass whose
+      ``form_valid`` logs a user in and mints a token pair with no
+      authorization read anywhere on that path — stapel-core 0.38.0's bypass,
+      in miniature.
     - CFG001 (config-lint): an ``os.environ.get`` read outside settings.
     - MIG001 (migration-lint): a destructive ``RemoveField`` without the
       contract-phase marker.
@@ -126,6 +130,16 @@ def make_dirty_project(tmp_path):
         "def thing_view(request):\n"
         "    return StapelResponse({\"ok\": True})\n"
     )
+    (proj / "app" / "login_views.py").write_text(
+        "from django.contrib.auth.views import LoginView\n"
+        "from django.contrib.auth import login\n\n\n"
+        "class CookieLoginView(LoginView):\n"
+        "    def form_valid(self, form):\n"
+        "        user = form.get_user()\n"
+        "        login(self.request, user)\n"
+        "        access, refresh = provider.create_tokens(user)\n"
+        "        return super().form_valid(form)\n"
+    )
 
     migrations = proj / "app" / "migrations"
     migrations.mkdir()
@@ -187,6 +201,7 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
         "stapel-lint",
         "stapel-adoption-lint",
         "stapel-url-lint",
+        "stapel-authz-lint",
         "stapel-api-lint",
         "stapel-config-lint",
         "stapel-migration-lint",
@@ -215,6 +230,10 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
 
     url_rules = {f["rule"] for f in by_name["stapel-url-lint"].findings}
     assert "URL001" in url_rules
+
+    authz_rules = {f["rule"] for f in by_name["stapel-authz-lint"].findings}
+    assert authz_rules == {"AUTHZ001", "AUTHZ002"}
+    assert by_name["stapel-authz-lint"].errors == 2
 
     api_rules = {f["rule"] for f in by_name["stapel-api-lint"].findings}
     assert api_rules == {"SCHEMA001"}
@@ -264,9 +283,9 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
     assert by_name["stapel-index-lint"].findings == []
 
     total_errors = sum(r.errors for r in reports)
-    # R006, ADO001, ADO002, URL001, CFG001, MIG001, SUR001, NGX001, NGX003,
-    # FED001, EXP001
-    assert total_errors == 11
+    # R006, ADO001, ADO002, URL001, AUTHZ001, AUTHZ002, CFG001, MIG001,
+    # SUR001, NGX001, NGX003, FED001, EXP001
+    assert total_errors == 13
 
 
 def test_clean_project_reports_all_zero(tmp_path):
@@ -298,7 +317,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 15 linters." in out
+    assert "All clean across 16 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -307,13 +326,14 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     payload = json.loads(capsys.readouterr().out)
     assert code == 1
     assert payload["ok"] is False
-    assert payload["errors"] == 10
-    assert len(payload["linters"]) == 15
+    assert payload["errors"] == 12
+    assert len(payload["linters"]) == 16
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
         "stapel-adoption-lint",
         "stapel-url-lint",
+        "stapel-authz-lint",
         "stapel-api-lint",
         "stapel-config-lint",
         "stapel-migration-lint",

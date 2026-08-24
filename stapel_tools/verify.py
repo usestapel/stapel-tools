@@ -24,6 +24,17 @@ Linters composed (in this order)
   installed gdpr data owner reachable by an erasure)
 * ``stapel_tools.url_lint``        — URL001 (bare ``URLField()`` truncation
   trap)
+* ``stapel_tools.authz_lint``      — AUTHZ001-005 (the "credentials verified,
+  authorization never asked" class that stapel-core 0.38.0-0.43.0 closed in
+  five releases: a ``LoginView.form_valid`` that minted fleet-wide JWTs for
+  any active account because no staff gate sat on the minting path, a
+  ``refresh_access_token(x, None)`` re-minting from up-to-7-day-old claims,
+  two ``get_user()`` overrides that dropped Django's own
+  ``user_can_authenticate``, and a revocation blacklist written through
+  ``django.core.cache.cache``, whose per-service ``KEY_PREFIX`` made "log out
+  everywhere" invisible to peers. Every one of those was found by a human
+  reading code — each component's own suite was green, because the defect
+  lived in what was NOT written and nothing in the fleet read for absence.)
 * ``stapel_tools.api_lint``        — API001-003 + SCHEMA001 (HTTP surface
                                      versioning: a breaking OpenAPI diff must
                                      carry a bump, an UPGRADE.json record and a
@@ -139,6 +150,7 @@ from typing import Callable, Optional
 from . import (
     adoption_lint,
     api_lint,
+    authz_lint,
     config_lint,
     doc_lint,
     env_address_lint,
@@ -217,6 +229,13 @@ def run_url_lint(project: Path) -> LinterReport:
     violations = url_lint.lint_paths([str(project)])
     errors, warnings = _count(violations)
     return LinterReport("stapel-url-lint", errors, warnings, _to_dicts(violations))
+
+
+def run_authz_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = authz_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-authz-lint", errors, warnings, _to_dicts(findings), notes)
 
 
 def run_api_lint(project: Path, base_ref: Optional[str]) -> LinterReport:
@@ -322,6 +341,7 @@ COMPOSED_LINTERS: tuple[str, ...] = (
     "stapel-lint",
     "stapel-adoption-lint",
     "stapel-url-lint",
+    "stapel-authz-lint",
     "stapel-api-lint",
     "stapel-config-lint",
     "stapel-migration-lint",
@@ -435,6 +455,7 @@ def verify_project(
         ("stapel-lint", lambda: run_lint(project)),
         ("stapel-adoption-lint", lambda: run_adoption_lint(project, search_roots)),
         ("stapel-url-lint", lambda: run_url_lint(project)),
+        ("stapel-authz-lint", lambda: run_authz_lint(project)),
         ("stapel-api-lint", lambda: run_api_lint(project, base_sha)),
         ("stapel-config-lint", lambda: run_config_lint(project)),
         ("stapel-migration-lint", lambda: run_migration_lint(project, base_sha)),

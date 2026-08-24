@@ -2,6 +2,109 @@
 
 ## [Unreleased]
 
+## [0.53.0] — 2026-08-24
+
+### `stapel-authz-lint` — the "credentials verified, authorization never asked" gate
+
+> **A NEW GATE. `stapel-verify` now composes a sixteenth linter, so a project
+> that upgrades stapel-tools can go red on code that has not changed.** All
+> five rules are new checks, four of them errors. If your pipeline turns red
+> on this upgrade, read the finding before waiving it: the class it describes
+> shipped a full authentication bypass in stapel-core and stayed live for
+> months, invisible to a green suite. Per-rule escape is
+> `# noqa: AUTHZ00N <reason>` on the line; per-surface escape is the
+> `stapel-lint.toml` profile (`[waivers]` takes a rule id and a written
+> reason). Both leave a record; skimming past a red wall does not.
+
+On 2026-08-24 stapel-core shipped five security releases (0.38.0-0.43.0) for
+what turned out to be **one defect class wearing five costumes**: every place
+where the code proved *who you are* and then never asked *what you may have*.
+
+`JWTCookieLoginView` is the admin login view — its template is
+`admin/login.html`, its redirect target is the admin index — but it named no
+`authentication_form`, so Django used the plain `AuthenticationForm`, which
+checks `is_active` and nothing else. `form_valid()` then called `login()`,
+`create_tokens()` and `set_jwt_cookies()` with no staff check anywhere in its
+body. Any active account's own password minted a fleet-wide JWT pair, walking
+past a consumer's password-login gate, its lockout service, its TOTP step-up
+and its tracked-session creation. The file *did* read `is_staff` three times.
+All three sat in `dispatch()`'s already-authenticated branch, none on the
+minting path — so every file-level grep called it safe. It was not.
+
+Four more of the same shape, one layer down: a refresh endpoint re-minting
+from a presented token's own up-to-7-day-old claims; two `get_user()`
+overrides that silently dropped the `user_can_authenticate()` check
+`ModelBackend.get_user` performs, so a deactivated account kept a live session
+for the life of its session cookie; and both blacklists writing through
+`django.core.cache.cache`, whose real key comes from the *deployment's*
+`KEY_PREFIX` — `auth` wrote `auth:1:jwt_blacklist:<jti>` while `profiles` read
+`stapel_profiles:1:jwt_blacklist:<jti>`, making "log out everywhere" a
+per-service illusion for months. That last one is what made the login bypass
+unrecoverable while it was live.
+
+Every one of the five was found by a human reading code. **None was found by a
+test**, because each component's own suite was green: the login view did log
+people in, the refresh endpoint did return a token, the blacklist did
+blacklist. The defect lived in what was *not* written, and nothing in the
+fleet read for absence. Five point fixes would have closed five instances of a
+class that has more instances. This is the class, as a machine check.
+
+| rule | level | what it holds |
+|---|---|---|
+| AUTHZ001 | error | a `LoginView` subclass defining `form_valid` must either name an `Admin*` authentication form (class attribute or `get_form_class`) or read authorization inside `form_valid`'s **own body** — a gate in a sibling method is not on the minting path |
+| AUTHZ002 | error | `create_tokens`/`set_jwt_cookies` in a function that also calls `login()` or `form.get_user()` needs an authorization read **earlier in the same function**. A token outlives the request that minted it, so a check after the mint is a log line |
+| AUTHZ003 | warning | an explicit `refresh_access_token(x, None)`. Since core 0.39.0 the django-layer default IS the database loader, so the bare call is the safe form and only the typed-out `None` is flagged: it has to be a decision, not an omission |
+| AUTHZ004 | error | a `get_user()` **method** override returning `objects.get()` needs an `is_active`/`user_can_authenticate` check — it resolves `request.user` on every request after the one that authenticated |
+| AUTHZ005 | error | a revocation/blacklist entry read or written through `django.core.cache.cache` instead of `stapel_core.core.revocation_store.revocation_cache()` |
+
+**The control that proves the rules are not inverted.** Run against
+`stapel-core` at `v0.37.0` — the last tag before the fixes — the linter reports
+12 errors: AUTHZ001 and AUTHZ002 on `django/jwt/login_views.py`, AUTHZ004 on
+both `backends.py` and `session.py`, and AUTHZ005 on all four
+`TokenBlacklist` methods plus the three user-blacklist functions. Run against
+`HEAD` (0.43.0) it reports **zero errors**. A rule that fires on the remedy
+and not on the defect is inverted, and this pair is the assertion that it is
+not; `tests/test_authz_lint.py` carries the same pair as a fixture so it
+cannot rot.
+
+50 tests. Every rule ships a positive (the defect as it was actually written),
+a negative (the shape core actually shipped as the fix), and at least one
+**near-miss** — because a security linter that cries wolf gets suppressed and
+is then strictly worse than no linter. The near-misses are drawn from the
+fleet, not invented: `self.client.login(...)` in a test suite is not
+`django.contrib.auth.login`; `SSOLoginView(APIView)` in stapel-auth is named
+like a login view and is not one; a `cache.clear()` under a docstring that
+mentions the blacklist is not a revocation write; and a `LoginView` subclass
+whose only `is_staff` reads sit in `dispatch()` **must** fire, since that is
+the shipped defect verbatim.
+
+**What the rules cannot catch, on the record** (README carries the full list):
+recognition is syntactic — no import resolution, no cross-module call graph,
+no dataflow — so an authorization helper imported from another module reads as
+absence, while a same-module predicate is followed one fixed-point hop.
+AUTHZ001 keys on a base class name ending in `LoginView`, so a credential view
+on `APIView` is invisible to it. AUTHZ002 stays silent on a mint with no
+credential call in the same function (a DRF password-reset/OTP flow is the
+intended grant, ~15 such sites in stapel-auth), which also means a bypass
+split across two functions is not seen. "Before the mint" is source order, not
+execution order. AUTHZ003 sees a literal `None`, never a runtime value.
+AUTHZ004 covers `objects.get()`, not `filter().first()` or a manager method.
+AUTHZ005 reads the enclosing function/class and the call's own identifiers and
+strings — deliberately not prose — and does not follow a raw django_redis
+handle taken through `cache.client`.
+
+### Also
+
+- `stapel-verify`'s composed roster is 16 linters; `stapel-authz-lint`
+  declares surface `python`, so `stapel-lint.toml`'s existing switch governs
+  it like every other Python-surface gate.
+- New console script `stapel-authz-lint`.
+- `# noqa:` parsing in this linter reads the first token of each
+  comma-separated part, so `# noqa: AUTHZ001 - storefront login, not admin`
+  suppresses. Every one of these rules asks for a written reason; a parser
+  that then refused to read the line would be arguing with its own advice.
+- The generated `AGENTS.md` names the AUTHZ codes in its verify section.
+
 ## [0.52.0] — 2026-08-24
 
 ### `stapel-disk` — a lifecycle for build/disk, because the machine died twice

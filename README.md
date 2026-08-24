@@ -426,6 +426,77 @@ a "before". A repo with no `docs/schema.json` has no HTTP contract to check
 and is silent. Composed into `stapel-verify`, which forwards its `--base-sha`
 as the baseline ref.
 
+### `stapel-authz-lint` — the "credentials verified, authorization never asked" gate
+
+```bash
+stapel-authz-lint .                          # lint the project in .
+stapel-authz-lint . --json                   # machine output
+stapel-authz-lint . --strict                 # AUTHZ003 (warning) becomes an error
+```
+
+On 2026-08-24 stapel-core shipped five security releases (0.38.0-0.43.0) for
+one defect class wearing five costumes: every place where the code proved
+*who you are* and then never asked *what you may have*. `JWTCookieLoginView`
+is the admin login view, but named no `authentication_form`, so Django used
+the plain `AuthenticationForm` — `is_active` and nothing else — and
+`form_valid()` then called `login()`, `create_tokens()` and
+`set_jwt_cookies()` with no staff check on that path. Any active account's own
+password minted a fleet-wide JWT pair. The file *did* read `is_staff` three
+times; all three sat in `dispatch()`'s already-authenticated branch, so every
+file-level grep called it safe.
+
+Every one of the five was found by a human reading code. None was found by a
+test, because each component's suite was green: the login view did log people
+in, the refresh endpoint did return a token, the blacklist did blacklist. The
+defect lived in what was **not** written, and nothing in the fleet read for
+absence.
+
+| rule | level | what it holds |
+|---|---|---|
+| AUTHZ001 | error | a `LoginView` subclass defining `form_valid` must either name an `Admin*` authentication form (class attribute or `get_form_class`) or read authorization (`is_staff`/`is_superuser`/a permission call) inside `form_valid`'s own body — a gate in a sibling method is not on the minting path |
+| AUTHZ002 | error | `create_tokens`/`set_jwt_cookies` in a function that also calls `login()` or `form.get_user()` needs an authorization read **earlier in the same function**. A token outlives the request that minted it, so a check after the mint is a log line |
+| AUTHZ003 | warning | an explicit `refresh_access_token(x, None)` re-mints from the presented token's own claims (up to `JWT_REFRESH_TOKEN_LIFETIME`, 7 days), resurrecting revoked flags. Since core 0.39.0 the django-layer default is the database loader, so the bare call is the safe form and only the typed-out `None` is flagged — it must be a decision, not an omission |
+| AUTHZ004 | error | a `get_user()` **method** override returning `objects.get()` needs an `is_active`/`user_can_authenticate` check. `get_user` resolves `request.user` on every request after the one that authenticated, so dropping it lets a deactivated account keep a live session for the life of the session cookie |
+| AUTHZ005 | error | a revocation/blacklist entry read or written through `django.core.cache.cache`. Django builds the real key from *this deployment's* `KEY_PREFIX`, so `auth` wrote `auth:1:jwt_blacklist:<jti>` while `profiles` read `stapel_profiles:1:jwt_blacklist:<jti>` — use `stapel_core.core.revocation_store.revocation_cache()` |
+
+Suppress with `# noqa: AUTHZ00N` on the reported line; a written reason after
+the code on the same line is read fine, and is the point.
+
+**What these rules cannot catch, stated plainly** — a rule that pretends to
+cover more than it does is worse than one whose edge is written down:
+
+- Recognition is syntactic. There is no import resolution, no cross-module
+  call graph, no dataflow. An authorization helper **imported from another
+  module** reads as absence; only same-module predicates are followed (one
+  fixed-point hop, so `form_valid` → `has_admin_access` → `is_staff` passes).
+- AUTHZ001 keys on a base class whose name ends in `LoginView`. A credential
+  view built on `APIView`, `View` or a bespoke base is invisible to it —
+  AUTHZ002 is the net underneath, and it only fires where `login()` or
+  `form.get_user()` appears.
+- AUTHZ002 does not fire on a mint with no credential call in the same
+  function: a DRF flow that mints for an account some service already verified
+  (password reset, OTP promotion — ~15 such call sites in stapel-auth) is the
+  intended grant, not this class. The cost of that precision is that a genuine
+  bypass **split across two functions** is not seen.
+- "Before the mint" is source order, not execution order. A read inside a
+  branch that never runs, or a helper whose refusal is a logged warning rather
+  than a return, satisfies the rule.
+- AUTHZ003 sees a literal `None`, never a value. `loader or None` and a
+  variable that happens to be `None` at runtime both pass.
+- AUTHZ004 covers `objects.get()`. `objects.filter(...).first()`, a manager
+  method, a cache lookup or a raw query in a `get_user` override are not
+  matched.
+- AUTHZ005 decides "is this about revocation?" from the enclosing function
+  name, the enclosing class (name and class-level constants), and identifiers
+  and string literals **inside the call itself**. Deliberately not from prose:
+  a docstring mentioning the blacklist next to an unrelated `cache.clear()` is
+  how a rule earns its first blanket suppression. A revocation key built from
+  a constant imported from elsewhere and named nothing revocation-ish is
+  missed.
+
+Composed into `stapel-verify` (surface `python`), so a project picks the gate
+up on its next stapel-tools upgrade with nothing to regenerate.
+
 ### `stapel-adoption-lint` — honesty gate for stapel-module adoption
 
 ```bash

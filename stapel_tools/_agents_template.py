@@ -149,13 +149,17 @@ invents output from nothing.
 {{FRONTEND_SECTION}}
 ## Verify before you claim done
 
-    stapel-verify .          # composes every backend linter above (R/SWAP/CFG/URL/ADO/MIG/DOC/NGX codes); exit 0 required
+    stapel-verify .          # composes every backend linter above (R/SWAP/CFG/URL/AUTHZ/ADO/MIG/DOC/NGX codes); exit 0 required
     npx eslint .              # frontend/, if this project has one
 
 `stapel-verify` runs `stapel_tools.lint` (R001-R008), `adoption_lint`
 (module actually mounted, no shadow routes, an installed gdpr data owner
 reachable by an erasure — ADO-codes), `url_lint`
-(URL001), `config_lint` (CFG000-007), `migration_lint` (MIG-codes,
+(URL001), `authz_lint` (AUTHZ001-005 — a credential verified and an
+authorization never asked: a login view that mints tokens with no privilege
+check on that path, a re-mint from a token's own stale claims, a `get_user`
+override that dropped Django's lifecycle check, a revocation written into a
+per-service cache namespace its peers cannot see), `config_lint` (CFG000-007), `migration_lint` (MIG-codes,
 expand/contract), `swap_lint` (SWAP001/SWAP002), `doc_lint` (DOC001) and
 `nginx_cache_lint` (NGX001-004) in one pass — no reimplemented rules, pure
 composition. A green run is required before calling backend work done; a
