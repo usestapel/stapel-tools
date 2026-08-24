@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+## [0.50.1] — 2026-08-24
+
+### SUR002 asks about the displaced symbol, not about one replacement's name
+
+`stapel-core` publishes `HasWorkspaceMandate` and `HasWorkspaceMandateIfScoped`
+with an identical `instead_of` list, and which of the two a view takes is a
+decision the project makes per view: the strict class for a product view, the
+scoped one for a library view a single-tenant host also mounts — that class's
+own docstring says exactly that.
+
+`check_instead_of` silenced per displacing ENTRY (`entry["name"] in
+seen_names`), so a project that adopted the strict sibling and documented why
+it refused the scoped one was still reported for the same two displaced
+symbols, by the sibling it had correctly declined. Measured on meettoday: two
+SUR002 errors on views that are right as written, whose only routes to green
+were a weaker gate or a silenced rule — the two outcomes the SUR family exists
+to avoid.
+
+The unit is now the displaced symbol: a symbol is answered for when the
+project uses ANY published replacement for it, and a finding names every
+sibling it could have taken. The incident state — a project that has never
+heard of any replacement — is unchanged and still fires.
+
 ## [0.50.0] — 2026-08-24
 
 ### A legacy project can be gated by ITS OWN linters — `stapel-lint.toml`

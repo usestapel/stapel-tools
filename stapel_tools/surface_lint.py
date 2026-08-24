@@ -444,6 +444,16 @@ def check_instead_of(project: Path, index: list[dict]) -> list[Finding]:
     NOT caught: a project that uses the replacement somewhere and forgets it on
     one view. That is a per-view judgement, and the fleet data says a machine
     cannot make it — a product with guest sessions legitimately runs both.
+
+    The unit is the DISPLACED SYMBOL, not the displacing entry, because
+    replacements come in siblings: ``stapel-core`` publishes
+    ``HasWorkspaceMandate`` and ``HasWorkspaceMandateIfScoped`` for the same
+    two displaced symbols, and which of them fits a view is a decision the
+    project makes per view (the strict one for a product view, the scoped one
+    for a library view a single-tenant host also mounts — that class's own
+    docstring says so). Asking "did they adopt THIS name" re-reported a
+    correct product that had deliberately picked the sibling; asking "did they
+    adopt ANY replacement for this symbol" is the question the rule means.
     """
     displacing = [
         entry for entry in index
@@ -451,6 +461,11 @@ def check_instead_of(project: Path, index: list[dict]) -> list[Finding]:
     ]
     if not displacing:
         return []
+
+    replacements: dict[str, list[dict]] = {}
+    for entry in displacing:
+        for displaced in entry["instead_of"]:
+            replacements.setdefault(displaced, []).append(entry)
 
     # one pass over the project: which displaced symbols sit in
     # permission_classes, and whether the replacement occurs anywhere at all
@@ -471,32 +486,44 @@ def check_instead_of(project: Path, index: list[dict]) -> list[Finding]:
         listed = _permission_class_names(tree)
         if not listed:
             continue
-        for entry in displacing:
-            for displaced in entry["instead_of"]:
-                if displaced in used_here:
-                    continue
-                spellings = spellings_of(tree, displaced)
-                for text, lineno in listed:
-                    if text in spellings:
-                        used_here[displaced] = (str(path), lineno)
-                        break
+        for displaced in replacements:
+            if displaced in used_here:
+                continue
+            spellings = spellings_of(tree, displaced)
+            for text, lineno in listed:
+                if text in spellings:
+                    used_here[displaced] = (str(path), lineno)
+                    break
 
     findings: list[Finding] = []
-    for entry in displacing:
-        if entry["name"] in seen_names:
-            continue  # the project knows the replacement — per-view calls are its own
-        for displaced in entry["instead_of"]:
-            site = used_here.get(displaced)
-            if site is None:
-                continue
-            path, lineno = site
-            findings.append(Finding(
-                path, lineno, "SUR002",
-                f"permission_classes uses {displaced}, which {entry['module']} "
+    for displaced, entries in replacements.items():
+        if any(entry["name"] in seen_names for entry in entries):
+            continue  # the project knows a replacement — per-view calls are its own
+        site = used_here.get(displaced)
+        if site is None:
+            continue
+        path, lineno = site
+        modules = ", ".join(dict.fromkeys(entry["module"] for entry in entries))
+        if len(entries) == 1:
+            entry = entries[0]
+            head = (
+                f"permission_classes uses {displaced}, which {modules} "
                 f"publishes a replacement for, and {entry['name']} is used "
                 f"nowhere in this project — {entry['path']}. "
-                f"Intent: {entry.get('intent', '')}",
-            ))
+                f"Intent: {entry.get('intent', '')}"
+            )
+        else:
+            names = ", ".join(entry["name"] for entry in entries)
+            head = (
+                f"permission_classes uses {displaced}, which {modules} "
+                f"publishes replacements for ({names}), and none of them is "
+                "used anywhere in this project. "
+                + " ".join(
+                    f"{entry['name']} ({entry['path']}): {entry.get('intent', '')}"
+                    for entry in entries
+                )
+            )
+        findings.append(Finding(path, lineno, "SUR002", head))
     return findings
 
 

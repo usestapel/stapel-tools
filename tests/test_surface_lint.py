@@ -228,6 +228,65 @@ def test_sur002_quiet_for_a_same_named_local_class(workspace):
     assert run(proj, workspace) == []
 
 
+SIBLING_SURFACE = [
+    {
+        "name": "HasWorkspaceMandate",
+        "kind": "permission_class",
+        "path": "stapel_core.django.api.permissions.HasWorkspaceMandate",
+        "intent": "The mandate gate for a PRODUCT view. Fail closed.",
+        "instead_of": [
+            "rest_framework.permissions.IsAuthenticated",
+            "stapel_core.django.api.permissions.IsNotAnonymousUser",
+        ],
+    },
+    {
+        "name": "HasWorkspaceMandateIfScoped",
+        "kind": "permission_class",
+        "path": "stapel_core.django.api.permissions.HasWorkspaceMandateIfScoped",
+        "intent": "The same gate for a LIBRARY view a single-tenant host also mounts.",
+        "instead_of": [
+            "rest_framework.permissions.IsAuthenticated",
+            "stapel_core.django.api.permissions.IsNotAnonymousUser",
+        ],
+    },
+]
+
+
+def test_sur002_quiet_when_the_project_picked_a_SIBLING_replacement(tmp_path):
+    """Two published classes displace the same symbol; adopting either is adoption.
+
+    Measured on meettoday: it runs ``[IsAuthenticated, HasWorkspaceMandate]``
+    on the views that need a mandate and says in its own source why it did NOT
+    take ``HasWorkspaceMandateIfScoped`` (that class is for library views; this
+    is a product). Asking per-entry re-reported the never-imported sibling and
+    made the only route to green either a weaker gate or a silenced rule.
+    """
+    make_module(tmp_path, "stapel-core", CORE_SURFACE + SIBLING_SURFACE)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "views.py").write_text(VIEW_ATTRIBUTE_IMPORT)
+    (proj / "gated.py").write_text(
+        "from rest_framework.permissions import IsAuthenticated\n"
+        "from rest_framework.views import APIView\n"
+        "from stapel_core.django.api.permissions import HasWorkspaceMandate\n\n\n"
+        "class Gated(APIView):\n"
+        "    permission_classes = [IsAuthenticated, HasWorkspaceMandate]\n"
+    )
+    assert run(proj, tmp_path) == []
+
+
+def test_sur002_still_fires_when_no_sibling_is_adopted(tmp_path):
+    """The incident state survives the widening: no replacement anywhere."""
+    make_module(tmp_path, "stapel-core", CORE_SURFACE + SIBLING_SURFACE)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "views.py").write_text(VIEW_ATTRIBUTE_IMPORT)
+    findings = run(proj, tmp_path)
+    assert codes(findings) == ["SUR002"]
+    assert "HasWorkspaceMandate" in findings[0].message
+    assert "IsNotAnonymousUser" in findings[0].message
+
+
 def test_sur002_reports_once_per_displaced_symbol(workspace):
     """One finding per displaced symbol, not per call site."""
     proj = workspace / "proj"
