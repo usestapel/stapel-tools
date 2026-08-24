@@ -880,6 +880,29 @@ SITE_URL={url}
 # config/settings/dev.py, never in the shared settings base.
 FRONTEND_URL={url}
 
+# ─── Browser WebSocket origins (stapel-core >=0.44.2) — FAIL-CLOSED ─────────
+# Every origin a BROWSER opens a socket from, with its port when it is not the
+# scheme's default. The cookie branch of the socket handshake is gated on this
+# list because a cookie is ambient authority (the browser sends it on a
+# handshake started by any page, and sockets have neither the same-origin
+# policy nor CORS in front of them). An empty list is a misconfiguration, not a
+# wildcard: handshakes close 4403 and `manage.py check` fails with
+# stapel_core.jwt.E001.
+#
+#   same-origin SPA (this stack's nginx serves it):  {url}
+#   SPA on its own origin:  STAPEL_WS_ALLOWED_ORIGINS={url},https://app.example.com
+STAPEL_WS_ALLOWED_ORIGINS={url}
+
+# ─── Cookie SameSite, when the SPA is on ANOTHER SITE ───────────────────────
+# Left unset the JWT cookie is SameSite=Lax, which is right for a same-site SPA
+# and WRONG for a cross-site one: the browser will not send it on the SPA's
+# XHR/socket handshake at all, and the app looks signed out one request after a
+# successful sign-in. `None` is the cross-site value and it REQUIRES Secure —
+# a browser drops `SameSite=None` without it — so both go together, over HTTPS
+# only, and the SPA's origin must be in the allowlist above.
+# JWT_COOKIE_SAMESITE=None
+# JWT_COOKIE_SECURE=True
+
 # ─── Reverse proxy: what the process is allowed to believe ──────────────────
 # STAPEL_TRUST_PROXY_SSL_HEADER makes Django believe X-Forwarded-Proto
 # (SECURE_PROXY_SSL_HEADER). Since stapel-core 0.24 it is OPT-IN, and the opt-in
@@ -1130,6 +1153,30 @@ SITE_URL={url}
 # DEBUG=False and no value. The dev value lives in .env.local /
 # config/settings/dev.py, never in the shared settings base.
 FRONTEND_URL={url}
+
+# ─── Browser WebSocket origins (stapel-core >=0.44.2) — FAIL-CLOSED ─────────
+# Every origin a BROWSER opens a socket from, with its port when it is not the
+# scheme's default. The cookie branch of the handshake is gated on this list:
+# a cookie is ambient authority (the browser sends it on a handshake started by
+# any page, and sockets have neither the same-origin policy nor CORS in front
+# of them). An empty list refuses every handshake — close 4403, and
+# `manage.py check` fails with stapel_core.jwt.E001 at deploy time.
+#
+# A fleet's frontend lives in its own repository. Served by THIS stack's nginx
+# it is the same origin as below; deployed on its own host it is a second
+# entry, and then the cookie is cross-site — see the SameSite block.
+STAPEL_WS_ALLOWED_ORIGINS={url}
+
+# ─── Cookie SameSite, when the SPA is on ANOTHER SITE ───────────────────────
+# The JWT cookie is SameSite=Lax unless stated. That is right while the SPA and
+# the API share a site, and WRONG the moment they do not: the browser stops
+# sending the cookie on the SPA's XHR and on its socket handshake, and the app
+# reads as signed out one request after a successful sign-in. `None` is the
+# cross-site value and REQUIRES Secure (a browser drops `SameSite=None`
+# without it), so both lines go together, over HTTPS only, and the SPA's origin
+# must also be in STAPEL_WS_ALLOWED_ORIGINS above.
+# JWT_COOKIE_SAMESITE=None
+# JWT_COOKIE_SECURE=True
 
 # ─── Reverse proxy: what the processes are allowed to believe ───────────────
 # STAPEL_TRUST_PROXY_SSL_HEADER makes Django believe X-Forwarded-Proto

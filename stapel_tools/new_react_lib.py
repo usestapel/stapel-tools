@@ -66,11 +66,45 @@ _PAIR_MIN_CORE = max(FLOW_PRIMITIVE_MIN_CORE, MODULE_FACTORY_MIN_CORE)
 # cannot honestly claim an older core.
 DEFAULT_CORE_PEER = ">=0.4.0 <1.0.0"
 
+# ── the default skin (§54) ───────────────────────────────────────────────────
+# The audit's G2: every freshly scaffolded pair used to be "headless shipped,
+# feature not shipped" — no `src/default/`, no `./default` export, no antd peer,
+# so a host got a bag of state and had to draw every screen itself. The skin is
+# therefore ON by default and `--no-skin` is the opt-out (a genuinely headless
+# pair — billing, calendar, recordings — is the exception, and an exception has
+# to be asked for).
+#
+# `SkinTheme` (`@stapel/tokens-antd/skin`) is the ONE themed surface: it bridges
+# the §68 neutral role dictionary onto an antd `ConfigProvider` and follows the
+# host's mode. A pair that mounts its own `ConfigProvider` forks the bridge; a
+# pair that defaults `mode="light"` ignores a dark host. Both are why the floor
+# below is the minor that ships `SkinTheme`.
+TOKENS_ANTD_PEER = ">=0.6.0"
+ANTD_PEER = ">=5.20.0 <7"
+
+# Icon names the shell's registry resolves (`shell-react/src/default/icons.tsx`).
+# An unknown name renders a generic glyph with no error, so the scaffold picks
+# from this set and `_frontend_templates.NAV_ICON_REGISTRY` refuses anything
+# outside it at generation time.
+SCAFFOLD_NAV_ICON = "AppstoreOutlined"
+
 
 def render(template: str, ctx: dict) -> str:
+    """Substitute `{{KEY}}` tokens until the text stops changing.
+
+    A single pass is not enough since the skin fragments landed: a fragment is
+    itself a template (`SKIN_I18N_EN` carries `{{MODULE}}` lines), and a
+    single-pass renderer would substitute it AFTER `MODULE` had already been
+    replaced, leaving `{{MODULE}}` in the generated file. Looping to a fixed
+    point makes the fragments composable regardless of dict order; the bound
+    stops a fragment that (wrongly) reproduced its own token from spinning."""
     result = template
-    for key, value in ctx.items():
-        result = result.replace(f"{{{{{key}}}}}", value)
+    for _ in range(5):
+        before = result
+        for key, value in ctx.items():
+            result = result.replace(f"{{{{{key}}}}}", value)
+        if result == before:
+            break
     return result
 
 
@@ -153,6 +187,136 @@ def analytics_marker(flow_count: int) -> dict:
     }
 
 
+def skin_context(skin: bool) -> dict:
+    """The template fragments that differ between a skinned pair (the default)
+    and a `--no-skin` one. Kept as data rather than as branches inside the
+    templates so that BOTH shapes are readable in one place, and so a reader can
+    see exactly what `--no-skin` costs: the `./default` subpath, the antd peers,
+    the themed harness, the skin demo, the panel's i18n keys and the pair's one
+    nav entry (an entry naming a component that does not exist is worse than
+    none — it fails at the container's import)."""
+    if not skin:
+        return {
+            "SKIN_EXPORTS": "",
+            "SKIN_PEERS": "",
+            "SKIN_PEERS_ANTD": "",
+            "SKIN_DEVDEPS": "",
+            "SKIN_DEVDEPS_ANTD": "",
+            "SKIN_SIZE_LIMITS": "",
+            "SKIN_I18N_KEYS": "",
+            "SKIN_I18N_EN": "",
+            "HARNESS_SKIN_IMPORT": "",
+            "HARNESS_THEMED_CHILDREN": "{props.children}",
+            "HARNESS_THEME_NOTE": "",
+            "SKIN_README": "",
+        }
+    return {
+        "SKIN_EXPORTS": (
+            '    "./default": {\n'
+            '      "types": "./dist/default/index.d.ts",\n'
+            '      "default": "./dist/default/index.js"\n'
+            "    },\n"
+            '    "./i18n/ru": {\n'
+            '      "types": "./dist/i18n/ru.d.ts",\n'
+            '      "default": "./dist/i18n/ru.js"\n'
+            "    },\n"
+            '    "./i18n/es": {\n'
+            '      "types": "./dist/i18n/es.d.ts",\n'
+            '      "default": "./dist/i18n/es.js"\n'
+            "    },\n"
+        ),
+        # Split so the dependency maps stay alphabetical (`antd` sorts after
+        # `@tanstack/react-query`, `@stapel/tokens-antd` right after `@stapel/tokens`).
+        "SKIN_PEERS": f'    "@stapel/tokens-antd": "{TOKENS_ANTD_PEER}",\n',
+        "SKIN_PEERS_ANTD": f'    "antd": "{ANTD_PEER}",\n',
+        "SKIN_DEVDEPS": '    "@stapel/tokens-antd": "workspace:^",\n',
+        "SKIN_DEVDEPS_ANTD": '    "antd": "^5.20.0",\n',
+        "SKIN_SIZE_LIMITS": (
+            ",\n    {\n"
+            '      "name": "default skin subpath (opt-in: antd + the token bridge)",\n'
+            '      "path": "dist/default/index.js",\n'
+            '      "limit": "10 KB"\n'
+            "    },\n    {\n"
+            '      "name": "i18n/ru subpath (opt-in locale: en floor + ru UI)",\n'
+            '      "path": "dist/i18n/ru.js",\n'
+            '      "limit": "8 KB"\n'
+            "    },\n    {\n"
+            '      "name": "i18n/es subpath (opt-in locale: en floor + es UI)",\n'
+            '      "path": "dist/i18n/es.js",\n'
+            '      "limit": "8 KB"\n'
+            "    }"
+        ),
+        "SKIN_I18N_KEYS": (
+            '  navOverview: "{{MODULE}}.nav.overview",\n'
+            '  panelEmpty: "{{MODULE}}.panel.empty",\n'
+            '  panelLoading: "{{MODULE}}.panel.loading",\n'
+        ),
+        "SKIN_I18N_EN": (
+            "\n  // the default skin's own copy (see i18n/ru.ts, i18n/es.ts)\n"
+            + "".join(f'  {line}\n' for line in _SKIN_TEXT_LINES["en"])
+        ),
+        "HARNESS_SKIN_IMPORT": 'import { SkinTheme } from "@stapel/tokens-antd/skin";\n',
+        "HARNESS_THEMED_CHILDREN": "\n          <SkinTheme>{props.children}</SkinTheme>\n        ",
+        "HARNESS_THEME_NOTE": (
+            "\n * `SkinTheme` is mounted here too, so a `./default` demo is drawn\n"
+            " * through the same antd bridge a host gets — a skin demo that themed\n"
+            " * itself would document a screen nobody ships."
+        ),
+        "SKIN_README": _SKIN_README,
+    }
+
+
+# The scaffold's own UI copy, in the three locales the fleet ships. It is
+# deliberately GENERIC — "Overview", "Nothing here yet", "Loading" — and that is
+# what makes ru/es honest from commit 1 rather than a placeholder: a generator
+# cannot translate a product's vocabulary, and it can translate these. Every key
+# the pair adds later is held to the same rule by `test/i18nParity.test.ts`.
+_SKIN_TEXT_LINES: dict[str, list[str]] = {
+    "en": [
+        '"{{MODULE}}.nav.overview": "Overview",',
+        '"{{MODULE}}.panel.empty": "Nothing here yet.",',
+        '"{{MODULE}}.panel.loading": "Loading…",',
+    ],
+    "ru": [
+        '"{{MODULE}}.nav.overview": "Обзор",',
+        '"{{MODULE}}.panel.empty": "Здесь пока ничего нет.",',
+        '"{{MODULE}}.panel.loading": "Загрузка…",',
+    ],
+    "es": [
+        '"{{MODULE}}.nav.overview": "Resumen",',
+        '"{{MODULE}}.panel.empty": "Aquí todavía no hay nada.",',
+        '"{{MODULE}}.panel.loading": "Cargando…",',
+    ],
+}
+
+# The unknown-error fallback exists in every pair (`i18n/keys.ts`), so the two
+# locale bundles carry it too — otherwise the very first refusal a ru/es host
+# shows would be the one sentence still in English.
+_UNKNOWN_ERROR_TEXT = {
+    "ru": '"{{MODULE}}.error.unknown": "Что-то пошло не так. Попробуйте ещё раз.",',
+    "es": '"{{MODULE}}.error.unknown": "Algo salió mal. Inténtalo de nuevo.",',
+}
+
+_LOCALE_NAMES = {"ru": "Russian", "es": "Spanish"}
+
+_SKIN_README = """
+`./default` is the pair's **shipped** half: `<{{CAMEL}}Panel/>`, themed through
+`SkinTheme` from `@stapel/tokens-antd/skin` (one bridge for the whole fleet — a
+pair never mounts its own `ConfigProvider` and never defaults a theme mode).
+Importing it is the opt-in that pulls `antd`; a host with its own design system
+keeps importing the root entry and draws its own screens.
+
+```tsx
+import { {{CAMEL}}Panel } from "{{PKG_NAME}}/default";
+import { register{{CAMEL}}I18nRu } from "{{PKG_NAME}}/i18n/ru";
+```
+
+Locales ship as subpaths (`./i18n/ru`, `./i18n/es`) so a host carries only the
+ones it registers; `test/i18nParity.test.ts` fails the build if a key exists in
+en and not in ru/es. Product rules for this pair: `docs/guidelines.md`.
+"""
+
+
 def build_context(
     module: str,
     title: str,
@@ -161,6 +325,7 @@ def build_context(
     desc: str | None = None,
     core_peer: str = DEFAULT_CORE_PEER,
     flow_count: int = 0,
+    skin: bool = True,
 ) -> dict:
     camel = module.capitalize()
     default_desc = (
@@ -182,10 +347,56 @@ def build_context(
         "CORE_PEER": core_peer,
         "YEAR": str(datetime.date.today().year),
         **analytics_marker(flow_count),
+        **skin_context(skin),
     }
 
 
-def nav_manifest_json(ctx: dict) -> str:
+def nav_entries(ctx: dict, *, skin: bool = True) -> list[dict]:
+    """The pair's declared screens — ONE source for both `src/nav/manifest.ts`
+    and `nav-manifest.json`, so the declaration and its generated projection
+    cannot disagree before `pnpm gen:nav` has ever run.
+
+    A skinned pair declares its panel; a `--no-skin` pair declares nothing,
+    because an entry naming a `component.export` that does not exist passes the
+    generator's structural validation and fails at the CONTAINER's import — two
+    repositories away from the mistake."""
+    if not skin:
+        return []
+    module = ctx["MODULE"]
+    return [
+        {
+            "id": f"{module}.overview",
+            "labelKey": f"{module}.nav.overview",
+            "icon": SCAFFOLD_NAV_ICON,
+            # Relative: a child of the member area (`/app` in a monolith,
+            # `/account` in a storefront container). An absolute path would
+            # claim a root-level address the container may already own.
+            "route": {"path": module},
+            "component": {"export": f"{ctx['CAMEL']}Panel", "subpath": "default"},
+            "placement": {"level": "top"},
+            "menuVisibleDefault": True,
+            "requiresAuth": True,
+            # DECLARED, never derived: a screen that later gains requiresAuth
+            # for an unrelated reason must not silently leave a public tree.
+            "surface": "member",
+            "order": 50,
+        }
+    ]
+
+
+def nav_entries_ts(entries: list[dict]) -> str:
+    """The `navEntries` array literal for `src/nav/manifest.ts`. JSON is a valid
+    TS object literal, so the declaration is a projection of the same dict the
+    manifest is — no second hand-written copy to drift."""
+    if not entries:
+        return "[]"
+    body = json.dumps(entries, indent=2)
+    return "\n".join(
+        line if i == 0 else f"  {line}" for i, line in enumerate(body.splitlines())
+    )
+
+
+def nav_manifest_json(ctx: dict, *, skin: bool = True) -> str:
     """The pair's own ``nav-manifest.json``, byte-identical to what
     ``scripts/gen-nav-manifest.mjs`` writes for the same (empty) declaration:
     ``JSON.stringify({package, version, entries}, null, 2)`` + a newline.
@@ -198,12 +409,46 @@ def nav_manifest_json(ctx: dict) -> str:
     the same field, so the two agree by construction until the first
     changeset moves both."""
     return json.dumps(
-        {"package": ctx["PKG_NAME"], "version": "0.0.0", "entries": []}, indent=2
+        {
+            "package": ctx["PKG_NAME"],
+            "version": "0.0.0",
+            "entries": nav_entries(ctx, skin=skin),
+        },
+        indent=2,
+        ensure_ascii=False,
     ) + "\n"
 
 
-def file_plan(ctx: dict) -> dict:
-    """Relative path (within the package dir) -> rendered content."""
+def locale_bundle(ctx: dict, locale: str, *, skin: bool = True) -> str:
+    """`src/i18n/<locale>.ts` — the pair's own UI copy in one locale, rendered
+    from the same generic text table the en bundle uses. The bundle carries
+    exactly the keys the pair DECLARES (a `--no-skin` pair has no panel copy),
+    so locale parity is an equality rather than a superset."""
+    lines = [_UNKNOWN_ERROR_TEXT[locale]]
+    if skin:
+        lines.extend(_SKIN_TEXT_LINES[locale])
+    return render(
+        T.I18N_LOCALE_TS,
+        {
+            **ctx,
+            "LOCALE": locale,
+            "LOCALE_CAMEL": locale.capitalize(),
+            "LOCALE_NAME": _LOCALE_NAMES[locale],
+            "LOCALE_TEXTS": "".join(f"  {line}\n" for line in lines),
+        },
+    )
+
+
+def file_plan(ctx: dict, *, skin: bool | None = None) -> dict:
+    """Relative path (within the package dir) -> rendered content.
+
+    `skin` is READ OFF THE CONTEXT by default: the context already carries the
+    skin fragments (`build_context(..., skin=False)` empties them), and a second
+    independent flag here is a way for the two halves of one decision to
+    disagree — a package.json exporting `./default` with no `src/default/` in
+    the plan."""
+    if skin is None:
+        skin = bool(ctx.get("SKIN_EXPORTS"))
     module = ctx["MODULE"]
     plan = {
         "package.json": render(T.PACKAGE_JSON, ctx),
@@ -229,10 +474,20 @@ def file_plan(ctx: dict) -> dict:
         # generated projection ship together, so the pair is enrolled in the
         # nav contract from its first commit instead of being retrofitted
         # into it once per pair.
-        "src/nav/manifest.ts": render(T.NAV_MANIFEST_TS, ctx),
-        "nav-manifest.json": nav_manifest_json(ctx),
+        "src/nav/manifest.ts": render(
+            T.NAV_MANIFEST_SKIN_TS if skin else T.NAV_MANIFEST_TS,
+            {**ctx, "NAV_ENTRIES": nav_entries_ts(nav_entries(ctx, skin=skin))},
+        ),
+        "nav-manifest.json": nav_manifest_json(ctx, skin=skin),
         "src/i18n/keys.ts": render(T.I18N_KEYS_TS, ctx),
         "src/i18n/errorsMap.ts": render(T.ERRORS_MAP_TS, ctx),
+        # Locale subpaths (i18n-shipping.md §2): ru/es ship from commit 1, so
+        # parity is a gate rather than a retrofit. `--no-skin` keeps them —
+        # a headless pair still has refusal copy.
+        "src/i18n/ru.ts": locale_bundle(ctx, "ru", skin=skin),
+        "src/i18n/es.ts": locale_bundle(ctx, "es", skin=skin),
+        # The pair's own product rules, written down where the pair is.
+        "docs/guidelines.md": render(T.GUIDELINES_MD, ctx),
         # demo layer (first-class code: compiled, product-linted, smoke-rendered)
         "demo/_harness.tsx": render(T.HARNESS_TSX, ctx),
         f"demo/{ctx['CAMEL']}.demo.tsx": render(T.DEMO_TSX, ctx),
@@ -243,7 +498,16 @@ def file_plan(ctx: dict) -> dict:
         "test/errorsBundle.test.ts": render(T.ERRORS_BUNDLE_TEST, ctx),
         "test/demos.test.tsx": render(T.DEMOS_TEST_TSX, ctx),
         "test/prodBundlePurity.test.ts": render(T.PROD_BUNDLE_PURITY_TEST, ctx),
+        # The parity gate the fleet lacked: a key with no ru/es text fails the
+        # build instead of reaching a ru/es host in English.
+        "test/i18nParity.test.ts": render(T.I18N_PARITY_TEST, ctx),
     }
+    if skin:
+        camel = ctx["CAMEL"]
+        plan[f"src/default/{camel}Panel.tsx"] = render(T.DEFAULT_PANEL_TSX, ctx)
+        plan["src/default/types.ts"] = T.DEFAULT_TYPES_TS
+        plan["src/default/index.ts"] = render(T.DEFAULT_INDEX_TS, ctx)
+        plan[f"demo/{camel}Skin.demo.tsx"] = render(T.DEMO_SKIN_TSX, ctx)
     return plan
 
 
@@ -481,6 +745,7 @@ def scaffold_react_lib(
     backend: str | None = None,
     path_prefix: str | None = None,
     desc: str | None = None,
+    skin: bool = True,
 ) -> Path:
     backend = backend or f"stapel-{module}"
     path_prefix = path_prefix or f"/{module}/api/v1/"  # v1 canon (api-versioning.md §2)
@@ -488,6 +753,7 @@ def scaffold_react_lib(
         module, title, backend, path_prefix, desc,
         core_peer=core_peer_range(react_dir),
         flow_count=module_flow_count(react_dir, module),
+        skin=skin,
     )
 
     packages_dir = react_dir / "packages"
@@ -580,6 +846,16 @@ def main():
         "(default: /<module>/api/)",
     )
     parser.add_argument(
+        "--no-skin",
+        dest="skin",
+        action="store_false",
+        help="scaffold the headless layers ONLY — no src/default/ skin, no "
+        "./default export, no antd peers, no nav entry. The skin is on by "
+        "default (§54: a pair ships a feature, not only a bag); pass this for "
+        "a pair that is genuinely headless by design (billing, calendar, "
+        "recordings) and say so in its MODULE.md.",
+    )
+    parser.add_argument(
         "--react-dir",
         type=Path,
         default=None,
@@ -606,6 +882,7 @@ def main():
         react_dir,
         backend=args.backend,
         path_prefix=args.path_prefix,
+        skin=args.skin,
     )
 
 

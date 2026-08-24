@@ -259,9 +259,13 @@ class TestThemeJsonScaffold:
         import stapel_tools._precommit_templates as P
 
         for name in dir(F):
-            if name.isupper():
-                assert "tokens-lib.mjs" not in getattr(F, name)
-                assert "gen-tokens.mjs" not in getattr(F, name)
+            # Uppercase names in this module are templates AND plain constants
+            # (a photo count, an icon registry); only the strings can vendor a
+            # generator.
+            val = getattr(F, name)
+            if name.isupper() and isinstance(val, str):
+                assert "tokens-lib.mjs" not in val
+                assert "gen-tokens.mjs" not in val
         for name in dir(P):
             if name.isupper() or name.startswith("_"):
                 val = getattr(P, name)

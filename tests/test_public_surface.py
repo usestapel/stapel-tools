@@ -71,9 +71,13 @@ class TestMountTable:
             "and add a row to NAV_ENTRY_MOUNTS."
         )
 
-    def test_container_entry_is_the_only_local_one(self):
+    def test_the_container_roots_are_the_only_local_ones(self):
+        """The two sections no module owns — and now BOTH are declared. Before
+        `admin.root` existed here, gdpr's `admin.privacy` and video's
+        `admin.usage` hung from a parent nobody declared and were dropped as
+        orphans in every generated container, silently."""
         local = {k for k, v in F.NAV_ENTRY_MOUNTS.items() if "local" in v}
-        assert local == {"account.root"}
+        assert local == {"account.root", "admin.root"}
 
 
 class TestRoutePlan:
@@ -142,16 +146,38 @@ class TestRoutesRenderer:
         assert gate < account, "the /account subtree must be nested inside the gate"
         assert src.index('path: "/login"') < gate, "sign-in must be outside the gate"
 
-    def test_a_component_needing_container_props_becomes_a_named_gap(self):
-        """`ListingComposerPage` requires `features` — the chosen category's
-        schema, which lives in another pair (L2 pairs do not import each
-        other). Generation will not pass `[]`: an empty feature schema does
-        not read as "not wired yet", it reads as "this category has no
-        attributes"."""
-        src = self._routes()
+    def test_the_cross_pair_composer_is_wired_from_the_installed_pairs(self):
+        """`ListingComposerPage` needs the category schema and the photo queue,
+        and an L2 pair may not import another L2 pair — so the CONTAINER
+        composes them. It used to be a placeholder, which meant the scripted
+        storefront had no way to list anything at all."""
+        files = _plan()["files"]
+        src = files["src/routes.tsx"]
+        assert '{ path: "/new", element: <ListingComposePage /> },' in src
+        page = files["src/pages/ListingComposePage.tsx"]
+        assert "useCategoryFeatures" in page
+        assert "CategoryPickerField" in page
+        # ONE upload queue: the bag the composer publishes from is the bag the
+        # grid draws. Two queues publish an empty images_draft while the photos
+        # sit on screen.
+        assert page.count("useUploadQueue(") == 1
+        assert "<MediaGalleryField bag={images} />" in page
+        # The slot it CANNOT fill is named on the page, not papered over.
+        assert "renderLocationPicker" in page
+        assert "compose-location-gap" in page
+
+    def test_the_composer_falls_back_to_a_named_gap_without_its_member_pairs(self):
+        """A composite screen is only mountable when every pair it composes is
+        installed; short of that the page NAMES which prop belongs to which
+        missing pair, rather than fabricating an empty feature schema (which
+        does not read as "not wired yet" — it reads as "this category has no
+        attributes")."""
+        src = _plan(pairs=["auth", "profiles", "categories", "listings"])[
+            "files"
+        ]["src/routes.tsx"]
         assert 'entryId="listings.compose"' in src
-        assert 'missing={["features"]}' in src
-        assert "<ListingComposerPage" not in src
+        assert "gallerySlot (needs @stapel/cdn-react)" in src
+        assert "<ListingComposePage" not in src
 
     def test_route_parameters_go_through_a_wrapper(self):
         src = self._routes()
@@ -424,6 +450,26 @@ class TestWriter:
         assert ":latest" not in workflow
 
     def test_named_gaps_are_reported_to_the_operator(self, tmp_path, capsys):
+        """With the composer's member pairs missing, the operator is TOLD which
+        screen was emitted as a gap — the full storefront selection now mounts
+        every declared screen, so the gap is provoked by leaving cdn out."""
+        out = write_public_surface(
+            tmp_path / "repo",
+            name="acme-storefront",
+            title="Acme",
+            pairs=["auth", "profiles", "categories", "listings"],
+            locale="en",
+            realtime=False,
+            extra_prefixes=[],
+            doc_type="listing",
+        )
+        assert any("NAMED GAPS" in line and "listings.compose" in line for line in out)
+
+    def test_the_full_selection_leaves_no_named_gap(self, tmp_path):
+        """The scripted storefront mounts every screen its pairs declare. This
+        is the assertion that would have caught "the app is a library": before
+        the composer was wired, the one screen that lists something was a
+        placeholder."""
         out = write_public_surface(
             tmp_path / "repo",
             name="acme-storefront",
@@ -434,7 +480,7 @@ class TestWriter:
             extra_prefixes=[],
             doc_type="listing",
         )
-        assert any("NAMED GAPS" in line and "listings.compose" in line for line in out)
+        assert not any("NAMED GAPS" in line for line in out)
 
 
 # ── the integration gate ─────────────────────────────────────────────────────

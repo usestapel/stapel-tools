@@ -53,8 +53,13 @@ STAPEL_LIBS = {
         "dir": "stapel_core",
         "required": True,
         "description": "Core framework (required)",
-        "pin": "0.10.0",
-        "ahead_of_pypi": False,  # matches PyPI 0.10.0 @ 2026-07-11
+        # 0.44.2: the browser cookie branch of the WebSocket handshake plus the
+        # origin allowlist that guards it (`STAPEL_WS_ALLOWED_ORIGINS`,
+        # `stapel_core.jwt.E001`). The scaffold emits that setting, so it may
+        # not pin a core that has never heard of it — the project would boot
+        # with a socket every browser is turned away from.
+        "pin": "0.44.2",
+        "ahead_of_pypi": True,  # released 2026-08-24; PyPI publish pending
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
@@ -495,7 +500,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.16.0",
+        "version": "0.16.1",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
@@ -628,6 +633,29 @@ FRONTEND_REACT_LIBS = {
             },
         ],
     },
+    "forms": {
+        # The backend has been selectable since the forms module landed
+        # (STAPEL_LIBS "forms"), and the pair was published — but this registry
+        # had no entry, so `stapel-create-project --modules forms` shipped a
+        # headless backend and a frontend that could not see it (forms-react
+        # audit FR-3). Registered here, its runtime, provider and catalogue join
+        # `modules.tsx` like every other pair's.
+        #
+        # No `default_component`: every screen `@stapel/forms-react/default`
+        # exports needs an id the scaffold cannot fabricate (`FormsListPane`
+        # requires `workspaceId`) — the same treatment as workspaces.
+        #
+        # No `nav` mirror YET: forms-react 0.1.0 publishes no
+        # `nav-manifest.json` at all (it declares no `src/nav/manifest.ts`), and
+        # a mirror claiming entries the package does not publish is exactly what
+        # `scripts/check_nav_manifest_sync.py` exists to refuse. The mirror lands
+        # in the same wave the pair's own declaration does.
+        "package": "@stapel/forms-react",
+        "version": "0.1.0",
+        "provider": "FormsProvider",
+        "create_runtime": "createFormsRuntime",
+        "register_i18n": "registerFormsI18n",
+    },
     "gdpr": {
         "package": "@stapel/gdpr-react",
         "version": "0.1.0",
@@ -663,7 +691,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.4.0",
+        "version": "0.5.0",
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -779,7 +807,7 @@ FRONTEND_REACT_LIBS = {
     "search": {
         # No STAPEL_LIBS entry — see the dict docstring.
         "package": "@stapel/search-react",
-        "version": "0.4.0",
+        "version": "0.5.0",
         "provider": "SearchProvider",
         "create_runtime": "createSearchRuntime",
         "register_i18n": "registerSearchI18n",
@@ -839,6 +867,206 @@ FRONTEND_REACT_LIBS = {
         "register_i18n": "registerWorkspacesI18n",
     },
 }
+# ---------------------------------------------------------------------------
+# Composite frontend presets — the product shapes (architect verdict,
+# 2026-08-24: "stapel-booking / shop / social / classified mount no URLs; their
+# frontend counterpart is the same thing one layer up").
+#
+# A composite backend (`stapel-shop`, `stapel-classified`, …) is not a service:
+# its preset.py is INSTALLED_APPS + URL_INCLUDES + settings, i.e. a NAMED SET of
+# other modules plus glue. Its frontend counterpart is exactly that and nothing
+# more — a named set of pairs, the container-owned nav parents that make their
+# submenu entries resolve, and the container's own pages. So there is no
+# `@stapel/shop-react` package to build and never will be; there is this table.
+#
+# Each preset carries:
+#   backend   the composite module in STAPEL_LIBS whose `requires` this mirrors
+#   pairs     the registered pairs a container installs, in registry order
+#   pending   pair key -> why it is NOT in `pairs` yet. Named rather than
+#             omitted: "classified without moderation" is a product decision a
+#             reader must see, not a silent gap. Each becomes a line the CLI
+#             prints and a line in the generated README.
+#   why       one line per pair that is NOT a backend member, saying what the
+#             container needs it for — so nobody has to guess why a storefront
+#             preset installs `cdn` when `stapel-shop` does not depend on it.
+#
+# What a preset EXPANDS to is computed, never hand-listed twice: the nav bundle
+# is the members' own mirrors plus the container roots
+# (`_frontend_templates.public_nav_manifests`), and the container pages are the
+# ones the mount plan actually emits for that selection.
+FRONTEND_COMPOSITES: dict[str, dict] = {
+    "shop": {
+        "backend": "shop",
+        "description": "Storefront: catalogue, listings, reviews, search",
+        "pairs": [
+            "auth",
+            "attributes",
+            "categories",
+            "cdn",
+            "listings",
+            "profiles",
+            "reviews",
+            "search",
+        ],
+        "pending": {
+            "currencies": (
+                "no @stapel/currencies-react yet — every price on the "
+                "storefront renders unformatted until it exists"
+            ),
+        },
+        "why": {
+            "auth": "a storefront always generates sign-in",
+            "profiles": "the seller's own settings screen",
+            "cdn": "the photo pipe the listing composer publishes from",
+            "search": "browse: the storefront's own way into the catalogue",
+        },
+    },
+    "classified": {
+        "backend": "classified",
+        "description": "Classified ads: the shop shape plus place and messaging",
+        "pairs": [
+            "auth",
+            "attributes",
+            "categories",
+            "cdn",
+            "chat",
+            "listings",
+            "profiles",
+            "reviews",
+            "search",
+        ],
+        "pending": {
+            "geo": (
+                "no @stapel/geo-react yet — the composer asks a seller for a "
+                "raw lat/lon pair until it exists (named on the page)"
+            ),
+            "moderation": (
+                "no @stapel/moderation-react yet — stapel-classified registers "
+                "listing/review report targets that nothing renders a button for"
+            ),
+            "currencies": "no @stapel/currencies-react yet — prices go unformatted",
+        },
+        "why": {
+            "auth": "a storefront always generates sign-in",
+            "profiles": "the seller's own settings screen",
+            "cdn": "the photo pipe the listing composer publishes from",
+            "search": "browse: the storefront's own way into the catalogue",
+            "chat": "buyer↔seller messaging is the classified's own surface",
+        },
+    },
+    "booking": {
+        "backend": "booking",
+        "description": "Bookable resources: listings on a calendar",
+        "pairs": [
+            "auth",
+            "attributes",
+            "calendar",
+            "categories",
+            "cdn",
+            "listings",
+            "profiles",
+            "search",
+        ],
+        "pending": {},
+        "why": {
+            "auth": "a storefront always generates sign-in",
+            "profiles": "the owner's own settings screen",
+            "cdn": "photos of the resource being booked",
+            "search": "browse: finding a resource before booking it",
+        },
+    },
+    "social": {
+        "backend": "social",
+        "description": "Social surface: profiles, messaging, reviews",
+        "pairs": ["auth", "cdn", "chat", "profiles", "reviews"],
+        "pending": {},
+        "why": {
+            "auth": "sign-in",
+            "cdn": "avatars and attachments",
+        },
+    },
+}
+
+
+class CompositeError(SystemExit):
+    """An unknown preset. Its own type so a caller can tell it from an IO
+    failure and print the roster instead of a stack trace."""
+
+
+def composite_pairs(name: str) -> list[str]:
+    """The registered pairs a preset installs. Raises on an unknown preset (the
+    roster is small and hand-curated — a typo must not silently scaffold a
+    container with no pairs)."""
+    preset = FRONTEND_COMPOSITES.get(name)
+    if preset is None:
+        raise CompositeError(
+            f"unknown frontend preset {name!r}. Known: "
+            f"{', '.join(sorted(FRONTEND_COMPOSITES))}"
+        )
+    unknown = [k for k in preset["pairs"] if k not in FRONTEND_REACT_LIBS]
+    if unknown:
+        raise CompositeError(
+            f"preset {name!r} names pairs that are not registered: {unknown!r}. "
+            "A preset is a SELECTION over FRONTEND_REACT_LIBS; register the pair "
+            "there first."
+        )
+    return list(preset["pairs"])
+
+
+def composite_nav_bundle(name: str, *, app_package: str = "app") -> list[dict]:
+    """The preset's BAKED nav bundle: every member pair's mirrored manifest plus
+    the container-owned roots its entries hang from (`account.root` always,
+    `admin.root` only when a member pair declares an admin-level screen).
+
+    Computed from the same function the generator uses, so the preset cannot
+    promise a menu the container does not build."""
+    from . import _frontend_templates as F
+
+    entries = [{"key": k, **FRONTEND_REACT_LIBS[k]} for k in composite_pairs(name)]
+    return F.public_nav_manifests(F.public_nav_pairs(entries), app_package=app_package)
+
+
+def composite_nav_entries(name: str) -> list[dict]:
+    """Flat view of the bundle above — every nav entry a preset's container
+    resolves, pairs' and container's alike."""
+    return [entry for m in composite_nav_bundle(name) for entry in m["entries"]]
+
+
+def composite_container_pages(name: str, *, doc_type: str = "") -> list[str]:
+    """The container's OWN pages for a preset: the two (or three) section
+    landings it always writes, plus every cross-pair page the selection makes
+    mountable (`ListingComposePage`) — the files a reader will actually find in
+    `src/`, not a promise."""
+    from . import _frontend_templates as F
+
+    pairs = composite_pairs(name)
+    entries = [{"key": k, **FRONTEND_REACT_LIBS[k]} for k in pairs]
+    manifests = F.public_nav_manifests(
+        F.public_nav_pairs(entries), app_package="app"
+    )
+    plan = F.build_public_route_plan(manifests)
+    mounts = F.public_mount_plan(plan, {"doc_type": doc_type}, pairs=tuple(pairs))
+    pages = ["src/StorefrontHome.tsx", "src/AccountHome.tsx"]
+    if any(e["id"] == "admin.root" for m in manifests for e in m["entries"]):
+        pages.append("src/AdminHome.tsx")
+    pages.extend(sorted(mounts["pages"]))
+    return pages
+
+
+def composite_report(name: str) -> list[str]:
+    """What a preset expands to, as printable lines — including the pending
+    members BY NAME, because a preset that quietly ships without moderation is
+    the kind of gap that gets discovered in production."""
+    preset = FRONTEND_COMPOSITES[name]
+    lines = [f"preset {name}: {preset['description']}"]
+    lines.append("  pairs: " + ", ".join(composite_pairs(name)))
+    lines.append(f"  nav entries: {len(composite_nav_entries(name))}")
+    lines.append("  container pages: " + ", ".join(composite_container_pages(name)))
+    for key, reason in preset["pending"].items():
+        lines.append(f"  NOT INSTALLED — {key}: {reason}")
+    return lines
+
+
 # Support packages the generated app needs alongside any FRONTEND_REACT_LIBS
 # selection — pins from the live npm registry (2026-08-23), see the
 # FRONTEND_REACT_LIBS docstring above for why npm (not the sibling
@@ -1574,7 +1802,11 @@ def _write_frontend_scaffold(
     routing_active = bool(want_auth) or bool(want_landing) or any_nav_entries
 
     nav_pairs = F.nav_wired_pairs(react_entries, auth_wired=auth_wired)
-    route_plan = F.build_nav_route_plan(nav_pairs) if nav_pairs else {"absolute_routes": [], "app_children": []}
+    route_plan = (
+        F.build_nav_route_plan(nav_pairs)
+        if nav_pairs
+        else {"absolute_routes": [], "app_children": [], "container_roots": []}
+    )
     app_route_present = auth_wired or bool(route_plan["app_children"])
     shell_react_needed = bool(nav_pairs) or app_route_present
 
@@ -1604,8 +1836,28 @@ def _write_frontend_scaffold(
             routing_active=True, has_modules=bool(react_entries),
         ))
         if shell_react_needed:
-            _write(frontend / "src" / "nav.generated.ts", F.render_nav_generated_ts(nav_pairs))
+            _write(
+                frontend / "src" / "nav.generated.ts",
+                F.render_nav_generated_ts(nav_pairs, auth_wired=auth_wired),
+            )
             _write(frontend / "stapel.nav.json", F.STAPEL_NAV_JSON)
+        # One landing page per container-owned section the selection needs
+        # (`/app/account`, `/app/admin`). Without them the admin-level screens
+        # gdpr and video declare are orphans and disappear silently.
+        if auth_wired and "admin.root" in route_plan["container_roots"]:
+            _write(frontend / "src" / "AdminGate.tsx", F.ADMIN_GATE_APP_TSX)
+        for root_id in route_plan["container_roots"]:
+            component = F.MONOLITH_CONTAINER_ROOTS[root_id]["_local"]
+            children = [
+                entry["id"]
+                for pair in nav_pairs
+                for entry in pair["nav"]
+                if entry["placement"].get("parentId") == root_id
+            ]
+            _write(
+                frontend / "src" / f"{component}.tsx",
+                F.render_section_home_tsx(root_id, children),
+            )
         _write(frontend / "src" / "routes.tsx", F.render_routes_tsx(
             route_plan, auth_wired=auth_wired, want_landing=bool(want_landing),
             app_route_present=app_route_present, has_cdn=has_cdn,

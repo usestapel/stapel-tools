@@ -224,7 +224,10 @@ def public_source_plan(
     manifests = F.public_nav_manifests(nav_pairs, app_package=name)
     plan = F.build_public_route_plan(manifests)
     options = {"doc_type": doc_type}
-    mounts = F.public_mount_plan(plan, options)
+    # The selection itself is an input to mounting: a CROSS-PAIR screen (the
+    # listing composer) is wired only when every pair it composes is installed.
+    selected = tuple(pairs)
+    mounts = F.public_mount_plan(plan, options, pairs=selected)
 
     modules = []
     for key in (*ALWAYS_PROXIED, *pairs, *extra_prefixes):
@@ -262,7 +265,7 @@ def public_source_plan(
         ),
         "src/mandateSource.ts": F.render_mandate_source_ts(),
         "src/nav.generated.ts": F.render_public_nav_generated_ts(manifests),
-        "src/routes.tsx": F.render_public_routes_tsx(plan, options),
+        "src/routes.tsx": F.render_public_routes_tsx(plan, options, pairs=selected),
         "src/MemberGate.tsx": F.MEMBER_GATE_TSX,
         "src/StorefrontShell.tsx": F.STOREFRONT_SHELL_TSX,
         "src/StorefrontHome.tsx": F.STOREFRONT_HOME_TSX,
@@ -272,6 +275,19 @@ def public_source_plan(
             name=name, title=title, pairs=pairs, locale=locale, realtime=realtime
         ),
     }
+    # `/admin` exists only when a selected pair hangs a screen from it (see
+    # ADMIN_ROOT_ENTRY): the container declares the root so those screens
+    # resolve, and writes its landing page in the same breath.
+    if any(
+        m["entries"] and any(e["id"] == "admin.root" for e in m["entries"])
+        for m in manifests
+    ):
+        files["src/AdminHome.tsx"] = F.ADMIN_HOME_TSX
+        # The staff gate needs a staff fact; auth-react's session is where it
+        # lives. Without that pair the admin routes stay member-gated and each
+        # pane refuses on its own — no gate that only pretends to check.
+        if "auth" in selected:
+            files["src/AdminGate.tsx"] = F.ADMIN_GATE_TSX
     if mounts["needs_placeholder"]:
         files["src/NavPlaceholder.tsx"] = F.NAV_PLACEHOLDER_TSX
     files.update(mounts["pages"])
@@ -529,6 +545,20 @@ def main(argv: Optional[list] = None) -> int:
         ),
     )
     p.add_argument(
+        "--preset",
+        default="",
+        help=(
+            "a composite product shape instead of a hand-listed --pairs: "
+            "shop, classified, booking, social "
+            "(create_project.FRONTEND_COMPOSITES). A composite backend mounts "
+            "no URLs of its own — it is a named set of modules — and its "
+            "frontend counterpart is the same thing one layer up: the member "
+            "pairs, the container-owned nav parents that make their entries "
+            "resolve, and the container's own pages. Members the fleet has no "
+            "react pair for yet are PRINTED by name, never silently dropped."
+        ),
+    )
+    p.add_argument(
         "--name",
         default=None,
         help="npm package name for the container (default: the repo dir name)",
@@ -582,12 +612,25 @@ def main(argv: Optional[list] = None) -> int:
 
     repo = args.repo.resolve()
     if args.surface == "public":
+        from .create_project import CompositeError, composite_pairs, composite_report
+
         pairs = [k.strip() for k in args.pairs.split(",") if k.strip()]
+        if args.preset:
+            try:
+                preset_pairs = composite_pairs(args.preset)
+            except CompositeError as exc:
+                raise SurfaceError(f"frontend-repo-init: {exc}") from exc
+            # --pairs beside a preset ADDS, never replaces: a fleet that runs
+            # one more module than its shape says is normal, and silently
+            # dropping either list would be the surprising behaviour.
+            pairs = preset_pairs + [k for k in pairs if k not in preset_pairs]
+            for line in composite_report(args.preset):
+                print("  " + line, file=sys.stderr)
         if not pairs:
             raise SurfaceError(
-                "frontend-repo-init: --surface public needs --pairs. A "
-                "container with no pairs is an empty page with a menu, and "
-                "generating one would only look like progress."
+                "frontend-repo-init: --surface public needs --pairs or "
+                "--preset. A container with no pairs is an empty page with a "
+                "menu, and generating one would only look like progress."
             )
         name = args.name or repo.name
         title = args.title or name
@@ -604,9 +647,9 @@ def main(argv: Optional[list] = None) -> int:
             force=args.force,
         ):
             print(line, file=sys.stderr)
-    elif args.pairs or args.realtime or args.name or args.title or args.doc_type:
+    elif args.pairs or args.preset or args.realtime or args.name or args.title or args.doc_type:
         raise SurfaceError(
-            "frontend-repo-init: --pairs/--realtime/--name/--title/--doc-type only mean "
+            "frontend-repo-init: --pairs/--preset/--realtime/--name/--title/--doc-type only mean "
             "something with --surface public. Passing them to the delivery "
             "half would do nothing, and doing nothing quietly is how a flag "
             "becomes folklore."

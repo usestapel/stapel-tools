@@ -386,6 +386,26 @@ SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
 JWT_COOKIE_SECURE = False
 
+# ─── Browser WebSocket origins (stapel-core >=0.44.2) ───────────────────────
+# A cookie is ambient authority: the browser attaches it to a WebSocket
+# handshake started by ANY page, and sockets are protected by neither the
+# same-origin policy nor CORS. So core gates the COOKIE branch on an origin
+# allowlist and FAILS CLOSED — an empty list is a misconfiguration, not a
+# wildcard: handshakes close 4403 and `manage.py check` reports
+# `stapel_core.jwt.E001`.
+#
+# Core reads `STAPEL_WS_ALLOWED_ORIGINS` from the env (comma-separated), which
+# the generated .env files set for the compose stack. This default covers a
+# NATIVE run (Vite on :5173 talking to runserver on :8000) where no .env is
+# loaded, so a developer never meets a socket that closes for a reason the
+# stack could have known. prod.py inherits nothing from here.
+if not STAPEL_WS_ALLOWED_ORIGINS:  # type: ignore[name-defined]  # noqa: F405
+    STAPEL_WS_ALLOWED_ORIGINS = [
+        "http://localhost:5173",  # Vite dev server
+        "http://localhost:8000",  # runserver, when the SPA is served by Django
+        "http://localhost",       # the local compose stack's nginx
+    ]
+
 # Local machine: run Celery tasks INLINE (no broker/worker required for the
 # local stack to be complete — a lib's .delay() executes eagerly; errors are
 # recorded on the result, never turned into a request 500).

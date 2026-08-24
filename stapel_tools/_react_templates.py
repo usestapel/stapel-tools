@@ -56,7 +56,7 @@ PACKAGE_JSON = """{
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./manifest": "./manifest.json",
+{{SKIN_EXPORTS}}    "./manifest": "./manifest.json",
     "./manifest.json": "./manifest.json",
     "./nav-manifest.json": "./nav-manifest.json",
     "./llms.txt": "./llms.txt",
@@ -81,25 +81,26 @@ PACKAGE_JSON = """{
   },
   "size-limit": [
     {
+      "name": "index — the skin and the ru/es locales must NOT be in the main bundle",
       "path": "dist/index.js",
       "limit": "12 KB"
-    }
+    }{{SKIN_SIZE_LIMITS}}
   ],
   "peerDependencies": {
     "@stapel/core": "{{CORE_PEER}}",
-    "@tanstack/react-query": "^5.0.0",
-    "react": ">=19"
+{{SKIN_PEERS}}    "@tanstack/react-query": "^5.0.0",
+{{SKIN_PEERS_ANTD}}    "react": ">=19"
   },
   "devDependencies": {
     "@size-limit/preset-small-lib": "^11.2.0",
     "@stapel/core": "workspace:^",
     "@stapel/showcase": "workspace:^",
     "@stapel/tokens": "workspace:^",
-    "@tanstack/react-query": "^5.81.0",
+{{SKIN_DEVDEPS}}    "@tanstack/react-query": "^5.81.0",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
-    "jsdom": "^26.1.0",
+{{SKIN_DEVDEPS_ANTD}}    "jsdom": "^26.1.0",
     "msw": "^2.10.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
@@ -540,7 +541,7 @@ import { {{MODULE}}ErrorBundleEn } from "./generated/errors.gen.js";
  */
 export const {{UPPER}}_I18N_KEYS = {
   unknownError: "{{MODULE}}.error.unknown",
-} as const;
+{{SKIN_I18N_KEYS}}} as const;
 
 export type {{CAMEL}}I18nKey =
   (typeof {{UPPER}}_I18N_KEYS)[keyof typeof {{UPPER}}_I18N_KEYS];
@@ -558,7 +559,7 @@ export const {{MODULE}}I18nBundleEn: I18nDictionary = {
 
   // {{MODULE}}-react UI
   "{{MODULE}}.error.unknown": "Something went wrong. Please try again.",
-};
+{{SKIN_I18N_EN}}};
 
 /**
  * Register {{MODULE}}-react's key bundle into a core i18n engine (call once at
@@ -813,15 +814,15 @@ HARNESS_TSX = """/**
  *    untracked clickable — the tracked point is the real `<button>` in here.
  *
  * The mock runtime injects a canned `fetch` (no MSW worker needed) so a demo
- * renders identically in Ladle (interactive) and in vitest (smoke). Themes are
- * the viewer's job (data-theme + tokens.css); this only wires the providers a
- * headless component needs: query client, i18n, and the {{MODULE}} runtime.
+ * renders identically in Ladle (interactive) and in vitest (smoke). The token
+ * layer is the viewer's (data-theme + tokens.css); this wires the providers a
+ * demo needs: query client, i18n, and the {{MODULE}} runtime.{{HARNESS_THEME_NOTE}}
  */
 import { useMemo } from "react";
 import type { CSSProperties, ReactElement, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider, createI18n, useT } from "@stapel/core";
-import { cssVar, radii, spacing, fontSize } from "@stapel/tokens";
+{{HARNESS_SKIN_IMPORT}}import { cssVar, radii, spacing, fontSize } from "@stapel/tokens";
 import { create{{CAMEL}}Runtime } from "../src/index.js";
 import { {{CAMEL}}Provider, register{{CAMEL}}I18n } from "../src/index.js";
 
@@ -910,7 +911,7 @@ export function {{CAMEL}}DemoHarness(props: {
   return (
     <QueryClientProvider client={queryClient}>
       <I18nProvider i18n={i18n}>
-        <{{CAMEL}}Provider runtime={runtime}>{props.children}</{{CAMEL}}Provider>
+        <{{CAMEL}}Provider runtime={runtime}>{{HARNESS_THEMED_CHILDREN}}</{{CAMEL}}Provider>
       </I18nProvider>
     </QueryClientProvider>
   );
@@ -919,9 +920,9 @@ export function {{CAMEL}}DemoHarness(props: {
 // ── shared demo UI (token-driven; no raw colours, no literal prose) ───────────
 
 const cardStyle: CSSProperties = {
-  background: cssVar(\"card-bg\"),
-  color: cssVar(\"color-text-primary\"),
-  border: `1px solid ${cssVar(\"card-border\")}`,
+  background: cssVar(\"surface-raised\"),
+  color: cssVar(\"text\"),
+  border: `1px solid ${cssVar(\"border\")}`,
   borderRadius: radii.lg,
   padding: spacing[\"5\"],
   display: \"flex\",
@@ -950,13 +951,13 @@ export function StepBadge(props: { step: string }): ReactElement {
   const t = useT();
   return (
     <div style={{ display: \"flex\", gap: spacing[\"2\"], alignItems: \"center\" }}>
-      <span style={{ color: cssVar(\"color-text-secondary\") }}>
+      <span style={{ color: cssVar(\"text-muted\") }}>
         {t(\"demo.label.step\")}
       </span>
       <code
         style={{
-          background: cssVar(\"color-background-secondary\"),
-          color: cssVar(\"color-text-brand\"),
+          background: cssVar(\"surface-sunken\"),
+          color: cssVar(\"brand\"),
           borderRadius: radii.sm,
           // Size tokens are unitless numbers; React only auto-appends `px` to
           // single numeric values, so multi-value shorthands spell the unit.
@@ -970,8 +971,8 @@ export function StepBadge(props: { step: string }): ReactElement {
 }
 
 const buttonStyle: CSSProperties = {
-  background: cssVar(\"button-primary-bg\"),
-  color: cssVar(\"button-primary-text\"),
+  background: cssVar(\"brand\"),
+  color: cssVar(\"text-on-accent\"),
   border: \"none\",
   borderRadius: radii.md,
   // See StepBadge: unitless tokens need an explicit unit in shorthands.
@@ -1037,7 +1038,7 @@ export default defineDemo({
   description:
     "The headless {{MODULE}} root wires the runtime, i18n engine, and query client into React context. Replace with per-flow demos as you add headless components.",
   component: {{CAMEL}}Provider,
-  tokens: ["card-bg"],
+  tokens: ["surface-raised"],
   variants: {
     default: { render: () => <{{CAMEL}}ProviderDemo /> },
   },
@@ -1111,7 +1112,7 @@ src/
   analytics/  generated typed-event registry (events.json)
 demo/         first-class demos (compiled, product-linted, smoke-rendered)
 ```
-
+{{SKIN_README}}
 ## Generated surfaces (drift-gated)
 
 | Surface | Path | Gate |
@@ -1211,4 +1212,344 @@ CHANGELOG_MD = """# {{PKG_NAME}}
   api → model → flows → headless → i18n; drift-gated generated surfaces
   (flows registry, backend error map, manifest + llms.txt) via the shared
   monorepo `gen:*` drivers.
+"""
+
+# ── src/default/index.ts (the §54 skin subpath) ───────────────────────────────
+# A pair whose only export is headless ships a library, not a feature: the
+# host still has to draw every state before anything renders. `./default` is
+# the shipped half — one antd surface per pair, themed through the ONE shared
+# bridge (`@stapel/tokens-antd/skin`'s `SkinTheme`), never through a local
+# ConfigProvider (which would fork the token bridge per pair) and never with a
+# `mode = "light"` default (which would ignore the host's theme).
+DEFAULT_INDEX_TS = """/**
+ * `{{PKG_NAME}}/default` — the pair's default AntD skin (§54: a pair ships a
+ * FEATURE, not only a bag). A separate entry point, so a host that brings its
+ * own visuals never pulls `antd` or the token bridge into its bundle;
+ * importing this subpath is the opt-in.
+ *
+ * ```tsx
+ * import { {{CAMEL}}Panel } from "{{PKG_NAME}}/default";
+ * // under the pair's <{{CAMEL}}Provider> + core's <I18nProvider>:
+ * <{{CAMEL}}Panel />
+ * ```
+ */
+export { {{CAMEL}}Panel } from "./{{CAMEL}}Panel.js";
+export type { {{CAMEL}}PanelProps } from "./{{CAMEL}}Panel.js";
+export type { ThemeModeProp } from "./types.js";
+"""
+
+DEFAULT_TYPES_TS = """/**
+ * The one prop every skin component in this package shares.
+ *
+ * `mode` is OPTIONAL and has no default here on purpose: the shared
+ * `SkinTheme` (`@stapel/tokens-antd/skin`) follows the host's theme when
+ * nobody overrides it, and a `mode = "light"` default in a pair is how a dark
+ * host ends up with one white rectangle in the middle of its app.
+ */
+export interface ThemeModeProp {
+  readonly mode?: "light" | "dark";
+}
+"""
+
+DEFAULT_PANEL_TSX = """/**
+ * `<{{CAMEL}}Panel/>` — the skin skeleton this pair ships from `./default`.
+ *
+ * It is a SKELETON and says so: a themed surface, the three states every
+ * screen owes a person (loading, empty, refusal), and the provider check that
+ * makes a missing `<{{CAMEL}}Provider>` a loud error instead of a blank box.
+ * Replace the body as the pair grows read hooks — keep the frame:
+ *
+ *  - one `<SkinTheme>` from `@stapel/tokens-antd/skin`, never a local
+ *    `ConfigProvider` (that forks the token bridge per pair) and never a
+ *    `mode = "light"` default (that ignores the host's theme);
+ *  - every user-visible string through an i18n key with en/ru/es texts;
+ *  - a dialog, if this screen ever opens one, through `SkinDialog` — the
+ *    fleet's "bottom sheet on a phone, modal above 768px" rule lives there
+ *    once (`stapel/no-bare-dialog` refuses a bare antd Modal/Drawer here).
+ */
+import type { ReactElement } from "react";
+import { Card, Empty, Typography } from "antd";
+import { useT } from "@stapel/core";
+import { SkinTheme } from "@stapel/tokens-antd/skin";
+import { {{UPPER}}_I18N_KEYS } from "../i18n/keys.js";
+import { use{{CAMEL}}Runtime } from "../model/context.js";
+import type { ThemeModeProp } from "./types.js";
+
+export interface {{CAMEL}}PanelProps extends ThemeModeProp {
+  /** Rendered while the screen's own data is in flight. */
+  readonly loading?: boolean;
+}
+
+export function {{CAMEL}}Panel(props: {{CAMEL}}PanelProps): ReactElement {
+  const t = useT();
+  // Reads the runtime purely so that mounting this panel OUTSIDE
+  // <{{CAMEL}}Provider> throws the context error with the provider's name in
+  // it, at the place the mistake was made.
+  use{{CAMEL}}Runtime();
+
+  return (
+    <SkinTheme {...(props.mode !== undefined ? { mode: props.mode } : {})}>
+      <Card title={t({{UPPER}}_I18N_KEYS.navOverview)} data-testid="{{MODULE}}-panel">
+        {props.loading === true ? (
+          <Typography.Paragraph>
+            {t({{UPPER}}_I18N_KEYS.panelLoading)}
+          </Typography.Paragraph>
+        ) : (
+          <Empty description={t({{UPPER}}_I18N_KEYS.panelEmpty)} />
+        )}
+      </Card>
+    </SkinTheme>
+  );
+}
+"""
+
+# ── src/i18n/ru.ts, es.ts (locale subpaths — i18n-shipping.md §2) ─────────────
+# The scaffold's OWN key set is deliberately small and GENERIC ("Overview",
+# "Nothing here yet", "Loading", "Something went wrong"), which is exactly what
+# makes shipping ru and es from commit 1 honest rather than a placeholder: a
+# generator cannot translate a product's vocabulary, and it can translate these.
+# The parity test then keeps every key the pair adds later under the same rule.
+I18N_LOCALE_TS = """import type { I18nDictionary, I18nEngine } from "@stapel/core";
+import { {{MODULE}}I18nBundleEn } from "./keys.js";
+
+/**
+ * {{LOCALE_NAME}} bundle for {{MODULE}}-react — shipped as the
+ * `{{PKG_NAME}}/i18n/{{LOCALE}}` subpath (i18n-shipping.md §2) so the locale is
+ * opt-in: a host that never registers it never carries these strings (the main
+ * entry does not import this module).
+ *
+ * Only the pair's OWN UI keys live here. The backend error catalogue for this
+ * locale arrives generated (`errors.{{LOCALE}}.gen.ts`, `pnpm gen:errors`) once
+ * {{BACKEND}} ships a `translations/errors.{{LOCALE}}.json` — spread it in
+ * FIRST, exactly as `keys.ts` spreads the en one, so every backend code keeps
+ * coverage by construction.
+ */
+export const {{MODULE}}I18nBundle{{LOCALE_CAMEL}}: I18nDictionary = {
+{{LOCALE_TEXTS}}};
+
+/**
+ * Register the {{LOCALE_NAME}} bundle. The en bundle goes UNDER it
+ * (merge-priority convention): a key this locale has not translated yet
+ * degrades to ENGLISH, never to a raw key.
+ */
+export function register{{CAMEL}}I18n{{LOCALE_CAMEL}}(
+  engine: I18nEngine,
+  locale = "{{LOCALE}}"
+): void {
+  engine.registerBundle(locale, {{MODULE}}I18nBundleEn);
+  engine.registerBundle(locale, {{MODULE}}I18nBundle{{LOCALE_CAMEL}});
+}
+"""
+
+# ── test/i18nParity.test.ts ───────────────────────────────────────────────────
+I18N_PARITY_TEST = """// @vitest-environment node
+import { readFileSync } from "node:fs";
+import { describe, expect, it } from "vitest";
+import { createI18n } from "@stapel/core";
+import {
+  {{UPPER}}_I18N_KEYS,
+  {{MODULE}}I18nBundleEn,
+} from "../src/i18n/keys.js";
+import {
+  {{MODULE}}I18nBundleRu,
+  register{{CAMEL}}I18nRu,
+} from "../src/i18n/ru.js";
+import { {{MODULE}}I18nBundleEs } from "../src/i18n/es.js";
+
+/**
+ * Locale parity for the pair's OWN keys (the shared-layer audit's rule 5: 8 of
+ * 19 pairs carried an ad-hoc version of this test and 11 carried none, so a
+ * key added in en reached ru/es hosts as English or as a raw key). Every key in
+ * {@link {{UPPER}}_I18N_KEYS} must have a text in en, ru AND es, and the
+ * `{param}` slots must match across all three — a translation that drops a slot
+ * renders a sentence with a hole in it.
+ */
+const BUNDLES = {
+  en: {{MODULE}}I18nBundleEn,
+  ru: {{MODULE}}I18nBundleRu,
+  es: {{MODULE}}I18nBundleEs,
+} as const;
+
+function paramsOf(text: string): string[] {
+  const seen: string[] = [];
+  for (const m of text.matchAll(/\\{(\\w+)\\}/g)) {
+    const name = m[1] as string;
+    if (!seen.includes(name)) seen.push(name);
+  }
+  return seen;
+}
+
+describe("i18n locale parity", () => {
+  for (const [locale, bundle] of Object.entries(BUNDLES)) {
+    it(`${locale} covers every key the pair declares`, () => {
+      const missing = Object.values({{UPPER}}_I18N_KEYS).filter(
+        (key) => !(key in bundle)
+      );
+      expect(missing).toEqual([]);
+    });
+
+    it(`${locale} keeps the en {param} slots`, () => {
+      for (const key of Object.values({{UPPER}}_I18N_KEYS)) {
+        expect(paramsOf(bundle[key] ?? "").sort(), `${locale}:${key}`).toEqual(
+          paramsOf({{MODULE}}I18nBundleEn[key] ?? "").sort()
+        );
+      }
+    });
+  }
+
+  it("a key missing from a locale degrades to English, never to a raw key", () => {
+    const i18n = createI18n({ locale: "en" });
+    register{{CAMEL}}I18nRu(i18n);
+    // The en floor is registered UNDER ru by the register helper, so a key the
+    // ru bundle does not carry still renders a sentence.
+    expect(i18n.t({{UPPER}}_I18N_KEYS.unknownError)).toBeTruthy();
+  });
+
+  it("the locale subpaths stay OUT of the main entry's source graph", () => {
+    const src = readFileSync("src/index.ts", "utf8");
+    expect(src).not.toMatch(/i18n\\/(ru|es)/);
+  });
+});
+"""
+
+# ── docs/guidelines.md (the pair's own product-surface checklist) ─────────────
+GUIDELINES_MD = """# {{TITLE}} — frontend guidelines
+
+The product rules THIS pair is held to. The fleet-wide ones live in
+stapel-react's `docs/frontend-guidelines.md`; this file records what they mean
+for {{PKG_NAME}} and what has been decided for its screens. It is a stub on
+purpose — fill it as the pair grows, and keep decisions here rather than in a
+reviewer's memory.
+
+## What this pair ships
+
+| Layer | Where | Rule |
+|---|---|---|
+| headless | `src/headless/` | zero visual opinion; every state is in the bag |
+| default skin | `src/default/` | the shipped screens — antd, themed by `SkinTheme` |
+| i18n | `src/i18n/{keys,ru,es}.ts` | every user-visible string is a key with en+ru+es |
+| nav | `src/nav/manifest.ts` | the screens a container may mount |
+
+## Non-negotiable
+
+1. **One skin surface.** Components under `src/default/` render inside
+   `SkinTheme` from `@stapel/tokens-antd/skin`. No local `ConfigProvider`, no
+   `mode = "light"` default — a pair that picks a mode ignores the host's theme.
+2. **Dialogs are the fleet's dialog.** Use `SkinDialog`; on a phone it is a
+   bottom sheet, at 768px and above a centred modal. `stapel/no-bare-dialog`
+   refuses a bare antd `Modal`/`Drawer` here.
+3. **No raw colours, no raw spacing.** `cssVar("<role>")` and the `spacing`/
+   `radii` steps from `@stapel/tokens`. Never a hex, never a magic px.
+4. **Reasons beside controls.** A disabled control is derived from an
+   `ActionAvailability` and renders its block WHERE the control is — never in a
+   tooltip (touch has no hover) and never as a silent `disabled`.
+5. **Three states, always.** Loading, empty and refusal are designed, not
+   implied. `matchList`/`LoadState` from `@stapel/core` name them.
+6. **Mobile first.** Every skin component has a `viewport: "phone"` demo
+   variant; 390px is the design width, and element width — not the viewport —
+   decides a layout.
+7. **Every string is a key.** en in `i18n/keys.ts`, ru in `i18n/ru.ts`, es in
+   `i18n/es.ts`. `test/i18nParity.test.ts` is the gate; a key with no ru/es text
+   fails the build rather than reaching a host in English.
+8. **Icon-only buttons carry `aria-label`** (an i18n key, not a literal).
+
+## Decisions log
+
+_(Record product decisions here: what a screen refuses to render and why, which
+slot a container must fill, which state was deliberately left out.)_
+
+- {{YEAR}}-.. — scaffolded; `{{CAMEL}}Panel` is a skeleton (themed frame +
+  empty/loading states). No product decisions yet.
+"""
+
+# ── demo/<Camel>Skin.demo.tsx (the skin, at phone width and at desktop) ───────
+DEMO_SKIN_TSX = """/**
+ * The DEFAULT SKIN in the viewer — because the default skin is what a host
+ * actually ships. The headless demo beside this one documents the layer a host
+ * REPLACES; this one documents the layer it MOUNTS.
+ *
+ * The `phone` variant is not decoration: the viewer offers 390/768/1280
+ * (`showcase-viewer/.ladle/config.mjs`), and a skin component that has never
+ * been drawn at 390 is a skin nobody has checked on the device most people use.
+ */
+import type { ReactElement } from "react";
+import { defineDemo } from "@stapel/showcase";
+import { {{CAMEL}}Panel } from "../src/default/index.js";
+import { {{CAMEL}}DemoHarness } from "./_harness.js";
+
+function {{CAMEL}}PanelDemo(props: { loading?: boolean }): ReactElement {
+  return (
+    <{{CAMEL}}DemoHarness>
+      <{{CAMEL}}Panel {...(props.loading === true ? { loading: true } : {})} />
+    </{{CAMEL}}DemoHarness>
+  );
+}
+
+export default defineDemo({
+  id: "{{MODULE}}.panel-skin",
+  title: "{{TITLE}} panel (default skin)",
+  description:
+    "The shipped {{MODULE}} surface: one themed card with the empty and loading states a screen owes a person. Replace the body as the pair grows read hooks; keep the frame.",
+  component: {{CAMEL}}Panel,
+  variants: {
+    default: {
+      description: "Desktop width, nothing to show yet.",
+      viewport: "desktop",
+      step: "empty",
+      render: () => <{{CAMEL}}PanelDemo />,
+    },
+    phone: {
+      description: "The same surface at 390px — the design width.",
+      viewport: "phone",
+      step: "empty",
+      render: () => <{{CAMEL}}PanelDemo />,
+    },
+    loading: {
+      description: "Data in flight: the panel says so instead of drawing an empty box.",
+      viewport: "phone",
+      step: "loading",
+      render: () => <{{CAMEL}}PanelDemo loading />,
+    },
+  },
+});
+"""
+
+# ── src/nav/manifest.ts, skinned variant ─────────────────────────────────────
+# With a `./default` subpath in the plan there IS a `component.export` that
+# resolves, so the pair declares its screen from commit 1 instead of joining
+# the nav contract in a later retrofit. `{{NAV_ENTRIES}}` is rendered from the
+# SAME python dict that produces `nav-manifest.json`, so the declaration and
+# its generated projection cannot disagree before `pnpm gen:nav` ever runs.
+NAV_MANIFEST_SKIN_TS = """/**
+ * {{PKG_NAME}}'s contribution to the scripted-fullstack navigation contract
+ * (`@stapel/core`'s `NavEntry` / `PackageNavManifest`).
+ *
+ * `scripts/gen-nav-manifest.mjs` reads `navEntries` below, stamps
+ * `package`/`version` from this package's own `package.json`, and writes
+ * `packages/{{PKG_DIR}}/nav-manifest.json` plus this package's slice of the
+ * monorepo's root aggregate. `resolveNav` (`@stapel/shell-react`) is what
+ * turns that aggregate plus a host's override file into the tree a shell
+ * renders and a container mounts routes from.
+ *
+ * ── The one entry below ────────────────────────────────────────────────────
+ *
+ * It names `{{CAMEL}}Panel` from `./default` — a component that exists, which
+ * is the whole rule: an entry naming a component that does not exist passes
+ * the generator's structural validation and fails at the CONTAINER's import,
+ * two repositories away from the mistake.
+ *
+ * `surface` is DECLARED, not left to the `requiresAuth ? "member" : "public"`
+ * derivation: a screen that later gains `requiresAuth` for an unrelated reason
+ * must not silently drop out of a public container's tree.
+ *
+ * `icon` must be a name the shell's registry knows
+ * (`shell-react/src/default/icons.tsx`) — an unknown name renders a generic
+ * glyph, and stapel-tools' scaffold refuses one at generation time.
+ *
+ * Adding the next screen: ship the component from `./default`, add an entry
+ * here, then `pnpm gen:nav` — never hand-edit `nav-manifest.json`.
+ */
+import type { NavEntry } from "@stapel/core";
+
+export const navEntries: readonly NavEntry[] = {{NAV_ENTRIES}};
 """

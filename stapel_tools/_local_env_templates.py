@@ -150,6 +150,15 @@ SITE_URL=http://localhost
 # settings base carries no default, so prod can never inherit this one.
 FRONTEND_URL=http://localhost
 
+# ─── Browser WebSocket origins (stapel-core >=0.44.2) — FAIL-CLOSED ─────────
+# A cookie is attached by the browser to a socket handshake from ANY page, and
+# WebSockets have neither the same-origin policy nor CORS in front of them. So
+# the cookie branch is gated on this allowlist and an EMPTY list refuses every
+# handshake (close 4403) — `manage.py check` reports stapel_core.jwt.E001 at
+# deploy time rather than leaving a product quietly polling. Ports included:
+# an entry without one never matches.
+STAPEL_WS_ALLOWED_ORIGINS=http://localhost,http://localhost:5173
+
 # ─── Entrypoint canon (bootstrap.sh, §57 item 3) — Django's own
 # createsuperuser --noinput reads these natively. Dev-only convenience
 # credentials; change them (or unset to skip auto-creation) before any
@@ -217,6 +226,15 @@ SITE_URL=http://localhost
 # for a native Vite run. A real deployment sets this in its own env — the
 # settings base carries no default, so prod can never inherit this one.
 FRONTEND_URL=http://localhost
+
+# ─── Browser WebSocket origins (stapel-core >=0.44.2) — FAIL-CLOSED ─────────
+# A cookie is attached by the browser to a socket handshake from ANY page, and
+# WebSockets have neither the same-origin policy nor CORS in front of them. So
+# the cookie branch is gated on this allowlist and an EMPTY list refuses every
+# handshake (close 4403) — `manage.py check` reports stapel_core.jwt.E001 at
+# deploy time rather than leaving a product quietly polling. Ports included:
+# an entry without one never matches.
+STAPEL_WS_ALLOWED_ORIGINS=http://localhost,http://localhost:5173
 
 # ─── Entrypoint canon (bootstrap.sh, §57 item 3) ────────────────────────────
 DJANGO_SUPERUSER_USERNAME=admin

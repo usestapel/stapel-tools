@@ -464,6 +464,19 @@ def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
                 f'const {key}Runtime = {e["create_runtime"]}({{ baseUrl: "/{key}/api/v1/" }});'
             )
         lines.append(f"{e['register_i18n']}(i18n);")
+    # The container's OWN nav copy — the labels of the sections no pair owns
+    # (`/app/account`, `/app/admin`). Without it the shell renders the raw key.
+    # English only, for the same reason the storefront's floor is: a generator
+    # does not invent a product's voice in a language nobody reviewed.
+    section_roots = parent_roots_needed(entries)
+    if section_roots:
+        bundle = {
+            MONOLITH_CONTAINER_ROOTS[root]["labelKey"]: MONOLITH_NAV_I18N_EN[
+                MONOLITH_CONTAINER_ROOTS[root]["labelKey"]
+            ]
+            for root in section_roots
+        }
+        lines.append(f"i18n.registerBundle(\"en\", {json.dumps(bundle, indent=2)});")
     lines.append("")
     lines.append(f"export const INSTALLED_REACT_MODULES = {_ts_string_array([e['key'] for e in entries])} as const;")
     lines.append("")
@@ -567,6 +580,176 @@ def _ts_string_array(values: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
+class NavContractError(ValueError):
+    """A nav mirror declares something no container can honour. Raised at
+    GENERATION time on purpose: every one of these used to degrade silently —
+    an unknown icon rendered a generic glyph, an undeclared parent dropped the
+    screen, a `route.index` was copied around and read by nobody — and a
+    scaffolded app looked complete while a screen was simply gone."""
+
+
+# The icon names the shell's registry actually resolves
+# (`shell-react/src/default/icons.tsx` — `ICONS`). The registry falls back to a
+# generic glyph for an unknown name WITHOUT a word, so a typo ships as a
+# slightly wrong picture nobody notices. Generation refuses one instead.
+# Adding an icon to the shell means adding its name here, in the same wave.
+NAV_ICON_REGISTRY: frozenset[str] = frozenset(
+    {
+        "LoginOutlined",
+        "SafetyCertificateOutlined",
+        "UserOutlined",
+        "BellOutlined",
+        "AppstoreOutlined",
+        "AuditOutlined",
+        "ClockCircleOutlined",
+        "FolderOpenOutlined",
+        "HeartOutlined",
+        "MessageOutlined",
+        "OrderedListOutlined",
+        "PlusOutlined",
+        "ProfileOutlined",
+        "QrcodeOutlined",
+        "SearchOutlined",
+        "TagOutlined",
+    }
+)
+
+# Nav parents no PAIR owns, because no module owns "the account section" or
+# "the admin section": the CONTAINER declares them (ACCOUNT_ROOT_ENTRY /
+# ADMIN_ROOT_ENTRY below) and every `placement.parentId` pointing at one
+# resolves against the container's own one-entry manifest.
+CONTAINER_NAV_ROOTS: frozenset[str] = frozenset({"account.root", "admin.root"})
+
+
+def declared_nav_ids() -> set[str]:
+    """Every nav id ANY registered pair declares, plus the container-owned
+    roots. The reference set for the parent check: a `parentId` inside it but
+    absent from THIS project's selection is a legitimate drop ("that pair is not
+    installed"); a `parentId` outside it is a typo or a parent nobody ever
+    declared — the `admin.root` case, where two real admin screens vanished from
+    every generated container without a word."""
+    from .create_project import FRONTEND_REACT_LIBS
+
+    ids = set(CONTAINER_NAV_ROOTS)
+    for pair in FRONTEND_REACT_LIBS.values():
+        for entry in pair.get("nav", ()):
+            ids.add(entry["id"])
+    return ids
+
+
+def validate_nav_entries(entries: list[dict], *, declared: set[str] | None = None) -> None:
+    """Refuse, at generation time, the three nav declarations that used to
+    degrade quietly (shared-layer audit Q3/G5):
+
+    * an `icon` outside the shell's registry — renders a generic glyph today;
+    * a submenu `parentId` NO pair and no container ever declares — the screen
+      is dropped as an orphan and nothing says so (gdpr's `admin.privacy` and
+      video's `admin.usage` were both invisible in every generated container);
+    * a `route.index` — the field is DEAD: `resolveNav` copies `route` opaque,
+      the shell's `matchesLocation` ignores it, and this generator decides a
+      section's index itself (the container owns `/account` and `/admin`). It is
+      dropped from the contract rather than half-implemented, so declaring one
+      is an error that names the decision instead of a route that never matches.
+    """
+    known = declared_nav_ids() if declared is None else declared
+    problems: list[str] = []
+    for entry in entries:
+        icon = entry.get("icon")
+        if icon not in NAV_ICON_REGISTRY:
+            problems.append(
+                f"{entry['id']}: icon {icon!r} is not in the shell's registry "
+                f"({', '.join(sorted(NAV_ICON_REGISTRY))}). Add the icon to "
+                "shell-react/src/default/icons.tsx AND to NAV_ICON_REGISTRY, or "
+                "pick a registered name — an unknown name renders a generic "
+                "glyph with no error."
+            )
+        if "index" in entry.get("route", {}):
+            problems.append(
+                f"{entry['id']}: route.index is not honoured by anything — "
+                "resolveNav copies `route` opaque, the shell's matchesLocation "
+                "ignores it, and the container decides its own section index. "
+                "Drop the field from the declaration."
+            )
+        placement = entry.get("placement", {})
+        if placement.get("level") == "submenu":
+            parent = placement.get("parentId")
+            if parent is None or parent not in known:
+                problems.append(
+                    f"{entry['id']}: placement.parentId {parent!r} is declared by "
+                    "no registered pair and by no container root "
+                    f"({', '.join(sorted(CONTAINER_NAV_ROOTS))}). A submenu entry "
+                    "under a parent nobody declares is dropped as an orphan and "
+                    "the screen disappears silently."
+                )
+    if problems:
+        raise NavContractError(
+            "nav manifest mirror is not mountable:\n  - " + "\n  - ".join(problems)
+        )
+
+
+# The monolith frontend's own versions of the container roots. Same ids (the
+# parentId a pair declares must resolve in EITHER container), different address
+# and different copy: a monolith's member area is `/app`, so the roots are its
+# relative children, and the labels come from the app's own bundle rather than
+# from a storefront's.
+MONOLITH_CONTAINER_ROOTS: dict[str, dict] = {
+    "account.root": {
+        "id": "account.root",
+        "labelKey": "app.nav.account",
+        "icon": "UserOutlined",
+        "route": {"path": "account"},
+        "component": {"export": "AccountSection", "subpath": "."},
+        "placement": {"level": "top"},
+        "menuVisibleDefault": True,
+        "requiresAuth": True,
+        "surface": "member",
+        "order": 100,
+        "_local": "AccountSection",
+    },
+    "admin.root": {
+        "id": "admin.root",
+        "labelKey": "shell.nav.admin",
+        "icon": "AuditOutlined",
+        "route": {"path": "admin"},
+        "component": {"export": "AdminSection", "subpath": "."},
+        "placement": {"level": "top"},
+        "menuVisibleDefault": True,
+        "requiresAuth": True,
+        "surface": "member",
+        "order": 110,
+        "_local": "AdminSection",
+    },
+}
+
+# The app-level copy for those two labels. English only, for the same reason
+# the storefront's own bundle is (STOREFRONT_I18N_EN): a generator does not
+# invent a product's voice in a language nobody reviewed.
+MONOLITH_NAV_I18N_EN: dict[str, str] = {
+    "app.nav.account": "Account",
+    "shell.nav.admin": "Admin",
+}
+
+
+def parent_roots_needed(pairs: list[dict]) -> list[str]:
+    """Which container roots the selected pairs' entries actually hang from.
+
+    Returned sorted, and EMPTY when nothing needs them: a project with no
+    admin-level screen must not grow an empty "Admin" tab, and a project that
+    has one must not lose it (gdpr's `admin.privacy` and video's `admin.usage`
+    were dropped as orphans in every generated container because no manifest
+    declared `admin.root` — the shared-layer audit's Q3 finding)."""
+    needed = set()
+    for pair in pairs:
+        for entry in pair.get("nav", ()):
+            placement = entry.get("placement", {})
+            if placement.get("level") != "submenu":
+                continue
+            parent = placement.get("parentId")
+            if parent in CONTAINER_NAV_ROOTS:
+                needed.add(parent)
+    return sorted(needed)
+
+
 def nav_wired_pairs(react_entries: list[dict], *, auth_wired: bool) -> list[dict]:
     """The selected react pairs (``create_project._frontend_react_entries``
     output) that actually join the scripted nav/route tree — every selected
@@ -599,12 +782,21 @@ def build_nav_route_plan(nav_pairs: list[dict]) -> dict:
       here so routing and the nav menu never disagree about what "installed"
       means.
 
-    Returns ``{"absolute_routes": [...], "app_children": [...]}``, each a
-    list of ``{"path": <route path>, "entry": <mirrored NavEntry dict>}`` —
-    entries carry a ``"_package"`` key (the pair's npm package name) for
-    ``render_routes_tsx``'s component imports.
+    A CONTAINER ROOT (`account.root`, `admin.root`) is injected as a top
+    whenever a selected entry hangs from one: no module owns "the account
+    section" or "the admin section", so without the container declaring them
+    those screens were dropped as orphans and vanished with no log.
+
+    Returns ``{"absolute_routes": [...], "app_children": [...],
+    "container_roots": [...]}``; each route is ``{"path": <route path>,
+    "entry": <mirrored NavEntry dict>}`` — entries carry a ``"_package"`` key
+    (the pair's npm package name) for ``render_routes_tsx``'s component
+    imports, or a ``"_local"`` key for a page the container itself writes.
     """
     all_entries = [{**entry, "_package": pair["package"]} for pair in nav_pairs for entry in pair["nav"]]
+    validate_nav_entries(all_entries)
+    roots = parent_roots_needed(nav_pairs)
+    all_entries.extend(MONOLITH_CONTAINER_ROOTS[root] for root in roots)
     tops = {e["id"]: e for e in all_entries if e["placement"]["level"] == "top"}
     children_by_parent: dict[str, list[dict]] = {}
     for e in all_entries:
@@ -626,10 +818,14 @@ def build_nav_route_plan(nav_pairs: list[dict]) -> dict:
         for child in sorted(children_by_parent.get(top["id"], []), key=lambda e: (e["order"], e["id"])):
             app_children.append({"path": f'{path}/{child["route"]["path"]}', "entry": child})
 
-    return {"absolute_routes": absolute_routes, "app_children": app_children}
+    return {
+        "absolute_routes": absolute_routes,
+        "app_children": app_children,
+        "container_roots": roots,
+    }
 
 
-def render_nav_generated_ts(nav_pairs: list[dict]) -> str:
+def render_nav_generated_ts(nav_pairs: list[dict], *, auth_wired: bool = True) -> str:
     """``frontend/src/nav.generated.ts`` — bakes ``INSTALLED_NAV_MANIFESTS``
     (this project's selected pairs' MIRRORED nav-manifest entries, exactly
     the shape ``PackageNavManifest[]`` from ``@stapel/core`` describes) at
@@ -641,11 +837,43 @@ def render_nav_generated_ts(nav_pairs: list[dict]) -> str:
     regeneration needed. ``reresolveNav`` re-exposes that same call for a
     host that wants to re-resolve against a DIFFERENT (e.g. freshly
     fetched) overrides object at runtime, without a rebuild.
+
+    The resolver is AUDIENCE-NAMED (``resolveMemberNav``/``resolvePublicNav``),
+    never bare ``resolveNav``: the bare call's audience argument is optional and
+    its default does not filter, so the "/app" shell used to hand every
+    ``surface: "member"`` entry to whoever was standing in front of it. Which
+    one is right is a property of the container: "/app" is the member area when
+    auth gates it, and a public tree when nothing does.
+
+    The container roots this project needs (``account.root``/``admin.root``)
+    ship as the app's OWN one-entry manifest, because an override file cannot
+    create an entry and no pair owns those sections.
     """
     manifests = [
         {"package": pair["package"], "version": pair["version"], "entries": pair["nav"]}
         for pair in nav_pairs
     ]
+    roots = parent_roots_needed(nav_pairs)
+    if roots:
+        manifests.append(
+            {
+                "package": "app",
+                "version": "0.0.0",
+                "entries": [
+                    {k: v for k, v in MONOLITH_CONTAINER_ROOTS[root].items()
+                     if not k.startswith("_")}
+                    for root in roots
+                ],
+            }
+        )
+    resolver = "resolveMemberNav" if auth_wired else "resolvePublicNav"
+    audience_note = (
+        "a settled member — the gate on \"/app\" is what makes that the honest "
+        "audience"
+        if auth_wired
+        else "an anonymous visitor — nothing gates \"/app\" in this project, so "
+        "a member-only entry would be a door that refuses whoever opens it"
+    )
     manifests_json = json.dumps(manifests, indent=2)
     return f'''\
 /**
@@ -659,27 +887,38 @@ def render_nav_generated_ts(nav_pairs: list[dict]) -> str:
  */
 import type {{ PackageNavManifest }} from "@stapel/core";
 import type {{ NavOverridesFile, ResolvedNavEntry }} from "@stapel/shell-react";
-import {{ resolveNav }} from "@stapel/shell-react";
+import {{ {resolver} }} from "@stapel/shell-react";
 import stapelNavOverrides from "../stapel.nav.json";
 
 export const INSTALLED_NAV_MANIFESTS: readonly PackageNavManifest[] = {manifests_json} as const;
 
 /**
  * Resolved once at import time against the committed stapel.nav.json (the
- * project's deep-merge-over-default override channel) — the same call
- * @stapel/shell-react's own <AppShell/> is built on.
+ * project's deep-merge-over-default override channel), for {audience_note}.
+ * The audience is in the NAME rather than in an optional argument, because the
+ * optional argument's default does not filter — a container that forgot it
+ * mounted every member screen for everyone.
  */
-export const RESOLVED_NAV: readonly ResolvedNavEntry[] = resolveNav(
+export const RESOLVED_NAV: readonly ResolvedNavEntry[] = {resolver}(
   INSTALLED_NAV_MANIFESTS,
   stapelNavOverrides as NavOverridesFile
 );
 
 /** Re-resolve against a different (e.g. freshly-fetched) overrides object
- * at runtime — same pure function, without a rebuild. */
+ * at runtime — same pure function, same audience, without a rebuild. */
 export function reresolveNav(overridesFile?: NavOverridesFile): readonly ResolvedNavEntry[] {{
-  return resolveNav(INSTALLED_NAV_MANIFESTS, overridesFile);
+  return {resolver}(INSTALLED_NAV_MANIFESTS, overridesFile);
 }}
 '''
+
+
+def _is_admin_entry(entry: dict) -> bool:
+    """Is this entry the admin section or one of its screens? Read off the
+    declaration (`admin.root` / `parentId: "admin.root"`), never off a path."""
+    return (
+        entry.get("id") == "admin.root"
+        or entry.get("placement", {}).get("parentId") == "admin.root"
+    )
 
 
 def render_routes_tsx(
@@ -715,10 +954,20 @@ def render_routes_tsx(
     """
     absolute_routes = route_plan["absolute_routes"]
     app_children = route_plan["app_children"]
+    # A second gate over the admin section: "/app" establishes a session,
+    # `user.is_staff` establishes who operates the product. No auth wired means
+    # no staff fact to read, so the section stays as gated as "/app" is.
+    admin_gated = auth_wired and any(
+        _is_admin_entry(c["entry"]) for c in app_children
+    )
 
     component_imports: dict[tuple[str, str], set[str]] = {}
+    local_imports: set[str] = set()
     for r in (*absolute_routes, *app_children):
         entry = r["entry"]
+        if entry.get("_local"):
+            local_imports.add(entry["_local"])
+            continue
         comp = entry["component"]
         component_imports.setdefault((entry["_package"], comp["subpath"]), set()).add(comp["export"])
     uses_profile_settings = any(
@@ -751,10 +1000,14 @@ def render_routes_tsx(
         lines.append('import { RESOLVED_NAV } from "./nav.generated.js";')
     if auth_wired:
         lines.append('import { ProtectedRoute } from "./ProtectedRoute.js";')
+    if admin_gated:
+        lines.append('import { AdminGate } from "./AdminGate.js";')
     if want_landing:
         lines.append('import { LandingPage } from "./LandingPage.js";')
     for (package, subpath), exports in component_imports.items():
         lines.append(f'import {{ {", ".join(sorted(exports))} }} from "{package}/{subpath}";')
+    for name in sorted(local_imports):
+        lines.append(f'import {{ {name} }} from "./{name}.js";')
     if needs_cdn_avatar_helper:
         lines.append('import { avatarUrlFor } from "./lib/cdn.js";')
     lines.append("")
@@ -766,8 +1019,19 @@ def render_routes_tsx(
         lines.append('  { path: "/", element: <Navigate to="/app" replace /> },')
 
     for r in absolute_routes:
-        comp = r["entry"]["component"]["export"]
+        entry = r["entry"]
+        comp = entry["component"]["export"]
         element = _profile_settings_jsx(has_cdn) if comp == "ProfileSettings" else f'<{comp} />'
+        # Per-route `requiresAuth` (shared-layer audit Q3): "/app" is gated as a
+        # whole, but an ABSOLUTE-path entry is a sibling of it, so its own flag
+        # is the only gate it has. auth.qr_confirm (`surface: "public"`,
+        # `requiresAuth: true` — a signed-in phone confirming a signed-out
+        # desktop) used to mount for anonymous visitors because the flag was
+        # emitted into the manifest and read by nobody.
+        # "/login" itself is never gated whatever it declares: ProtectedRoute
+        # redirects THERE, so gating it is an infinite redirect.
+        if entry.get("requiresAuth") and auth_wired and r["path"] != "/login":
+            element = f"<ProtectedRoute>{element}</ProtectedRoute>"
         lines.append(f'  {{ path: "{r["path"]}", element: {element} }},')
 
     if app_route_present:
@@ -785,8 +1049,11 @@ def render_routes_tsx(
         if app_children:
             lines.append("    children: [")
             for c in app_children:
-                comp = c["entry"]["component"]["export"]
+                entry = c["entry"]
+                comp = entry["component"]["export"]
                 element = _profile_settings_jsx(has_cdn) if comp == "ProfileSettings" else f'<{comp} />'
+                if admin_gated and _is_admin_entry(entry):
+                    element = f"<AdminGate>{element}</AdminGate>"
                 lines.append(f'      {{ path: "{c["path"]}", element: {element} }},')
             lines.append("    ],")
         lines.append("  },")
@@ -997,6 +1264,99 @@ export default [
     },
   },
 ];
+"""
+
+# ``frontend/src/<Section>Section.tsx`` — the landing of a container-owned
+# section (`/app/account`, `/app/admin`). It exists because the SECTION exists:
+# a pair declaring `placement.parentId: "admin.root"` is naming a parent no
+# module owns, and until the container declared one those screens were dropped
+# as orphans with no log. The page itself is deliberately a named gap, like the
+# storefront's — what belongs on an account landing is product knowledge.
+SECTION_HOME_TSX = """\
+import type { ReactElement } from "react";
+import { cssVar } from "@stapel/tokens";
+
+/**
+ * GENERATED — the landing of the {{SECTION_LABEL}} section.
+ *
+ * The section is this app's own: no pair owns "the {{SECTION_LOWER}} area", and
+ * the screens under it ({{SECTION_CHILDREN}}) hang from it by
+ * `placement.parentId`. Replace this page with the real landing; the routes
+ * beneath it already work.
+ */
+export function {{SECTION_COMPONENT}}(): ReactElement {
+  return (
+    <section
+      style={{
+        padding: "2rem",
+        background: cssVar("surface"),
+        color: cssVar("text"),
+      }}
+    >
+      <h1 style={{ margin: 0 }}>{{SECTION_LABEL}}</h1>
+      <p style={{ color: cssVar("text-muted"), maxWidth: "32rem" }}>
+        This section's landing page is yours to compose from the screens in the
+        menu. The screens themselves are already mounted.
+      </p>
+    </section>
+  );
+}
+"""
+
+
+def render_section_home_tsx(root_id: str, children: list[str]) -> str:
+    """One section landing page, named after the container root it belongs to.
+    `children` are the ids that hang from it — printed in the file's own
+    docstring so a reader learns WHY the section exists from the section."""
+    root = MONOLITH_CONTAINER_ROOTS[root_id]
+    label = MONOLITH_NAV_I18N_EN[root["labelKey"]]
+    listed = ", ".join(children) if children else "none yet"
+    return (
+        SECTION_HOME_TSX.replace("{{SECTION_COMPONENT}}", root["_local"])
+        .replace("{{SECTION_LABEL}}", label)
+        .replace("{{SECTION_LOWER}}", label.lower())
+        .replace("{{SECTION_CHILDREN}}", listed)
+    )
+
+
+# ``frontend/src/AdminGate.tsx`` — the staff gate over the `/app/admin`
+# section. Emitted only when auth is wired, because `user.is_staff` (from
+# @stapel/auth-react's session) is the only staff fact this container has;
+# without it the routes stay behind ProtectedRoute and each pane refuses on its
+# own. It REFUSES BY NAME rather than hiding or redirecting: a menu entry that
+# vanishes teaches nobody the screen exists, and a redirect to sign-in tells a
+# signed-in person they are signed out.
+ADMIN_GATE_APP_TSX = """\
+import type { ReactElement, ReactNode } from "react";
+import { cssVar } from "@stapel/tokens";
+import { useAuthSessionState } from "@stapel/auth-react";
+
+/**
+ * GENERATED — staff gate for the admin section (`/app/admin/...`).
+ * Inside "/app", so a settled member is already established; the remaining
+ * question is whether this member operates the product.
+ */
+export function AdminGate({ children }: { children: ReactNode }): ReactElement {
+  const { user } = useAuthSessionState();
+  if (user?.is_staff === true) return <>{children}</>;
+  return (
+    <section
+      style={{
+        padding: "2rem",
+        background: cssVar("surface"),
+        color: cssVar("text"),
+      }}
+      data-testid="admin-gate-refusal"
+    >
+      <h1 style={{ margin: 0 }}>This section is for staff</h1>
+      <p style={{ color: cssVar("text-muted"), maxWidth: "32rem" }}>
+        You are signed in, and this part of the app belongs to the people who
+        operate it. Nothing is wrong with your account. It is listed rather than
+        hidden so that asking for access is possible at all.
+      </p>
+    </section>
+  );
+}
 """
 
 GITIGNORE = """\
@@ -1232,6 +1592,29 @@ ACCOUNT_ROOT_ENTRY = {
     "order": 100,
 }
 
+# The container's own ADMIN root — the twin of the above, and the fix for the
+# shared-layer audit's Q3 finding: `admin.root` was declared by NOBODY (no
+# pair's nav-manifest, no container), so gdpr's `admin.privacy` and video's
+# `admin.usage` were dropped as orphans in every generated container and two
+# real screens vanished without a log. It is added only when a selected pair
+# actually hangs a screen from it: an empty "Admin" tab is its own defect.
+#
+# `surface: "member"` and not a third surface: staff-ness is a MANDATE, checked
+# by the screen itself, and the fleet rule is that a staff-only screen is
+# reachable and REFUSES BY NAME rather than being hidden.
+ADMIN_ROOT_ENTRY = {
+    "id": "admin.root",
+    "labelKey": "shell.nav.admin",
+    "icon": "AuditOutlined",
+    "route": {"path": "/admin"},
+    "component": {"export": "AdminHome", "subpath": "."},
+    "placement": {"level": "top"},
+    "menuVisibleDefault": True,
+    "requiresAuth": True,
+    "surface": "member",
+    "order": 110,
+}
+
 # How a nav entry's component is MOUNTED — read off each component's own prop
 # interface in the sibling stapel-react checkout, never guessed. This is the
 # table that keeps generation from emitting a mount that does not compile, and
@@ -1280,7 +1663,13 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     "chat.conversations": {},
     # listings-react 0.2.0
     "listings.detail": {"route_params": {"id": "number"}},
-    "listings.compose": {"container": ("features",)},
+    # The composer is the fleet's one CROSS-PAIR screen, and it used to be the
+    # scaffold's biggest lie by omission: the entry mounted a placeholder, so
+    # the scripted storefront had no way to list anything. Everything it needs
+    # is knowable from the pairs' own manifests (categories supplies the
+    # feature schema and the picker, cdn supplies the photo queue and grid), so
+    # generation WIRES it — and NAMES the one slot it still cannot fill.
+    "listings.compose": {"composite": "listings.compose"},
     "listings.mine": {},
     "listings.favorites": {},
     # search-react 0.2.0 — SearchPage's `adapter` is REQUIRED and the pair
@@ -1305,6 +1694,7 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     "admin.usage": {},
     # the container's own.
     "account.root": {"local": "AccountHome"},
+    "admin.root": {"local": "AdminHome"},
 }
 
 
@@ -1324,8 +1714,13 @@ def public_nav_manifests(nav_pairs: list[dict], *, app_package: str) -> list[dic
         {"package": pair["package"], "version": pair["version"], "entries": pair["nav"]}
         for pair in nav_pairs
     ]
+    entries = [ACCOUNT_ROOT_ENTRY]
+    # `admin.root` joins only when a selected pair hangs a screen from it —
+    # otherwise the container would grow an Admin tab leading to nothing.
+    if "admin.root" in parent_roots_needed(nav_pairs):
+        entries.append(ADMIN_ROOT_ENTRY)
     manifests.append(
-        {"package": app_package, "version": "0.0.0", "entries": [ACCOUNT_ROOT_ENTRY]}
+        {"package": app_package, "version": "0.0.0", "entries": entries}
     )
     return manifests
 
@@ -1347,14 +1742,23 @@ def build_public_route_plan(manifests: list[dict]) -> dict:
         own component as that route's INDEX.
       * a submenu entry                      -> a child of its parent's path.
 
+    A route also carries its own ``requiresAuth``: `surface` says who may be
+    SHOWN a door, `requiresAuth` says whether opening it needs a session, and
+    the two are independent (auth.qr_confirm is `surface: "public"` AND
+    `requiresAuth: true` — a signed-in phone confirming a signed-out desktop).
+    A public-surface route that requires a session is mounted inside the gate;
+    the audit found it mounted for anonymous visitors because the flag was
+    emitted into the manifest and read by nobody.
+
     Returns ``{"public": [...], "member_absolute": [...],
     "account_children": [...], "account_entry": <entry|None>}`` where each
-    route is ``{"path": str, "entry": entry, "index": bool}``. `entry` carries
-    a `"_package"` key for the import the renderer emits.
+    route is ``{"path": str, "entry": entry, "requiresAuth": bool}``. `entry`
+    carries a `"_package"` key for the import the renderer emits.
     """
     all_entries = [
         {**entry, "_package": m["package"]} for m in manifests for entry in m["entries"]
     ]
+    validate_nav_entries(all_entries)
     tops = {e["id"]: e for e in all_entries if e["placement"]["level"] == "top"}
     children_by_parent: dict[str, list[dict]] = {}
     for e in all_entries:
@@ -1367,6 +1771,23 @@ def build_public_route_plan(manifests: list[dict]) -> dict:
 
     def surface_of(entry: dict) -> str:
         return entry.get("surface") or ("member" if entry["requiresAuth"] else "public")
+
+    def _route(path: str, entry: dict) -> dict:
+        # `gate` names the EXTRA gate a route needs beyond its surface. Today
+        # one value: the admin subtree, where the container knows the person is
+        # a member and the screen still belongs to staff. It is a route fact,
+        # decided here once, rather than a string the renderer re-derives from
+        # a path.
+        admin = (
+            entry["id"] == ADMIN_ROOT_ENTRY["id"]
+            or entry.get("placement", {}).get("parentId") == ADMIN_ROOT_ENTRY["id"]
+        )
+        return {
+            "path": path,
+            "entry": entry,
+            "requiresAuth": bool(entry.get("requiresAuth")),
+            "gate": "admin" if admin else None,
+        }
 
     public: list[dict] = []
     member_absolute: list[dict] = []
@@ -1382,45 +1803,25 @@ def build_public_route_plan(manifests: list[dict]) -> dict:
         if top["id"] == ACCOUNT_ROOT_ENTRY["id"]:
             account_entry = top
             for child in kids(top["id"]):
-                account_children.append(
-                    {"path": child["route"]["path"], "entry": child, "index": False}
-                )
+                account_children.append(_route(child["route"]["path"], child))
             continue
         if path.startswith("/"):
             bucket = public if surface == "public" else member_absolute
-            bucket.append({"path": path, "entry": top, "index": False})
+            bucket.append(_route(path, top))
             for child in kids(top["id"]):
-                bucket.append(
-                    {
-                        "path": f'{path}/{child["route"]["path"]}',
-                        "entry": child,
-                        "index": False,
-                    }
-                )
+                bucket.append(_route(f'{path}/{child["route"]["path"]}', child))
             continue
         # A relative path under a PUBLIC surface has no parent to be relative
         # to on a storefront (there is no "/app"): it becomes a root-level
         # sibling. A member one is a child of /account.
         if surface == "public":
-            public.append({"path": f"/{path}", "entry": top, "index": False})
+            public.append(_route(f"/{path}", top))
             for child in kids(top["id"]):
-                public.append(
-                    {
-                        "path": f'/{path}/{child["route"]["path"]}',
-                        "entry": child,
-                        "index": False,
-                    }
-                )
+                public.append(_route(f'/{path}/{child["route"]["path"]}', child))
         else:
-            account_children.append({"path": path, "entry": top, "index": False})
+            account_children.append(_route(path, top))
             for child in kids(top["id"]):
-                account_children.append(
-                    {
-                        "path": f'{path}/{child["route"]["path"]}',
-                        "entry": child,
-                        "index": False,
-                    }
-                )
+                account_children.append(_route(f'{path}/{child["route"]["path"]}', child))
 
     return {
         "public": public,
@@ -1439,6 +1840,13 @@ def build_public_route_plan(manifests: list[dict]) -> dict:
 # key always resolves to a sentence rather than to a raw key.
 STOREFRONT_I18N_EN: dict[str, str] = {
     "storefront.nav.account": "Account",
+    "shell.nav.admin": "Admin",
+    "storefront.admin.title": "Admin",
+    "storefront.admin.body": (
+        "The admin section belongs to this container: no pair owns it, and the "
+        "screens under it (privacy requests, usage) are declared by pairs that "
+        "hang from it. Compose the landing here; the screens are mounted."
+    ),
     "storefront.home.title": "Storefront home",
     "storefront.home.body": (
         "The home page is a composite screen — a category carousel from one "
@@ -1464,6 +1872,12 @@ STOREFRONT_I18N_EN: dict[str, str] = {
     "storefront.placeholder.entry": "Nav entry",
     "storefront.placeholder.component": "Component",
     "storefront.placeholder.missing": "Props the container must supply",
+    "storefront.admin.refused.title": "This section is for staff",
+    "storefront.admin.refused.body": (
+        "You are signed in, and this part of the app belongs to the people who "
+        "operate it. Nothing is wrong with your account. It is listed rather "
+        "than hidden so that asking for access is possible at all."
+    ),
     "storefront.gate.asking": "Checking your access",
     "storefront.gate.unavailable.title": "We could not check your access",
     "storefront.gate.unavailable.body": (
@@ -1471,6 +1885,14 @@ STOREFRONT_I18N_EN: dict[str, str] = {
         "your account has changed."
     ),
     "storefront.gate.retry": "Try again",
+    "storefront.compose.location.title": "Where the item is, is still asked as coordinates",
+    "storefront.compose.location.body": (
+        "This build has no address picker: the geocoder is deployment knowledge "
+        "(stapel-geo's proxy) and no React pair publishes a field for it yet, so "
+        "the composer falls back to a raw latitude/longitude pair. Fill the "
+        "composer's `renderLocationPicker` slot in src/pages/ListingComposePage.tsx "
+        "and delete this notice."
+    ),
     "storefront.route.invalid.title": "This address does not name a record",
     "storefront.route.invalid.body": (
         "The parameter in the address could not be read, so there is nothing "
@@ -1913,10 +2335,138 @@ def render_nav_page_wrapper_tsx(
     return "\n".join(lines)
 
 
-def public_mount_plan(plan: dict, options: dict | None = None) -> dict:
+# Cross-pair screens: the ones a CONTAINER composes because no pair may import
+# another pair (an L2 pair importing an L2 pair is the fork this architecture
+# exists to prevent). Each entry names the pairs whose exports the generated
+# page imports, the prop each of them satisfies, and the slots that stay
+# UNFILLED with the pair that would fill them — so the page can say what is
+# missing instead of quietly asking a seller for a latitude.
+COMPOSITE_PAGES: dict[str, dict] = {
+    "listings.compose": {
+        "page": "ListingComposePage",
+        # pair key -> the composer prop(s) it satisfies
+        "pairs": {
+            "categories": ("features", "renderCategoryPicker"),
+            "cdn": ("gallerySlot", "images"),
+        },
+        # composer prop -> the pair that would fill it, once that pair exists
+        "unwired": {"renderLocationPicker": "geo"},
+    },
+}
+
+# How many photos a listing carries. A STOREFRONT number (stapel-cdn has no
+# opinion on it and stapel-listings does not cap it), which is why it is here
+# and not read off a pair.
+LISTING_GALLERY_MAX = 10
+
+LISTING_COMPOSE_PAGE_TSX = '''\
+/**
+ * GENERATED — the listing composer, wired.
+ *
+ * This is the fleet's one cross-pair screen: `@stapel/listings-react` owns the
+ * draft, but the category schema lives in `@stapel/categories-react` and the
+ * photo queue in `@stapel/cdn-react`, and an L2 pair may not import another L2
+ * pair. So the CONTAINER holds the three together — that is the whole reason
+ * this file exists rather than the composer being mounted directly.
+ *
+ * What is wired here:
+ *   features/renderCategoryPicker  <- categories-react (`useCategoryFeatures`,
+ *                                     `<CategoryPickerField/>`)
+ *   gallerySlot/images             <- cdn-react (ONE `useUploadQueue` bag,
+ *                                     drawn by `<MediaGalleryField bag={…}/>`;
+ *                                     two queues would publish an empty
+ *                                     `images_draft` while photos sat on screen)
+ *
+ * What is NOT, and says so: `renderLocationPicker`. Omitted, the composer asks
+ * for a raw lat/lon pair — the only question it can ask on its own, and one no
+ * seller can answer. A geocoder is deployment knowledge (stapel-geo's
+ * `/geo/api/v1/` proxy) and there is no react pair for it yet, so the gap is
+ * NAMED on the page instead of being papered over.
+ */
+import { useState } from "react";
+import type { ReactElement } from "react";
+import { Alert, Flex } from "antd";
+import { useT } from "@stapel/core";
+import { useCategoryFeatures } from "@stapel/categories-react";
+import { CategoryPickerField } from "@stapel/categories-react/default";
+import { useUploadQueue } from "@stapel/cdn-react";
+import { MediaGalleryField } from "@stapel/cdn-react/default";
+import { ListingComposerPage } from "@stapel/listings-react/default";
+import { STOREFRONT_I18N_KEYS } from "../i18n/keys.js";
+
+/** The storefront's photo count — see LISTING_GALLERY_MAX in stapel-tools. */
+const GALLERY_MAX = {{GALLERY_MAX}};
+
+export function ListingComposePage(): ReactElement {
+  const t = useT();
+  // The container owns the chosen category because the same id keys the
+  // feature read; the composer reports every change through onCategoryChange.
+  const [category, setCategory] = useState("");
+  const categoryId = category === "" ? null : Number(category);
+  const features = useCategoryFeatures(categoryId);
+  // ONE queue: the bag the composer publishes from is the bag the grid draws.
+  const images = useUploadQueue({ max: GALLERY_MAX });
+
+  return (
+    <Flex vertical gap={16}>
+      <Alert
+        type="warning"
+        showIcon
+        data-testid="compose-location-gap"
+        message={t(STOREFRONT_I18N_KEYS.composeLocationTitle)}
+        description={t(STOREFRONT_I18N_KEYS.composeLocationBody)}
+      />
+      <ListingComposerPage
+        features={features.data ?? []}
+        featuresLoading={features.isFetching}
+        featuresError={features.error}
+        category={category}
+        onCategoryChange={setCategory}
+        renderCategoryPicker={({ value, setCategory: choose }) => (
+          <CategoryPickerField
+            value={value === "" ? null : Number(value)}
+            onChange={(id) => choose(id === null ? "" : String(id))}
+          />
+        )}
+        gallerySlot={<MediaGalleryField bag={images} />}
+        images={{ refs: images.refs, settled: images.settled }}
+      />
+    </Flex>
+  );
+}
+'''
+
+
+def render_listing_compose_page_tsx() -> str:
+    """``src/pages/ListingComposePage.tsx`` — the composer with its cross-pair
+    slots filled from the pairs the container installed."""
+    return LISTING_COMPOSE_PAGE_TSX.replace("{{GALLERY_MAX}}", str(LISTING_GALLERY_MAX))
+
+
+def composite_gaps(entry_id: str, pairs: tuple) -> tuple:
+    """The props a composite page cannot fill with THIS pair selection, named
+    the way the placeholder names props: `<prop> (needs @stapel/<key>-react)`.
+    Empty when every member pair is installed."""
+    spec = COMPOSITE_PAGES[entry_id]
+    gaps = []
+    for key, props in spec["pairs"].items():
+        if key not in pairs:
+            gaps.extend(f"{prop} (needs @stapel/{key}-react)" for prop in props)
+    return tuple(gaps)
+
+
+def public_mount_plan(
+    plan: dict, options: dict | None = None, *, pairs: tuple = ()
+) -> dict:
     """How every route in *plan* is mounted — the single pass both
     ``render_public_routes_tsx`` and the file writer read, so the element a
     route renders and the files that exist can never disagree.
+
+    *pairs* is the container's pair SELECTION (registry keys). A composite
+    screen — one the container assembles from several pairs because no pair may
+    import another — is mounted only when every member pair is installed; short
+    of that it falls to the placeholder naming which prop belongs to which
+    missing pair.
 
     *options* carries the values a deployment knows and this generator was
     told (today: ``doc_type``). A mount whose `option_props` are not all
@@ -1960,6 +2510,20 @@ def public_mount_plan(plan: dict, options: dict | None = None) -> dict:
             needs_placeholder = True
             elements[entry["id"]] = _placeholder_jsx(entry, missing)
             continue
+        if "composite" in mount:
+            spec = COMPOSITE_PAGES[mount["composite"]]
+            gaps = composite_gaps(mount["composite"], pairs)
+            if gaps:
+                needs_placeholder = True
+                elements[entry["id"]] = _placeholder_jsx(entry, gaps)
+                continue
+            name = spec["page"]
+            pages[f"src/pages/{name}.tsx"] = render_listing_compose_page_tsx()
+            line = f'import {{ {name} }} from "./pages/{name}.js";'
+            if line not in wrapper_imports:
+                wrapper_imports.append(line)
+            elements[entry["id"]] = f"<{name} />"
+            continue
         if "local" in mount:
             name = mount["local"]
             local_imports.add(name)
@@ -1996,7 +2560,9 @@ def public_mount_plan(plan: dict, options: dict | None = None) -> dict:
     }
 
 
-def render_public_routes_tsx(plan: dict, options: dict | None = None) -> str:
+def render_public_routes_tsx(
+    plan: dict, options: dict | None = None, *, pairs: tuple = ()
+) -> str:
     """``src/routes.tsx`` — the public storefront's route tree (spec §6.1
     item 5).
 
@@ -2014,8 +2580,14 @@ def render_public_routes_tsx(plan: dict, options: dict | None = None) -> str:
     adding a segment. `matchMandate` inside it is what keeps "we could not
     ask" out of "you may not" (see MemberGate.tsx).
     """
-    mounts = public_mount_plan(plan, options)
+    mounts = public_mount_plan(plan, options, pairs=pairs)
     elements = mounts["elements"]
+    # The staff gate needs a staff fact, and the only one the container has is
+    # the auth session's `is_staff`. No auth pair, no gate — and the routes stay
+    # member-gated rather than pretending to be checked.
+    admin_gated = "auth" in pairs and any(
+        r.get("gate") == "admin" for r in plan["member_absolute"]
+    )
 
     lines: list[str] = [
         "/**",
@@ -2033,6 +2605,8 @@ def render_public_routes_tsx(plan: dict, options: dict | None = None) -> str:
         'import { StorefrontShell } from "./StorefrontShell.js";',
         'import { StorefrontHome } from "./StorefrontHome.js";',
     ]
+    if admin_gated:
+        lines.append('import { AdminGate } from "./AdminGate.js";')
     lines.extend(mounts["imports"])
     lines.append("")
     lines.append("export const router = createBrowserRouter([")
@@ -2040,15 +2614,47 @@ def render_public_routes_tsx(plan: dict, options: dict | None = None) -> str:
     lines.append("    element: <StorefrontShell />,")
     lines.append("    children: [")
     lines.append("      { index: true, element: <StorefrontHome /> },")
+    # A public-SURFACE route that still needs a session (auth.qr_confirm) is
+    # drawn in the public menu and mounted INSIDE the gate: the two axes are
+    # independent, and `requiresAuth` used to be emitted and read by nobody.
+    gated_public = [r for r in plan["public"] if r["requiresAuth"]]
     for route in plan["public"]:
+        if route["requiresAuth"]:
+            continue
         element = elements[route["entry"]["id"]]
         lines.append(f'      {{ path: "{route["path"]}", element: {element} }},')
     lines.append("      {")
     lines.append("        element: <MemberGate />,")
     lines.append("        children: [")
-    for route in plan["member_absolute"]:
+    for route in gated_public:
         element = elements[route["entry"]["id"]]
         lines.append(f'          {{ path: "{route["path"]}", element: {element} }},')
+    # The admin subtree gets a SECOND gate, nested inside the member one: the
+    # container knows there is a settled member, and the remaining question —
+    # does this member operate the product — is `user.is_staff`. It refuses by
+    # name; the entry stays in the menu, because a screen that vanishes teaches
+    # nobody it exists. Without auth-react installed there is no staff fact to
+    # read, so the routes stay member-gated and each pane refuses on its own.
+    admin_routes = [r for r in plan["member_absolute"] if r.get("gate") == "admin"]
+    plain_member = [r for r in plan["member_absolute"] if r.get("gate") != "admin"]
+    for route in plain_member:
+        element = elements[route["entry"]["id"]]
+        lines.append(f'          {{ path: "{route["path"]}", element: {element} }},')
+    if admin_routes and admin_gated:
+        lines.append("          {")
+        lines.append("            element: <AdminGate />,")
+        lines.append("            children: [")
+        for route in admin_routes:
+            element = elements[route["entry"]["id"]]
+            lines.append(
+                f'              {{ path: "{route["path"]}", element: {element} }},'
+            )
+        lines.append("            ],")
+        lines.append("          },")
+    else:
+        for route in admin_routes:
+            element = elements[route["entry"]["id"]]
+            lines.append(f'          {{ path: "{route["path"]}", element: {element} }},')
     account_entry = plan.get("account_entry")
     if account_entry or plan["account_children"]:
         lines.append("          {")
@@ -2173,6 +2779,88 @@ export function AccountHome(): ReactElement {
       description={
         <Typography.Paragraph>
           {t(STOREFRONT_I18N_KEYS.accountBody)}
+        </Typography.Paragraph>
+      }
+    />
+  );
+}
+'''
+
+ADMIN_HOME_TSX = '''\
+/**
+ * GENERATED — the landing of `/admin`.
+ *
+ * `admin.root` is the container's own nav entry: no module owns "the admin
+ * section", and until the container declared one, every pair that hung a
+ * screen from it (gdpr's privacy console, video's usage pane) lost that screen
+ * to the orphan rule with no log. The landing itself is a composition of those
+ * sections, so it is emitted as a page that says so.
+ *
+ * Access: this is a MEMBER route inside `<MemberGate/>`. Staff-ness is checked
+ * by the panes themselves, which refuse by name — a staff screen is reachable
+ * and says no, rather than being hidden from the person who needs to know it
+ * exists.
+ */
+import type { ReactElement } from "react";
+import { Alert, Typography } from "antd";
+import { useT } from "@stapel/core";
+import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
+
+export function AdminHome(): ReactElement {
+  const t = useT();
+  return (
+    <Alert
+      type="info"
+      showIcon
+      data-testid="admin-home"
+      message={t(STOREFRONT_I18N_KEYS.adminTitle)}
+      description={
+        <Typography.Paragraph>
+          {t(STOREFRONT_I18N_KEYS.adminBody)}
+        </Typography.Paragraph>
+      }
+    />
+  );
+}
+'''
+
+ADMIN_GATE_TSX = '''\
+/**
+ * GENERATED — the staff gate over `/admin`.
+ *
+ * It sits INSIDE `<MemberGate/>`: by the time this renders, the container knows
+ * there is a settled member. The remaining question is whether the member
+ * operates this product, and the answer is `user.is_staff` — the one staff fact
+ * the session already carries (`@stapel/auth-react`'s `useAuthSessionState`).
+ *
+ * It REFUSES BY NAME rather than hiding or redirecting, which is the fleet
+ * rule for a staff screen: a menu entry that vanishes teaches nobody that the
+ * screen exists, and a redirect to sign-in tells a signed-in person they are
+ * signed out. The panes underneath refuse by name too — this gate is the first
+ * of the two, not a replacement for either.
+ */
+import type { ReactElement } from "react";
+import { Alert, Typography } from "antd";
+import { Outlet } from "react-router";
+import { useT } from "@stapel/core";
+import { useAuthSessionState } from "@stapel/auth-react";
+import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
+
+export function AdminGate(): ReactElement {
+  const t = useT();
+  const { user } = useAuthSessionState();
+
+  if (user?.is_staff === true) return <Outlet />;
+
+  return (
+    <Alert
+      type="warning"
+      showIcon
+      data-testid="admin-gate-refusal"
+      message={t(STOREFRONT_I18N_KEYS.adminRefusedTitle)}
+      description={
+        <Typography.Paragraph>
+          {t(STOREFRONT_I18N_KEYS.adminRefusedBody)}
         </Typography.Paragraph>
       }
     />

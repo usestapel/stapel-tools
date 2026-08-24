@@ -2,6 +2,115 @@
 
 ## [Unreleased]
 
+## [0.54.0] — 2026-08-24
+
+### The scaffold ships a FEATURE — `stapel-new-react-lib` reaches etalon parity
+
+> `--no-skin` is the new opt-out. Every pair scaffolded from now on carries a
+> default AntD skin, ru/es locales and a nav entry; a pair that is genuinely
+> headless by design (billing, calendar, recordings) asks for that with the
+> flag and says why in its MODULE.md.
+
+The shared-layer audit measured it: *"every freshly scaffolded pair is
+'headless shipped, feature not shipped' on day one"*. The scaffold emitted the
+layer a host REPLACES and nothing of the layer a host SHIPS — no `src/default/`,
+no `./default` export, no antd peer, `en` only, no guidelines, no phone demo —
+so every new pair began as a §54 violation by construction and each one
+rediscovered the fix by hand.
+
+`file_plan` now emits, from the auth-react etalon:
+
+* `src/default/<Camel>Panel.tsx` + `index.ts` + `types.ts` — a themed skeleton
+  through `SkinTheme` (`@stapel/tokens-antd/skin`), never a local
+  `ConfigProvider` (which forks the token bridge per pair) and never a
+  `mode = "light"` default (which ignores a dark host);
+* `./default`, `./i18n/ru`, `./i18n/es` export subpaths + their own size-limit
+  budgets, `antd >=5.20.0 <7` / `@stapel/tokens-antd >=0.6.0` peers, and the
+  `tsc` build that emits exactly the paths the exports map names;
+* `src/i18n/{ru,es}.ts` with the en floor registered UNDER the locale (a missing
+  key degrades to English, never to a raw key) and `test/i18nParity.test.ts` —
+  the gate 11 of 19 live pairs had no version of;
+* `src/nav/manifest.ts` with a REAL entry (a skinned pair has a component the
+  entry can name) rendered from the same dict as `nav-manifest.json`, so
+  declaration and projection cannot disagree before `pnpm gen:nav` runs;
+* `docs/guidelines.md`, `demo/<Name>Skin.demo.tsx` with a `viewport: "phone"`
+  variant, and a harness themed by the same `SkinTheme` a host gets.
+
+Fixed on the way: the demo harness spoke the PRE-§68 token roles (`card-bg`,
+`color-text-primary`, …), so a scaffolded pair's demos did not typecheck at
+all. Proven end to end — `tsc -p tsconfig.json`, `tsc -p tsconfig.demo.json`
+and `vitest run` over a freshly scaffolded probe package are green.
+
+### The nav contract stops failing silently
+
+Three defects, all invisible in the output:
+
+* **`admin.root` was declared by nobody.** gdpr's `admin.privacy` and video's
+  `admin.usage` hang from it, so every generated container dropped them as
+  orphans — two real screens, no log line. Both containers now declare the root
+  when (and only when) a selected pair hangs a screen from it, write its landing
+  page, and gate the subtree with `<AdminGate/>`: `user.is_staff` from the auth
+  session, REFUSING BY NAME rather than hiding (a menu entry that vanishes
+  teaches nobody the screen exists).
+* **`requiresAuth` was emitted and read by nothing.** "/app" and "/account" are
+  gated as subtrees, but an absolute-path entry is their sibling:
+  `auth.qr_confirm` (`surface: "public"`, `requiresAuth: true`) mounted for
+  anonymous visitors. Per-route now: `<ProtectedRoute>` in the monolith, inside
+  `<MemberGate/>` on a storefront — never "/login", which is where the gate
+  redirects.
+* **The member container resolved with no audience.** `resolveNav`'s audience
+  argument is optional and its default does not filter, so a guest mandate
+  inside "/app" got every member entry. The generated `nav.generated.ts` now
+  calls `resolveMemberNav`/`resolvePublicNav` — the audience is in the name.
+
+`validate_nav_entries` refuses at GENERATION time: an icon outside the shell's
+registry (16 names — an unknown one renders a generic glyph with no error), a
+`parentId` no registered pair and no container root declares, and `route.index`
+— which is hereby DROPPED from the contract rather than half-implemented
+(`resolveNav` copies `route` opaque, the shell's `matchesLocation` ignores it,
+and the container decides its own section index).
+
+### The listing composer is wired, not a placeholder
+
+`NAV_ENTRY_MOUNTS["listings.compose"]` emitted a named gap, which meant the
+scripted storefront had no way to list anything — a library, not an app. The
+cross-pair page is now generated: `useCategoryFeatures` + `<CategoryPickerField>`
+from categories-react, ONE `useUploadQueue` bag drawn by `<MediaGalleryField>`
+from cdn-react (two queues publish an empty `images_draft` while the photos sit
+on screen). The one slot it cannot fill — `renderLocationPicker`, which needs a
+geo pair that does not exist — is NAMED on the page instead of silently asking a
+seller for a latitude. A selection missing a member pair still falls back to the
+placeholder, naming which prop belongs to which pair.
+
+`forms` joins `FRONTEND_REACT_LIBS` (its backend has been selectable since the
+module landed; the frontend registry had no entry, so `--modules forms` shipped
+a headless backend). No nav mirror yet: forms-react publishes no
+`nav-manifest.json`, and a mirror claiming entries a package does not publish is
+what the drift gate exists to refuse.
+
+### Composite frontend presets — `--preset shop|classified|booking|social`
+
+A composite backend mounts no URLs: its `preset.py` is a named set of modules.
+Its frontend counterpart is the same thing one layer up, so there is no
+`@stapel/shop-react` to build — there is `FRONTEND_COMPOSITES`, a table of
+member pairs whose expansion (pairs, baked nav bundle with the container roots,
+container pages) is COMPUTED by the same functions the generator uses. Members
+the fleet has no react pair for yet are printed by name — classified names geo,
+moderation and currencies rather than shipping without them quietly.
+
+### Browser WebSocket origins reach the generated stack
+
+stapel-core 0.44.2 gates the cookie branch of a WebSocket handshake on an origin
+allowlist and FAILS CLOSED (an empty list refuses every handshake, close 4403;
+`manage.py check` reports `stapel_core.jwt.E001`). A cookie is ambient
+authority — the browser attaches it to a handshake started by any page, and
+sockets have neither the same-origin policy nor CORS in front of them. So:
+`STAPEL_WS_ALLOWED_ORIGINS` in both `.env.local` presets and both prod env
+templates (with the SPA-on-another-site `JWT_COOKIE_SAMESITE=None` + Secure pair
+documented beside it), a working default in `dev.py` for a native Vite run, and
+the core pin moved to 0.44.2 — a scaffold may not emit a setting the library it
+pins has never heard of.
+
 ## [0.53.0] — 2026-08-24
 
 ### `stapel-authz-lint` — the "credentials verified, authorization never asked" gate

@@ -11,6 +11,7 @@ from stapel_tools.new_react_lib import (
     module_flow_count,
     nav_check_script,
     nav_gen_script,
+    nav_entries,
     nav_manifest_json,
     nav_packages_from,
     patch_root_gen,
@@ -554,14 +555,24 @@ class TestNavManifestEmission:
         return build_context("notifications", "Notifications",
                              "stapel-notifications", "/notifications/api/")
 
-    def test_manifest_ts_declares_an_empty_entry_list(self):
+    def test_manifest_ts_declares_the_skin_screen(self):
+        """A skinned pair (the default) declares its ONE screen from commit 1 —
+        it can, because `./default` ships a component the entry names. The
+        rule the emptiness used to protect is unchanged: never an entry whose
+        `component.export` does not resolve."""
         plan = file_plan(self._ctx())
         src = plan["src/nav/manifest.ts"]
         assert 'import type { NavEntry } from "@stapel/core";' in src
-        # EMPTY on purpose: a scaffolded pair ships no ./default subpath, so
-        # any entry would name a component that does not resolve — and it
-        # would resolve at the CONTAINER's import, two repositories from the
-        # mistake. The file's own docstring has to say so.
+        assert '"id": "notifications.overview"' in src
+        assert '"export": "NotificationsPanel"' in src
+        assert '"subpath": "default"' in src
+
+    def test_no_skin_declares_an_empty_entry_list(self):
+        """`--no-skin`: no ./default subpath, so any entry would name a
+        component that does not resolve — and it would fail at the CONTAINER's
+        import, two repositories from the mistake."""
+        plan = file_plan(self._ctx(), skin=False)
+        src = plan["src/nav/manifest.ts"]
         assert "export const navEntries: readonly NavEntry[] = [];" in src
         assert "Why this list is empty" in src
 
@@ -570,14 +581,38 @@ class TestNavManifestEmission:
         so a freshly scaffolded pair is ALREADY green under `pnpm
         gen:nav:check`. A scaffold whose first act is to redden a gate is a
         scaffold everyone learns to run with the gate switched off."""
-        text = nav_manifest_json(self._ctx())
+        ctx = self._ctx()
+        text = nav_manifest_json(ctx)
         assert text.endswith("\n")
-        assert json.loads(text) == {
-            "package": "@stapel/notifications-react",
-            "version": "0.0.0",
-            "entries": [],
-        }
-        assert text == json.dumps(json.loads(text), indent=2) + "\n"
+        data = json.loads(text)
+        assert data["package"] == "@stapel/notifications-react"
+        assert data["version"] == "0.0.0"
+        assert data["entries"] == nav_entries(ctx)
+        assert text == json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+        assert json.loads(nav_manifest_json(ctx, skin=False))["entries"] == []
+
+    def test_the_declaration_and_its_projection_are_one_source(self):
+        """`src/nav/manifest.ts` and `nav-manifest.json` are rendered from the
+        SAME dict, so they cannot disagree before `pnpm gen:nav` has ever run."""
+        ctx = self._ctx()
+        plan = file_plan(ctx)
+        declared = json.loads(plan["nav-manifest.json"])["entries"]
+        src = plan["src/nav/manifest.ts"]
+        for entry in declared:
+            assert f'"id": "{entry["id"]}"' in src
+
+    def test_the_scaffolded_icon_is_one_the_shell_resolves(self):
+        """An icon outside the shell's registry renders a generic glyph with no
+        error — so the scaffold picks a registered one, and the container-side
+        validator refuses anything else at generation time."""
+        from stapel_tools._frontend_templates import (
+            NAV_ICON_REGISTRY,
+            validate_nav_entries,
+        )
+
+        entries = nav_entries(self._ctx())
+        assert entries[0]["icon"] in NAV_ICON_REGISTRY
+        validate_nav_entries(entries, declared=set())
 
     def test_package_json_publishes_the_manifest(self):
         pkg = json.loads(file_plan(self._ctx())["package.json"])
@@ -643,3 +678,137 @@ class TestRootNavPatch:
         scripts = json.loads((tmp_path / "package.json").read_text())["scripts"]
         assert "packages/billing-react" in scripts["gen:nav"]
         assert "packages/billing-react/nav-manifest.json" in scripts["gen:nav:check"]
+
+
+class TestDefaultSkinParity:
+    """G2 of the shared-layer audit: "every freshly scaffolded pair is
+    'headless shipped, feature not shipped' on day one". The etalon
+    (auth-react) ships `src/default/`, a `./default` export, ru/es locale
+    subpaths, a parity test, product guidelines and a skin demo drawn at phone
+    width; the scaffold shipped none of it, so every new pair started as a §54
+    violation by construction. The skin is now ON by default — `--no-skin` is
+    the opt-out for a pair that is genuinely headless by design."""
+
+    def _plan(self, module="notifications", skin=True):
+        ctx = build_context(module, module.capitalize(), f"stapel-{module}",
+                            f"/{module}/api/", skin=skin)
+        return file_plan(ctx)
+
+    def test_the_skin_files_exist(self):
+        plan = self._plan()
+        assert "src/default/NotificationsPanel.tsx" in plan
+        assert "src/default/index.ts" in plan
+        assert "src/default/types.ts" in plan
+
+    def test_the_panel_is_themed_through_the_one_shared_bridge(self):
+        """Not a local ConfigProvider (that forks the token bridge per pair) and
+        not a `mode = "light"` default (that ignores a dark host)."""
+        src = self._plan()["src/default/NotificationsPanel.tsx"]
+        assert 'import { SkinTheme } from "@stapel/tokens-antd/skin";' in src
+        assert "<ConfigProvider" not in src
+        assert "<SkinTheme" in src
+        # `mode` is passed THROUGH when the host set it and omitted otherwise,
+        # so the shared theme follows the host instead of a pair-picked default.
+        assert 'props.mode !== undefined ? { mode: props.mode } : {}' in src
+        code = src.split("*/", 1)[1]  # past the file docstring
+        assert 'mode = "light"' not in code
+
+    def test_package_json_exports_the_subpaths_with_their_peers(self):
+        pkg = json.loads(self._plan()["package.json"])
+        assert pkg["exports"]["./default"]["default"] == "./dist/default/index.js"
+        assert pkg["exports"]["./i18n/ru"]["default"] == "./dist/i18n/ru.js"
+        assert pkg["exports"]["./i18n/es"]["default"] == "./dist/i18n/es.js"
+        peers = pkg["peerDependencies"]
+        assert peers["@stapel/tokens-antd"] == ">=0.6.0"
+        assert peers["antd"] == ">=5.20.0 <7"
+        assert peers["react"] == ">=19"
+        # the subpaths carry their own byte budgets, so the main entry cannot
+        # quietly grow the skin or a locale
+        names = {limit["path"] for limit in pkg["size-limit"]}
+        assert {"dist/index.js", "dist/default/index.js", "dist/i18n/ru.js",
+                "dist/i18n/es.js"} == names
+
+    def test_the_tsc_build_emits_the_subpaths(self):
+        """`build` is `tsc -p tsconfig.json` with rootDir `src`, so
+        `src/default/index.ts` and `src/i18n/ru.ts` compile to exactly the paths
+        the exports map names — no second build step to keep in step."""
+        plan = self._plan()
+        tsconfig = json.loads(plan["tsconfig.json"])
+        assert tsconfig["compilerOptions"]["rootDir"] == "src"
+        assert tsconfig["compilerOptions"]["outDir"] == "dist"
+        assert json.loads(plan["package.json"])["scripts"]["build"] == (
+            "tsc -p tsconfig.json"
+        )
+
+    def test_locales_ship_with_the_pair_and_carry_every_key(self):
+        plan = self._plan()
+        for locale in ("ru", "es"):
+            src = plan[f"src/i18n/{locale}.ts"]
+            assert f"registerNotificationsI18n{locale.capitalize()}" in src
+            # en floor UNDER the locale: a missing key degrades to English,
+            # never to a raw key.
+            assert "engine.registerBundle(locale, notificationsI18nBundleEn);" in src
+        keys_ts = plan["src/i18n/keys.ts"]
+        for key in ("notifications.nav.overview", "notifications.panel.empty",
+                    "notifications.panel.loading"):
+            assert key in keys_ts
+            assert key in plan["src/i18n/ru.ts"]
+            assert key in plan["src/i18n/es.ts"]
+
+    def test_the_parity_test_ships_with_the_pair(self):
+        src = self._plan()["test/i18nParity.test.ts"]
+        assert "notificationsI18nBundleRu" in src
+        assert "notificationsI18nBundleEs" in src
+        assert "keeps the en {param} slots" in src
+
+    def test_the_locales_stay_out_of_the_main_entry(self):
+        index = self._plan()["src/index.ts"]
+        assert "i18n/ru" not in index
+        assert "i18n/es" not in index
+        assert "src/default" not in index
+
+    def test_the_skin_demo_is_drawn_at_phone_width(self):
+        """Mobile first is a rule with teeth only if something checks it: the
+        gen:demos default-skin gate reads this literal."""
+        src = self._plan()["demo/NotificationsSkin.demo.tsx"]
+        assert 'viewport: "phone"' in src
+        assert "NotificationsPanel" in src
+
+    def test_the_harness_themes_the_demos(self):
+        src = self._plan()["demo/_harness.tsx"]
+        assert 'import { SkinTheme } from "@stapel/tokens-antd/skin";' in src
+        assert "<SkinTheme>" in src
+
+    def test_guidelines_ship_with_the_pair(self):
+        src = self._plan()["docs/guidelines.md"]
+        assert "SkinDialog" in src
+        assert "aria-label" in src
+
+    def test_no_skin_drops_exactly_the_skin(self):
+        plan = self._plan(skin=False)
+        assert not [rel for rel in plan if rel.startswith("src/default/")]
+        assert "demo/NotificationsSkin.demo.tsx" not in plan
+        pkg = json.loads(plan["package.json"])
+        assert "./default" not in pkg["exports"]
+        assert "antd" not in pkg["peerDependencies"]
+        assert "@stapel/tokens-antd" not in pkg["peerDependencies"]
+        # but NOT the locales, the parity gate or the guidelines: a headless
+        # pair still has refusal copy and still has product rules.
+        assert "src/i18n/ru.ts" in plan
+        assert "test/i18nParity.test.ts" in plan
+        assert "docs/guidelines.md" in plan
+
+    def test_no_skin_keeps_the_locale_bundles_key_exact(self):
+        """Parity is an equality, not a superset: a `--no-skin` pair declares no
+        panel copy, so its ru/es bundles must not carry any either."""
+        plan = self._plan(skin=False)
+        assert "notifications.panel.empty" not in plan["src/i18n/ru.ts"]
+        assert "notifications.panel.empty" not in plan["src/i18n/keys.ts"]
+
+    def test_the_scaffold_copies_no_generator(self):
+        """Fork-free rule: the skin wave adds templates, never a copy of a gen
+        driver — the pair still owns NO gen:* scripts."""
+        pkg = json.loads(self._plan()["package.json"])
+        assert not [s for s in pkg["scripts"] if s.startswith("gen")]
+        for content in self._plan().values():
+            assert "gen-nav-manifest.mjs" not in content or "pnpm gen:nav" in content
