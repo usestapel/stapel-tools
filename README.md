@@ -675,6 +675,64 @@ byte-deterministic (sorted keys; `--created-at`/`SOURCE_DATE_EPOCH`).
 The platform bake step calls this during image build and bakes the file
 into the image at `/app/release.json`.
 
+### `stapel-disk` — build/disk lifecycle: preflight guard, tiered reclaim, ephemeral reaper
+
+```bash
+stapel-disk guard --min-free-gb 15 --for "make e2e"   # refuse BEFORE the build
+stapel-disk doctor                                    # where the space went
+stapel-disk reclaim [--images]                        # tier 1 [+ tier 2]
+stapel-disk reap [--dry-run] [--owner studio-e2e]     # this run's own garbage
+```
+
+A build that runs out of disk does not fail cleanly. It dies mid-layer on an
+opaque `ENOSPC`, and it can take the docker daemon's socket with it — after
+which every shell tool on the machine fails with an EOF too. Measured on the
+fleet's own workstation the night this shipped: 27.9 GB across 187 unreferenced
+volumes (131 of them anonymous PGDATA directories orphaned by a test script
+that removed its postgres container without `-v`), plus 12.4 GB of
+unreferenced images.
+
+**`guard`** is the preflight: put it in front of every target that builds an
+image or starts a sandbox. Below the threshold it refuses with the free space,
+the threshold, the shortfall and the exact reclaim command; above it, it is
+silent and cheap. Threshold: `--min-free-gb`, else `STAPEL_DISK_MIN_FREE_GB`,
+else 15 GiB.
+
+**`reclaim`** is tiered:
+
+| tier | what | how |
+| --- | --- | --- |
+| 1 | build cache, dangling images, stopped containers | always, safe to automate |
+| 2 | unreferenced images | `--images`, opt-in |
+| — | **volumes** | **refused, at every tier** |
+
+The volume refusal is a hard rule in the tool, not a convention: a project's
+repositories, its databases and its snapshots live in named volumes, and
+`docker system prune --volumes` cannot tell them from build garbage. Passing
+`--volumes` exits 2 and prints why. No argv this command emits can delete a
+volume.
+
+**`reap`** is the other half — the thing that creates throwaway resources must
+own their death. It removes only resources that *identify themselves* as
+ephemeral: the `stapel.ephemeral=true` label (the contract, stamped at
+creation) or an explicit name pattern (`studio-vol-e2e-*` and friends — the
+fallback for resources created before the label existed). A pattern must carry
+at least four literal characters before its first wildcard, so `--pattern '*'`
+is refused rather than obeyed. `--dry-run` lists matches and the count of
+resources inspected and left untouched.
+
+Wire it into a Makefile so the whole lifecycle is one target's business:
+
+```make
+e2e: disk-guard
+	@set -e; trap 'stapel-disk reap --quiet' EXIT INT TERM; \
+		docker compose up -d && ./run-the-suite.sh
+```
+
+The `trap` is the point: a crashed run is exactly the run that leaks, so the
+reaper has to fire on failure as well as success. Generated projects inherit
+`disk-guard` / `disk-doctor` targets from the scaffold.
+
 ## Project layout
 
 Generated projects follow the mainstream Django community canon so the shape is

@@ -964,8 +964,9 @@ MONOLITH_MAKEFILE = """\
 # {{TITLE}} — project controls (backend). See frontend/README.md for the
 # frontend's own lint/build — not yet wired into these targets (follow-up).
 PYTHON ?= python
+COMPOSE ?= docker compose -f docker-compose.local.yml --env-file .env.local
 
-.PHONY: controls lint test boot-smoke
+.PHONY: controls lint test boot-smoke disk-guard disk-doctor build up down
 
 controls: lint boot-smoke test
 
@@ -977,6 +978,40 @@ boot-smoke:
 
 test:
 \t$(MAKE) -C {{DIR_NAME}} test PYTHON=$(PYTHON)
+
+# --- Disk lifecycle (stapel-tools `stapel-disk`) ---------------------------
+# An image build that runs out of disk does not fail cleanly: it dies mid-layer
+# on an opaque ENOSPC and can take the docker daemon's socket down with it, at
+# which point every shell tool on the machine starts erroring too. So every
+# target that builds an image checks free space FIRST and refuses with a
+# number, a threshold and the exact reclaim command.
+#
+#   make build DISK_MIN_FREE_GB=25   # raise the bar for a heavy build
+#   make disk-doctor                 # where the space actually went
+#
+# `stapel-disk reclaim` is tiered and never blanket-prunes volumes — this
+# project's database and media volumes live there. Requires stapel-tools
+# (pip install stapel-tools); the guard is skipped, loudly, when it is absent.
+DISK_MIN_FREE_GB ?= 15
+
+disk-guard:
+\t@if command -v stapel-disk >/dev/null 2>&1; then \\
+\t\tstapel-disk guard --min-free-gb $(DISK_MIN_FREE_GB) --for "$(MAKECMDGOALS)"; \\
+\telse \\
+\t\techo "disk-guard: stapel-disk not installed (pip install stapel-tools) — preflight skipped" >&2; \\
+\tfi
+
+disk-doctor:
+\tstapel-disk doctor
+
+build: disk-guard
+\t$(COMPOSE) build
+
+up: disk-guard
+\t$(COMPOSE) up -d
+
+down:
+\t$(COMPOSE) down
 """
 
 MONOLITH_GITIGNORE = """\

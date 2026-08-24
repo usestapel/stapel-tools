@@ -1240,3 +1240,46 @@ class TestSingleAndNoLibScaffoldUnaffected:
         assert "stapel_booking.urls" not in urls  # but mounts no urls of its own
         assert 'path("calendar/", include("stapel_calendar.urls")),' in urls
         assert 'path("listings/api/", include("stapel_listings.urls")),' in urls
+
+
+class TestGeneratedProjectsInheritTheDiskGuard:
+    """Every generated project inherits the fleet's build/disk preflight.
+
+    The failure this prevents is not a red test — it is an image build that
+    dies mid-layer on an opaque ENOSPC and takes the docker daemon's socket
+    with it. The guard refuses first, with a number. Both presets that write a
+    root Makefile carry the target; the monolith preset (the one with a compose
+    stack) also puts it in front of `build`/`up`.
+    """
+
+    @pytest.mark.parametrize("preset", ["monolith", "minimal"])
+    def test_root_makefile_has_the_guard(self, tmp_path, preset):
+        makefile = (_create(tmp_path, "app", preset) / "Makefile").read_text()
+        assert "disk-guard:" in makefile
+        assert "disk-doctor:" in makefile
+        assert "stapel-disk guard --min-free-gb $(DISK_MIN_FREE_GB)" in makefile
+        assert "DISK_MIN_FREE_GB ?= 15" in makefile
+
+    @pytest.mark.parametrize("preset", ["monolith", "minimal"])
+    def test_missing_tool_is_reported_not_swallowed(self, tmp_path, preset):
+        """A skipped preflight must say so — a silent skip is a guard that
+        stops guarding the day someone forgets to install stapel-tools."""
+        makefile = (_create(tmp_path, "app", preset) / "Makefile").read_text()
+        assert "preflight skipped" in makefile
+        # …and the skip must be an `else` branch: `cmd || echo` would turn the
+        # guard's own REFUSAL (exit 1) into a passing target.
+        assert "|| echo \"disk-guard" not in makefile
+
+    def test_monolith_image_targets_depend_on_the_guard(self, tmp_path):
+        makefile = (_create(tmp_path, "app", "monolith") / "Makefile").read_text()
+        assert "build: disk-guard" in makefile
+        assert "up: disk-guard" in makefile
+
+    @pytest.mark.parametrize("preset", ["monolith", "minimal"])
+    def test_no_generated_target_can_blanket_prune_volumes(self, tmp_path, preset):
+        """The house rule, asserted at the scaffold: a generated project must
+        never ship a target that deletes its own database volume."""
+        makefile = (_create(tmp_path, "app", preset) / "Makefile").read_text()
+        assert "system prune" not in makefile
+        assert "volume prune" not in makefile
+        assert "--volumes" not in makefile

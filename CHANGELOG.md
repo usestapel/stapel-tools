@@ -2,6 +2,71 @@
 
 ## [Unreleased]
 
+## [0.52.0] — 2026-08-24
+
+### `stapel-disk` — a lifecycle for build/disk, because the machine died twice
+
+Twice in one night the fleet's workstation reached **0 bytes free**. Nothing
+failed in a way anyone could act on: an in-flight image build died mid-layer
+on an opaque `ENOSPC`, the OrbStack daemon dropped its socket, and from then
+on *every* shell tool on the host returned an EOF. Measured immediately after:
+
+| | total | active | reclaimable |
+| --- | --- | --- | --- |
+| local volumes | 205 | 18 | **27.9 GB (93%)** |
+| images | 99 | 30 | 12.4 GB (62%) |
+
+The obvious hypothesis was that studio's e2e leaks its per-project resources,
+and it does — `studio-vol-e2e-2f3f7a8c` and six `studio-vol-smoke-*` volumes,
+each with its `studio-net-*` bridge, still on the engine weeks after the runs
+that made them. But that is 13 objects, not 27.9 GB. The bulk was elsewhere and
+had the same shape: **131 anonymous PostgreSQL data directories (~45 MB each)
+created inside one 72-hour window**, by a migration-test script that starts
+`postgres:10` and tears it down with `docker rm -f` *without* `-v`. The image
+declares `VOLUME /var/lib/postgresql/data`, so every single run left a PGDATA
+behind. Same defect, two sites: something creates a docker resource and nothing
+owns its death.
+
+A cleanup command would have bought one night. This is the mechanism instead,
+and it lives in stapel-tools because it applies to everything in the fleet that
+builds an image.
+
+**`stapel-disk guard`** — preflight. It runs *before* the build, compares free
+space against a threshold (`--min-free-gb`, `STAPEL_DISK_MIN_FREE_GB`, default
+15 GiB) and refuses with the free space, the threshold, the shortfall and the
+exact reclaim command. A refusal you can act on beats an ENOSPC at layer 7 of 9.
+
+**`stapel-disk reclaim`** — tiered, and explicit about its limits. Tier 1
+(always, safe to automate): build cache, dangling images, stopped containers.
+Tier 2 (`--images`, opt-in): unreferenced images. **Volumes: never.**
+`docker volume prune` and `docker system prune --volumes` are refused by this
+tool at every tier, and the refusal says why — the studio's `project-repos`,
+every stack's `db-data` and the snapshot volumes are named volumes, and a
+blanket prune deletes the owner's data while reporting it as reclaimed space.
+A test asserts that no argv this command can emit is capable of removing a
+volume, so the rule cannot be relaxed by accident.
+
+**`stapel-disk reap`** — the actual leak fix. It removes only resources that
+*identify themselves* as throwaway: the `stapel.ephemeral=true` label, or an
+explicit name pattern for the pre-label generation. Two guards stand in front
+of the owner's data — a pattern needs four literal characters before its first
+wildcard (`--pattern '*'` is refused, not obeyed), and every individual
+resource is re-checked against the contract immediately before removal.
+`--dry-run` lists the matches and the count of resources inspected and left
+alone.
+
+**`stapel-disk doctor`** — free space, reclaimable per tier, orphan counts. The
+state made visible before it is fatal.
+
+### Generated projects inherit the guard
+
+`MONOLITH_MAKEFILE` gains `disk-guard` / `disk-doctor` and now carries guarded
+`build` / `up` / `down` targets over `docker-compose.local.yml`;
+`MINIMAL_MAKEFILE` gains `disk-guard` / `disk-doctor`. Both degrade loudly
+rather than silently when `stapel-tools` is not installed. Threshold per
+project: `make build DISK_MIN_FREE_GB=25`.
+
+
 ## [0.51.0] — 2026-08-24
 
 ### The library scaffold inherits the core serializer seam instead of embedding one

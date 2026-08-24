@@ -388,7 +388,7 @@ MINIMAL_MAKEFILE = """\
 # Override the interpreter: make controls PYTHON=/path/to/python
 PYTHON ?= python
 
-.PHONY: controls lint test boot-smoke openapi run migration-lint release-manifest messages messages-check
+.PHONY: controls lint test boot-smoke openapi run migration-lint release-manifest messages messages-check disk-guard disk-doctor
 
 controls: lint boot-smoke test
 
@@ -411,6 +411,28 @@ test:
 
 openapi:
 \t$(PYTHON) manage.py spectacular --format openapi-json --file openapi.json --validate
+
+# --- Disk lifecycle (stapel-tools `stapel-disk`) ---------------------------
+# Put `disk-guard` in front of anything that builds an image or starts a
+# sandbox. A build that runs out of disk does not fail cleanly: it dies
+# mid-layer on an opaque ENOSPC and can take the docker daemon down with it.
+# The guard refuses first, naming the free space, the threshold and the exact
+# reclaim command. `stapel-disk reclaim` is tiered and NEVER blanket-prunes
+# volumes — databases and media live there.
+#
+#   make disk-guard DISK_MIN_FREE_GB=25
+#   make disk-doctor          # free space, reclaimable by tier, orphan counts
+DISK_MIN_FREE_GB ?= 15
+
+disk-guard:
+\t@if command -v stapel-disk >/dev/null 2>&1; then \\
+\t\tstapel-disk guard --min-free-gb $(DISK_MIN_FREE_GB) --for "$(MAKECMDGOALS)"; \\
+\telse \\
+\t\techo "disk-guard: stapel-disk not installed (pip install stapel-tools) — preflight skipped" >&2; \\
+\tfi
+
+disk-doctor:
+\tstapel-disk doctor
 
 run:
 \t$(PYTHON) manage.py migrate && $(PYTHON) manage.py runserver
