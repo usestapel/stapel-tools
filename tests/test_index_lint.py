@@ -370,8 +370,10 @@ def test_it_is_composed_into_verify():
     from stapel_tools import verify
 
     assert hasattr(verify, "run_index_lint")
-    source = verify.verify_project.__code__.co_names
-    assert "run_index_lint" in source
+    # Declared composition, not bytecode names: the calls moved behind the
+    # per-project lint profile switch, and `verify_project` now asserts its
+    # own list against COMPOSED_LINTERS, so this handle cannot drift.
+    assert "stapel-index-lint" in verify.COMPOSED_LINTERS
 
 
 @pytest.mark.parametrize("bad", ["{not json", ""])

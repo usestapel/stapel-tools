@@ -104,3 +104,46 @@ class TestMonolithDevVsProdSplit:
         )
         local_text = (proj / ".env.local").read_text()
         assert "ALLOW_UNCONFIGURED_PAYMENT_PROVIDER" not in local_text
+
+
+class TestScaffoldGateSeesTheDevHatch:
+    """0.49.0 wrote the hatch into ``.env.local`` and stopped there — but
+    ``assemble_scaffold``'s ``check`` gate, the one place that proves a
+    generated tree boots at all, read ``.env`` only. So a studio-generated
+    monolith selecting billing still went SCAFFOLDING -> FAILED on E104,
+    which is the exact outcome 0.49.0 set out to prevent.
+
+    The gate's env is now ``.env`` plus the keys ``.env.local`` ADDS.
+    Additions only: ``.env.local`` also re-declares SECRET_KEY and
+    POSTGRES_PASSWORD as committed dev placeholders, and letting those win
+    trades E104 for ``stapel_core.prodguard`` E001/E002 — a different false
+    red, not a fix.
+    """
+
+    def test_dev_only_keys_reach_the_gate(self, tmp_path):
+        from stapel_tools.assemble_scaffold import _load_dotenv
+
+        proj = _create_monolith(tmp_path, modules=["core", "billing"])
+        env = _load_dotenv(proj)
+        assert env["ALLOW_UNCONFIGURED_PAYMENT_PROVIDER"] == "1"
+
+    def test_env_wins_over_env_local_on_shared_keys(self, tmp_path):
+        from stapel_tools.assemble_scaffold import _load_dotenv
+
+        proj = _create_monolith(tmp_path, modules=["core", "billing"])
+        env = _load_dotenv(proj)
+        real_secret = dict(
+            line.split("=", 1) for line in (proj / ".env").read_text().splitlines()
+            if line and not line.startswith("#") and "=" in line
+        )
+        assert env["SECRET_KEY"] == real_secret["SECRET_KEY"].strip()
+        assert "django-insecure" not in env["SECRET_KEY"]
+        assert env["POSTGRES_PASSWORD"] == real_secret["POSTGRES_PASSWORD"].strip()
+
+    def test_minimal_layout_has_no_pair_and_still_works(self, tmp_path):
+        from stapel_tools.assemble_scaffold import _load_dotenv
+
+        proj = _create_minimal(tmp_path, modules=["core", "billing"])
+        env = _load_dotenv(proj)
+        assert env["ALLOW_UNCONFIGURED_PAYMENT_PROVIDER"] == "1"
+        assert "SECRET_KEY" in env

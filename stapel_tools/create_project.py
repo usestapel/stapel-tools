@@ -663,7 +663,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.3.1",
+        "version": "0.4.0",
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -779,7 +779,7 @@ FRONTEND_REACT_LIBS = {
     "search": {
         # No STAPEL_LIBS entry — see the dict docstring.
         "package": "@stapel/search-react",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "provider": "SearchProvider",
         "create_runtime": "createSearchRuntime",
         "register_i18n": "registerSearchI18n",

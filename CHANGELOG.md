@@ -2,6 +2,73 @@
 
 ## [Unreleased]
 
+## [0.50.0] — 2026-08-24
+
+### A legacy project can be gated by ITS OWN linters — `stapel-lint.toml`
+
+Every linter `stapel-verify` composes encodes a *stapel* contract. Against a
+project stapel generated, all fourteen are fair. Against an **imported legacy
+project** none of them is: a Django shop that never heard of `stapel_core`
+trips R-codes, SWAP-codes and CFG-codes in the hundreds on its first commit,
+not one of which describes a defect — they describe the project not being a
+stapel project. A pipeline that runs the arsenal there produces exactly one
+thing: a permanently red gate the operator learns to skim past, which is
+strictly worse than no gate, because it is ungated *and* unrecorded.
+
+New `stapel_tools.lint_profile`: a project-root `stapel-lint.toml` declaring
+one **mode per surface** (`python`, `frontend`, `docs`, `i18n`, `deploy`) —
+`stapel` (the arsenal), `native` (the project's OWN `ruff`/`eslint`/whatever
+IS the gate) or `off`. An absent file means `stapel` everywhere, so every
+generated project is bit-for-bit unaffected.
+
+The unit is a surface, not a linter, because that is the unit an operator can
+reason about: "this project's Python is gated by its own ruff" is a decision;
+"ADO002 off, ADO003 on" is a configuration accident waiting to happen.
+Individual rules stay reachable through `[waivers]`, one id at a time, each
+with its written reason — the same shape as
+`STAPEL_SECURITY_CHECK_WAIVERS`.
+
+Three rules keep it from becoming a silent kill switch:
+
+* `off` without a `reason`, `native` without a `command`, or a waiver with an
+  empty reason **raises** `LintProfileError` — the gate stops and names the
+  line. A malformed profile must not degrade into "run everything" (a
+  surprise red wall) or "run nothing" (a silent ungating);
+* every non-`stapel` surface still emits a report line carrying its mode and
+  reason, in the human table and in `--json`, next to a `profile` block —
+  what was *not* checked is as visible as what was, including a waiver that
+  matched nothing this run;
+* a `native` command is a shell command out of the tree under inspection, so
+  it runs only under the new `--run-native` flag. Studio's sandbox passes it
+  (it already runs the project's own `make controls` there); a bare local run
+  of an untrusted checkout does not, and reports the surface as
+  declared-but-not-run rather than green-by-omission.
+
+A native gate's exit code is the verdict and its output tail is the evidence.
+stapel deliberately does not parse another tool's format — the coder loop
+never needed it to, it already reads `make controls` tails the same way.
+
+`verify.COMPOSED_LINTERS` is now the declared, introspectable composition
+order (`verify_project` asserts its own list against it), and every composed
+linter must carry a surface in `LINTER_SURFACES` — a linter absent from that
+map would run under a profile that says the surface is off, which is the one
+failure mode a switch like this must not have.
+
+### `assemble_scaffold`'s `check` gate finally sees 0.49.0's billing hatch
+
+0.49.0 wrote `ALLOW_UNCONFIGURED_PAYMENT_PROVIDER=1` into the DEV env and
+stopped there — but the `check` gate, the one place that proves a generated
+tree boots at all, read `.env` only. A studio-generated monolith selecting
+billing therefore still went `SCAFFOLDING -> FAILED` on E104: the exact
+outcome 0.49.0 set out to prevent, at the exact place it mattered.
+
+The gate's env is now `.env` plus the keys `.env.local` **adds**. Additions
+only, in that direction, because `.env.local` also re-declares `SECRET_KEY`
+and `POSTGRES_PASSWORD` as committed dev placeholders, and letting those win
+trades E104 for `stapel_core.prodguard` E001/E002 — a different false red,
+not a fix. The prod guard is untouched: `.env`/`.env.example` carry no hatch,
+so `deploy/check-env.sh` and a real prod boot behave exactly as before.
+
 ## [0.49.0] — 2026-08-24
 
 ### A generated project can select stapel-billing and still boot in dev

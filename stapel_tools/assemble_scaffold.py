@@ -125,27 +125,57 @@ def _run_config_lint(project_dir: Path) -> GateResult:
     return GateResult("config-lint", passed=not findings, output=output)
 
 
-def _load_dotenv(project_dir: Path) -> dict[str, str]:
-    """Parse the generated project's own ``.env`` (KEY=VALUE, ``#`` comments)
-    so the static gates below boot against the SAME config a real run would
-    — not just ``os.environ``. Needed since stapel_core's config.E001 system
-    check (added after this gate runner was first written) resolves
-    ``required`` CONFIG.MD keys via ``get_config()`` against the actual
-    process environment, independent of any settings.py fallback value —
-    a required key (SECRET_KEY) that only exists in the project's own .env
-    file, never exported to the calling shell, must still reach the
-    subprocess or the gate false-fails on every project this tool generates."""
-    env_path = project_dir / ".env"
-    if not env_path.is_file():
+def _parse_env_file(path: Path) -> dict[str, str]:
+    if not path.is_file():
         return {}
     values: dict[str, str] = {}
-    for line in env_path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
         values[key.strip()] = value.strip()
     return values
+
+
+def _load_dotenv(project_dir: Path) -> dict[str, str]:
+    """Parse the generated project's own env files (KEY=VALUE, ``#``
+    comments) so the static gates below boot against the SAME config a real
+    run would — not just ``os.environ``. Needed since stapel_core's
+    config.E001 system check (added after this gate runner was first written)
+    resolves ``required`` CONFIG.MD keys via ``get_config()`` against the
+    actual process environment, independent of any settings.py fallback value
+    — a required key (SECRET_KEY) that only exists in the project's own .env
+    file, never exported to the calling shell, must still reach the
+    subprocess or the gate false-fails on every project this tool generates.
+
+    When the layout ships a pair (``.env`` + ``.env.local`` — monolith and
+    microservices; a minimal project ships one file), the gate's env is
+    **``.env`` plus every key ``.env.local`` adds that ``.env`` does not
+    define**. Additions only, in that direction, for two reasons that pull
+    against each other and both have to hold:
+
+    * ``.env.local`` is where 0.49.0's billing hatch
+      (``ALLOW_UNCONFIGURED_PAYMENT_PROVIDER``) lives, because a dev boot is
+      the boot that must survive an unconfigured Stripe. Reading only ``.env``
+      re-failed the ``check`` gate on ``stapel_billing.E104`` — the exact
+      error 0.49.0 set out to keep out of dev, still fired at the one place
+      that proves a generated tree boots at all.
+    * ``.env.local`` also *re-declares* ``SECRET_KEY``/``POSTGRES_PASSWORD``
+      as committed dev placeholders. Letting those win would boot the gate on
+      values ``stapel_core.prodguard`` E001/E002 exist to reject, trading one
+      false red for another.
+
+    The prod guard is untouched either way: ``.env``/``.env.example`` carry no
+    hatch, so ``deploy/check-env.sh`` and a real prod boot behave exactly as
+    before.
+    """
+    base = _parse_env_file(project_dir / ".env")
+    dev_only = {
+        k: v for k, v in _parse_env_file(project_dir / ".env.local").items()
+        if k not in base
+    }
+    return {**base, **dev_only}
 
 
 def _run_manage_check(

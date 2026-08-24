@@ -276,6 +276,65 @@ stapel-gen-client . --check      # drift gate (pre-commit's gen-client-check)
 stapel-gen-client . --force      # generate even without a detected override
 ```
 
+### `stapel-verify` + `stapel-lint.toml` — the arsenal, and the switch a legacy project needs
+
+```bash
+stapel-verify .                    # every composed linter, human table
+stapel-verify . --json             # machine output (profile + per-linter)
+stapel-verify . --run-native       # also execute the profile's native gates
+```
+
+Every linter `stapel-verify` composes encodes a **stapel** contract, which is
+a fair gate only against a project stapel generated. An imported legacy tree
+trips hundreds of them on its first commit, none describing a defect — and a
+permanently red gate is a gate that is off, minus the record.
+
+`stapel-lint.toml` at the project root is that record. One **mode per
+surface** (`python`, `frontend`, `docs`, `i18n`, `deploy`):
+
+| mode | meaning |
+|---|---|
+| `stapel` | run the stapel arsenal for the surface (the default — an absent file means this everywhere, so a generated project is unaffected) |
+| `native` | the project's **own** linter is the gate; `command` is mandatory |
+| `off` | the surface is not gated; `reason` is mandatory |
+
+```toml
+# stapel-lint.toml
+[surface.python]
+mode = "native"
+command = "ruff check ."
+
+[surface.frontend]
+mode = "native"
+command = "npm run lint"
+
+[surface.docs]
+mode = "off"
+reason = "reference docs live in Confluence, not the repo"
+
+[waivers]
+SWAP002 = "presenters are the app's own; see ADR-7"
+```
+
+Three rules keep it from becoming a silent kill switch, all borrowed from
+`stapel_core.django.check_guard`'s waiver canon:
+
+* `off` without a `reason`, `native` without a `command`, or a `[waivers]`
+  entry with an empty reason is an **error in the profile** — the gate stops
+  and names the line, it never degrades into "run nothing";
+* every non-`stapel` surface still emits a report line carrying its mode and
+  its reason, in the table and in `--json`, so what was *not* checked is
+  visible next to what was — including a waiver that matched nothing;
+* a `native` command is a shell command out of the tree under inspection, so
+  it does not run without `--run-native`. Studio's sandbox passes it (it
+  already runs the project's own `make controls` there); a bare local run of
+  an untrusted checkout does not.
+
+A native gate's **exit code is the verdict** and its output tail is the
+evidence — stapel deliberately does not parse another tool's format, and the
+coder loop never needed it to: it already reads `make controls` tails the
+same way.
+
 ### `stapel-lint` — project-specific static linter
 
 ```bash

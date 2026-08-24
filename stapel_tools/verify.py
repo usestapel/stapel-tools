@@ -88,25 +88,46 @@ Linters composed (in this order)
   ``proxy_connect_timeout``, which is half of why the original incident read
   as "server load" for a full day instead of "wrong address".
 
+Per-project profile (legacy projects)
+-------------------------------------
+Every linter above encodes a *stapel* contract, which is a fair gate only
+against a project stapel generated. An imported legacy tree trips hundreds of
+them on its first commit — none describing a defect — and the gate becomes a
+red wall the operator learns to skim past, which is strictly worse than no
+gate. ``stapel_tools.lint_profile`` is the switch: a project-root
+``stapel-lint.toml`` declaring, per surface, ``stapel`` (the arsenal, the
+default), ``native`` (the project's OWN ruff/eslint IS the gate) or ``off``
+(with a mandatory written reason). Absent file ⇒ every surface is ``stapel``,
+so a generated project is unaffected.
+
+A ``native`` command is a **shell command out of the repo under inspection**,
+so it does not run unless the caller asks for it: ``--run-native`` (Studio's
+sandbox passes it; it already runs the project's own ``make controls`` there).
+Without the flag the surface is reported as declared-but-not-run, never
+silently green-by-omission.
+
 Usage
 -----
-    stapel-verify <project_root> [--workspace ROOT ...] [--base-sha SHA] [--json]
+    stapel-verify <project_root> [--workspace ROOT ...] [--base-sha SHA]
+                  [--run-native] [--json]
 
 ``--workspace`` and ``--base-sha`` are forwarded to the sub-linters that
 accept them (adoption-lint and surface-lint, migration-lint respectively);
 the other linters ignore what does not apply to them.
 
 Exit codes: 0 all clean (warnings allowed), 1 any linter reported at least one
-error, 2 usage/environment error (bad project_root).
+error (or a native gate came back non-zero), 2 usage/environment error (bad
+project_root, unreadable profile).
 """
 from __future__ import annotations
 
 import argparse
 import dataclasses
 import json
+import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 from . import (
     adoption_lint,
@@ -117,12 +138,20 @@ from . import (
     frontend_delivery_lint,
     index_lint,
     lint,
+    lint_profile,
     migration_lint,
     nginx_cache_lint,
     po_lint,
     surface_lint,
     swap_lint,
     url_lint,
+)
+from .lint_profile import (
+    MODE_NATIVE,
+    MODE_OFF,
+    MODE_STAPEL,
+    LintProfile,
+    LintProfileError,
 )
 
 
@@ -133,6 +162,16 @@ class LinterReport:
     warnings: int
     findings: list[dict]
     notes: list[str] = dataclasses.field(default_factory=list)
+    #: which profile surface this report belongs to ("" for the whole-project
+    #: profile note line itself)
+    surface: str = ""
+    #: the surface's profile mode — "stapel" | "native" | "off"
+    mode: str = MODE_STAPEL
+    #: True when the linter did not run at all (surface off, or replaced by a
+    #: native gate, or a native gate declared with --run-native withheld).
+    #: A skipped report never carries findings and never fails the run — but
+    #: it is always PRINTED, so "not checked" is visible next to "checked".
+    skipped: bool = False
 
 
 def _to_dicts(items) -> list[dict]:
@@ -250,32 +289,211 @@ def run_frontend_delivery_lint(project: Path) -> LinterReport:
     )
 
 
+# ---------------------------------------------------------------------------
+# the native gate — the project's OWN linter, when the profile says so
+# ---------------------------------------------------------------------------
+
+#: (command, cwd) -> (returncode, combined output). Injectable so the suite
+#: proves the wiring without shelling out, and so an embedder (Studio) can
+#: route the call through its own sandbox instead of this process.
+NativeRunner = Callable[[str, Path], "tuple[int, str]"]
+
+#: The composition order, names only — the introspectable handle a linter's
+#: own "am I actually wired into the gate?" test asserts against. Bytecode
+#: introspection used to serve that purpose and broke the moment the calls
+#: moved behind the profile switch; a declared tuple cannot drift silently,
+#: because ``verify_project`` compares its own list against it.
+COMPOSED_LINTERS: tuple[str, ...] = (
+    "stapel-lint",
+    "stapel-adoption-lint",
+    "stapel-url-lint",
+    "stapel-config-lint",
+    "stapel-migration-lint",
+    "stapel-swap-lint",
+    "stapel-doc-lint",
+    "stapel-surface-lint",
+    "stapel-index-lint",
+    "stapel-nginx-cache-lint",
+    "stapel-env-address-lint",
+    "stapel-frontend-delivery-lint",
+    "stapel-po-lint",
+    "stapel-exposure-lint",
+)
+
+
+def _subprocess_runner(command: str, cwd: Path) -> "tuple[int, str]":
+    proc = subprocess.run(
+        command, shell=True, cwd=str(cwd), capture_output=True, text=True,
+    )
+    return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
+
+
+def run_native_gate(
+    surface: lint_profile.SurfaceProfile, project: Path, runner: NativeRunner,
+) -> LinterReport:
+    """Run the project's own linter for one surface and turn its exit code
+    into the same verdict shape every other report carries.
+
+    One error, not a parsed finding list: the whole point of a native gate is
+    that stapel does not know that tool's output format. The command's exit
+    code is the verdict and its tail is the evidence — which is exactly what
+    the coder loop needs, since it already reads ``make controls`` tails the
+    same way.
+    """
+    code, output = runner(surface.command, project)
+    tail = output.strip()[-4000:]
+    notes = [f"native gate: {surface.command}"]
+    if code == 0:
+        notes.append("exit 0")
+    return LinterReport(
+        name=f"native:{surface.surface}",
+        errors=0 if code == 0 else 1,
+        warnings=0,
+        findings=[] if code == 0 else [{
+            "path": surface.command, "line": 0, "rule": "NATIVE",
+            "message": tail or f"exited {code} with no output",
+            "level": "error",
+        }],
+        notes=notes,
+        surface=surface.surface,
+        mode=MODE_NATIVE,
+    )
+
+
+def _skipped(name: str, surface: lint_profile.SurfaceProfile, note: str) -> LinterReport:
+    return LinterReport(
+        name=name, errors=0, warnings=0, findings=[], notes=[note],
+        surface=surface.surface, mode=surface.mode, skipped=True,
+    )
+
+
+def _apply_waivers(report: LinterReport, waivers: dict[str, str]) -> LinterReport:
+    """Drop findings whose rule id is waived, and say so in the notes.
+
+    Same canon as ``STAPEL_SECURITY_CHECK_WAIVERS``: per-id, with a written
+    reason, echoed on every run. A waiver that matched nothing is reported by
+    :func:`profile_notes` instead, so the dict cannot rot into a blanket list.
+    """
+    if not waivers:
+        return report
+    kept, dropped = [], []
+    for f in report.findings:
+        if f.get("rule") in waivers:
+            dropped.append(f["rule"])
+        else:
+            kept.append(f)
+    if not dropped:
+        return report
+    report.findings = kept
+    report.errors = sum(1 for f in kept if f["level"] == "error")
+    report.warnings = len(kept) - report.errors
+    for rule in sorted(set(dropped)):
+        n = sum(1 for r in dropped if r == rule)
+        report.notes.append(f"waived {rule} x{n}: {waivers[rule]}")
+    return report
+
+
 def verify_project(
     project: Path,
     *,
     workspace: Optional[list[Path]] = None,
     base_sha: Optional[str] = None,
+    profile: Optional[LintProfile] = None,
+    run_native: bool = False,
+    native_runner: Optional[NativeRunner] = None,
 ) -> list[LinterReport]:
-    """Run every stapel linter against ``project``. Returns one
-    :class:`LinterReport` per linter, in a fixed order."""
+    """Run the stapel lint arsenal against ``project``, filtered by its
+    per-project profile. Returns one :class:`LinterReport` per linter, in a
+    fixed order, plus one per ``native`` surface.
+
+    ``profile`` defaults to ``lint_profile.load_profile(project)`` — the
+    project's own ``stapel-lint.toml``, or the full arsenal when it has none.
+    """
     project = project.resolve()
     search_roots = [project.parent] + list(workspace or [])
-    return [
-        run_lint(project),
-        run_adoption_lint(project, search_roots),
-        run_url_lint(project),
-        run_config_lint(project),
-        run_migration_lint(project, base_sha),
-        run_swap_lint(project),
-        run_doc_lint(project),
-        run_surface_lint(project, search_roots),
-        run_index_lint(project),
-        run_nginx_cache_lint(project),
-        run_env_address_lint(project),
-        run_frontend_delivery_lint(project),
-        run_po_lint(project),
-        run_exposure_lint(project),
+    prof = profile if profile is not None else lint_profile.load_profile(project)
+
+    # name -> zero-arg call. Order is the fixed composition order; the profile
+    # only ever replaces an entry with a skipped report, never reorders.
+    composed: list[tuple[str, Callable[[], LinterReport]]] = [
+        ("stapel-lint", lambda: run_lint(project)),
+        ("stapel-adoption-lint", lambda: run_adoption_lint(project, search_roots)),
+        ("stapel-url-lint", lambda: run_url_lint(project)),
+        ("stapel-config-lint", lambda: run_config_lint(project)),
+        ("stapel-migration-lint", lambda: run_migration_lint(project, base_sha)),
+        ("stapel-swap-lint", lambda: run_swap_lint(project)),
+        ("stapel-doc-lint", lambda: run_doc_lint(project)),
+        ("stapel-surface-lint", lambda: run_surface_lint(project, search_roots)),
+        ("stapel-index-lint", lambda: run_index_lint(project)),
+        ("stapel-nginx-cache-lint", lambda: run_nginx_cache_lint(project)),
+        ("stapel-env-address-lint", lambda: run_env_address_lint(project)),
+        ("stapel-frontend-delivery-lint", lambda: run_frontend_delivery_lint(project)),
+        ("stapel-po-lint", lambda: run_po_lint(project)),
+        ("stapel-exposure-lint", lambda: run_exposure_lint(project)),
     ]
+    if [n for n, _ in composed] != list(COMPOSED_LINTERS):  # pragma: no cover
+        raise LintProfileError(
+            "verify_project's composition drifted from COMPOSED_LINTERS — the "
+            "declared order is what every consumer introspects"
+        )
+    # A linter missing from LINTER_SURFACES would escape every profile
+    # silently — the one failure mode a switch like this must not have.
+    missing = [n for n, _ in composed if n not in lint_profile.LINTER_SURFACES]
+    if missing:  # pragma: no cover - guarded by test_lint_profile
+        raise LintProfileError(
+            f"linter(s) {', '.join(missing)} are composed by stapel-verify but "
+            f"carry no surface in lint_profile.LINTER_SURFACES"
+        )
+
+    reports: list[LinterReport] = []
+    for name, call in composed:
+        surface = prof.for_linter(name)
+        if surface.mode == MODE_OFF:
+            reports.append(_skipped(
+                name, surface,
+                f"skipped: surface '{surface.surface}' is off — {surface.reason}",
+            ))
+            continue
+        if surface.mode == MODE_NATIVE:
+            reports.append(_skipped(
+                name, surface,
+                f"skipped: surface '{surface.surface}' is gated by the "
+                f"project's own linter ({surface.command})",
+            ))
+            continue
+        report = call()
+        report.surface = surface.surface
+        report.mode = MODE_STAPEL
+        reports.append(_apply_waivers(report, prof.waivers))
+
+    runner = native_runner or _subprocess_runner
+    for surface in prof.native_surfaces():
+        if run_native:
+            reports.append(run_native_gate(surface, project, runner))
+        else:
+            reports.append(_skipped(
+                f"native:{surface.surface}", surface,
+                f"declared but NOT RUN (pass --run-native): {surface.command}",
+            ))
+    return reports
+
+
+def profile_notes(profile: LintProfile, reports: list[LinterReport]) -> list[str]:
+    """Header lines describing what this run did *not* check, and why.
+
+    Printed above the table and carried in the JSON, because the one thing a
+    profile must never do is make a surface disappear from the report.
+    """
+    if not profile.present:
+        return []
+    lines = [f"lint profile: {profile.path}"] + [f"  {s}" for s in profile.summary()]
+    fired = {
+        n.split(" x")[0].removeprefix("waived ")
+        for r in reports for n in r.notes if n.startswith("waived ")
+    }
+    for rule in sorted(set(profile.waivers) - fired):
+        lines.append(f"  waiver {rule} matched nothing this run")
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -283,13 +501,22 @@ def verify_project(
 # ---------------------------------------------------------------------------
 
 
-def _print_table(reports: list[LinterReport], project: Path) -> None:
+def _print_table(
+    reports: list[LinterReport], project: Path, notes: Optional[list[str]] = None,
+) -> None:
     name_w = max(len(r.name) for r in reports)
     print(f"stapel-verify: {project}\n")
+    for line in notes or []:
+        print(line)
+    if notes:
+        print()
     header = f"{'linter':<{name_w}}  errors  warnings"
     print(header)
     print("-" * len(header))
     for r in reports:
+        if r.skipped:
+            print(f"{r.name:<{name_w}}  {'—':>6}  {'—':>8}  ({r.mode})")
+            continue
         print(f"{r.name:<{name_w}}  {r.errors:>6}  {r.warnings:>8}")
 
     for r in reports:
@@ -306,7 +533,11 @@ def _print_table(reports: list[LinterReport], project: Path) -> None:
 
     total_errors = sum(r.errors for r in reports)
     total_warnings = sum(r.warnings for r in reports)
+    skipped = sum(1 for r in reports if r.skipped)
     print()
+    if skipped:
+        print(f"{skipped} of {len(reports)} linters did not run "
+              f"(see the lint profile above).")
     if total_errors or total_warnings:
         parts = []
         if total_errors:
@@ -345,6 +576,14 @@ def main(argv: Optional[list] = None) -> int:
              "stapel-migration-lint's MIG002 base-sha check.",
     )
     parser.add_argument(
+        "--run-native", action="store_true",
+        help="Execute the native gate command(s) a stapel-lint.toml profile "
+             "declares. Off by default: a native command is a shell command "
+             "out of the tree under inspection, so running it is the "
+             "caller's decision (Studio's sandbox passes this; a bare local "
+             "run of an untrusted checkout should not).",
+    )
+    parser.add_argument(
         "--json", action="store_true",
         help="Machine output: per-linter errors/warnings/findings (for agents/CI).",
     )
@@ -355,8 +594,18 @@ def main(argv: Optional[list] = None) -> int:
         print(f"Error: not a directory: {project}", file=sys.stderr)
         return 2
 
+    try:
+        profile = lint_profile.load_profile(project)
+    except LintProfileError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
     workspace = [Path(w).resolve() for w in args.workspace]
-    reports = verify_project(project, workspace=workspace, base_sha=args.base_sha)
+    reports = verify_project(
+        project, workspace=workspace, base_sha=args.base_sha,
+        profile=profile, run_native=args.run_native,
+    )
+    notes = profile_notes(profile, reports)
 
     total_errors = sum(r.errors for r in reports)
     total_warnings = sum(r.warnings for r in reports)
@@ -367,12 +616,22 @@ def main(argv: Optional[list] = None) -> int:
                 "ok": total_errors == 0,
                 "errors": total_errors,
                 "warnings": total_warnings,
+                "profile": {
+                    "path": profile.path,
+                    "present": profile.present,
+                    "surfaces": {
+                        s: dataclasses.asdict(profile.for_surface(s))
+                        for s in lint_profile.SURFACES
+                    },
+                    "waivers": profile.waivers,
+                    "notes": notes,
+                },
                 "linters": [dataclasses.asdict(r) for r in reports],
             },
             indent=2, sort_keys=True, ensure_ascii=False,
         ))
     else:
-        _print_table(reports, project.resolve())
+        _print_table(reports, project.resolve(), notes)
 
     return 1 if total_errors else 0
 
