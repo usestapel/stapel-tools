@@ -166,19 +166,19 @@ def fleet_docker():
             ["c1", "studio-sandbox-abc123def456", ""],           # pattern
             ["c2", "studio-quiet-otter-4417", EPH],              # label
             ["c3", "stapel-studio-local-web-1", "com.docker.compose.project=x"],  # durable
-            ["c4", "ironmemo-backend-kafka-1", ""],              # durable
+            ["c4", "legacy-app-kafka-1", ""],              # durable
         ],
         volumes=[
             ["studio-vol-e2e-2f3f7a8c", ""],                     # pattern
             ["studio-vol-quiet-otter-4417", EPH],                # label
-            ["studio-vol-client", ""],                            # DURABLE project repo
+            ["studio-vol-atlas", ""],                            # DURABLE project repo
             ["stapel-studio-local_project-repos", ""],           # DURABLE
             ["stapel-studio-local_db-data", ""],                 # DURABLE
-            ["ironmemo-backend_postgres_data", ""],              # DURABLE
+            ["legacy-app_postgres_data", ""],              # DURABLE
         ],
         networks=[
             ["n1", "studio-net-e2e-2f3f7a8c", ""],               # pattern
-            ["n2", "studio-net-client", ""],                      # durable
+            ["n2", "studio-net-atlas", ""],                      # durable
             ["n3", "bridge", ""],
         ],
         images=[
@@ -212,9 +212,9 @@ class TestReaper:
     def test_durable_resources_are_untouched(self):
         dock = fleet_docker()
         dg.reap(dock)
-        for durable in ("studio-vol-client", "stapel-studio-local_project-repos",
-                        "stapel-studio-local_db-data", "ironmemo-backend_postgres_data",
-                        "studio-net-client", "bridge", "stapel-studio:local"):
+        for durable in ("studio-vol-atlas", "stapel-studio-local_project-repos",
+                        "stapel-studio-local_db-data", "legacy-app_postgres_data",
+                        "studio-net-atlas", "bridge", "stapel-studio:local"):
             assert durable not in dock.removed
         # …and they were inspected, not merely missed: 2 containers + 4 volumes
         # + 2 networks + 1 image were looked at and deliberately left alone.
