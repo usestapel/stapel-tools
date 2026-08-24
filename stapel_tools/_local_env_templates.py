@@ -87,6 +87,24 @@ STAPEL_AUTH = {
 }
 """
 
+# Dev-only escape hatch for stapel-billing (E104): a generated project that
+# selects billing with no Stripe key would fail `manage.py check`/migrate
+# outright — E104 is the deliberate prod guard (an unconfigured payment
+# provider must never boot silently), but it is enforced regardless of
+# environment, so a fresh dev checkout hits it too. Spliced in only when
+# billing is selected AND no STRIPE_SECRET_KEY was supplied at generation
+# time (create_project._create_monolith). Never written into .env.example —
+# that split (dev opens the hatch, prod does not) IS the guard.
+DEV_BILLING_UNCONFIGURED_BLOCK = """
+# ─── Dev-only: stapel-billing selected, no Stripe key configured ───────────
+# Without this, `manage.py check`/migrate cannot boot at all — stapel_billing
+# E104 refuses an unconfigured payment provider outright (the real prod
+# guard). This makes billing answer checkout/portal/cancel with dev
+# placeholders instead (W104). Fine here; must NEVER leave a developer
+# machine — the prod env (.env.example / .env) carries no such flag.
+ALLOW_UNCONFIGURED_PAYMENT_PROVIDER=1
+"""
+
 # ── .env.local — standalone preset (default) ─────────────────────────────────
 ENV_LOCAL_STANDALONE = ENV_LOCAL_BANNER + """\
 #

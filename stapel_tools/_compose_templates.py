@@ -931,6 +931,23 @@ OAUTH_CALLBACK_BASE_URL={url}
 RUN_CMD=gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
 """
 
+# Appended to .env.example (never .env.local) when stapel-billing is among
+# the selected libs: a commented placeholder, not a value — .env.example is
+# committed, so a real secret must never land in it regardless of whether one
+# was supplied at generation time. Left unset, stapel_billing.E104 refuses to
+# boot at prod deploy until the owner fills this in — that refusal is the
+# deliberate guard (an unconfigured payment provider must never come up
+# silently answering checkout/portal/cancel with fabricated placeholders).
+# The dev-only hatch (ALLOW_UNCONFIGURED_PAYMENT_PROVIDER) lives in
+# .env.local ONLY (_local_env_templates.DEV_BILLING_UNCONFIGURED_BLOCK) —
+# never here. That split IS the guard.
+PROD_BILLING_COMMENT_BLOCK = """
+# ─── Billing (stapel-billing) ───────────────────────────────────────────────
+# Stripe secret key for the default payment provider. Missing here makes
+# stapel_billing.E104 refuse to boot until it is set.
+# STRIPE_SECRET_KEY=
+"""
+
 # Project-root Makefile (studio controls contract, R3/§44 follow-up): the
 # generated backend lives in {{DIR_NAME}}/, not at the root, so the root
 # targets delegate into {{DIR_NAME}}/Makefile (SVC_MAKEFILE in _templates.py)

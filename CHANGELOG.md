@@ -2,6 +2,46 @@
 
 ## [Unreleased]
 
+## [0.49.0] — 2026-08-24
+
+### A generated project can select stapel-billing and still boot in dev
+
+`stapel_billing.E104` is a deliberate prod guard: an unconfigured payment
+provider must never boot silently and answer checkout/portal/cancel with
+fabricated placeholders. The library was never the defect. The scaffold was:
+a generated project that selected billing with no Stripe key could not even
+run `manage.py check`/migrate locally, because E104 fires regardless of
+environment — there was no dev/prod split for it to hide behind.
+
+The fix lives entirely in env emission, not in stapel-billing. When billing
+is selected with no `STRIPE_SECRET_KEY` supplied at generation time, the
+generated DEV env opens stapel-billing's own escape hatch —
+`ALLOW_UNCONFIGURED_PAYMENT_PROVIDER=1`, with a comment explaining it answers
+with dev placeholders (W104) and must never leave a developer machine:
+`.env.local` for monolith, `.env`/`.env.example` for minimal (one env file,
+not a pair — the same file every other dev-only default here, SECRET_KEY and
+DEBUG included, already relies on the operator to harden before
+`DJANGO_ENV=prod`). The monolith/microservices PROD template
+(`.env.example`) never carries that flag; it gets a commented
+`# STRIPE_SECRET_KEY=` placeholder instead, so E104 still fires at prod boot
+until the owner configures real keys. That split IS the prod guard.
+
+### STAPEL_LIBS completeness: stapel-docs, stapel-forms, stapel-moderation
+
+All three shipped with a full MODULE.md/CONFIG.MD/urls.py surface and a PyPI
+release but were never added to the registry `create_project`/
+`assemble_scaffold` read from — a selection naming any of them silently fell
+through `assemble_scaffold`'s "unknown lib" path instead of generating a
+working project. Onboarded following the second-wave shape: each mounts bare
+at its own `/<mod>/` prefix (v1 canon already baked into each library's own
+root URLconf), `forms` carries the same hard `attributes` dependency its
+pyproject.toml already declares (a form's schema IS a list of
+stapel-attributes FeatureDefs), `docs`/`moderation` depend on stapel-core
+only. Their GDPR participation (`docs` on the erasure-request protocol,
+`forms`/`moderation` on the in-process `GDPRProvider`) needed no registry
+changes at all — `stapel_tools/_gdpr_owners.py` reads it straight from each
+library's own source, by design (0.48.0).
+
 ## [0.48.0] — 2026-08-24
 
 ### The gdpr data-owner inventory is derived from the selection, not asked for

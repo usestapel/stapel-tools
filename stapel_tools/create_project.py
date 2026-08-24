@@ -223,6 +223,30 @@ STAPEL_LIBS = {
         "url_prefix": "currencies/",
         "requires": [],
     },
+    "docs": {
+        "repo": "https://github.com/usestapel/stapel-docs.git",
+        "dir": "stapel_docs",
+        "required": False,
+        "description": "Workspace documents (folders, revisions, snapshot/CRDT collab)",
+        "default": False,
+        "pin": "0.3.0",
+        "ahead_of_pypi": False,  # matches PyPI 0.3.0 @ 2026-08-24
+        "http": True,
+        "url_prefix": "docs/",
+        "requires": [],
+    },
+    "forms": {
+        "repo": "https://github.com/usestapel/stapel-forms.git",
+        "dir": "stapel_forms",
+        "required": False,
+        "description": "Admin-defined forms (schemas, anonymous submissions, response review)",
+        "default": False,
+        "pin": "0.2.0",
+        "ahead_of_pypi": False,  # matches PyPI 0.2.0 @ 2026-08-24
+        "http": True,
+        "url_prefix": "forms/",
+        "requires": ["attributes"],  # pyproject dependency, hard
+    },
     "geo": {
         "repo": "https://github.com/usestapel/stapel-geo.git",
         "dir": "stapel_geo",
@@ -263,6 +287,18 @@ STAPEL_LIBS = {
         "ahead_of_pypi": False,  # matches PyPI 0.1.2 @ 2026-07-11
         "http": True,
         "url_prefix": "mailtrap/",
+        "requires": [],
+    },
+    "moderation": {
+        "repo": "https://github.com/usestapel/stapel-moderation.git",
+        "dir": "stapel_moderation",
+        "required": False,
+        "description": "Cross-target moderation (reports, verdicts, sanctions, appeals)",
+        "default": False,
+        "pin": "0.1.0",
+        "ahead_of_pypi": False,  # matches PyPI 0.1.0 @ 2026-08-24
+        "http": True,
+        "url_prefix": "moderation/",
         "requires": [],
     },
     "recordings": {
@@ -1155,6 +1191,7 @@ ENV_PRESETS = ("standalone", "studio")
 def _write_env_local(
     project_dir: Path, ctx: dict, broker: str, task_broker: str,
     backend_upstream: str, env_preset: str = "standalone",
+    billing_unconfigured: bool = False,
 ):
     """``.env.local`` — the COMMITTED dev environment (§57 item 7, revised by
     owner decision: a gitignored .env.local never reaches the next clone).
@@ -1164,9 +1201,15 @@ def _write_env_local(
     DB password (refused by guard_db_password), ``admin`` superuser, and
     the ``STAPEL_LOCAL_ENV=1`` flag the generated ``deploy/check-env.sh``
     gate keys on. ``env_preset`` picks standalone (default) vs studio
-    (email/oauth STUBS only — see _local_env_templates.py's docstring)."""
+    (email/oauth STUBS only — see _local_env_templates.py's docstring).
+
+    ``billing_unconfigured`` — True when stapel-billing is selected and no
+    Stripe secret was supplied at generation time: splices in
+    ``DEV_BILLING_UNCONFIGURED_BLOCK`` (see _local_env_templates.py) so a
+    fresh dev checkout can boot at all despite stapel_billing.E104. Never
+    True for the prod template (.env.example) — that split is the guard."""
     from ._compose_templates import _broker_env
-    from ._local_env_templates import ENV_LOCAL_PRESETS
+    from ._local_env_templates import DEV_BILLING_UNCONFIGURED_BLOCK, ENV_LOCAL_PRESETS
 
     if env_preset not in ENV_PRESETS:
         print(
@@ -1190,6 +1233,8 @@ def _write_env_local(
         company_email=ctx["company_email"],
         broker_env=_broker_env(broker, task_broker),
     )
+    if billing_unconfigured:
+        text += DEV_BILLING_UNCONFIGURED_BLOCK
     _write(project_dir / ".env.local", text)
 
 
@@ -1600,6 +1645,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         MONOLITH_GITIGNORE,
         MONOLITH_MAKEFILE,
         NGINX_LOCAL_CONF_TEMPLATE,
+        PROD_BILLING_COMMENT_BLOCK,
         Frontend,
         nginx_local_backend_locations,
         render_compose_base,
@@ -1612,6 +1658,15 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     slug = ctx["slug"]
     dir_name = ctx["service_dir_name"]  # "svc-<slug>" — the backend's own dir
     backend_upstream_default = f"{dir_name}:8000"
+    # stapel-billing selected with no Stripe secret supplied at generation
+    # time (see stapel_tools/_local_env_templates.DEV_BILLING_UNCONFIGURED_
+    # BLOCK / _compose_templates.PROD_BILLING_COMMENT_BLOCK docstrings): the
+    # dev env opens stapel_billing's E104 hatch, the prod template never
+    # does — that split is the guard.
+    billing_selected = "billing" in (feature_libs or [])
+    billing_unconfigured = billing_selected and not (
+        (module_config or {}).get("billing", {}).get("STRIPE_SECRET_KEY")
+    )
     # Reserved backend prefixes — generated from the actual lib selection
     # (owner directive), rendered into local-nginx, prod-nginx AND the Vite
     # proxy from the same list so they can never drift apart. Also written
@@ -1648,8 +1703,14 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
             {**compose_ctx, "DB_NAME": f"stapel_{slug.replace('-', '_')}"},
         ),
     )
-    _write(project_dir / ".env.example", render_env(MONOLITH_ENV_TEMPLATE, broker, ctx, task_broker))
-    _write_env_local(project_dir, ctx, broker, task_broker, backend_upstream_default, env_preset)
+    env_example_text = render_env(MONOLITH_ENV_TEMPLATE, broker, ctx, task_broker)
+    if billing_selected:
+        env_example_text += PROD_BILLING_COMMENT_BLOCK
+    _write(project_dir / ".env.example", env_example_text)
+    _write_env_local(
+        project_dir, ctx, broker, task_broker, backend_upstream_default, env_preset,
+        billing_unconfigured=billing_unconfigured,
+    )
     _write(project_dir / ".gitignore", MONOLITH_GITIGNORE)
     _write(project_dir / "services.conf", f"{slug}\n")
     # Root controls surface (R3/§44 follow-up — studio controls contract runs
@@ -1785,6 +1846,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
 
 def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None, module_config: dict | None = None):
     from ._minimal_templates import (
+        MINIMAL_BILLING_UNCONFIGURED_BLOCK,
         MINIMAL_BOOT_SMOKE_SETTINGS,
         MINIMAL_CONFTEST,
         MINIMAL_ENV_EXAMPLE,
@@ -1877,7 +1939,19 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     # _write_env_from_ctx() call in create_project() turns it into a real
     # .env with a freshly generated secret (SEC-6), same as monolith/
     # microservices.
-    _write(project_dir / ".env.example", r(MINIMAL_ENV_EXAMPLE))
+    # stapel-billing selected with no Stripe secret supplied at generation
+    # time: open the dev-only E104 hatch so `manage.py check`/migrate can
+    # even boot (see MINIMAL_BILLING_UNCONFIGURED_BLOCK's own docstring —
+    # this preset has one env file, so removing the flag before
+    # DJANGO_ENV=prod is on the operator, same as SECRET_KEY/DEBUG already
+    # are here).
+    billing_unconfigured = "billing" in feature_modules and not (
+        (module_config or {}).get("billing", {}).get("STRIPE_SECRET_KEY")
+    )
+    env_example_text = r(MINIMAL_ENV_EXAMPLE)
+    if billing_unconfigured:
+        env_example_text += MINIMAL_BILLING_UNCONFIGURED_BLOCK
+    _write(project_dir / ".env.example", env_example_text)
     from ._templates import CELERY_APP_PY, CONFIG_INIT_PY
     _write(project_dir / "config" / "__init__.py", CONFIG_INIT_PY)
     # DJANGO_SETTINGS_MODULE default differs from the service tier layout.

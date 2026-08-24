@@ -340,6 +340,23 @@ ALLOWED_HOSTS=*
 FRONTEND_URL={{url}}
 """
 
+# Appended to MINIMAL_ENV_EXAMPLE (create_project._create_minimal) only when
+# stapel-billing is selected with no STRIPE_SECRET_KEY supplied at generation
+# time. This preset has one env file, not a dev/prod pair (DJANGO_ENV is a
+# runtime branch in config/settings.py, not a second template) — so the
+# guard is the same one every other dev-only default here already relies on
+# (SECRET_KEY, DEBUG, ALLOWED_HOSTS): remove it deliberately before
+# DJANGO_ENV=prod, or stapel_billing.E104 does it for you at boot.
+MINIMAL_BILLING_UNCONFIGURED_BLOCK = """
+# ─── Dev-only: stapel-billing selected, no Stripe key configured ───────────
+# Without this, `manage.py check`/migrate cannot boot at all — stapel_billing
+# E104 refuses an unconfigured payment provider outright (the real prod
+# guard). This makes billing answer checkout/portal/cancel with dev
+# placeholders instead (W104). Remove this line (and set STRIPE_SECRET_KEY)
+# before DJANGO_ENV=prod — E104 will otherwise stop you at boot anyway.
+ALLOW_UNCONFIGURED_PAYMENT_PROVIDER=1
+"""
+
 MINIMAL_README = """\
 # {{title}}
 
