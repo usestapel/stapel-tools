@@ -534,6 +534,7 @@ def _print_table(
     total_errors = sum(r.errors for r in reports)
     total_warnings = sum(r.warnings for r in reports)
     skipped = sum(1 for r in reports if r.skipped)
+    ran = len(reports) - skipped
     print()
     if skipped:
         print(f"{skipped} of {len(reports)} linters did not run "
@@ -544,9 +545,14 @@ def _print_table(
             parts.append(f"{total_errors} error{'s' if total_errors != 1 else ''}")
         if total_warnings:
             parts.append(f"{total_warnings} warning{'s' if total_warnings != 1 else ''}")
-        print(f"{', '.join(parts)} found across {len(reports)} linters.")
+        print(f"{', '.join(parts)} found across {ran} linter{'s' if ran != 1 else ''}"
+              f"{' that ran' if skipped else ''}.")
     else:
-        print(f"All clean across {len(reports)} linters.")
+        # "All clean across 15 linters" when 9 of them never ran is the exact
+        # false reassurance the profile mechanism exists to prevent — count
+        # what actually ran.
+        print(f"All clean across {ran} linter{'s' if ran != 1 else ''}"
+              f"{' that ran' if skipped else ''}.")
 
 
 # ---------------------------------------------------------------------------

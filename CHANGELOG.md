@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+## [0.50.2] — 2026-08-24
+
+`stapel-verify`'s closing line counted linters that never ran: "All clean
+across 15 linters" printed directly under "9 of 15 linters did not run" is the
+exact false reassurance the per-project lint profile (0.50.0) exists to
+prevent — a legacy project with most surfaces on `native`/`off` would end its
+gate on a sentence claiming coverage it did not have. The line now counts what
+actually ran and says so: "All clean across 6 linters that ran".
+
 ## [0.50.1] — 2026-08-24
 
 ### SUR002 asks about the displaced symbol, not about one replacement's name
