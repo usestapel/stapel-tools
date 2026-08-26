@@ -455,6 +455,10 @@ def file_plan(ctx: dict, *, skin: bool | None = None) -> dict:
         "tsconfig.json": render(T.TSCONFIG, ctx),
         "tsconfig.demo.json": T.TSCONFIG_DEMO,
         "vitest.config.ts": T.VITEST_CONFIG,
+        # One place for the jsdom gaps antd 6 falls into (matchMedia,
+        # ResizeObserver, the pseudo-element getComputedStyle form) plus the
+        # testing-library `waitFor` budget that pairs with the vitest ones.
+        "test/vitest.setup.ts": T.VITEST_SETUP_TS,
         "README.md": render(T.README_MD, ctx),
         "MODULE.md": render(T.MODULE_MD, ctx),
         "CHANGELOG.md": render(T.CHANGELOG_MD, ctx),
@@ -804,6 +808,10 @@ def scaffold_react_lib(
         f"# flows + errors + events + demos + manifest/llms.txt (all pairs)\n"
         f"  pnpm --filter {ctx['PKG_NAME']} build\n"
         f"  pnpm --filter {ctx['PKG_NAME']} lint test size\n"
+        # `test` deliberately excludes the pack purity test (npm pack --dry-run
+        # is tens of seconds cold and times the package out inside a parallel
+        # turbo graph); it runs on its own task instead.
+        f"  pnpm --filter {ctx['PKG_NAME']} test:pack\n"
         f"  pnpm lint:css                               # shared stylelint preset\n"
         f"  # then: alias {backend} schemas in api/types.ts, add model hooks,\n"
         f"  # and scaffold flow machines once {backend} annotates @flow_step.\n"

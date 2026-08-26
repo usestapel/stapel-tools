@@ -25,6 +25,7 @@ REQUIRED = [
     "tsconfig.json",
     "tsconfig.demo.json",
     "vitest.config.ts",
+    "test/vitest.setup.ts",
     "README.md",
     "MODULE.md",
     "CHANGELOG.md",
@@ -122,10 +123,49 @@ class TestFilePlan:
         _, plan = self._plan()
         pkg = json.loads(plan["package.json"])
         scripts = pkg["scripts"]
-        assert set(scripts) == {"build", "test", "lint", "size"}
+        assert set(scripts) == {"build", "test", "lint", "size", "test:pack"}
         assert not any(k.startswith("gen") for k in scripts)
         # the test task type-checks demos then runs vitest (§4.2)
-        assert scripts["test"] == "tsc -p tsconfig.demo.json && vitest run"
+        assert scripts["test"] == (
+            "tsc -p tsconfig.demo.json && vitest run --exclude test/prodBundlePurity.test.ts"
+        )
+
+    def test_pack_test_is_its_own_task(self):
+        """`prodBundlePurity.test.ts` shells out to `npm pack --dry-run` — tens of
+        seconds cold. Left inside `vitest run` it times the package out on the CI
+        runner's parallel turbo graph, so the fleet convention (tasks-react) keeps
+        it OUT of the default `test` task and runs it under `test:pack`."""
+        _, plan = self._plan()
+        scripts = json.loads(plan["package.json"])["scripts"]
+        assert "--exclude test/prodBundlePurity.test.ts" in scripts["test"]
+        assert scripts["test:pack"] == "vitest run test/prodBundlePurity.test.ts"
+
+    def test_vitest_budgets_survive_a_loaded_ci_runner(self):
+        """vitest's 5s default and testing-library's 1s `asyncUtilTimeout` both
+        flake when the whole monorepo renders in parallel; the two budgets are
+        raised together, in the two files that each own one."""
+        _, plan = self._plan()
+        cfg = plan["vitest.config.ts"]
+        assert "testTimeout: 30_000," in cfg
+        assert "hookTimeout: 30_000," in cfg
+        assert 'setupFiles: ["./test/vitest.setup.ts"],' in cfg
+        assert "configure({ asyncUtilTimeout: 10_000 });" in plan["test/vitest.setup.ts"]
+
+    def test_setup_closes_the_jsdom_gaps_antd_falls_into(self):
+        """jsdom ships no matchMedia and no ResizeObserver, and throws on the
+        pseudo-element `getComputedStyle` form antd 6's scroll locker calls on
+        every dialog mount. Plus `cleanup()`: vitest runs without injected
+        globals, so testing-library never registers its own afterEach and every
+        demo `demos.test.tsx` mounts would stay mounted into teardown."""
+        _, plan = self._plan()
+        setup = plan["test/vitest.setup.ts"]
+        assert 'Object.defineProperty(window, "matchMedia"' in setup
+        assert 'typeof globalThis.ResizeObserver === "undefined"' in setup
+        assert "window.getComputedStyle = ((element: Element" in setup
+        assert "afterEach(() => {\n  cleanup();\n});" in setup
+        # the stub answers `(min-width: N)` against a real width, so a test can
+        # replace it to decide layout instead of inheriting a blanket `false`
+        assert "DESKTOP_WIDTH >= Number(min[1])" in setup
 
     def test_package_hygiene(self):
         _, plan = self._plan()

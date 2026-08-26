@@ -2,6 +2,51 @@
 
 ## [Unreleased]
 
+## [0.55.4] — 2026-08-26
+
+### The scaffold hands a pair a test task the CI runner can actually finish
+
+Five pairs came off `stapel-new-react-lib` this week and every one of them
+inherited the same two defects, both in what the scaffold writes about testing.
+
+The first: the generated `package.json` ran `test/prodBundlePurity.test.ts`
+inside the default `vitest run`. That test shells out to `npm pack --dry-run`
+to prove no demo or showcase code reaches the tarball — 7 to 50 seconds cold,
+and on the CI runner's parallel turbo graph that is enough to time the whole
+package out. The proof is worth having; paying for it on every `pnpm test` is
+not. The fleet convention (`packages/tasks-react`) splits it, and the scaffold
+now writes that split:
+
+```json
+"test": "tsc -p tsconfig.demo.json && vitest run --exclude test/prodBundlePurity.test.ts",
+"test:pack": "vitest run test/prodBundlePurity.test.ts"
+```
+
+The second: the generated `vitest.config.ts` carried vitest's 5s default budget
+and the pair shipped no setup file at all. Both bite the moment a demo mounts an
+antd surface. vitest's `testTimeout` bounds the test, but testing-library polls
+its own 1s `asyncUtilTimeout` inside it and throws first — against work that was
+still in flight — and the first mount in a file pays antd's one-time CSS-in-JS
+generation before a single assertion runs. jsdom then supplies neither
+`matchMedia` (antd's responsive observer asks on mount) nor `ResizeObserver`
+(`Select`'s dropdown alignment), and throws "Not implemented" on the
+pseudo-element `getComputedStyle` form that antd 6's scroll locker calls on
+every dialog mount — each throw emitted as a `jsdomError` carrying a full React
+stack, until the suite's real output is unreadable.
+
+A generated pair now gets `testTimeout`/`hookTimeout` at 30s, a
+`test/vitest.setup.ts` copied from the etalon's shape with
+`configure({ asyncUtilTimeout: 10_000 })`, and the three jsdom shims. The
+`matchMedia` stub answers `(min-width: N)` by comparing against a real desktop
+width rather than saying `false` to everything, so a test that cares about the
+phone layout can replace it and decide, instead of inheriting an answer. The
+setup also registers `afterEach(cleanup)`: vitest runs without injected globals,
+so testing-library never registers its own, and every demo `demos.test.tsx`
+mounted would otherwise stay mounted into environment teardown.
+
+Generous, not permissive — a green test still resolves as fast as the state it
+awaits.
+
 ## [0.55.3] — 2026-08-26
 
 ### A generated project promises only the image formats it can decode
