@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 import pytest
+from siblings import requires
 
 from stapel_tools.create_project import STAPEL_LIBS, create_project
 from stapel_tools.new_service import _detect_transports, scaffold_service
@@ -1118,20 +1119,18 @@ class TestMultiLibMonolithMountsEachLibUnderItsOwnPrefix:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "ALL_RESOLVED" in result.stdout
 
+    @requires("stapel_profiles", "stapel_calendar", "stapel_cdn")
     def test_resolves_end_to_end_under_django_full_lib_set(self, tmp_path):
         """Same proof as above, over the exact auth/profiles/calendar/cdn
         set the coordinating task named — including a BARE-mounted lib
         (calendar, whose own urls.py nests "api/v1/" internally) alongside
         "/api/"-mounted ones, so the fix's two mount shapes both get a real
-        resolve(), not just auth+gdpr's one shape. Skipped (not failed) when
-        stapel_profiles/stapel_calendar/stapel_cdn aren't importable in this
-        interpreter — CI's minimal "Tests" job doesn't install them (see the
-        CI-safe auth+gdpr test above, which always runs); this one is the
-        fuller local/dev-environment proof (verified locally against the
-        actual sibling checkouts for this fix)."""
-        pytest.importorskip("stapel_profiles")
-        pytest.importorskip("stapel_calendar")
-        pytest.importorskip("stapel_cdn")
+        resolve(), not just auth+gdpr's one shape.
+
+        The three siblings are declared in the `test` extra, so CI has them
+        and STAPEL_TEST_STRICT_SIBLINGS=1 makes their absence a failure there.
+        On a laptop that ran `pip install -e .` this skips with a named
+        reason — the only environment where a skip is honest."""
         result = self._resolve_check(
             tmp_path, ["auth", "profiles", "calendar", "cdn"],
             [

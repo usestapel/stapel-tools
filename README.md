@@ -497,6 +497,59 @@ cover more than it does is worse than one whose edge is written down:
 Composed into `stapel-verify` (surface `python`), so a project picks the gate
 up on its next stapel-tools upgrade with nothing to regenerate.
 
+### `stapel-sibling-lint` — the suite imports what nothing declares
+
+```bash
+stapel-sibling-lint .                        # lint the repo in .
+stapel-sibling-lint . --json                 # machine output
+stapel-sibling-lint . --strict               # SIB004/SIB005 (warnings) become errors
+```
+
+On 2026-08-24 three releases died of one defect within hours of each other —
+stapel-chat 0.5.0, stapel-core 0.44.0, stapel-notifications 0.17.0. All green
+on a laptop, all red on the runner, all at test *setup* with
+`ModuleNotFoundError`, all re-released the next morning with no product change.
+The mechanism: this fleet develops in ONE virtualenv that has every sibling
+installed, so a test may import `stapel_moderation` while `pyproject.toml`
+never says the suite needs it. Nothing in the repo disagrees — pytest is happy,
+ruff is happy, review is happy, because a reader cannot see an absence. The
+runner, which installs only what is declared, is the first machine to find out.
+
+| rule | level | what it holds |
+|---|---|---|
+| SIB001 | error | a suite file imports a top-level `stapel_*` package that pyproject declares in neither `dependencies` nor the `test` extra. Imports are collected at any depth — function bodies, fixtures, `try` blocks — because that is where the ones that shipped were hiding |
+| SIB002 | error | a suite file names an undeclared `stapel_*` package in an `INSTALLED_APPS` list. There is no `import` token on that line and it imports all the same: `override_settings` fires `setting_changed`, Django reloads the app registry, and every label is loaded for real (stapel-core 0.44.0, verbatim) |
+| SIB003 | error | `pytest.importorskip("stapel_*")` — or the `requires`/`installed` seam from `tests/siblings.py` — naming an undeclared sibling. A skip is not a declaration; it is a decision to run nothing, taken silently, on every machine that lacks the package — which on CI is every machine |
+| SIB004 | warning | a **declared** sibling behind a skip guard (`importorskip`, or `try: import … except ImportError: skip`) in a repo whose workflows never set `STAPEL_TEST_STRICT_SIBLINGS=1`. On CI the extra IS installed, so a skip means the install step did not do what the workflow says, and the run stays green having asserted nothing |
+| SIB005 | warning | the `test` extra declares a `stapel-*` sibling no suite file imports or names (a `requires("stapel_x")` counts — the seam speaks in strings) — the other direction, so the extra cannot rot into a wish list |
+| SIB006 | error | a committed `docs/errors.json` entry whose `owner` is neither this module nor `stapel_core`. The codegen reads the error registry of the interpreter it runs in, so a workspace virtualenv holding every sibling emits keys this package does not own while CI emits fewer: the artifact then describes the machine that generated it, and its drift gate flips depending on who ran it last |
+
+**The `STAPEL_TEST_STRICT_SIBLINGS` contract** (what SIB004 asks for). Every
+stapel library's suite honours one environment variable: **a DECLARED sibling
+that is not installed is a FAILURE, never a skip.** Unset — a laptop, a fork,
+someone who ran `pip install -e .` — a missing sibling skips with a named
+reason. Set (CI, always), it fails, because CI installed `.[test]` two steps
+earlier and a skip there is the install step lying. The seam is three names in
+`tests/siblings.py` (`STRICT`, `installed(module)`, `requires(module, …)`), and
+`stapel-new-library` now scaffolds it along with the `test` extra, the CI step
+that installs it and the flag on the pytest step. The linter never runs your
+suite, so it checks the two things it can see: that the declaration exists, and
+that a skip-guarded suite is not shipped with CI silent about strictness.
+
+Suppress with `# noqa: SIB00N` on the reported line, and write the reason.
+
+**What this rule cannot catch, stated plainly:** it is not a dependency
+resolver. A module maps to a distribution by the fleet's convention
+(`stapel_foo` → `stapel-foo`); a distribution shipping a top-level module under
+another name reads as undeclared. It does not follow transitive dependencies
+either, on purpose — transitivity is not a contract, and "it worked because
+something else pulled it in" is what this class is made of. The one expansion
+it performs is a self-referential extra (`stapel-notifications[realtime]`
+inside notifications' own `test` extra), because that is this file talking
+about this file.
+
+Composed into `stapel-verify` (surface `python`).
+
 ### `stapel-adoption-lint` — honesty gate for stapel-module adoption
 
 ```bash

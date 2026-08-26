@@ -46,6 +46,17 @@ Issues = "https://github.com/usestapel/{{NAME_DASH}}/issues"
 
 [project.optional-dependencies]
 all = []
+# ONE declaration of what the TEST SUITE needs, as opposed to what the package
+# needs. CI installs exactly this (`pip install -e ".[test]"`), so a sibling a
+# test imports and this list does not name is a red release on a clean runner —
+# the class that killed three of them in one night on 2026-08-24. The gate over
+# this list is `stapel-sibling-lint` (SIB001-006), wired into CI below; the
+# skip-vs-fail half of the contract is `tests/siblings.py`.
+test = [
+    "pytest",
+    "pytest-django",
+    "pytest-cov",
+]
 
 [tool.setuptools]
 package-dir = {"{{PKG}}" = "."}
@@ -443,6 +454,79 @@ def api_client():
 '''
 
 TESTS_INIT = ""
+
+# The skip-vs-fail half of the sibling contract (stapel-sibling-lint SIB004).
+# A suite reaches for a sibling through `requires`, never a bare import at
+# module scope: a contributor without the extra gets a named skip, and CI —
+# which installs `.[test]` and sets STAPEL_TEST_STRICT_SIBLINGS=1 — gets a
+# failure instead, because there a skip means the install step silently did not
+# happen. Without that asymmetry a cross-module agreement test can sit unrun
+# for months while every run stays green.
+SIBLINGS = '''"""Sibling modules this test suite reaches for, and the one rule about them.
+
+1. Every sibling the suite touches is **declared** in the ``test`` extra of
+   ``pyproject.toml`` (``pip install -e ".[test]"``). ``stapel-sibling-lint``
+   (SIB001-003) fails the build when a declaration is missing.
+2. Reaching for one goes through :func:`requires`, never a bare import at
+   module scope, so a contributor without the extra gets a named skip instead
+   of a collection error.
+3. CI sets ``STAPEL_TEST_STRICT_SIBLINGS=1``. In strict mode a missing sibling
+   **fails** instead of skipping — on CI the extra is installed, so a skip
+   there means the install step did not do what the workflow says it does.
+"""
+from __future__ import annotations
+
+import os
+from importlib.util import find_spec
+
+import pytest
+
+#: CI sets this. See rule 3 above.
+STRICT = os.environ.get("STAPEL_TEST_STRICT_SIBLINGS", "") == "1"
+
+
+def installed(module: str) -> bool:
+    """Is ``module`` importable here? Never raises, never imports it."""
+    try:
+        return find_spec(module) is not None
+    except (ImportError, ValueError):  # pragma: no cover - defensive
+        return False
+
+
+def requires(*modules: str):
+    """Decorator: this test needs every sibling module named."""
+    missing = [m for m in modules if not installed(m)]
+    if not missing:
+        return lambda func: func
+
+    names = ", ".join(m.replace("_", "-") for m in missing)
+    message = (
+        f"{names} not installed. Declared in this package's `test` extra — "
+        f\'install it with `pip install -e ".[test]"`.\'
+    )
+
+    if not STRICT:
+        return pytest.mark.skip(reason=message)
+
+    def _decorator(func):
+        # Deliberately NOT functools.wraps: pytest reads the wrapped signature
+        # and would build fixtures that themselves need the missing module.
+        def _missing_sibling(*_args, **_kwargs):
+            pytest.fail(
+                f"{message} STAPEL_TEST_STRICT_SIBLINGS=1 is set, so this is a "
+                f"failure rather than a skip: on CI the extra is installed, "
+                f"and a skip here would mean it silently was not."
+            )
+
+        _missing_sibling.__name__ = func.__name__
+        _missing_sibling.__doc__ = func.__doc__
+        return _missing_sibling
+
+    return _decorator
+
+
+__all__ = ["STRICT", "installed", "requires"]
+'''
 
 TESTS_URLS = '''from django.urls import include, path
 
@@ -883,10 +967,30 @@ jobs:
       - name: Import check
         run: python -c "import {{PKG}}; print('import OK')"
 
-      - name: Install test dependencies
-        run: pip install pytest pytest-django pytest-cov
+      # The suite's dependencies are DECLARED, in the `test` extra, and CI
+      # installs exactly that. A hand-typed list here is how three releases
+      # shipped red in one night (2026-08-24): a test imported a sibling the
+      # shared development virtualenv happened to have, nothing declared it,
+      # and the runner was the first machine to find out.
+      - name: Install test dependencies (the declared `test` extra)
+        run: pip install -e ".[test]"
+
+      # The gate over that declaration: SIB001-003 (an undeclared sibling
+      # imported, named in INSTALLED_APPS, or hidden behind importorskip),
+      # SIB004 (a declared sibling skip-guarded with no strict flag), SIB005
+      # (an extra nothing uses), SIB006 (a foreign-owned key in the committed
+      # docs/errors.json).
+      - name: The suite declares its own siblings (stapel-sibling-lint)
+        run: |
+          pip install "stapel-tools>=0.55.0,<1" --quiet
+          stapel-sibling-lint .
 
       - name: Tests with coverage
+        # Strict siblings: a DECLARED sibling that is missing FAILS instead of
+        # skipping. A quiet skip on CI means the install step above did not do
+        # what it says, which is the other half of this defect class.
+        env:
+          STAPEL_TEST_STRICT_SIBLINGS: "1"
         run: |
           pytest tests/ \\
             --cov={{PKG}} \\

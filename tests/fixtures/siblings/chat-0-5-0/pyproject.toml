@@ -1,0 +1,15 @@
+# stapel-chat at tag v0.5.0, trimmed to the declaration that matters.
+# Verbatim in the one respect under test: there is no `test` extra at all,
+# and the two runtime dependencies are the only siblings this file names.
+[project]
+name = "stapel-chat"
+version = "0.5.0"
+dependencies = [
+    "stapel-core>=0.43.0,<1.0",
+    "stapel-realtime>=0.1.2,<1.0",
+]
+
+[project.optional-dependencies]
+realtime = ["stapel-realtime[channels]>=0.1.2,<1.0"]
+channels = ["stapel-realtime[channels]>=0.1.2,<1.0"]
+all = ["stapel-realtime[channels]>=0.1.2,<1.0"]

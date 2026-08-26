@@ -1,0 +1,24 @@
+# stapel-notifications at HEAD (0.17.1), trimmed. Two things are verbatim and
+# both are load-bearing:
+#   * the `test` extra declares `stapel-notifications[realtime]` — a
+#     SELF-referential extra, so what `realtime` holds (stapel-realtime) is
+#     declared by this file about this file, and the linter expands it;
+#   * stapel-translate appears nowhere, and tests/test_i18n_loop.py imports it.
+[project]
+name = "stapel-notifications"
+version = "0.17.1"
+dependencies = [
+    "stapel-core>=0.26.0,<1.0",
+]
+
+[project.optional-dependencies]
+firebase = ["firebase-admin>=6.4"]
+realtime = ["stapel-realtime[channels]>=0.1.2,<1.0"]
+all = ["stapel-notifications[firebase]"]
+test = [
+    "stapel-notifications[realtime]",
+    "channels[daphne]>=4.0",
+    "pytest",
+    "pytest-django",
+    "stapel-tools>=0.35.0,<1",
+]

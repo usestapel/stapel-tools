@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.54.0"
+version = "0.55.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -22,6 +22,37 @@ classifiers = [
 ]
 dependencies = []
 
+# What the TEST SUITE needs, as opposed to what the package needs — the
+# declaration `stapel-sibling-lint` was written to enforce, applied first to
+# the repo that ships it. Before 0.55.0 this list did not exist, and the suite
+# imported six siblings on the strength of a shared development virtualenv
+# having them: stapel_core (tests/test_codegen.py, both as an import and as an
+# INSTALLED_APPS label), stapel_auth/stapel_gdpr (the generated-project gates),
+# and stapel_profiles/stapel_calendar/stapel_cdn behind three `importorskip`s
+# that had therefore never run on a runner. CI installs `.[test]`, so the list
+# is the thing that decides what CI has, and the strict flag on the pytest step
+# turns a missing one from a quiet skip into a failure.
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-django",
+    "pytest-cov",
+    "pyyaml",
+    "django<6.1",
+    "djangorestframework",
+    "drf-spectacular",
+    "stapel-core>=0.45.0,<1",
+    # These two are reached by a SUBPROCESS, not an import: the generator
+    # tests boot a generated project's Django and resolve its URLs, and that
+    # interpreter imports the libs the project selected. No AST here can see
+    # that, hence the suppression and this reason.
+    "stapel-auth>=0.28.0,<1",   # noqa: SIB005 - imported by the generated project under test
+    "stapel-gdpr>=0.5.0,<1",    # noqa: SIB005 - imported by the generated project under test
+    "stapel-profiles>=0.16.0,<1",
+    "stapel-calendar>=0.6.0,<1",
+    "stapel-cdn>=0.17.0,<1",
+]
+
 [project.scripts]
 stapel-lint = "stapel_tools.lint:main"
 stapel-migration-lint = "stapel_tools.migration_lint:main"
@@ -31,6 +62,7 @@ stapel-config-manifest = "stapel_tools.config_manifest:main"
 stapel-url-lint = "stapel_tools.url_lint:main"
 stapel-api-lint = "stapel_tools.api_lint:main"
 stapel-authz-lint = "stapel_tools.authz_lint:main"
+stapel-sibling-lint = "stapel_tools.sibling_lint:main"
 stapel-nginx-cache-lint = "stapel_tools.nginx_cache_lint:main"
 stapel-env-address-lint = "stapel_tools.env_address_lint:main"
 stapel-exposure-lint = "stapel_tools.exposure_lint:main"
@@ -72,6 +104,11 @@ where = ["."]
 include = ["stapel_tools*"]
 
 [tool.pytest.ini_options]
+# tests/fixtures holds INPUT trees — repositories-in-miniature the linters are
+# run AGAINST. Their `test_*.py` files are data: importing them here would
+# collect stapel-chat's suite into this one. (The default list is repeated
+# because setting this key replaces it.)
+norecursedirs = ["fixtures", "*.egg", ".*", "_darcs", "build", "CVS", "dist", "node_modules", "venv", "{arch}"]
 markers = [
     # The integration gate in tests/test_public_surface.py: it installs a real
     # npm tree and runs tsc/vite/eslint over the generated container. Opt-in

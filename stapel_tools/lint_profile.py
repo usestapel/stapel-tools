@@ -89,8 +89,8 @@ MODES = (MODE_STAPEL, MODE_NATIVE, MODE_OFF)
 SURFACES: dict[str, str] = {
     "python": "backend Python: response/flow discipline, adoption, config, "
               "migrations, swap indirection, urls, index, authentication/"
-              "authorization seams, HTTP surface versioning and surface "
-              "contracts",
+              "authorization seams, test-suite sibling declarations, HTTP "
+              "surface versioning and surface contracts",
     "frontend": "the SPA: delivery canon (build output, entry document, asset "
                 "hashing)",
     "docs": "in-repo documentation: model field docs",
@@ -107,6 +107,7 @@ LINTER_SURFACES: dict[str, str] = {
     "stapel-adoption-lint": "python",
     "stapel-url-lint": "python",
     "stapel-authz-lint": "python",
+    "stapel-sibling-lint": "python",
     "stapel-config-lint": "python",
     "stapel-migration-lint": "python",
     "stapel-swap-lint": "python",

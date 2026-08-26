@@ -1,0 +1,21 @@
+# stapel-chat at HEAD (0.5.1 onwards) — the same suite, declared. Trimmed to
+# the declaration under test; the `test` extra is verbatim in what it names.
+[project]
+name = "stapel-chat"
+version = "0.6.0"
+dependencies = [
+    "stapel-core>=0.45.0,<1.0",
+    "stapel-realtime>=0.1.2,<1.0",
+]
+
+[project.optional-dependencies]
+realtime = ["stapel-realtime[channels]>=0.1.2,<1.0"]
+all = ["stapel-realtime[channels]>=0.1.2,<1.0"]
+# What the TEST SUITE needs, as opposed to what the package needs.
+test = [
+    "pytest",
+    "pytest-django",
+    "stapel-tools>=0.9.1,<1",
+    "stapel-moderation>=0.3.0,<1.0",
+    "stapel-cdn>=0.16.0,<1.0",
+]

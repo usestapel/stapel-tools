@@ -2,6 +2,97 @@
 
 ## [Unreleased]
 
+## [0.55.0] — 2026-08-26
+
+### `stapel-sibling-lint` — three red releases in one night, as a machine check
+
+On 2026-08-24 stapel-chat 0.5.0, stapel-core 0.44.0 and stapel-notifications
+0.17.0 all shipped, all failed on the runner at test *setup* with
+`ModuleNotFoundError`, and all were re-released the next morning with no
+product change. One defect, three costumes:
+
+* **a plain import** — chat's `tests/test_moderation_seam.py` reached for
+  `stapel_moderation` inside a fixture and `tests/test_attachments.py` for
+  `stapel_cdn` inside a helper. Neither was named in `pyproject.toml`. Depth is
+  the trick: the imports that bit were inside functions and `try` blocks, where
+  a module-header grep does not look;
+* **a settings string** — core's `override_settings(INSTALLED_APPS=
+  ["stapel_realtime"])`. No `import` token on the line, and it imports:
+  `setting_changed` reloads the app registry and loads every label for real;
+* **a skip that never ran** — `pytest.importorskip("stapel_cdn")`. It never
+  failed, and on CI it never ran either, so two cross-module agreement tests
+  had been asserting nothing for months without reddening anything.
+
+The fleet develops in ONE virtualenv holding every sibling, so nothing in a
+repo can disagree with an undeclared import: pytest is happy, ruff is happy,
+review is happy, because a reader cannot see an absence. The new linter reads
+for that absence — SIB001 (undeclared import, at any depth), SIB002
+(`INSTALLED_APPS`), SIB003 (`importorskip`), SIB004 (a declared sibling behind
+a skip guard with no strict flag in CI), SIB005 (a `test` extra nothing uses),
+SIB006 (a foreign-owned key in the committed `docs/errors.json` — the same
+class one step downstream, where the codegen publishes whatever the generating
+venv happened to have installed).
+
+Verified against the repositories it was written from, and those runs are the
+fixtures under `tests/fixtures/siblings/`: chat at `v0.5.0` flags 10 errors
+(three distributions, none declared) and at HEAD is clean; core at HEAD gives
+SIB001 x9 + the SIB002 settings string; notifications at HEAD gives SIB001 x3
+(`stapel_translate`, still live) + SIB004 (a declared `stapel_realtime` behind
+`importorskip`, in a repo whose workflows set no strict flag).
+
+**The `STAPEL_TEST_STRICT_SIBLINGS` contract**, documented for libs and
+scaffolded by `stapel-new-library`: a DECLARED sibling that is not installed is
+a FAILURE, never a skip. Unset — a laptop, a fork — it skips with a named
+reason; set (CI, always) it fails, because CI installed `.[test]` two steps
+earlier and a skip there is the install step lying. Generated libraries now get
+the `test` extra, `tests/siblings.py` (`STRICT` / `installed` / `requires`), a
+CI step that installs the extra, a `stapel-sibling-lint` step and the flag on
+the pytest step.
+
+Dogfooded first: this repo's own suite imported six siblings and declared none
+of them, and its three `importorskip`s had therefore never run on any CI run it
+has ever had. `pyproject.toml` now carries the `test` extra, `make check` runs
+`sibling-lint`, and both workflows install `.[test]` and set the strict flag.
+
+### The e2e installs versions that EXIST on npm
+
+The 0.54.0 publish died on `No matching version found for
+@stapel/auth-react@^0.16.1`. Nothing was wrong with the pin: it MIRRORS the
+sibling stapel-react checkout, which had 0.16.1 in its tree with the publish
+still pending, and npm had 0.16.0. The e2e job is the one consumer for which a
+version living only in a working tree does not exist.
+
+`scripts/e2e_npm_pins.py` now runs before `npm install` in both workflows. For
+every `@stapel/*` dependency of the generated frontend it asks the registry
+whether anything satisfies the declared range — the same resolution
+`npm install` performs — keeps the range when something does, and falls back to
+the newest published version when nothing does. Every fallback is LISTED by
+name (`mirror ^0.16.1, npm has 0.16.0`), because "the pair has not shipped yet"
+has to be a line in the log rather than a surprise for whoever generates a
+project next; `--strict` turns the listing into a failure for the release path,
+where a mirror ahead of npm means the publish order is wrong. Third-party
+ranges are never rewritten: a miss on react or vite is a real defect, not a
+publish-order fact. As of this release the mirrors ahead of npm are
+`@stapel/auth-react` (0.16.1 vs 0.16.0), `@stapel/listings-react` (0.5.0 vs
+0.4.0) and `@stapel/search-react` (0.5.0 vs 0.4.0).
+
+### The generated shell stops guessing the theme and starts being told who is staff
+
+`_frontend_templates` emitted `<AppShell nav={RESOLVED_NAV} mode="light" />`
+(and the storefront's `<PublicShell nav={nav} mode="light" />`). Both are a
+generator answering a question it cannot know: the shell follows the document's
+live `data-theme` through `SkinTheme`, and a pinned side overrides the reader's
+own setting on every dark deployment. Both `mode` props are gone.
+
+The opposite defect sat next to it: `<AppShell/>` reads no session by design
+(the rule that keeps `resolveNav` pure), and takes `staff` from the container —
+so with nothing passed, `staff` defaulted to false and the admin section was
+drawn switched-off for the very staff who own it. When auth is wired, routes.tsx
+now emits a local `AppChrome` that reads `useAuthSessionState()` and hands down
+`staff={user?.is_staff === true}` — the same field `AdminGate` refuses on, so
+the menu and the screen cannot disagree. Without an auth pair there is no staff
+fact to read, and the shell's own default is then the honest answer.
+
 ## [0.54.0] — 2026-08-24
 
 ### The scaffold ships a FEATURE — `stapel-new-react-lib` reaches etalon parity

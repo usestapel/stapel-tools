@@ -936,8 +936,10 @@ def render_routes_tsx(
     - one sibling route per ``route_plan["absolute_routes"]`` entry (e.g.
       "/login" -> ``<AuthPanel/>`` when auth is wired).
     - "/app" — present when ``app_route_present`` (auth wired, or at least
-      one selected pair contributed a nav entry): ``<AppShell nav=
-      {{RESOLVED_NAV}} mode="light"/>`` — AppShell renders its own
+      one selected pair contributed a nav entry): ``<AppShell
+      nav={{RESOLVED_NAV}}/>``, wrapped in a local ``AppChrome`` that hands it
+      ``staff={{user?.is_staff === true}}`` when auth is wired — AppShell
+      renders its own
       ``<Outlet/>`` internally (its props carry no ``children`` slot), so
       this never re-nests one — wrapped in ``<ProtectedRoute>`` only when
       ``auth_wired`` (an unprotected "/app" is valid too: a nav-bearing
@@ -1010,6 +1012,27 @@ def render_routes_tsx(
         lines.append(f'import {{ {name} }} from "./{name}.js";')
     if needs_cdn_avatar_helper:
         lines.append('import { avatarUrlFor } from "./lib/cdn.js";')
+
+    # `<AppShell/>` reads no session, on purpose: the same rule that keeps
+    # `resolveNav` pure keeps the session in ONE place, the container. So the
+    # container answers the one question the chrome cannot — does this member
+    # operate the product — with `user.is_staff`, the very field `AdminGate`
+    # refuses on, so the menu and the screen can never disagree. It has to be a
+    # component: a route object cannot call a hook.
+    if app_route_present and auth_wired:
+        lines.append('import type { ReactElement } from "react";')
+        lines.append('import { useAuthSessionState } from "@stapel/auth-react";')
+        lines.append("")
+        lines.append("/**")
+        lines.append(" * GENERATED — the app chrome plus the one fact the shell cannot read")
+        lines.append(" * for itself. `staff={false}` does not hide the admin section: the")
+        lines.append(" * shell lists it switched off with the reason beside it, because an")
+        lines.append(" * entry that vanishes teaches nobody the screen exists.")
+        lines.append(" */")
+        lines.append("function AppChrome(): ReactElement {")
+        lines.append("  const { user } = useAuthSessionState();")
+        lines.append("  return <AppShell nav={RESOLVED_NAV} staff={user?.is_staff === true} />;")
+        lines.append("}")
     lines.append("")
     lines.append("export const router = createBrowserRouter([")
 
@@ -1035,17 +1058,18 @@ def render_routes_tsx(
         lines.append(f'  {{ path: "{r["path"]}", element: {element} }},')
 
     if app_route_present:
-        shell_element = 'element: <AppShell nav={RESOLVED_NAV} mode="light" />,'
         lines.append("  {")
         lines.append('    path: "/app",')
         if auth_wired:
             lines.append("    element: (")
             lines.append("      <ProtectedRoute>")
-            lines.append('        <AppShell nav={RESOLVED_NAV} mode="light" />')
+            lines.append("        <AppChrome />")
             lines.append("      </ProtectedRoute>")
             lines.append("    ),")
         else:
-            lines.append(f"    {shell_element}")
+            # No auth pair, no session, no staff fact — and the shell's own
+            # default (`staff` absent means false) is then the honest answer.
+            lines.append("    element: <AppShell nav={RESOLVED_NAV} />,")
         if app_children:
             lines.append("    children: [")
             for c in app_children:
@@ -2716,7 +2740,10 @@ import { RESOLVED_NAV_MEMBER, RESOLVED_NAV_PUBLIC } from "./nav.generated.js";
 export function StorefrontShell(): ReactElement {
   const principal = useMandatePrincipal();
   const nav = principal === "member" ? RESOLVED_NAV_MEMBER : RESOLVED_NAV_PUBLIC;
-  return <PublicShell nav={nav} mode="light" />;
+  // No `mode`: the shell follows the document's live `data-theme` through
+  // SkinTheme. Pinning it to "light" here was a wrong answer on every dark
+  // deployment, decided by a generator that cannot know the deployment.
+  return <PublicShell nav={nav} />;
 }
 '''
 

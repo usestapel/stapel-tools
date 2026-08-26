@@ -139,6 +139,14 @@ class TestRoutesRenderer:
         assert "element: <StorefrontShell />," in src
         assert "{ index: true, element: <StorefrontHome /> }," in src
 
+    def test_the_storefront_chrome_pins_no_theme(self):
+        """`mode="light"` is a generator answering a question it cannot know:
+        the shell follows the document's live `data-theme` through SkinTheme,
+        and a pinned side overrides the reader's own setting on every dark
+        deployment."""
+        assert 'mode="light"' not in F.STOREFRONT_SHELL_TSX
+        assert "<PublicShell nav={nav} />" in F.STOREFRONT_SHELL_TSX
+
     def test_account_subtree_sits_inside_the_member_gate(self):
         src = self._routes()
         gate = src.index("element: <MemberGate />,")

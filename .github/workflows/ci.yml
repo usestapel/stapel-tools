@@ -57,9 +57,34 @@ jobs:
           SIBLING_ROOT: ${{ github.workspace }}/siblings
         run: python scripts/check_nav_manifest_sync.py
 
-      - name: Tests with coverage
+      # The suite's dependencies are DECLARED (the `test` extra), not typed out
+      # here. They used to be typed out here, which is how the list and the
+      # suite drifted apart: three siblings were reached for by tests and named
+      # nowhere, and their `importorskip`s therefore skipped on every CI run
+      # this repo has ever had. `stapel-sibling-lint` is the gate over that
+      # list, and it runs against this repo before the suite does.
+      - name: Install test dependencies (the declared `test` extra)
         run: |
-          pip install pytest pytest-cov pytest-django "django<6.1" djangorestframework "psycopg[binary]" "stapel-core @ git+https://github.com/usestapel/stapel-core.git" "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" --quiet
+          pip install -e ".[test]" "psycopg[binary]" --quiet
+          # ...and the three siblings the scaffold generates against are ALSO
+          # taken from main, so a generator change meets the real fleet rather
+          # than last week's release. The extra floors them; this pins them to
+          # HEAD on top of it.
+          pip install --quiet \
+            "stapel-core @ git+https://github.com/usestapel/stapel-core.git" \
+            "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" \
+            "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git"
+
+      - name: The suite declares its own siblings (SIB001-006)
+        run: python -m stapel_tools.sibling_lint .
+
+      - name: Tests with coverage
+        # Strict siblings: a DECLARED sibling that is missing FAILS instead of
+        # skipping. A quiet skip here would mean the install step above did not
+        # do what it says — the other half of the same defect class.
+        env:
+          STAPEL_TEST_STRICT_SIBLINGS: "1"
+        run: |
           pytest tests/ \
             --cov=stapel_tools \
             --cov-report=term-missing \
@@ -238,6 +263,20 @@ jobs:
           POSTGRES_DB: stapel_e2e
           REDIS_URL: redis://127.0.0.1:6379/0
         run: python "$GITHUB_WORKSPACE/scripts/e2e_live_circle.py" e2e
+
+      # The 0.54.0 publish died right here on `No matching version found for
+      # @stapel/auth-react@^0.16.1`: the scaffold's version mirror is copied
+      # from the sibling stapel-react checkout, which had 0.16.1 in its tree
+      # with the publish still pending — and npm, the only registry this
+      # install consults, had 0.16.0. So the pins are resolved against the
+      # registry first: a range that resolves is kept (the mirror IS the pin),
+      # a range that resolves to nothing falls back to the newest published
+      # version, and every fallback is LISTED by name so "the pair has not
+      # shipped yet" is a line in the log instead of a surprise for the next
+      # person who generates a project.
+      - name: Pin the generated frontend to versions that exist on npm
+        working-directory: ${{ runner.temp }}/e2e/frontend
+        run: python "$GITHUB_WORKSPACE/scripts/e2e_npm_pins.py" package.json
 
       - name: Frontend builds (npm install + vite build; npm ci needs a lockfile the scaffold doesn't ship yet)
         working-directory: ${{ runner.temp }}/e2e/frontend

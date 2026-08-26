@@ -162,6 +162,7 @@ from . import (
     migration_lint,
     nginx_cache_lint,
     po_lint,
+    sibling_lint,
     surface_lint,
     swap_lint,
     url_lint,
@@ -236,6 +237,13 @@ def run_authz_lint(project: Path) -> LinterReport:
     findings = authz_lint.lint_project(project, notes=notes)
     errors, warnings = _count(findings)
     return LinterReport("stapel-authz-lint", errors, warnings, _to_dicts(findings), notes)
+
+
+def run_sibling_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = sibling_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-sibling-lint", errors, warnings, _to_dicts(findings), notes)
 
 
 def run_api_lint(project: Path, base_ref: Optional[str]) -> LinterReport:
@@ -342,6 +350,7 @@ COMPOSED_LINTERS: tuple[str, ...] = (
     "stapel-adoption-lint",
     "stapel-url-lint",
     "stapel-authz-lint",
+    "stapel-sibling-lint",
     "stapel-api-lint",
     "stapel-config-lint",
     "stapel-migration-lint",
@@ -456,6 +465,7 @@ def verify_project(
         ("stapel-adoption-lint", lambda: run_adoption_lint(project, search_roots)),
         ("stapel-url-lint", lambda: run_url_lint(project)),
         ("stapel-authz-lint", lambda: run_authz_lint(project)),
+        ("stapel-sibling-lint", lambda: run_sibling_lint(project)),
         ("stapel-api-lint", lambda: run_api_lint(project, base_sha)),
         ("stapel-config-lint", lambda: run_config_lint(project)),
         ("stapel-migration-lint", lambda: run_migration_lint(project, base_sha)),

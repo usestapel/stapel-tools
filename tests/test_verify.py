@@ -52,6 +52,10 @@ def make_dirty_project(tmp_path):
     - NGX001 + NGX003 (nginx-cache-lint): the app.ironmemo.com SPA cache
       defect — an entry document carrying BOTH ``expires 1d`` AND an explicit
       ``add_header Cache-Control``.
+    - SIB001 (sibling-lint): a test module importing ``stapel_verifyfixture``
+      while the project's pyproject declares it in neither ``dependencies`` nor
+      the ``test`` extra — added by the caller that writes a pyproject, since
+      without one there is no declaration to check against.
     - SCHEMA001 (api-lint, warning): an emitted ``docs/schema.json`` whose
       ``info.version`` is the drf-spectacular placeholder rather than the
       package version. API001-003 need a git baseline, which a tmp_path
@@ -193,6 +197,14 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
     (proj / "pyproject.toml").write_text(
         '[project]\nname = "stapel-dirty"\nversion = "0.0.1"\n', encoding="utf-8"
     )
+    tests_dir = proj / "tests"
+    tests_dir.mkdir(exist_ok=True)
+    (tests_dir / "test_seam.py").write_text(
+        "def test_seam():\n"
+        "    from stapel_verifyfixture.registry import reset\n"
+        "    assert reset\n",
+        encoding="utf-8",
+    )
     (proj / "NOTES.md").write_text("found on the acme fleet\n", encoding="utf-8")
     reports = verify_project(proj)
 
@@ -202,6 +214,7 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
         "stapel-adoption-lint",
         "stapel-url-lint",
         "stapel-authz-lint",
+        "stapel-sibling-lint",
         "stapel-api-lint",
         "stapel-config-lint",
         "stapel-migration-lint",
@@ -234,6 +247,10 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
     authz_rules = {f["rule"] for f in by_name["stapel-authz-lint"].findings}
     assert authz_rules == {"AUTHZ001", "AUTHZ002"}
     assert by_name["stapel-authz-lint"].errors == 2
+
+    sibling_rules = {f["rule"] for f in by_name["stapel-sibling-lint"].findings}
+    assert sibling_rules == {"SIB001"}
+    assert by_name["stapel-sibling-lint"].errors == 1
 
     api_rules = {f["rule"] for f in by_name["stapel-api-lint"].findings}
     assert api_rules == {"SCHEMA001"}
@@ -283,9 +300,9 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
     assert by_name["stapel-index-lint"].findings == []
 
     total_errors = sum(r.errors for r in reports)
-    # R006, ADO001, ADO002, URL001, AUTHZ001, AUTHZ002, CFG001, MIG001,
-    # SUR001, NGX001, NGX003, FED001, EXP001
-    assert total_errors == 13
+    # R006, ADO001, ADO002, URL001, AUTHZ001, AUTHZ002, SIB001, CFG001,
+    # MIG001, SUR001, NGX001, NGX003, FED001, EXP001
+    assert total_errors == 14
 
 
 def test_clean_project_reports_all_zero(tmp_path):
@@ -317,7 +334,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 16 linters." in out
+    assert "All clean across 17 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -327,13 +344,14 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     assert code == 1
     assert payload["ok"] is False
     assert payload["errors"] == 12
-    assert len(payload["linters"]) == 16
+    assert len(payload["linters"]) == 17
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
         "stapel-adoption-lint",
         "stapel-url-lint",
         "stapel-authz-lint",
+        "stapel-sibling-lint",
         "stapel-api-lint",
         "stapel-config-lint",
         "stapel-migration-lint",

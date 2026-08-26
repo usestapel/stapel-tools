@@ -76,6 +76,7 @@ def file_plan(kind: str, ctx: dict) -> dict:
         "conftest.py": render(T.CONFTEST, ctx),
         "py.typed": "",
         "tests/__init__.py": T.TESTS_INIT,
+        "tests/siblings.py": T.SIBLINGS,
         "tests/test_public_api.py": render(T.TEST_PUBLIC_API, ctx),
         "MODULE.md": render(T.MODULE_MD, ctx),
         "README.md": render(T.README, ctx),

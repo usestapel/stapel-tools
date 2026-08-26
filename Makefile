@@ -12,12 +12,21 @@ PYTHON ?= python
 # already use (`${SIBLING_ROOT:-..}`): point it at the checkout that carries
 # stapel-react. Absent that checkout the nav gate SKIPS — it has nothing to
 # compare against, which is not a defect of a machine that does not have it.
-.PHONY: check lint test nav-sync
+#
+# `sibling-lint` runs the rule this repo ships against this repo. It is second
+# because it is the cheapest real gate here and because the class it catches
+# (a test importing a sibling nothing declares) only ever shows up on a clean
+# runner — i.e. after the tag, at the worst possible moment. Warnings do not
+# fail it; SIB001-003 do.
+.PHONY: check lint test nav-sync sibling-lint
 
-check: lint nav-sync test
+check: lint sibling-lint nav-sync test
 
 lint:
 	$(PYTHON) -m ruff check .
+
+sibling-lint:
+	$(PYTHON) -m stapel_tools.sibling_lint .
 
 nav-sync:
 	$(PYTHON) scripts/check_nav_manifest_sync.py

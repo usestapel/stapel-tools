@@ -985,6 +985,48 @@ class TestFrontendNavWiring:
         settings = next(e for e in resolved if e["id"] == "profiles.settings")
         assert [c["id"] for c in settings["children"]] == ["auth.security"]
 
+    def test_the_shell_gets_the_staff_fact_and_no_pinned_theme(self, tmp_path):
+        """Two defects of one shape: a generator answering a question it
+        cannot know, and not answering one it can.
+
+        `mode="light"` was a wrong answer on every dark deployment — the shell
+        follows the document's live `data-theme` through SkinTheme, and pinning
+        a side from a scaffold overrides the person's own setting.
+
+        `staff` is the opposite: `<AppShell/>` reads no session by design (the
+        same rule that keeps `resolveNav` pure), so the container has to hand
+        down `user.is_staff` — the very field `AdminGate` refuses on. Without
+        it the shell's `staff` defaults to false and the admin section is drawn
+        switched-off for the staff who own it.
+        """
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["core", "auth", "profiles", "notifications"],
+            want_auth=True,
+        )
+        routes_tsx = (proj / "frontend" / "src" / "routes.tsx").read_text()
+        assert 'mode="light"' not in routes_tsx
+        assert "function AppChrome()" in routes_tsx
+        assert (
+            "<AppShell nav={RESOLVED_NAV} staff={user?.is_staff === true} />"
+            in routes_tsx
+        )
+        assert 'import { useAuthSessionState } from "@stapel/auth-react";' in routes_tsx
+        assert "<AppChrome />" in routes_tsx
+
+    def test_without_auth_there_is_no_staff_fact_to_hand_down(self, tmp_path):
+        """No auth pair, no session: the shell's own default (absent means
+        false) is then the honest answer, and inventing a session read would
+        not compile."""
+        proj = _create(
+            tmp_path, "app", "monolith", modules=["core", "notifications"],
+        )
+        routes_tsx = (proj / "frontend" / "src" / "routes.tsx").read_text()
+        assert "element: <AppShell nav={RESOLVED_NAV} />," in routes_tsx
+        assert 'mode="light"' not in routes_tsx
+        assert "AppChrome" not in routes_tsx
+        assert "useAuthSessionState" not in routes_tsx
+
     def test_landing_only_scaffold_has_landing_route_and_no_app_protected_tree(self, tmp_path):
         """``--landing`` with no auth, no nav-bearing module: "/" mounts
         LandingPage, and there is no "/app" route at all (no ProtectedRoute,

@@ -1,0 +1,14 @@
+# stapel-core at tag v0.44.0, trimmed. Verbatim in what matters: the runtime
+# dependencies are third-party only (no sibling among them), and there is no
+# `test` extra — so `stapel_realtime` is declared nowhere at all.
+[project]
+name = "stapel-core"
+version = "0.44.0"
+dependencies = [
+    "Django>=5.1,<6.1",
+    "djangorestframework>=3.14",
+    "PyJWT>=2.8",
+]
+
+[project.optional-dependencies]
+channels = ["channels>=4.0"]
