@@ -140,6 +140,15 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379/0
         run: python "$GITHUB_WORKSPACE/scripts/e2e_live_circle.py" e2e
 
+      # Release-gating half of the peer-graph check (ci.yml carries the same
+      # step with the full reasoning): every pinned @stapel/* package's own
+      # peerDependencies, against the scaffold's pin of that peer. 0.55.5
+      # shipped a pair table raised to the 2026-08 release standing on a
+      # substrate that was not, and the install step two steps below is where
+      # that becomes an ERESOLVE.
+      - name: The scaffold's pins satisfy every pair's peer ranges
+        run: python "$GITHUB_WORKSPACE/scripts/check_npm_peer_graph.py"
+
       # The 0.54.0 publish died right here on `No matching version found for
       # @stapel/auth-react@^0.16.1`: the scaffold's version mirror is copied
       # from the sibling stapel-react checkout, which had 0.16.1 in its tree

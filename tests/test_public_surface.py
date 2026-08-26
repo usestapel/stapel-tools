@@ -378,14 +378,25 @@ class TestRealtimeSeam:
 
 class TestProjectFiles:
     def test_package_json_pins_come_from_the_registry(self):
+        """The storefront container installs the SAME substrate the generator
+        pins — asserted against the generator's constants, not against a
+        version typed here. A hand-typed floor (`^0.17.`) is a second table:
+        it went stale the day the pairs moved to a core peer floor of 0.18.1,
+        and reddened this test for the pin that FIXED the e2e."""
+        from stapel_tools.create_project import (
+            FRONTEND_REACT_CORE_DEPS,
+            FRONTEND_ROUTER_DEPS,
+            FRONTEND_SHELL_REACT_VERSION,
+        )
+
         pkg = json.loads(_plan()["files"]["package.json"])
         deps = pkg["dependencies"]
         for key in STOREFRONT_PAIRS:
             info = FRONTEND_REACT_LIBS[key]
             assert deps[info["package"]] == f'^{info["version"]}'
-        assert deps["@stapel/shell-react"].startswith("^0.7.")
-        assert deps["@stapel/core"].startswith("^0.17.")
-        assert deps["react-router"].startswith("^7.")
+        assert deps["@stapel/shell-react"] == f"^{FRONTEND_SHELL_REACT_VERSION}"
+        assert deps["@stapel/core"] == f'^{FRONTEND_REACT_CORE_DEPS["@stapel/core"]}'
+        assert deps["react-router"] == f'^{FRONTEND_ROUTER_DEPS["react-router"]}'
 
     def test_vite_proxy_never_claims_a_bare_module_root(self):
         """`location /listings` is a PREFIX match: a bare rule sends

@@ -56,8 +56,8 @@ PACKAGE_JSON = """\
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@stapel/eslint-plugin": "^0.3.0",
-    "@stapel/tokens": "^0.5.0",
+    "@stapel/eslint-plugin": "^0.11.0",
+    "@stapel/tokens": "^0.5.1",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
@@ -3254,10 +3254,17 @@ def render_public_modules_tsx(
 # registry. A generated app that type-checks under a different major than the
 # packages it installs is a support question waiting to happen, and the day
 # the fleet moves, both move together.
+#
+# The two `@stapel/*` entries are the exception that proves it: the monorepo
+# carries them as `workspace:*`, so the published version IS the mirror
+# (`npm view`, 2026-08-27 — eslint-plugin 0.11.0, tokens 0.5.1). They had
+# drifted apart from the minimal template's copy above (^0.10.0 here, ^0.3.0
+# there); both tables are now checked by `scripts/check_npm_peer_graph.py`,
+# which reads THESE constants rather than a copy.
 PUBLIC_DEV_DEPS = {
     "@eslint/js": "^9.30.0",
-    "@stapel/eslint-plugin": "^0.10.0",
-    "@stapel/tokens": "^0.5.0",
+    "@stapel/eslint-plugin": "^0.11.0",
+    "@stapel/tokens": "^0.5.1",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",

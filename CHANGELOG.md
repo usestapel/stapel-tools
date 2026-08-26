@@ -2,6 +2,101 @@
 
 ## [Unreleased]
 
+## [0.55.6] — 2026-08-27
+
+Both halves of the red 0.55.5 CI run, closed by mechanism.
+
+### The substrate moves with the pairs (and a gate that says so)
+
+0.55.5 raised all seventeen pair pins to the 2026-08 release and left the
+substrate they stand on behind. Nothing was unpublished, so
+`scripts/e2e_npm_pins.py` — the gate over "does this version exist?" — was
+green and had nothing to say; `npm install` in the e2e job died on an ERESOLVE
+instead: `peer @stapel/core@">=0.18.1 <1.0.0" from @stapel/auth-react@0.17.1`.
+Sixteen of the seventeen pairs declare that floor, and every skinned one peers
+`@stapel/tokens-antd@">=0.7.0"`.
+
+Every pin below is the output of `npm view <pkg> version` on 2026-08-27:
+
+| package | was | now | where |
+| --- | --- | --- | --- |
+| `@stapel/core` | 0.17.0 | **0.18.1** | `FRONTEND_REACT_CORE_DEPS` |
+| `@stapel/tokens-antd` | 0.5.0 | **0.7.0** | `FRONTEND_REACT_ANTD_DEPS` |
+| `@stapel/image` | 0.3.0 | **0.4.1** | `FRONTEND_IMAGE_VERSION` |
+| `@stapel/shell-react` | 0.7.1 | **0.7.2** | `FRONTEND_SHELL_REACT_VERSION` |
+| `@stapel/recordings-react` | 0.6.1 | **0.6.2** | `FRONTEND_REACT_LIBS["recordings"]` |
+| `@stapel/eslint-plugin` | ^0.3.0 / ^0.10.0 | **^0.11.0** | `PACKAGE_JSON` / `PUBLIC_DEV_DEPS` |
+| `@stapel/tokens` | ^0.5.0 | **^0.5.1** | `PACKAGE_JSON` / `PUBLIC_DEV_DEPS` |
+
+The two `@stapel/eslint-plugin` ranges had drifted apart — the minimal
+template's copy was five minors behind the storefront's — and are one number
+again.
+
+`@stapel/shell-react` 0.7.2 is a patch over the self-theming 0.7.1: it fixes
+`matchesLocation` for MULTI-SEGMENT relative paths, so a nav entry like
+`workspaces/settings` highlights instead of never matching.
+`FRONTEND_SHELL_SELF_THEMING_FLOOR` deliberately stays at 0.7.1 — it names the
+first release carrying the contract, not the newest release.
+
+**The new gate: `scripts/check_npm_peer_graph.py`.** It reads the generator's
+own pin tables (never a copy), resolves each declaration against the registry
+exactly as `npm install` would, and asserts that every pinned `@stapel/*`
+package's published `peerDependencies` are satisfied by the scaffold's pin of
+that peer. A peer the scaffold does not pin is listed, not failed — npm
+installs one that fits; only a pin can contradict a peer. npm range
+satisfaction is implemented in Python (`>=a.b.c <x.y.z`, `^`, `~`, exact,
+partials like `>=19`/`<7`, `*`, `||`, prerelease precedence) with a hard rule:
+an unrecognised range form RAISES rather than passing. Wired into both
+workflows' e2e job, immediately before the install it protects — and the daily
+schedule fires that job with no push, which is the only way drift arriving from
+another repo (a pair raising its own floor) is ever noticed here.
+`make peer-graph` runs it locally; it stays out of `make check`, which must
+work with no network.
+
+Against the 0.55.5 tree the gate names 35 violations and exits 1; against this
+one it exits 0. The generated e2e frontend (auth + notifications) now
+`npm install`s clean — 229 packages, verified locally against the real
+registry.
+
+The gate also LISTS (without failing) a second class it found on the way: a
+REQUIRED peer that npm has never heard of. `@stapel/chat-react@0.4.0` peers
+`@stapel/realtime@">=0.1.1"` and does NOT mark it optional, while
+`@stapel/notifications-react` and `@stapel/video-react` — which peer the same
+package — do. `@stapel/realtime` is not published (E404), so every project
+selecting chat fails `npm install` outright; the public-storefront preset
+includes chat, and that is exactly where the opt-in
+`test_generated_storefront_installs_typechecks_builds_and_lints` now stops.
+No pin in this repo can fix it (there is no version to pin): it is a
+one-line publish-order fix in `stapel-react`, either publishing
+`@stapel/realtime` or marking the peer optional the way its two siblings
+already do. `@stapel/currencies-react` (peered by `@stapel/listings-react`,
+optional) is unpublished for the same reason and is harmless today.
+
+### `recordings.detail` was unreachable in every generated container
+
+The mirror carried `route.path: "recordings/:recordingId"` while the plan
+builder joins parent + child, so the emitted route was
+`recordings/recordings/:recordingId`. The pair's 0.6.2 nav manifest makes the
+path relative (`":recordingId"`) and the mirror follows it.
+
+### stapel-billing is a declared test sibling
+
+`tests/test_billing_unconfigured_env.py` reads stapel-billing's own
+`docs/capabilities.json` — the `PAYMENT_PROVIDER` axis default, and the axis
+surface a `STRIPE_SECRET_KEY` is refused against. `capabilities_doc` finds it
+in a workspace checkout first and in the installed distribution second, and CI
+had neither, so both tests failed there while passing on every laptop in the
+workspace. They now declare the sibling through the `requires` seam and the
+`test` extra names `stapel-billing>=0.11.0,<1` (its wheel ships
+`stapel_billing/docs/capabilities.json`, so the installed path is real).
+Deliberately NOT added to CI's install-from-main list: that list exists for the
+three libraries a generated project BOOTS against in a subprocess, and billing
+is read as a released contract, not booted.
+
+`test_public_surface` also stopped hand-typing `^0.17.` as the expected core
+pin — the same second-table defect one level down. It compares against the
+generator's constants now.
+
 ## [0.55.5] — 2026-08-27
 
 ### The frontend registry catches up with the 2026-08 stapel-react release

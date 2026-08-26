@@ -1007,7 +1007,7 @@ FRONTEND_REACT_LIBS = {
     },
     "recordings": {
         "package": "@stapel/recordings-react",
-        "version": "0.6.1",
+        "version": "0.6.2",
         "provider": "RecordingsProvider",
         "create_runtime": "createRecordingsRuntime",
         "register_i18n": "registerRecordingsI18n",
@@ -1032,7 +1032,13 @@ FRONTEND_REACT_LIBS = {
                 "id": "recordings.detail",
                 "labelKey": "recordings.detail.heading",
                 "icon": "ProfileOutlined",
-                "route": {"path": "recordings/:recordingId"},
+                # RELATIVE to the parent (`recordings.list`), as of the pair's
+                # 0.6.2 manifest: the plan builder joins parent + child
+                # (`build_app_route_plan`), so the old self-prefixed
+                # "recordings/:recordingId" emitted
+                # `recordings/recordings/:recordingId` and the detail screen
+                # was unreachable in every generated container.
+                "route": {"path": ":recordingId"},
                 "component": {"export": "RecordingDetailPane", "subpath": "default"},
                 "placement": {"level": "submenu", "parentId": "recordings.list"},
                 "menuVisibleDefault": False,
@@ -1419,20 +1425,31 @@ def composite_report(name: str) -> list[str]:
 
 
 # Support packages the generated app needs alongside any FRONTEND_REACT_LIBS
-# selection — pins from the live npm registry (2026-08-23), see the
-# FRONTEND_REACT_LIBS docstring above for why npm (not the sibling
-# checkout's workspace pin) is the source of truth here.
+# selection — pins from the live npm registry (`npm view <pkg> version`,
+# 2026-08-27), see the FRONTEND_REACT_LIBS docstring above for why npm (not
+# the sibling checkout's workspace pin) is the source of truth here.
+#
+# THE SUBSTRATE MOVES WITH THE PAIRS. Every pin below is checked against the
+# pairs' published `peerDependencies` by `scripts/check_npm_peer_graph.py`:
+# raising the 17 pair pins and leaving this table behind is what broke the
+# 0.55.5 e2e (ERESOLVE, not a missing version), and a pair can raise its own
+# floor in another repo with no commit here at all.
 FRONTEND_REACT_CORE_DEPS = {
-    # 0.15.0, not 0.11.0: the wave-4 pairs bind two core surfaces that only
-    # exist from 0.15.0 — the mandate seam (`MandateProvider`/`useMandate`,
-    # which `@stapel/listings-react` declares as its peer floor) and the
-    # query encoder that APPENDS a repeated key (`f.<slug>` is OR-within-slug
-    # for `@stapel/search-react`; the symbol set did not change, only the
-    # behaviour, so a peer range could not have caught it). A range as wide
-    # as `>=0.3.0 <1.0.0` does not catch either — npm installs happily and
-    # the generated frontend fails at BUILD time on a missing export, or
-    # worse, at RUNTIME on a silently dropped filter.
-    "@stapel/core": "0.17.0",
+    # 0.18.1, not 0.15.0/0.17.0: the 2026-08 pairs declare
+    # `"@stapel/core": ">=0.18.1 <1.0.0"` as a peer — 16 of the 17 do, so an
+    # older core is an ERESOLVE at install, not a subtle runtime gap. The
+    # older reasons still hold underneath it and are why the pin is EXACT
+    # rather than a wide range: the wave-4 pairs bind two core surfaces that
+    # only exist from 0.15.0 — the mandate seam
+    # (`MandateProvider`/`useMandate`, which `@stapel/listings-react`
+    # declares as its peer floor) and the query encoder that APPENDS a
+    # repeated key (`f.<slug>` is OR-within-slug for `@stapel/search-react`;
+    # the symbol set did not change, only the behaviour, so a peer range
+    # could not have caught it). A range as wide as `>=0.3.0 <1.0.0` does not
+    # catch either — npm installs happily and the generated frontend fails at
+    # BUILD time on a missing export, or worse, at RUNTIME on a silently
+    # dropped filter.
+    "@stapel/core": "0.18.1",
     "@tanstack/react-query": "5.102.0",
 }
 # Only pulled in when >=1 selected module's registry entry has
@@ -1442,7 +1459,11 @@ FRONTEND_REACT_CORE_DEPS = {
 # only those stays antd-free.
 FRONTEND_REACT_ANTD_DEPS = {
     "antd": "6.6.1",
-    "@stapel/tokens-antd": "0.5.0",
+    # 0.7.0: every skinned pair peers `"@stapel/tokens-antd": ">=0.7.0"`, the
+    # release whose bridge reads the neutral colour-role dictionary the
+    # generated `stapel.theme.json` emits. 0.5.0 was an ERESOLVE against all
+    # 17 of them.
+    "@stapel/tokens-antd": "0.7.0",
 }
 
 # Scripted-fullstack navigation (P1) — router deps for the generated
@@ -1469,7 +1490,13 @@ FRONTEND_ROUTER_DEPS = {
 # project with routing active but no nav-bearing module (e.g. `--landing`
 # alone never needs the shell).
 FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
-FRONTEND_SHELL_REACT_VERSION = "0.7.1"
+# 0.7.2 (`npm view @stapel/shell-react version`, 2026-08-27) — the patch that
+# fixes `matchesLocation` for MULTI-SEGMENT relative paths, so a nav entry like
+# `workspaces/settings` highlights instead of never matching. Every generated
+# container with a nested nav entry benefits; the self-theming floor below is a
+# different number on purpose (the first release with the contract, not the
+# latest one).
+FRONTEND_SHELL_REACT_VERSION = "0.7.2"
 
 # The first `@stapel/shell-react` release that themes ITSELF and reads the
 # container's staff answer. Two facts, one release, because they are one
@@ -1521,7 +1548,12 @@ def shell_self_themes(version: str | None = None) -> bool:
 # (cdn, or a profiles avatar), so <Image meta={...image}> can render the
 # StapelImage descriptor the backend denormalizes (AGENTS.md §7).
 FRONTEND_IMAGE_PACKAGE = "@stapel/image"
-FRONTEND_IMAGE_VERSION = "0.3.0"
+# 0.4.1 (`npm view @stapel/image version`, 2026-08-27). `@stapel/search-react`
+# peers `">=0.3.0"` and listings/profiles/cdn peer `">=0.2.0"`, so 0.3.0 was
+# still resolvable — but the pin follows the registry, not the floor: a
+# generated project that installs the pairs' own image renderer at a version
+# BELOW what those pairs ship against gets two copies of it in the tree.
+FRONTEND_IMAGE_VERSION = "0.4.1"
 
 
 # Broker per project type: minimal never gets one, microservices requires one

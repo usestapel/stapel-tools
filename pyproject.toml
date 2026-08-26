@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.55.5"
+version = "0.55.6"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -51,6 +51,14 @@ test = [
     "stapel-profiles>=0.16.0,<1",
     "stapel-calendar>=0.6.0,<1",
     "stapel-cdn>=0.17.0,<1",
+    # Reached as DATA, not as an import: the billing env-hatch tests read
+    # stapel-billing's own `docs/capabilities.json` (the PAYMENT_PROVIDER axis
+    # default, and the axis surface a STRIPE_SECRET_KEY is refused against).
+    # `_module_config.capabilities_doc` finds it in the workspace checkout OR
+    # in the installed distribution — 0.11.0's wheel ships
+    # `stapel_billing/docs/capabilities.json`, so declaring it here is what
+    # gives the runner the second path. Undeclared, both tests reddened 0.55.5.
+    "stapel-billing>=0.11.0,<1",
     # stapel-cdn's `images` submodule is ON in a generated project, and its
     # check stapel_cdn.images.E001 FAILS `manage.py check` without libvips —
     # so a generated project carrying cdn does not boot on a machine that has

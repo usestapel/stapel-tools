@@ -37,7 +37,20 @@ The gate is now ``PAYMENT_PROVIDER``: left at the library's declared default
 gets the hatch and the prod placeholder; naming its own provider it gets
 neither, because host code carries host credentials and E104 is how a
 deployment is supposed to learn they are missing.
+
+Two tests below read stapel-billing's OWN ``docs/capabilities.json`` — the
+axis default and the refusal of a key outside the axis surface. That makes
+``stapel_billing`` a sibling this suite depends on, and it was declared
+nowhere: `_module_config.capabilities_doc` reads the workspace checkout first
+and the installed distribution second, so a laptop with the sibling beside
+this repo passed while the runner — which has neither — got ``None`` for the
+default and no validation at all, and both tests reddened the 0.55.5 CI run.
+They are declared through the `requires` seam now, and the `test` extra names
+`stapel-billing`, so CI installs it and ``STAPEL_TEST_STRICT_SIBLINGS=1``
+fails loudly if it ever does not.
 """
+from siblings import requires
+
 from stapel_tools.create_project import create_project
 
 
@@ -86,10 +99,14 @@ class TestMinimalBillingWithItsOwnPaymentProvider:
         text = (proj / ".env.example").read_text()
         assert "ALLOW_UNCONFIGURED_PAYMENT_PROVIDER" not in text
 
+    @requires("stapel_billing")
     def test_restating_the_library_default_is_not_naming_your_own(self, tmp_path):
         """The value the axis already carries is not a decision to run
         something else, so it must not close the hatch — the project still
-        boots on the Stripe provider with no key in sight."""
+        boots on the Stripe provider with no key in sight.
+
+        Needs the sibling: the default is READ from stapel-billing's
+        capabilities.json, never copied here."""
         from stapel_tools._module_config import axis_default
 
         default = axis_default("billing", "PAYMENT_PROVIDER")
@@ -100,11 +117,16 @@ class TestMinimalBillingWithItsOwnPaymentProvider:
         )
         assert "ALLOW_UNCONFIGURED_PAYMENT_PROVIDER=1" in (proj / ".env.example").read_text()
 
+    @requires("stapel_billing")
     def test_a_stripe_secret_is_not_a_module_config_key_at_all(self, tmp_path):
         """The contract the old gate was written against does not exist: the
         key is refused before any env file is written. A generator branch
         gated on it was unreachable, which is why the hatch went into every
-        billing project ever generated."""
+        billing project ever generated.
+
+        Needs the sibling: with no capabilities.json to validate against, the
+        generator warns and passes the key through — there is no refusal to
+        observe."""
         import pytest
 
         with pytest.raises(SystemExit) as excinfo:

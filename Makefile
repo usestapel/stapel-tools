@@ -18,7 +18,15 @@ PYTHON ?= python
 # (a test importing a sibling nothing declares) only ever shows up on a clean
 # runner — i.e. after the tag, at the worst possible moment. Warnings do not
 # fail it; SIB001-003 do.
-.PHONY: check lint test nav-sync sibling-lint
+#
+# `peer-graph` is deliberately NOT in `check`: it asks the npm registry, so a
+# laptop without node or without a network cannot run it and `make check` must
+# stay runnable there. CI runs it in the e2e job — the job that already has
+# node and already installs from the real registry — right before
+# `e2e_npm_pins.py`, and the daily schedule fires that job with no push, which
+# is the only way the drift it catches (a PAIR raising its peer floor in
+# ANOTHER repo) ever shows up.
+.PHONY: check lint test nav-sync sibling-lint peer-graph
 
 check: lint sibling-lint nav-sync test
 
@@ -30,6 +38,9 @@ sibling-lint:
 
 nav-sync:
 	$(PYTHON) scripts/check_nav_manifest_sync.py
+
+peer-graph:
+	$(PYTHON) scripts/check_npm_peer_graph.py
 
 test:
 	$(PYTHON) -m pytest -q -p no:cacheprovider
