@@ -72,18 +72,21 @@ CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
 # same engine — so STAPEL_CDN["ALLOWED_IMAGE_EXTENSIONS"] is a promise this
 # image either keeps or breaks, and `stapel_cdn.checks.E004` names the
 # formats it breaks at boot. This stage therefore NAMES every package the
-# stock allowlist (.jpg .jpeg .png .gif .webp .bmp .heic .heif) rests on
-# instead of inheriting them as somebody else's transitive Depends:
+# generated project's allowlist (_module_config.WEB_IMAGE_EXTENSIONS:
+# .jpg .jpeg .png .gif .webp .avif .heic .heif) rests on instead of
+# inheriting them as somebody else's transitive Depends:
 #
 #   jpeg/png/gif/webp  libvips42t64 itself
-#   bmp                vips-magick.so + libmagickcore (libvips has no native
-#                      BMP reader at all — it goes through ImageMagick)
 #   heic/heif          vips-heif.so + libheif1 + libheif-plugin-libde265
-#   avif (not stock)   the same path via libheif-plugin-dav1d, which is a
-#                      few hundred KB and comes with the HEIC set anyway
+#   avif               the same path via libheif-plugin-dav1d
+#
+# .bmp is NOT in that allowlist and needs no package here: libvips has no
+# native BMP reader at all (it goes through the optional ImageMagick module),
+# so the library's own default promised a format the stock pip install cannot
+# decode — E004's exact subject. Add both together or neither.
 #
 # Measured 2026-08-10 in this image (python:3.12-slim-trixie, arm64,
-# libvips 8.16.1): all eight stock formats decode a real file end to end.
+# libvips 8.16.1): every listed format decodes a real file end to end.
 #
 # The runtime stage installs libvips42t64 (the shared LIBRARY) and NOT
 # libvips-dev: headers, and the ~40 -dev packages behind them, are the

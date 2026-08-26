@@ -94,11 +94,47 @@ def required_settings(module: str, workspace_root: Path | None = None) -> list[d
     ]
 
 
+#: Image formats a GENERATED project declares allowed — the intersection of
+#: "what a web product actually receives" and "what any libvips a deployment
+#: is likely to have can read".
+#:
+#: stapel-cdn's own default adds ``.bmp``, and libvips has NO native BMP
+#: reader: ``.bmp`` decodes only through the optional ImageMagick module. On
+#: the plain ``pyvips[binary]`` wheels (the CI runner, a laptop with no apt
+#: libvips) neither ``bmpload`` nor ``magickload`` is registered, so every
+#: generated project carrying cdn failed ``manage.py check`` with
+#: ``stapel_cdn.images.E004`` — a boot-fatal Error for a format no web
+#: front-end uploads. ``.tif``/``.tiff`` are left out for the product reason
+#: rather than the decoder one: they are not a web delivery format.
+#:
+#: ``.avif`` is added for the same measurement in reverse — it rides
+#: ``heifload``, which the wheel does register, and an AVIF round-trip
+#: through the wheel's libvips 8.18.6 succeeds (measured 2026-08-26,
+#: linux/amd64 python:3.12-slim + ``pip install pyvips[binary]``: jpeg, png,
+#: gif, webp, heif and tiff loaders registered; bmp, magick, jxl and jp2k
+#: not). It is what iOS and every modern browser now emit next to HEIC.
+WEB_IMAGE_EXTENSIONS: tuple[str, ...] = (
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif",
+)
+
+#: Keys the SCAFFOLD itself supplies that the module has not declared as an
+#: axis in its capabilities.json. Without this they would be refused by
+#: ``validate_module_config`` on the second validation pass (create_project
+#: injects, scaffold_service re-validates) — the generator would be unable to
+#: narrow a default whose library-side value it knows the generated
+#: deployment cannot honour. An entry here becomes redundant, not wrong, the
+#: day the library declares the axis.
+SCAFFOLD_INJECTED_KEYS: dict[str, set[str]] = {
+    "cdn": {"ALLOWED_IMAGE_EXTENSIONS"},
+}
+
+
 def known_config_keys(module: str, workspace_root: Path | None = None) -> set[str] | None:
     """The module's configurable keys from its capabilities.json, or ``None``
     when the artifact is absent/unreadable (module not yet swept).
 
-    Axes + extension surface + REQUIRED settings. The last one is not a
+    Axes + extension surface + REQUIRED settings + the keys this scaffold
+    injects itself (:data:`SCAFFOLD_INJECTED_KEYS`). The required set is not a
     refinement: without it ``validate_module_config`` hard-rejected the very
     keys a module declares mandatory — a caller supplying ``DATA_OWNERS`` was
     refused because it is not an axis, so the scaffold could not have fixed
@@ -114,7 +150,34 @@ def known_config_keys(module: str, workspace_root: Path | None = None) -> set[st
         if isinstance(e, dict) and "name" in e
     }
     required = {entry["key"] for entry in required_settings(module, workspace_root)}
-    return axes | extensions | required
+    return axes | extensions | required | SCAFFOLD_INJECTED_KEYS.get(module, set())
+
+
+def inject_decodable_image_extensions(
+    module_config: dict[str, dict] | None,
+    selected: list[str],
+) -> dict[str, dict] | None:
+    """Narrow ``STAPEL_CDN["ALLOWED_IMAGE_EXTENSIONS"]`` to formats a generated
+    project can actually decode (:data:`WEB_IMAGE_EXTENSIONS`).
+
+    stapel-cdn 0.10 made libvips the ONE decoder on the image path, so the
+    setting is a promise the deployment keeps or breaks, and
+    ``stapel_cdn.checks.E004`` is boot-fatal about the difference. The library
+    default promises ``.bmp``, which no libvips reads without the ImageMagick
+    module — so the shipped default fails ``manage.py check`` on the very
+    install the scaffold's own requirements produce. The generator knows what
+    it is generating; it states the honest set instead of inheriting one.
+
+    A caller-supplied value is never overwritten: a deployment whose libvips
+    reads more (the generated Dockerfile's does) is entitled to say so.
+    """
+    if "cdn" not in selected:
+        return module_config
+    supplied = (module_config or {}).get("cdn") or {}
+    if "ALLOWED_IMAGE_EXTENSIONS" in supplied:
+        return module_config
+    cdn_config = {**supplied, "ALLOWED_IMAGE_EXTENSIONS": WEB_IMAGE_EXTENSIONS}
+    return {**(module_config or {}), "cdn": cdn_config}
 
 
 def validate_module_config(
@@ -278,6 +341,25 @@ _SETTING_COMMENTS: dict[tuple[str, str], tuple[str, ...]] = {
         "So add an entry for every store stapel-tools cannot see (search",
         "indexes, warehouses, third-party processors, your own apps), and",
         "bump DATA_OWNERS_VERSION when you do.",
+    ),
+    ("cdn", "ALLOWED_IMAGE_EXTENSIONS"): (
+        "What this deployment promises to decode. libvips is stapel-cdn's ONE",
+        "image decoder (0.10) — the upload guard and the processing pipeline",
+        "ask the same engine — so an extension listed here that this build",
+        "cannot read is accepted by the allowlist and then refused with",
+        "error.503.image_decoder_unavailable, which reads to the uploader as",
+        "their file being rejected. stapel_cdn.checks.E004 fails",
+        "`manage.py check` on exactly that mismatch, at boot.",
+        "This list is the portable web set: it holds on a plain",
+        "`pip install pyvips[binary]` (no apt libvips) as well as in this",
+        "project's own Dockerfile. The library default also offers .bmp,",
+        "which libvips reads ONLY through the ImageMagick module — hence its",
+        "absence here, not an oversight.",
+        "TO WIDEN: add the extension AND install its decoder in the image",
+        "(.bmp -> libvips + vips-magick.so/libmagickcore; .tif/.tiff ->",
+        "tiffload, already in most builds; .jxl -> libjxl; .svg -> librsvg),",
+        "then run `manage.py check`: E004 names anything the build cannot",
+        "honour before a single upload is refused.",
     ),
     ("gdpr", "DATA_OWNERS_VERSION"): (
         "Stamped onto every closure, so an audit can tell which inventory",

@@ -2700,6 +2700,15 @@ def create_project(
         })
         if "profiles" in feature_only:
             module_config.setdefault("profiles", {"PROFILES_AVATAR_CHECK": "comm"})
+        # ...and the one cdn default that is NOT the library's: the shipped
+        # ALLOWED_IMAGE_EXTENSIONS promises .bmp, which no libvips reads
+        # without the ImageMagick module, so a generated project failed
+        # `manage.py check` with the boot-fatal stapel_cdn.images.E004 on any
+        # plain `pip install pyvips[binary]`. Narrowed to the portable web
+        # set, per key — an explicit --module-config value still wins.
+        from ._module_config import inject_decodable_image_extensions
+
+        module_config = inject_decodable_image_extensions(module_config, feature_only)
 
     feature_apps = [
         STAPEL_LIBS[key]["dir"] for key in modules

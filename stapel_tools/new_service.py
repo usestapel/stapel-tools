@@ -733,10 +733,19 @@ def scaffold_service(
     against the module's docs/capabilities.json when the sibling checkout has
     one). Transports default to whatever broker the project's .env declares."""
     from ._gdpr_owners import inject_derived_data_owners
-    from ._module_config import validate_module_config
+    from ._module_config import (
+        inject_decodable_image_extensions,
+        validate_module_config,
+    )
 
     selected_modules = [app.removeprefix("stapel_") for app in (stapel_apps or [])]
     validate_module_config(module_config, selected=selected_modules)
+    # A service that installs stapel_cdn must not advertise a format its own
+    # image cannot decode: libvips is the one decoder on that path, and
+    # stapel_cdn.images.E004 is boot-fatal about the gap. The library default
+    # offers .bmp (ImageMagick module only) — narrowed here for every service
+    # this scaffolds, create_project's monolith included.
+    module_config = inject_decodable_image_extensions(module_config, selected_modules)
     # Same law as create_project: a service that installs stapel_gdpr needs the
     # inventory of stores its erasures are certified against, and every owner
     # library in the service publishes its own name and subjects. Derived, not

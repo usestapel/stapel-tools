@@ -928,6 +928,45 @@ class TestCdnAutoWiring:
         assert "STAPEL_PROFILES = {" in settings
         assert '"PROFILES_AVATAR_CHECK": \'comm\',' in settings
 
+    def test_cdn_allowlist_is_narrowed_to_what_a_stock_libvips_decodes(self, tmp_path):
+        """The v0.55.2 publish failure, as a unit.
+
+        stapel-cdn's shipped ALLOWED_IMAGE_EXTENSIONS promises .bmp, and
+        libvips has no native BMP reader — it decodes only through the
+        optional ImageMagick module, which the `pyvips[binary]` wheels do not
+        carry. Since 0.10 libvips is cdn's ONE decoder, so the mismatch is
+        boot-fatal: every generated project carrying cdn failed
+        `manage.py check` with stapel_cdn.images.E004. The generated settings
+        state the portable web set instead of inheriting a promise the
+        deployment cannot keep.
+        """
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
+        settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
+        assert '"ALLOWED_IMAGE_EXTENSIONS": (' in settings
+        for ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif"):
+            assert f"'{ext}'" in settings, ext
+        # The two the promise breaks on: .bmp needs ImageMagick, .tif/.tiff is
+        # not a web delivery format.
+        assert "'.bmp'" not in settings
+        assert "'.tif'" not in settings
+        assert "'.tiff'" not in settings
+        # ...and the settings say how to widen it, where the value is.
+        assert "TO WIDEN" in settings
+
+    def test_explicit_image_extensions_are_never_narrowed(self, tmp_path):
+        """A deployment whose libvips reads more is entitled to say so — the
+        generated Dockerfile's does. Per KEY, not per block: supplying only
+        ASSET_TYPES must still get the safe extension default (above)."""
+        create_project(
+            name="app3", project_type="monolith", title="App3",
+            url="https://x.dev", company_name="X", company_email="x@x.dev",
+            modules=["core", "cdn"], output_dir=tmp_path,
+            use_submodules=False, init_git=False,
+            module_config={"cdn": {"ALLOWED_IMAGE_EXTENSIONS": [".png", ".bmp"]}},
+        )
+        settings = (tmp_path / "app3" / "svc-app3" / "config" / "settings" / "base.py").read_text()
+        assert '"ALLOWED_IMAGE_EXTENSIONS": [\'.png\', \'.bmp\'],' in settings
+
     def test_cdn_without_profiles_renders_no_profiles_block(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
         settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
@@ -1149,6 +1188,51 @@ class TestMultiLibMonolithMountsEachLibUnderItsOwnPrefix:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "ALL_RESOLVED" in result.stdout
+
+    @requires("stapel_cdn", "pyvips")
+    def test_generated_cdn_project_checks_clean_on_a_stock_pyvips(self, tmp_path):
+        """The gate for the v0.55.2 publish failure, at the level it failed.
+
+        No apt libvips here — the `test` extra installs `pyvips[binary]`,
+        whose bundled build registers jpegload/pngload/gifload/webpload/
+        heifload/tiffload and NOT bmpload or magickload. stapel-cdn's shipped
+        ALLOWED_IMAGE_EXTENSIONS declares .bmp, so the generated project
+        failed `manage.py check` with the boot-fatal stapel_cdn.images.E004
+        until the scaffold started stating its own honest set.
+
+        Asserted twice on purpose: the check exits clean (what a deployment
+        experiences), and cdn's own predicate — the SAME function E004 and
+        the runtime 503 both call — reports nothing undecodable (why).
+        """
+        import os as _os
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
+        svc = proj / "svc-app"
+        env = {**_os.environ, "DJANGO_SETTINGS_MODULE": "config.settings.boot_smoke"}
+
+        check = subprocess.run(
+            [sys.executable, "manage.py", "check"],
+            cwd=svc, capture_output=True, text=True, env=env,
+        )
+        assert check.returncode == 0, check.stdout + check.stderr
+        assert "E004" not in check.stdout + check.stderr
+
+        script = (
+            "import django\n"
+            "django.setup()\n"
+            "from stapel_cdn import decoders\n"
+            "from stapel_cdn.conf import cdn_settings\n"
+            "assert decoders.available(), 'no image decoder in this environment'\n"
+            "undecodable = decoders.undecodable_allowed_extensions()\n"
+            "assert not undecodable, f'undecodable: {undecodable}'\n"
+            "print('DECODABLE', *cdn_settings.ALLOWED_IMAGE_EXTENSIONS)\n"
+        )
+        probe = subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=svc, capture_output=True, text=True, env=env,
+        )
+        assert probe.returncode == 0, probe.stdout + probe.stderr
+        assert "DECODABLE" in probe.stdout
 
     def test_backend_prefixes_agree_with_django_mounts(self, tmp_path):
         """nginx-local, prod-nginx and the Vite proxy all render off

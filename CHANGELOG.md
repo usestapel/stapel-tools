@@ -2,6 +2,67 @@
 
 ## [Unreleased]
 
+## [0.55.3] — 2026-08-26
+
+### A generated project promises only the image formats it can decode
+
+The 0.55.2 publish failed its own test jobs: a generated project carrying cdn
+did not pass `manage.py check`.
+
+```
+stapel_cdn.images.E004: STAPEL_CDN['ALLOWED_IMAGE_EXTENSIONS'] declares .bmp
+allowed, but this libvips build has no loader for it
+(bmpload, magickload not registered)
+```
+
+The runner is right and the check is right. stapel-cdn 0.10 made libvips the
+ONE decoder on the image path — the upload guard and the processing pipeline
+ask the same engine — so `ALLOWED_IMAGE_EXTENSIONS` is a promise a deployment
+keeps or breaks, and E004 is boot-fatal about the gap rather than letting it
+surface as `error.503.image_decoder_unavailable` on somebody's avatar. What
+was wrong is the value: **libvips has no native BMP reader at all**. `.bmp`
+decodes only through the optional ImageMagick module, which the
+`pyvips[binary]` wheels (CI, and any laptop without an apt libvips) do not
+carry. Measured 2026-08-26 in `python:3.12-slim` + `pip install pyvips[binary]`
+(libvips 8.18.6, linux/amd64): `jpegload`, `pngload`, `gifload`, `webpload`,
+`heifload`, `tiffload`, `svgload` registered; `bmpload`, `magickload`,
+`jxlload`, `jp2kload` not — and an AVIF round-trip succeeds.
+
+So the scaffold states its own honest set instead of inheriting one
+(`_module_config.WEB_IMAGE_EXTENSIONS`):
+
+    .jpg .jpeg .png .gif .webp .avif .heic .heif
+
+`.bmp` is out for the decoder reason above, `.tif`/`.tiff` for the product one
+(not a web delivery format). `.avif` is in: it rides `heifload`, which the
+wheel does register, and it is what iOS and every modern browser now emit
+beside HEIC. Applied per KEY by `inject_decodable_image_extensions`, in
+`create_project` *and* in `scaffold_service` (so `stapel-new-service
+--stapel-apps stapel_cdn` gets it too) — an explicit `--module-config` value is
+never narrowed, because the generated Dockerfile's libvips does read more.
+
+The generated `settings/base.py` carries the reason and the widening recipe
+beside the value: which package each further format needs, and that
+`manage.py check` will name anything the build cannot honour.
+
+Also: `known_config_keys` now unions `SCAFFOLD_INJECTED_KEYS` — the keys the
+generator supplies itself that a library has not declared as a capability axis
+(cdn has no `ALLOWED_IMAGE_EXTENSIONS` axis today), which the second validation
+pass would otherwise refuse.
+
+Gated by two tests: the rendered settings (unit), and — under
+`STAPEL_TEST_STRICT_SIBLINGS=1`, on the plain `pyvips[binary]` the `test`
+extra installs — a generated cdn monolith that boots, exits `manage.py check`
+clean, and whose `decoders.undecodable_allowed_extensions()` (the same
+predicate E004 and the runtime 503 both call) comes back empty.
+
+**Upstream note:** the defect is in stapel-cdn's own `conf.py` default, which
+ships `.bmp` in `ALLOWED_IMAGE_EXTENSIONS` — a format its only decoder cannot
+read without an optional ImageMagick module nobody's stock install has. Any
+host project that does not override it hits E004 on a plain `pip install
+stapel-cdn[images]`. The scaffold override above fixes every project this tool
+generates; the library default is stapel-cdn's to fix.
+
 ## [0.55.2] — 2026-08-26
 
 ### SCHEMA001 stops warning on the correct state
