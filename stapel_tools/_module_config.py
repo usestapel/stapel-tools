@@ -153,6 +153,26 @@ def known_config_keys(module: str, workspace_root: Path | None = None) -> set[st
     return axes | extensions | required | SCAFFOLD_INJECTED_KEYS.get(module, set())
 
 
+def axis_default(module: str, key: str, workspace_root: Path | None = None):
+    """The library's OWN declared default for one axis, or ``None`` when the
+    module is unswept or does not declare that axis.
+
+    The generator sometimes has to know whether a caller's value is really a
+    CHANGE — "did this project pick its own payment provider, or restate the
+    one the library already ships?" — and the honest answer lives in the
+    module's capabilities.json, not in a constant copied over here. A copied
+    constant is a second table to keep in step with the first, which is the
+    same defect class as the nav mirror the drift gate exists for.
+    """
+    doc = capabilities_doc(module, workspace_root)
+    if doc is None:
+        return None
+    for axis in doc.get("axes", []):
+        if isinstance(axis, dict) and axis.get("key") == key:
+            return axis.get("default")
+    return None
+
+
 def inject_decodable_image_extensions(
     module_config: dict[str, dict] | None,
     selected: list[str],

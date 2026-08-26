@@ -99,13 +99,21 @@ class TestRoutePlan:
         # a signed-in phone confirming a signed-out desktop. Deriving the
         # surface from requiresAuth would have put it behind the gate.
         assert public == {"/login", "/qr-confirm", "/c", "/c/:slug", "/l/:id", "/s",
-                          "/ranking-disclosure"}
-        assert member == {"/new"}
+                          "/ranking-disclosure", "/u/:userId"}
+        # `/new` is the one member-surface route that is not an admin screen
+        # and not a `/account` child; the rest of the member-absolute set is
+        # the staff-gated admin subtree auth's own admin skin hangs from
+        # `admin.root` (TestAdminRoot owns its exact shape).
+        assert {r["path"] for r in plan["member_absolute"]
+                if r.get("gate") != "admin"} == {"/new"}
+        assert "/admin" in member
 
     def test_member_relative_routes_hang_under_account(self):
         plan = self._built()
         paths = {r["path"] for r in plan["account_children"]}
-        assert paths == {"chat", "settings", "settings/security", "listings", "favorites"}
+        assert paths == {"chat", "connections", "settings", "settings/language",
+                         "settings/notifications", "settings/security", "listings",
+                         "favorites"}
         assert plan["account_entry"]["id"] == "account.root"
 
     def test_submenu_orphan_is_dropped_not_thrown(self):
@@ -375,7 +383,7 @@ class TestProjectFiles:
         for key in STOREFRONT_PAIRS:
             info = FRONTEND_REACT_LIBS[key]
             assert deps[info["package"]] == f'^{info["version"]}'
-        assert deps["@stapel/shell-react"].startswith("^0.6.")
+        assert deps["@stapel/shell-react"].startswith("^0.7.")
         assert deps["@stapel/core"].startswith("^0.17.")
         assert deps["react-router"].startswith("^7.")
 

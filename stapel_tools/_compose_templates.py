@@ -955,7 +955,12 @@ RUN_CMD=gunicorn config.wsgi:application --bind 0.0.0.0:8000 --workers 2
 """
 
 # Appended to .env.example (never .env.local) when stapel-billing is among
-# the selected libs: a commented placeholder, not a value — .env.example is
+# the selected libs AND the project runs the library's own default payment
+# provider (create_project._billing_dev_hatch_needed) — the only provider that
+# reads this key. A project that named its own PAYMENT_PROVIDER gets no
+# placeholder here: a committed prompt for a credential nothing in the
+# deployment consults is noise that reads as a requirement.
+# A commented placeholder, not a value — .env.example is
 # committed, so a real secret must never land in it regardless of whether one
 # was supplied at generation time. Left unset, stapel_billing.E104 refuses to
 # boot at prod deploy until the owner fills this in — that refusal is the

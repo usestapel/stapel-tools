@@ -120,14 +120,21 @@ class TestAdminRoot:
     def test_the_storefront_declares_it_when_a_pair_hangs_from_it(self):
         plan = _public_plan(["auth", "profiles", "gdpr", "video"])
         admin = {r["path"] for r in plan["member_absolute"] if r.get("gate") == "admin"}
-        assert admin == {"/admin", "/admin/privacy", "/admin/usage"}
+        assert admin == {
+            "/admin", "/admin/privacy", "/admin/usage", "/admin/sso",
+            "/admin/service-keys", "/admin/staff-roles", "/admin/create-account",
+            "/admin/auth-audit",
+        }
 
     def test_no_admin_tab_without_an_admin_screen(self):
-        """An empty Admin section is its own defect."""
-        plan = _public_plan(["auth", "profiles"])
+        """An empty Admin section is its own defect. auth is NOT the example
+        any more — its own admin skin (sso, service keys, staff roles, account
+        creation, the audit log) hangs from `admin.root`, so a selection
+        carrying auth always has an admin section."""
+        plan = _public_plan(["profiles", "listings"])
         assert not [r for r in plan["member_absolute"] if r.get("gate") == "admin"]
         manifests = F.public_nav_manifests(
-            F.public_nav_pairs(_entries(["auth", "profiles"])), app_package="acme"
+            F.public_nav_pairs(_entries(["profiles", "listings"])), app_package="acme"
         )
         assert not any(
             e["id"] == "admin.root" for m in manifests for e in m["entries"]
@@ -190,6 +197,114 @@ class TestPerRouteAuth:
         assert '{ path: "/qr-confirm", element: <ProtectedRoute><QrConfirmPanel /></ProtectedRoute> },' in src
         # never the sign-in screen: ProtectedRoute redirects THERE.
         assert '{ path: "/login", element: <AuthPanel /> },' in src
+
+
+class TestPublicSurfaceInTheMonolith:
+    """A `surface: "public"` screen whose path is RELATIVE is not an "/app"
+    child. "/app" is the member area and this container gates it whenever auth
+    is wired, so mounting a public screen there puts a login wall in front of
+    a person who by definition has no account. The public container has always
+    hoisted such a screen to a root-level sibling; this one silently did not,
+    and gdpr's `public.privacy-request` — the DSAR form — sat behind the gate
+    in every generated monolith. Mirroring recordings' `share/:linkToken`
+    would have added a second."""
+
+    def _src(self, keys):
+        pairs = F.nav_wired_pairs(_entries(keys), auth_wired=True)
+        plan = F.build_nav_route_plan(pairs)
+        return plan, F.render_routes_tsx(
+            plan, auth_wired=True, want_landing=False, app_route_present=True
+        )
+
+    def test_a_public_relative_top_is_a_root_sibling_not_an_app_child(self):
+        plan, src = self._src(["auth", "gdpr", "recordings"])
+        absolute = {r["path"] for r in plan["absolute_routes"]}
+        assert {"/privacy-request", "/share/:linkToken"} <= absolute
+        assert not {c["path"] for c in plan["app_children"]} & {
+            "privacy-request", "share/:linkToken"
+        }
+
+    def test_the_hoisted_screen_is_not_wrapped_in_the_member_gate(self):
+        """Hoisting relocates the screen; it does not loosen anything. The
+        sibling bucket still honours each route's own `requiresAuth`, which is
+        what keeps auth.qr_confirm (public surface, session required) gated."""
+        _, src = self._src(["auth", "gdpr", "recordings"])
+        assert '{ path: "/privacy-request", element: <PrivacyRequestPane /> },' in src
+        assert '{ path: "/share/:linkToken", element: <SharedRecordingView /> },' in src
+        assert '{ path: "/qr-confirm", element: <ProtectedRoute>' in src
+
+    def test_a_member_relative_top_still_hangs_under_app(self):
+        plan, _ = self._src(["auth", "recordings", "calendar"])
+        app = {c["path"] for c in plan["app_children"]}
+        assert {"recordings", "calendar", "calendar/availability"} <= app
+
+
+# ── the five pairs mirrored in 0.55.5 ────────────────────────────────────────
+
+
+class TestNewlyMirroredPairs:
+    """billing/calendar/forms/recordings/workspaces published nav manifests
+    the registry did not mirror at all, so their screens existed and no
+    scaffolded container mounted one. The drift gate could not see it: it
+    walked the MIRRORS, and there were none to walk."""
+
+    EXPECTED = {
+        "billing": ["account.billing"],
+        "calendar": ["calendar.month", "calendar.availability"],
+        "forms": ["forms.list", "forms.builder", "forms.responses"],
+        "recordings": ["recordings.list", "recordings.detail", "share.view"],
+        "workspaces": [
+            "workspaces.list", "workspaces.settings", "workspaces.members",
+            "workspaces.invitations", "workspaces.audit", "workspaces.invite",
+        ],
+    }
+
+    def test_each_pair_carries_its_entries(self):
+        for key, ids in self.EXPECTED.items():
+            mirror = FRONTEND_REACT_LIBS[key].get("nav")
+            assert mirror, f"{key} lost its nav mirror"
+            assert [e["id"] for e in mirror] == ids, key
+
+    def test_every_new_entry_has_a_mount_recipe(self):
+        for ids in self.EXPECTED.values():
+            for entry_id in ids:
+                assert entry_id in F.NAV_ENTRY_MOUNTS, entry_id
+
+    def test_the_route_param_screens_get_a_wrapper_not_a_placeholder(self):
+        """`formId`/`recordingId`/`linkToken`/`token` are REQUIRED props their
+        own address carries — a placeholder there would be a named gap where
+        the generator actually has the value."""
+        for entry_id, param in (
+            ("forms.builder", "formId"),
+            ("forms.responses", "formId"),
+            ("recordings.detail", "recordingId"),
+            ("share.view", "linkToken"),
+            ("workspaces.invite", "token"),
+        ):
+            assert F.NAV_ENTRY_MOUNTS[entry_id] == {"route_params": {param: "string"}}
+
+    def test_the_workspace_screens_mount_bare(self):
+        """`workspaceId` is optional on every workspaces/forms account screen
+        BECAUSE this contract routes them: with none, the active workspace
+        comes from the runtime selection. Passing a fabricated one would be
+        the generator inventing a scope."""
+        for entry_id in ("workspaces.list", "workspaces.settings",
+                         "workspaces.members", "workspaces.invitations",
+                         "workspaces.audit", "forms.list"):
+            assert F.NAV_ENTRY_MOUNTS[entry_id] == {}
+
+    def test_the_monolith_actually_mounts_them(self):
+        keys = ["auth", "billing", "calendar", "forms", "recordings", "workspaces"]
+        pairs = F.nav_wired_pairs(_entries(keys), auth_wired=True)
+        src = F.render_routes_tsx(
+            F.build_nav_route_plan(pairs),
+            auth_wired=True, want_landing=False, app_route_present=True,
+        )
+        for component in ("WalletPanel", "Calendar", "AvailabilityPane",
+                          "FormsListPane", "RecordingsList", "WorkspacesPage",
+                          "MembersManager", "InviteAcceptPage"):
+            assert f"<{component} " in src or f"<{component} />" in src, component
+        assert "NavPlaceholder" not in src
 
 
 # ── audience, in the member container ────────────────────────────────────────

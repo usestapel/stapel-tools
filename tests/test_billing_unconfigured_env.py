@@ -14,6 +14,29 @@ preset has one file, not a pair) and NEVER into the monolith/microservices
 PROD template (``.env.example``), which instead gets a commented
 ``# STRIPE_SECRET_KEY=`` placeholder so E104 still fires at prod boot until
 the owner configures real keys. That split IS the prod guard.
+
+WHICH projects get the hatch is decided by stapel-billing's own axis, not by
+a Stripe secret handed to the generator. Two facts about the real 0.11.0
+contract force that:
+
+* ``STRIPE_SECRET_KEY`` is not a ``module_config`` key at all — the module's
+  ``docs/capabilities.json`` declares ONE billing axis, ``PAYMENT_PROVIDER``,
+  and ``validate_module_config`` hard-refuses anything outside the axis +
+  extension surface. It is a secret; a generator renders module_config into a
+  committed ``STAPEL_BILLING = {…}`` settings block, which is the last place
+  a secret belongs. It reaches a deployment through the environment
+  (``AppSettings.env_var_names`` → the bare name), which is why the prod
+  ``.env.example`` placeholder is still the right artifact.
+* So the old gate — "was a STRIPE_SECRET_KEY supplied?" — was a branch nobody
+  could ever take. Every billing project got the dev hatch, including one
+  that had named its own payment backend: a placebo flag silently suppressing
+  the single check that would have reported that backend unconfigured.
+
+The gate is now ``PAYMENT_PROVIDER``: left at the library's declared default
+(the Stripe provider, whose credential only ever arrives via env) the project
+gets the hatch and the prod placeholder; naming its own provider it gets
+neither, because host code carries host credentials and E104 is how a
+deployment is supposed to learn they are missing.
 """
 from stapel_tools.create_project import create_project
 
@@ -54,14 +77,42 @@ class TestMinimalBillingWithoutStripeKey:
         assert "ALLOW_UNCONFIGURED_PAYMENT_PROVIDER=1" in text
 
 
-class TestMinimalBillingWithStripeKey:
-    def test_flag_absent_when_a_stripe_key_is_supplied(self, tmp_path):
+class TestMinimalBillingWithItsOwnPaymentProvider:
+    def test_flag_absent_when_the_project_names_its_own_provider(self, tmp_path):
         proj = _create_minimal(
             tmp_path, modules=["core", "billing"],
-            module_config={"billing": {"STRIPE_SECRET_KEY": "sk_test_x"}},
+            module_config={"billing": {"PAYMENT_PROVIDER": "app.billing.HouseProvider"}},
         )
         text = (proj / ".env.example").read_text()
         assert "ALLOW_UNCONFIGURED_PAYMENT_PROVIDER" not in text
+
+    def test_restating_the_library_default_is_not_naming_your_own(self, tmp_path):
+        """The value the axis already carries is not a decision to run
+        something else, so it must not close the hatch — the project still
+        boots on the Stripe provider with no key in sight."""
+        from stapel_tools._module_config import axis_default
+
+        default = axis_default("billing", "PAYMENT_PROVIDER")
+        assert default, "stapel-billing capabilities.json must declare the axis default"
+        proj = _create_minimal(
+            tmp_path, modules=["core", "billing"],
+            module_config={"billing": {"PAYMENT_PROVIDER": default}},
+        )
+        assert "ALLOW_UNCONFIGURED_PAYMENT_PROVIDER=1" in (proj / ".env.example").read_text()
+
+    def test_a_stripe_secret_is_not_a_module_config_key_at_all(self, tmp_path):
+        """The contract the old gate was written against does not exist: the
+        key is refused before any env file is written. A generator branch
+        gated on it was unreachable, which is why the hatch went into every
+        billing project ever generated."""
+        import pytest
+
+        with pytest.raises(SystemExit) as excinfo:
+            _create_minimal(
+                tmp_path, modules=["core", "billing"],
+                module_config={"billing": {"STRIPE_SECRET_KEY": "sk_test_x"}},
+            )
+        assert "STRIPE_SECRET_KEY" in str(excinfo.value)
 
 
 class TestNoBillingSelected:
@@ -97,13 +148,23 @@ class TestMonolithDevVsProdSplit:
         assert "ALLOW_UNCONFIGURED_PAYMENT_PROVIDER" not in local_text
         assert "STRIPE_SECRET_KEY" not in example_text
 
-    def test_stripe_key_supplied_closes_the_dev_hatch_too(self, tmp_path):
+    def test_own_payment_provider_closes_the_dev_hatch_too(self, tmp_path):
         proj = _create_monolith(
             tmp_path, modules=["core", "billing"],
-            module_config={"billing": {"STRIPE_SECRET_KEY": "sk_test_x"}},
+            module_config={"billing": {"PAYMENT_PROVIDER": "app.billing.HouseProvider"}},
         )
         local_text = (proj / ".env.local").read_text()
         assert "ALLOW_UNCONFIGURED_PAYMENT_PROVIDER" not in local_text
+
+    def test_own_payment_provider_drops_the_prod_stripe_placeholder(self, tmp_path):
+        """The placeholder prompts for a credential only the DEFAULT provider
+        reads. Committed into a project that runs its own backend it reads as
+        a requirement the deployment does not have."""
+        proj = _create_monolith(
+            tmp_path, modules=["core", "billing"],
+            module_config={"billing": {"PAYMENT_PROVIDER": "app.billing.HouseProvider"}},
+        )
+        assert "STRIPE_SECRET_KEY" not in (proj / ".env.example").read_text()
 
 
 class TestScaffoldGateSeesTheDevHatch:

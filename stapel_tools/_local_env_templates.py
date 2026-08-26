@@ -92,9 +92,12 @@ STAPEL_AUTH = {
 # outright — E104 is the deliberate prod guard (an unconfigured payment
 # provider must never boot silently), but it is enforced regardless of
 # environment, so a fresh dev checkout hits it too. Spliced in only when
-# billing is selected AND no STRIPE_SECRET_KEY was supplied at generation
-# time (create_project._create_monolith). Never written into .env.example —
-# that split (dev opens the hatch, prod does not) IS the guard.
+# billing is selected AND the project runs the library's own default payment
+# provider (create_project._billing_dev_hatch_needed) — a project that names
+# its own PAYMENT_PROVIDER gets no hatch, because this generator cannot know
+# whether host code holds host credentials and E104 is how it should find
+# out. Never written into .env.example — that split (dev opens the hatch,
+# prod does not) IS the guard.
 DEV_BILLING_UNCONFIGURED_BLOCK = """
 # ─── Dev-only: stapel-billing selected, no Stripe key configured ───────────
 # Without this, `manage.py check`/migrate cannot boot at all — stapel_billing

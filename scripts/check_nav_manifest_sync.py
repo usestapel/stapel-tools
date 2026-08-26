@@ -20,29 +20,48 @@ what lets CI check against a checkout that is not literally a sibling of
 this repo, and what makes this script testable against a fixture tree
 instead of the developer's own machine.
 
-Two skips and one failure — the distinction is the point
---------------------------------------------------------
+One skip and three failures — the distinction is the point
+----------------------------------------------------------
+The gate walks EVERY key of ``FRONTEND_REACT_LIBS``, not only the ones that
+already carry a mirror. That is the whole shape of the defect it was blind
+to until now: it iterated the MIRRORS and asked whether each matched a real
+file, so a pair that started publishing a nav manifest the registry had
+never mirrored was not "drift" to it — it was invisible. Five registered
+pairs (billing, calendar, forms, recordings, workspaces) published a
+combined 15 entries that no generated container mounted, and this script
+printed a green line the entire time. A gate that cannot see the thing it
+guards is worse than no gate, because it is believed.
+
 * No ``stapel-react`` checkout at all → SKIP, exit 0. There is nothing to
   compare against, which is not a defect of a checkout that does not carry
   stapel-react (the same convention ``tests/test_frontend_scaffold.py``'s
-  eslint-plugin check uses).
-* A pair with no ``"nav"`` mirror → not checked. It claims nothing.
+  eslint-plugin check uses). This is the ONLY skip.
+* A pair with no ``"nav"`` mirror AND no published (or empty)
+  ``nav-manifest.json`` → in sync. It claims nothing and the pair publishes
+  nothing: cdn, reviews and attributes each ship that way for a reason
+  recorded in the pair itself.
+* A pair whose real ``nav-manifest.json`` HAS entries while the registry
+  carries no mirror (or an empty one) → **FAILURE**. Those screens exist and
+  no scaffolded container mounts them.
+* A pair whose mirror differs from the real file (entries or version) →
+  **FAILURE**.
 * A pair that DOES carry a ``"nav"`` mirror but whose real
-  ``nav-manifest.json`` is missing → **FAILURE** (spec §3.8). This used to be
-  a silent skip, and a silent skip is exactly the shape of the bug the gate
-  exists for: the mirror claims a nav surface that the package no longer
-  publishes, and every scaffolded project keeps mounting routes for screens
-  that are not there.
+  ``nav-manifest.json`` is missing or empty → **FAILURE** (spec §3.8). This
+  used to be a silent skip too: the mirror claims a nav surface that the
+  package no longer publishes, and every scaffolded project keeps mounting
+  routes for screens that are not there.
 
     python scripts/check_nav_manifest_sync.py
     SIBLING_ROOT=/path/to/workspace python scripts/check_nav_manifest_sync.py
 
-Exit 0 = every mirrored ``"nav"`` entry matches its package's real
-``nav-manifest.json`` (as parsed JSON — key order doesn't matter, content
-does), and every mirrored version matches too. Exit 1 = at least one
-mismatch, printed with both sides so the fix is obvious (update the mirror
-in create_project.py's FRONTEND_REACT_LIBS to match the real file, or vice
-versa if the mirror caught a real regression in the pair itself).
+Exit 0 = for every registered pair, mirror and real ``nav-manifest.json``
+agree about whether there is a nav surface and about what is on it (as
+parsed JSON — key order doesn't matter, content does), version included.
+Exit 1 = at least one disagreement, printed with both sides so the fix is
+obvious (update the mirror in create_project.py's FRONTEND_REACT_LIBS to
+match the real file — and add its ``NAV_ENTRY_MOUNTS`` rows, which
+``tests/test_public_surface.py::TestMountTable`` insists on — or drop the
+mirror if the pair really did retire the surface).
 """
 from __future__ import annotations
 
@@ -98,17 +117,33 @@ def check(root: Path | None = None) -> int:
     checked = 0
     for key, info in FRONTEND_REACT_LIBS.items():
         mirrored_entries = info.get("nav")
-        if mirrored_entries is None:
-            continue
         real = _load_real_manifest(packages, key, info["package"])
-        if real is None:
+        real_published = bool((real or {}).get("entries"))
+        if not mirrored_entries:
+            # The blind spot this gate had: iterating the MIRRORS meant a pair
+            # that grew a nav surface the registry never mirrored was not
+            # compared against anything. A registered pair publishing entries
+            # is a claim on the container, whether or not anyone mirrored it.
+            if real_published:
+                mismatches.append(
+                    f"{key}: {packages / f'{key}-react' / 'nav-manifest.json'} "
+                    f"publishes {len(real['entries'])} entry(ies) "
+                    f"({', '.join(e.get('id', '?') for e in real['entries'])}) "
+                    "and FRONTEND_REACT_LIBS carries NO \"nav\" mirror, so "
+                    "every scaffolded container is missing those screens. "
+                    "Mirror the entries and add their NAV_ENTRY_MOUNTS rows:\n"
+                    f"  real: {json.dumps(real['entries'], indent=2, sort_keys=True)}"
+                )
+            continue
+        if not real_published:
             # Spec §3.8: a REGISTERED pair with no real manifest is drift,
             # not an absence. The mirror is a claim about a published file.
             mismatches.append(
                 f"{key}: FRONTEND_REACT_LIBS carries a \"nav\" mirror, but "
                 f"{packages / f'{key}-react' / 'nav-manifest.json'} does not "
-                "exist. Either the pair stopped publishing a nav manifest "
-                "(drop the mirror) or the checkout is stale (`pnpm gen:nav`)."
+                "exist or publishes no entries. Either the pair stopped "
+                "publishing a nav manifest (drop the mirror) or the checkout "
+                "is stale (`pnpm gen:nav`)."
             )
             continue
         checked += 1
@@ -132,9 +167,14 @@ def check(root: Path | None = None) -> int:
             print(m, "\n")
         return 1
 
+    # Both numbers, because the second is what the old gate could not see: a
+    # green line naming only the mirrors it compared was true and useless.
     print(
         f"check_nav_manifest_sync: {checked} nav-bearing pair(s) match their "
-        f"real nav-manifest.json (under {packages})."
+        f"real nav-manifest.json, and the other "
+        f"{len(FRONTEND_REACT_LIBS) - checked} registered pair(s) publish no "
+        f"nav manifest (walked all {len(FRONTEND_REACT_LIBS)}, under "
+        f"{packages})."
     )
     return 0
 

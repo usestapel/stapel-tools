@@ -90,15 +90,67 @@ def test_a_mirrored_pair_with_no_real_manifest_now_FAILS(gate, tmp_path, monkeyp
     assert gate.check(tmp_path) == 1
 
 
-def test_a_pair_with_no_mirror_is_not_checked(gate, tmp_path, monkeypatch):
-    """A pair that claims nothing is not drifting from anything — cdn, reviews
-    and attributes each ship without a nav manifest for a reason recorded in
-    the pair itself."""
+def test_a_mirrored_pair_whose_real_manifest_went_empty_FAILS(gate, tmp_path, monkeypatch):
+    """An `entries: []` file is the same claim as a missing one — the pair
+    publishes no nav surface — so it gets the same verdict. Treating "the file
+    parses" as "the surface is there" is how a retired screen keeps a route."""
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.2.3", [])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
+    })
+    assert gate.check(tmp_path) == 1
+
+
+def test_a_pair_with_no_mirror_AND_no_real_manifest_is_in_sync(gate, tmp_path, monkeypatch):
+    """A pair that claims nothing against a pair that publishes nothing — cdn,
+    reviews and attributes each ship that way for a reason recorded in the pair
+    itself. This is the ONLY shape a mirror-less pair may have."""
     (tmp_path / "stapel-react" / "packages").mkdir(parents=True)
     _registry(monkeypatch, {
         "demo": {"package": "@stapel/demo-react", "version": "1.2.3"}
     })
     assert gate.check(tmp_path) == 0
+
+
+def test_a_registered_pair_that_publishes_entries_with_NO_mirror_FAILS(
+    gate, tmp_path, monkeypatch
+):
+    """The blind spot: the gate used to iterate the MIRRORS, so a registered
+    pair that grew a nav surface nobody mirrored was compared against nothing
+    and the gate printed a green line. Five pairs (billing, calendar, forms,
+    recordings, workspaces) sat that way with 15 published entries no
+    scaffolded container mounted."""
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.2.3", [ENTRY])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3"}
+    })
+    assert gate.check(tmp_path) == 1
+
+
+def test_an_EMPTY_mirror_against_a_publishing_pair_FAILS(gate, tmp_path, monkeypatch):
+    """`"nav": []` is not a way to opt out of the walk: it says "this pair has
+    no screens", which is a claim, and it is false here."""
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.2.3", [ENTRY])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": []}
+    })
+    assert gate.check(tmp_path) == 1
+
+
+def test_every_registered_pair_is_walked_not_only_the_mirrored_ones(
+    gate, tmp_path, monkeypatch, capsys
+):
+    """The count the gate prints is over the WHOLE registry, so a reader can
+    tell the walk covered the pairs that carry no mirror rather than skipping
+    them."""
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.2.3", [ENTRY])
+    (tmp_path / "stapel-react" / "packages" / "quiet-react").mkdir()
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]},
+        "quiet": {"package": "@stapel/quiet-react", "version": "0.1.0"},
+    })
+    assert gate.check(tmp_path) == 0
+    assert "walked all 2" in capsys.readouterr().out
 
 
 def test_absent_checkout_skips_rather_than_fails(gate, tmp_path, monkeypatch):

@@ -2,6 +2,223 @@
 
 ## [Unreleased]
 
+## [0.55.5] — 2026-08-27
+
+### The frontend registry catches up with the 2026-08 stapel-react release
+
+Seventeen pairs published new versions this month and the scaffold was still
+pinning the last wave. Every pin below was verified 2026-08-27 against BOTH the
+sibling `stapel-react` checkout's `packages/<key>-react/package.json` and the
+live `npm view @stapel/<key>-react version` — identical on all eighteen
+packages, shell included:
+
+| pair | was | now |
+| --- | --- | --- |
+| auth | 0.16.1 | **0.17.1** |
+| attributes | 0.2.0 | **0.3.1** |
+| billing | 0.8.0 | **0.10.0** |
+| calendar | 0.6.1 | **0.8.0** |
+| categories | 0.3.1 | **0.5.0** |
+| cdn | 0.3.0 | **0.4.1** |
+| chat | 0.3.1 | **0.4.0** |
+| forms | 0.1.0 | **0.3.1** |
+| gdpr | 0.1.0 | **0.3.0** |
+| listings | 0.5.0 | **0.7.0** |
+| notifications | 0.9.1 | **0.11.0** |
+| profiles | 0.18.2 | **0.20.0** |
+| recordings | 0.5.1 | **0.6.1** |
+| reviews | 0.3.1 | **0.5.0** |
+| search | 0.5.0 | **0.7.0** |
+| video | 0.1.0 | **0.2.1** |
+| workspaces | 0.17.0 | **0.19.0** |
+
+`@stapel/shell-react` goes to **0.7.1**, and so does
+`FRONTEND_SHELL_SELF_THEMING_FLOOR`: 0.7.1 is the self-theming shell, the one
+that reads the host document's mode itself instead of being told. A generated
+container therefore stops passing `mode="light"` and starts passing
+`staff={user?.is_staff === true}` — both props are OPTIONAL on this shell, and
+the generator emits the contract the pinned version actually installs rather
+than one remembered from a previous release. The floor is measured, not
+remembered: pin the shell back below 0.7.1 and the generator goes back to
+emitting `mode` and no `staff`, because that is what compiles there.
+
+### The nav mirrors carry the screens the pairs now publish
+
+`FRONTEND_REACT_LIBS[<key>]["nav"]` mirrors each pair's own
+`nav-manifest.json`, and five pairs changed theirs:
+
+* **auth** — five admin screens joined, all under the container-owned
+  `admin.root`: `admin.sso_orgs`, `admin.service_keys`, `admin.staff_roles`,
+  `admin.users_create`, `admin.auth_audit`. None of the five takes a single
+  prop — each reads its data off the pair's own runtime, and the four that read
+  a staff-only list answer a refused read with the pair's own `ForbiddenState`
+  — so all five MOUNT. A generated storefront's `/admin` is a section now,
+  not the one or two screens gdpr and video had hung there alone.
+* **gdpr** — `public.privacy-request`, the anonymous DSAR form. `surface:
+  "public"`, `requiresAuth: false`: it is a route a visitor with no account can
+  reach, which is the entire point of a privacy request.
+* **notifications** — `notifications.feed` now mounts `NotificationsPage` (the
+  page frame) instead of the bare `NotificationFeedList`, and
+  `notifications.push` joined under `profiles.settings`. The push pane is the
+  one new entry that does NOT mount: it requires `getToken()`, a push
+  subscription minted by the host's own service worker, and a stub returning a
+  fake token registers a device nothing can ever deliver to. It gets the
+  placeholder that names the prop.
+* **profiles** — `profiles.language`, `profiles.notifications` (both under
+  `profiles.settings`), `profiles.connections`, and `profiles.public` on
+  `/u/:userId` — the pair's first public-surface screen, mounted through a
+  route-param wrapper.
+* **video** — `video.rooms`, the meetings screen, top-level and member-surface.
+
+Every icon these entries name was already in `NAV_ICON_REGISTRY` and in
+`shell-react/src/default/icons.tsx`, and every `placement.parentId` is one the
+generated container already declares (`admin.root`, `account.root`,
+`profiles.settings`) — no new registry names, no new parents, no special cases.
+`scripts/check_nav_manifest_sync.py` is green over every nav-bearing pair.
+
+### Five registered pairs whose screens no container mounted
+
+Billing, calendar, forms, recordings and workspaces had all started publishing
+`nav-manifest.json` files this registry did not mirror at all. Fifteen screens
+existed, were published, were documented in each pair's own manifest — and no
+scaffolded container mounted a single one.
+
+Mirrored now, byte-for-byte against the sibling checkout's real files:
+
+| pair | entries | ids |
+| --- | --- | --- |
+| billing | 1 | `account.billing` |
+| calendar | 2 | `calendar.month`, `calendar.availability` |
+| forms | 3 | `forms.list`, `forms.builder`, `forms.responses` |
+| recordings | 3 | `recordings.list`, `recordings.detail`, `share.view` |
+| workspaces | 6 | `workspaces.list/.settings/.members/.invitations/.audit/.invite` |
+
+Every one of the fifteen has a `NAV_ENTRY_MOUNTS` recipe read off the
+component's real prop interface in `packages/<key>-react/src/default/`, and
+every one of the fifteen MOUNTS — this wave adds no placeholders:
+
+* Ten mount bare. `workspaceId` is optional on all five workspaces account
+  screens and on `FormsListPane` precisely BECAUSE this nav contract routes
+  them: with none supplied, the active workspace comes from the runtime
+  selection, and a screen with no selection renders the pair's own designed
+  "choose a workspace" state. A generator that fabricated a `workspaceId`
+  would be inventing a scope. `WalletPanel`'s only prop (`onCheckoutUrl`) is
+  optional and its default sends the browser to the hosted checkout;
+  `Calendar`/`AvailabilityPane`/`RecordingsList` are optional throughout.
+* Five take a route parameter their own address carries — `forms/:formId`
+  (builder and responses), `recordings/:recordingId`, `share/:linkToken`,
+  `/invite/:token` — and get the one-file `useParams()` wrapper, which says so
+  when the address does not parse. `linkToken` and `token` are bearer secrets:
+  the route is the only place they belong.
+
+No new icon names (all nine distinct icons were already in both
+`NAV_ICON_REGISTRY` and `shell-react/src/default/icons.tsx`) and no new nav
+parents: four pairs hang from the container-owned `account.root`, and
+calendar's and recordings' submenu entries hang from a top their OWN pair
+declares.
+
+One upstream defect is mirrored rather than papered over, and is reported to
+`@stapel/recordings-react` instead: `recordings.detail` declares
+`route.path: "recordings/:recordingId"` under a parent whose path is already
+`recordings`. Every other pair in the fleet writes a submenu child's path
+RELATIVE to its parent (`auth.security` is `security` under `settings`), and
+both containers compose `"<parent>/<child>"`, so this one entry generates
+`recordings/recordings/:recordingId`. The mirror is byte-equal to the
+published file on purpose — the fix belongs in the manifest (`:recordingId`),
+not in a generator that quietly rewrites what a pair declares.
+
+`billing`, `calendar` and `recordings` stay provider-only in `ModulesPanel`,
+and the registry comment saying why is corrected: they are not "headless pairs
+with no `/default` subpath" — each ships one, with an antd peer dep. They are
+provider-only because they now arrive as ROUTES, and a second bare copy
+dropped on the panel is the same screen twice.
+
+### The drift gate could not see the thing it guards
+
+The gate walked the MIRRORS and asked whether each matched a real file. A pair
+that grew a nav surface nobody had mirrored was therefore not drift to it — it
+was invisible. That is how five pairs and fifteen screens sat outside every
+generated container while `scripts/check_nav_manifest_sync.py` printed a green
+line on every run, in `make check` and in CI.
+
+It now walks EVERY key of `FRONTEND_REACT_LIBS` and fails on all three ways the
+two sides can disagree: a real manifest with entries against no (or an empty)
+mirror; a mirror that differs; a mirror against a manifest that is missing or
+has gone empty. The only skip left is the one it always had — no `stapel-react`
+checkout at all, where there is nothing to compare against. Its success line
+now prints both counts (nav-bearing pairs compared, registered pairs walked),
+because a green line naming only the mirrors it compared was true and useless.
+
+`tests/test_nav_manifest_sync.py` grows the case that would have caught this:
+a fixture tree where a pair publishes a manifest and the registry key carries
+no mirror — non-zero exit.
+
+### A public screen behind the member gate, in every generated monolith
+
+Mirroring recordings surfaced a defect that was already there. The public
+container has always hoisted a `surface: "public"` screen with a RELATIVE path
+to a root-level sibling ("/app" is the member area; a public screen is not its
+child). The monolith's own route plan did not, so gdpr's
+`public.privacy-request` — the DSAR form a person with no account is meant to
+open — was mounted inside `/app`, behind `ProtectedRoute`, in every generated
+monolith. Recordings' `share/:linkToken` would have been the second: a share
+link is opened by someone with no session at all.
+
+`build_nav_route_plan` now applies the same rule the public renderer
+documents, and the surface derivation both containers route by lives in one
+function (`nav_entry_surface`) instead of two copies. Hoisting relocates the
+screen and loosens nothing: a sibling route still honours its own
+`requiresAuth`, which is what keeps `auth.qr_confirm` (public surface, session
+required) gated.
+
+### Billing configures the way stapel-billing 0.11.0 actually reads
+
+The scaffold decided whether to open stapel_billing's dev-only E104 hatch
+(`ALLOW_UNCONFIGURED_PAYMENT_PROVIDER=1`) by asking whether the caller had
+supplied `module_config["billing"]["STRIPE_SECRET_KEY"]`. Nobody could ever
+answer yes. `validate_module_config` REFUSES that key: stapel-billing's
+`docs/capabilities.json` declares one billing axis, `PAYMENT_PROVIDER`, and a
+secret is deliberately not among the keys a generator renders into a committed
+`STAPEL_BILLING = {…}` settings block. The branch was unreachable, so every
+billing project got the hatch — including one that had named its own payment
+backend, where the flag was a placebo silently suppressing the single check
+that would have reported that backend unconfigured.
+
+The gate is the real axis now (`_billing_dev_hatch_needed`): a project left on
+the library's own declared default provider — the Stripe one, whose credential
+only ever arrives through the environment and can never be known at generation
+time — gets the dev hatch and the committed `# STRIPE_SECRET_KEY=` prod
+placeholder. A project that names its own `PAYMENT_PROVIDER` gets neither: host
+code carries host credentials, this generator knows nothing about whether they
+are there, and E104 at boot is exactly how a deployment is supposed to find
+out. The prod placeholder moved onto the same condition for the same reason — a
+committed prompt for a credential nothing in the deployment reads is noise that
+reads as a requirement.
+
+Restating the library's default is not naming your own, so the comparison is
+against `capabilities.json`'s declared axis default (`_module_config.
+axis_default`) rather than a constant copied over here — a copied constant
+would be a second table to keep in step with the first, which is the same
+defect class as the nav mirror.
+
+The env var itself was verified against the library, not assumed:
+`AppSettings.env_var_names` resolves `STRIPE_SECRET_KEY` under its bare name
+and the key is in neither `no_env` nor `import_strings`, so the placeholder
+names something stapel-billing still reads.
+
+### The core floor, and why the venv went stale under it
+
+`tests/test_new_library.py::TestGeneratedRepoEndToEnd::test_module_kind_suite_is_green`
+failed on a development machine whose venv still carried `stapel-core` 0.29.0,
+against a generated module importing `stapel_core.django.api.views.
+StapelAPIView` (published in core 0.37.0). The `test` extra's floor —
+`stapel-core>=0.45.0,<1` — was already correct and already above both that
+requirement and the `STAPEL_LIBS["core"]` pin (0.44.2) the generated project
+itself carries, and CI installs `stapel-core` from git main on top of it, so
+neither floor nor CI could go stale. What had gone stale was one venv that was
+never re-synced after the floor rose. Nothing to raise; `pip install -U
+stapel-core` (0.47.0) is what closed it, and the test passes.
+
 ## [0.55.4] — 2026-08-26
 
 ### The scaffold hands a pair a test task the CI runner can actually finish

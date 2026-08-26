@@ -761,6 +761,15 @@ def nav_wired_pairs(react_entries: list[dict], *, auth_wired: bool) -> list[dict
     return [e for e in react_entries if e.get("nav") and (e["key"] != "auth" or auth_wired)]
 
 
+def nav_entry_surface(entry: dict) -> str:
+    """The entry's resolved surface — declared, or derived from
+    ``requiresAuth``. The same derivation ``@stapel/shell-react``'s
+    ``navEntrySurface`` does, in ONE place here: both container renderers
+    route by surface, and two copies of the rule is how they came to
+    disagree about where a public screen belongs."""
+    return entry.get("surface") or ("member" if entry["requiresAuth"] else "public")
+
+
 def build_nav_route_plan(nav_pairs: list[dict]) -> dict:
     """Pure, deterministic route-tree plan ``render_routes_tsx`` turns into
     react-router v7 route objects — the SCRIPTED (no-LLM) decision tree over
@@ -813,6 +822,26 @@ def build_nav_route_plan(nav_pairs: list[dict]) -> dict:
         path = top["route"]["path"]
         if path.startswith("/"):
             absolute_routes.append({"path": path, "entry": top})
+            continue
+        if nav_entry_surface(top) == "public":
+            # A PUBLIC-surface screen with a relative path is not an "/app"
+            # child: "/app" is the member area, and this container gates it
+            # whenever auth is wired. The public renderer has always hoisted
+            # such a screen to a root-level sibling
+            # (build_public_route_plan's own rule); this plan did not, so
+            # gdpr's `public.privacy-request` — the DSAR form a person with
+            # no account is supposed to be able to open — sat behind the
+            # login wall in every generated monolith, and recordings'
+            # `share/:linkToken` would have joined it. A sibling route still
+            # honours its own `requiresAuth` (render_routes_tsx), so this
+            # relocates the screen without loosening anything.
+            absolute_routes.append({"path": f"/{path}", "entry": top})
+            for child in sorted(
+                children_by_parent.get(top["id"], []), key=lambda e: (e["order"], e["id"])
+            ):
+                absolute_routes.append(
+                    {"path": f'/{path}/{child["route"]["path"]}', "entry": child}
+                )
             continue
         app_children.append({"path": path, "entry": top})
         for child in sorted(children_by_parent.get(top["id"], []), key=lambda e: (e["order"], e["id"])):
@@ -1682,15 +1711,38 @@ ADMIN_ROOT_ENTRY = {
 # naming that fact, not a mount that may or may not compile. The test
 # `test_nav_entry_mounts_covers_every_registered_entry` keeps the gap visible.
 NAV_ENTRY_MOUNTS: dict[str, dict] = {
-    # auth-react 0.16.0 — AuthPanel/QrConfirmPanel/SecuritySettings: every
+    # auth-react 0.17.1 — AuthPanel/QrConfirmPanel/SecuritySettings: every
     # prop optional (src/default/*.tsx).
     "auth.login": {},
     "auth.qr_confirm": {},
     "auth.security": {},
-    # notifications-react 0.9.1 — NotificationFeedList: `limit?` only.
+    # auth-react 0.17.1 admin skin (src/default/admin/*.tsx) — all five panels
+    # take NO props at all: each reads its data off the pair's own runtime, and
+    # the four that read a staff-only list answer a refused read with the
+    # pair's own `ForbiddenState` (`forbidden.tsx`). The container hands over
+    # nothing; the staff gate around the whole subtree is still its own.
+    "admin.sso_orgs": {},
+    "admin.service_keys": {},
+    "admin.staff_roles": {},
+    "admin.users_create": {},
+    "admin.auth_audit": {},
+    # notifications-react 0.11.0 — NotificationsPage: every prop optional.
     "notifications.feed": {},
-    # profiles-react 0.18.2 — ProfileSettings: every prop optional.
+    # notifications-react 0.11.0 — PushSettingsPane requires `getToken()`, the
+    # function that mints a push subscription token from the host's OWN service
+    # worker / native bridge. There is no service worker in a generated
+    # container to mint one from, and a stub returning a fake token registers a
+    # device that can never be delivered to — so the entry gets the placeholder
+    # naming the prop.
+    "notifications.push": {"container": ("getToken",)},
+    # profiles-react 0.20.0 — ProfileSettings/LanguageSettings/
+    # NotificationPreferences/ConnectionsPage: every prop optional.
+    # PublicProfilePage requires `userId`, which its own route carries.
     "profiles.settings": {},
+    "profiles.language": {},
+    "profiles.notifications": {},
+    "profiles.connections": {},
+    "profiles.public": {"route_params": {"userId": "string"}},
     # categories-react 0.2.0
     "categories.catalog": {},
     "categories.category": {"route_params": {"slug": "string"}},
@@ -1723,11 +1775,53 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
         "option_props": {"defaultType": "doc_type"},
     },
     "search.ranking": {},
-    # gdpr-react 0.1.0 — PrivacyPane/PrivacyAdminPane: every prop optional.
+    # gdpr-react 0.3.0 — PrivacyPane/PrivacyAdminPane/PrivacyRequestPane:
+    # every prop optional. The request pane's `captcha` slot stays unfilled:
+    # a public DSAR form with no captcha is the pair's own default, and a
+    # container cannot invent a provider's widget.
     "account.privacy": {},
     "admin.privacy": {},
-    # video-react 0.1.0 — ScopeUsagePane: every prop optional.
+    "public.privacy-request": {},
+    # video-react 0.2.1 — ScopeUsagePane/RoomsPane: every prop optional.
     "admin.usage": {},
+    "video.rooms": {},
+    # billing-react 0.10.0 — WalletPanel's only prop is `onCheckoutUrl`, and
+    # it is optional: omitted, the pair sends the browser to the hosted
+    # checkout with `location.assign`. A container that passed its router's
+    # navigate would be handing a react-router navigate an off-origin URL.
+    "account.billing": {},
+    # calendar-react 0.8.0 — Calendar/AvailabilityPane: every prop optional.
+    # `viewerId` is among them, so owner-only controls stay hidden until a
+    # host supplies one; that is the pair's own designed degradation, not a
+    # slot this generator can fill from a session it does not read.
+    "calendar.month": {},
+    "calendar.availability": {},
+    # forms-react 0.3.1 — `workspaceId` is optional on all three (the runtime's
+    # active selection answers it, which is exactly what the routable case
+    # means), but the builder and the responses table both REQUIRE `formId`,
+    # and their routes carry it.
+    "forms.list": {},
+    "forms.builder": {"route_params": {"formId": "string"}},
+    "forms.responses": {"route_params": {"formId": "string"}},
+    # recordings-react 0.6.1 — RecordingsList: every prop optional (`onOpen`
+    # omitted renders static rows; the detail route is reached from the menu).
+    # The other two require the id their own address carries, and `linkToken`
+    # is a BEARER SECRET: it belongs in the route and nowhere else.
+    "recordings.list": {},
+    "recordings.detail": {"route_params": {"recordingId": "string"}},
+    "share.view": {"route_params": {"linkToken": "string"}},
+    # workspaces-react 0.19.0 — every account screen's `workspaceId` is
+    # optional BECAUSE this nav contract routes it: with none, the active
+    # workspace comes from the runtime selection and a screen with no
+    # selection renders the pair's own "choose a workspace" state. The invite
+    # page is the exception and the only required prop in the pair: `token`,
+    # off its own public `/invite/:token` route.
+    "workspaces.list": {},
+    "workspaces.settings": {},
+    "workspaces.members": {},
+    "workspaces.invitations": {},
+    "workspaces.audit": {},
+    "workspaces.invite": {"route_params": {"token": "string"}},
     # the container's own.
     "account.root": {"local": "AccountHome"},
     "admin.root": {"local": "AdminHome"},
@@ -1805,8 +1899,7 @@ def build_public_route_plan(manifests: list[dict]) -> dict:
             continue  # orphan — dropped, not thrown (mirrors resolveNav)
         children_by_parent.setdefault(parent_id, []).append(e)
 
-    def surface_of(entry: dict) -> str:
-        return entry.get("surface") or ("member" if entry["requiresAuth"] else "public")
+    surface_of = nav_entry_surface
 
     def _route(path: str, entry: dict) -> dict:
         # `gate` names the EXTRA gate a route needs beyond its surface. Today

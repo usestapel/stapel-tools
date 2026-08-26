@@ -341,8 +341,11 @@ FRONTEND_URL={{url}}
 """
 
 # Appended to MINIMAL_ENV_EXAMPLE (create_project._create_minimal) only when
-# stapel-billing is selected with no STRIPE_SECRET_KEY supplied at generation
-# time. This preset has one env file, not a dev/prod pair (DJANGO_ENV is a
+# stapel-billing is selected AND the project runs the library's own default
+# payment provider (create_project._billing_dev_hatch_needed): a project that
+# names its own PAYMENT_PROVIDER owns that provider's credentials, and E104 is
+# how it learns they are missing.
+# This preset has one env file, not a dev/prod pair (DJANGO_ENV is a
 # runtime branch in config/settings.py, not a second template) — so the
 # guard is the same one every other dev-only default here already relies on
 # (SECRET_KEY, DEBUG, ALLOWED_HOSTS): remove it deliberately before

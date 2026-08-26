@@ -453,7 +453,7 @@ STAPEL_LIBS = {
 # and because the nav mirror below is what the drift gate checks. Splitting it
 # into a second registry would mean two places to pin one package.
 #
-# Pins verified 2026-08-23 against BOTH the sibling stapel-react checkout's
+# Pins verified 2026-08-27 against BOTH the sibling stapel-react checkout's
 # `packages/<key>-react/package.json` `version` AND the live
 # `npm view @stapel/<key>-react version` (identical for every entry — the
 # workspace checkout is not ahead of its own last publish for these
@@ -482,12 +482,16 @@ STAPEL_LIBS = {
 # export that is genuinely mountable with **zero required props** (read off
 # each pair's own `src/default/*.tsx` prop interfaces — the actual gate, not
 # a guess): `AuthPanel` (auth), `NotificationFeedList` (notifications),
-# `ProfileSettings` (profiles). Pairs that ship a `/default` subpath but
-# whose every component needs an app-supplied id the scaffold cannot
-# fabricate (`workspaces`: `WorkspaceSettings`/`MembersManager` both require
-# `workspaceId`) are wired provider-only, same as pairs with no `/default`
-# subpath at all (billing, calendar, recordings — genuinely headless, no
-# antd peer dep). Absent key = no default component to mount.
+# `ProfileSettings` (profiles). Pairs whose `/default` screens are all
+# WORKSPACE screens (`workspaces`, `forms`) are wired provider-only even
+# though their props are optional now: those screens read the runtime's
+# active workspace selection, which their own nav contract establishes by
+# routing them — a bare mount outside it renders "choose a workspace" and
+# nothing else. `billing`, `calendar` and `recordings` are provider-only for
+# the same reason and not for the older one (they DO ship a `/default`
+# subpath and an antd peer dep): each publishes a nav manifest, so its
+# screens arrive as ROUTES, and a second bare copy dropped on the panel
+# would be the same screen twice. Absent key = no default component to mount.
 #
 # `nav` is a MANUALLY PINNED MIRROR of that pair's own `nav-manifest.json`
 # (the same discipline as the version pins). Drift between mirror and real
@@ -500,7 +504,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.16.1",
+        "version": "0.17.1",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
@@ -510,7 +514,9 @@ FRONTEND_REACT_LIBS = {
         # ALSO requiring auth — the fleet's first entry proving the two axes
         # are independent (a signed-in phone confirms a signed-out desktop);
         # auth.security nests under profiles.settings (dropped by
-        # resolveNav's own orphan rule when profiles isn't installed).
+        # resolveNav's own orphan rule when profiles isn't installed). The
+        # five `admin.*` entries hang from the container-owned `admin.root`,
+        # so an install without an admin section drops them the same way.
         "nav": [
             {
                 "id": "auth.login",
@@ -546,31 +552,136 @@ FRONTEND_REACT_LIBS = {
                 "requiresAuth": True,
                 "order": 10,
             },
+            {
+                "id": "admin.sso_orgs",
+                "labelKey": "auth.nav.admin_sso",
+                "icon": "AppstoreOutlined",
+                "route": {"path": "sso"},
+                "component": {"export": "SsoOrgsPanel", "subpath": "default/admin"},
+                "placement": {"level": "submenu", "parentId": "admin.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 40,
+            },
+            {
+                "id": "admin.service_keys",
+                "labelKey": "auth.nav.admin_service_keys",
+                "icon": "SafetyCertificateOutlined",
+                "route": {"path": "service-keys"},
+                "component": {"export": "ServiceKeysPanel", "subpath": "default/admin"},
+                "placement": {"level": "submenu", "parentId": "admin.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 41,
+            },
+            {
+                "id": "admin.staff_roles",
+                "labelKey": "auth.nav.admin_staff_roles",
+                "icon": "UserOutlined",
+                "route": {"path": "staff-roles"},
+                "component": {"export": "StaffRolesPanel", "subpath": "default/admin"},
+                "placement": {"level": "submenu", "parentId": "admin.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 42,
+            },
+            {
+                "id": "admin.users_create",
+                "labelKey": "auth.nav.admin_users",
+                "icon": "PlusOutlined",
+                "route": {"path": "create-account"},
+                "component": {"export": "AdminUsersPanel", "subpath": "default/admin"},
+                "placement": {"level": "submenu", "parentId": "admin.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 43,
+            },
+            {
+                "id": "admin.auth_audit",
+                "labelKey": "auth.nav.admin_audit",
+                "icon": "AuditOutlined",
+                "route": {"path": "auth-audit"},
+                "component": {"export": "AdminAuditPanel", "subpath": "default/admin"},
+                "placement": {"level": "submenu", "parentId": "admin.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 44,
+            },
         ],
     },
     "attributes": {
         # L0 — no client, no provider, no runtime. See the dict docstring.
         "package": "@stapel/attributes-react",
-        "version": "0.2.0",
+        "version": "0.3.1",
         "register_i18n": "registerAttributesI18n",
     },
     "billing": {
         "package": "@stapel/billing-react",
-        "version": "0.8.0",
+        "version": "0.10.0",
         "provider": "BillingProvider",
         "create_runtime": "createBillingRuntime",
         "register_i18n": "registerBillingI18n",
+        # One entry, hanging from the container-owned `account.root`: the
+        # wallet is an account screen, never a tab of its own.
+        "nav": [
+            {
+                "id": "account.billing",
+                "labelKey": "billing.wallet.heading",
+                "icon": "TagOutlined",
+                "route": {"path": "billing"},
+                "component": {"export": "WalletPanel", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 80,
+            },
+        ],
     },
     "calendar": {
         "package": "@stapel/calendar-react",
-        "version": "0.6.1",
+        "version": "0.8.0",
         "provider": "CalendarProvider",
         "create_runtime": "createCalendarRuntime",
         "register_i18n": "registerCalendarI18n",
+        # `calendar.availability` nests under `calendar.month`, a parent this
+        # SAME pair declares — so both stand or fall together, and no
+        # container root is involved.
+        "nav": [
+            {
+                "id": "calendar.month",
+                "labelKey": "calendar.view.heading",
+                "icon": "ClockCircleOutlined",
+                "route": {"path": "calendar"},
+                "component": {"export": "Calendar", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 40,
+            },
+            {
+                "id": "calendar.availability",
+                "labelKey": "calendar.availability.heading",
+                "icon": "OrderedListOutlined",
+                "route": {"path": "availability"},
+                "component": {"export": "AvailabilityPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "calendar.month"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 10,
+            },
+        ],
     },
     "categories": {
         "package": "@stapel/categories-react",
-        "version": "0.3.1",
+        "version": "0.5.0",
         "provider": "CategoriesProvider",
         "create_runtime": "createCategoriesRuntime",
         "register_i18n": "registerCategoriesI18n",
@@ -607,14 +718,14 @@ FRONTEND_REACT_LIBS = {
         # menu item leading nowhere would be worse than its absence
         # (storefront spec §13.6 item 8).
         "package": "@stapel/cdn-react",
-        "version": "0.3.0",
+        "version": "0.4.1",
         "provider": "CdnProvider",
         "create_runtime": "createCdnRuntime",
         "register_i18n": "registerCdnI18n",
     },
     "chat": {
         "package": "@stapel/chat-react",
-        "version": "0.3.1",
+        "version": "0.4.0",
         "provider": "ChatProvider",
         "create_runtime": "createChatRuntime",
         "register_i18n": "registerChatI18n",
@@ -641,24 +752,62 @@ FRONTEND_REACT_LIBS = {
         # audit FR-3). Registered here, its runtime, provider and catalogue join
         # `modules.tsx` like every other pair's.
         #
-        # No `default_component`: every screen `@stapel/forms-react/default`
-        # exports needs an id the scaffold cannot fabricate (`FormsListPane`
-        # requires `workspaceId`) — the same treatment as workspaces.
+        # No `default_component`: `FormsListPane` mounts with zero required
+        # props, but it is a workspace screen that reads the runtime's active
+        # selection — the pair's own nav contract routes it rather than
+        # dropping it on a page — so the scaffold routes it too, or not at all.
         #
-        # No `nav` mirror YET: forms-react 0.1.0 publishes no
-        # `nav-manifest.json` at all (it declares no `src/nav/manifest.ts`), and
-        # a mirror claiming entries the package does not publish is exactly what
-        # `scripts/check_nav_manifest_sync.py` exists to refuse. The mirror lands
-        # in the same wave the pair's own declaration does.
+        # The `nav` mirror below is what makes those screens ROUTABLE: the
+        # builder and the responses table both read `:formId` off the address
+        # (NAV_ENTRY_MOUNTS route_params), and all three hang from the
+        # container-owned `account.root`.
         "package": "@stapel/forms-react",
-        "version": "0.1.0",
+        "version": "0.3.1",
         "provider": "FormsProvider",
         "create_runtime": "createFormsRuntime",
         "register_i18n": "registerFormsI18n",
+        "nav": [
+            {
+                "id": "forms.list",
+                "labelKey": "forms.nav.list",
+                "icon": "ProfileOutlined",
+                "route": {"path": "forms"},
+                "component": {"export": "FormsListPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 60,
+            },
+            {
+                "id": "forms.builder",
+                "labelKey": "forms.nav.builder",
+                "icon": "AppstoreOutlined",
+                "route": {"path": "forms/:formId"},
+                "component": {"export": "FormBuilderPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": False,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 61,
+            },
+            {
+                "id": "forms.responses",
+                "labelKey": "forms.nav.responses",
+                "icon": "OrderedListOutlined",
+                "route": {"path": "forms/:formId/responses"},
+                "component": {"export": "ResponsesPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": False,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 62,
+            },
+        ],
     },
     "gdpr": {
         "package": "@stapel/gdpr-react",
-        "version": "0.1.0",
+        "version": "0.3.0",
         "provider": "GdprProvider",
         "create_runtime": "createGdprRuntime",
         "register_i18n": "registerGdprI18n",
@@ -676,6 +825,18 @@ FRONTEND_REACT_LIBS = {
                 "order": 90,
             },
             {
+                "id": "public.privacy-request",
+                "labelKey": "gdpr.public.heading",
+                "icon": "SafetyCertificateOutlined",
+                "route": {"path": "privacy-request"},
+                "component": {"export": "PrivacyRequestPane", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 900,
+            },
+            {
                 "id": "admin.privacy",
                 "labelKey": "gdpr.admin.heading",
                 "icon": "AuditOutlined",
@@ -691,7 +852,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.5.0",
+        "version": "0.7.0",
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -748,7 +909,7 @@ FRONTEND_REACT_LIBS = {
     },
     "notifications": {
         "package": "@stapel/notifications-react",
-        "version": "0.9.1",
+        "version": "0.11.0",
         "provider": "NotificationsProvider",
         "create_runtime": "createNotificationsRuntime",
         "register_i18n": "registerNotificationsI18n",
@@ -759,17 +920,28 @@ FRONTEND_REACT_LIBS = {
                 "labelKey": "notifications.nav.feed",
                 "icon": "BellOutlined",
                 "route": {"path": "notifications"},
-                "component": {"export": "NotificationFeedList", "subpath": "default"},
+                "component": {"export": "NotificationsPage", "subpath": "default"},
                 "placement": {"level": "top"},
                 "menuVisibleDefault": True,
                 "requiresAuth": True,
                 "order": 20,
             },
+            {
+                "id": "notifications.push",
+                "labelKey": "notifications.nav.push",
+                "icon": "BellOutlined",
+                "route": {"path": "settings/push"},
+                "component": {"export": "PushSettingsPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "profiles.settings"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "order": 30,
+            },
         ],
     },
     "profiles": {
         "package": "@stapel/profiles-react",
-        "version": "0.18.2",
+        "version": "0.20.0",
         "provider": "ProfilesProvider",
         "create_runtime": "createProfilesRuntime",
         "register_i18n": "registerProfilesI18n",
@@ -786,20 +958,107 @@ FRONTEND_REACT_LIBS = {
                 "requiresAuth": True,
                 "order": 90,
             },
+            {
+                "id": "profiles.language",
+                "labelKey": "profiles.nav.language",
+                "icon": "MessageOutlined",
+                "route": {"path": "language"},
+                "component": {"export": "LanguageSettings", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "profiles.settings"},
+                "menuVisibleDefault": False,
+                "requiresAuth": True,
+                "order": 20,
+            },
+            {
+                "id": "profiles.notifications",
+                "labelKey": "profiles.nav.notifications",
+                "icon": "BellOutlined",
+                "route": {"path": "notifications"},
+                "component": {"export": "NotificationPreferences", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "profiles.settings"},
+                "menuVisibleDefault": False,
+                "requiresAuth": True,
+                "order": 30,
+            },
+            {
+                "id": "profiles.connections",
+                "labelKey": "profiles.nav.connections",
+                "icon": "HeartOutlined",
+                "route": {"path": "connections"},
+                "component": {"export": "ConnectionsPage", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "order": 91,
+            },
+            {
+                "id": "profiles.public",
+                "labelKey": "profiles.nav.public_profile",
+                "icon": "ProfileOutlined",
+                "route": {"path": "/u/:userId"},
+                "component": {"export": "PublicProfilePage", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 92,
+            },
         ],
     },
     "recordings": {
         "package": "@stapel/recordings-react",
-        "version": "0.5.1",
+        "version": "0.6.1",
         "provider": "RecordingsProvider",
         "create_runtime": "createRecordingsRuntime",
         "register_i18n": "registerRecordingsI18n",
+        # `share.view` is the fleet's second public-surface screen carried by
+        # an otherwise member-only pair: a share link is opened by someone
+        # with no session at all, so `requiresAuth: false` and the token in
+        # the address are the whole access decision.
+        "nav": [
+            {
+                "id": "recordings.list",
+                "labelKey": "recordings.list.heading",
+                "icon": "FolderOpenOutlined",
+                "route": {"path": "recordings"},
+                "component": {"export": "RecordingsList", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 40,
+            },
+            {
+                "id": "recordings.detail",
+                "labelKey": "recordings.detail.heading",
+                "icon": "ProfileOutlined",
+                "route": {"path": "recordings/:recordingId"},
+                "component": {"export": "RecordingDetailPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "recordings.list"},
+                "menuVisibleDefault": False,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 41,
+            },
+            {
+                "id": "share.view",
+                "labelKey": "recordings.share.heading",
+                "icon": "AppstoreOutlined",
+                "route": {"path": "share/:linkToken"},
+                "component": {"export": "SharedRecordingView", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 90,
+            },
+        ],
     },
     "reviews": {
         # No nav manifest either — reviews render inside a listing page and a
         # seller page, never on a route of their own (§13.8 item 11).
         "package": "@stapel/reviews-react",
-        "version": "0.3.1",
+        "version": "0.5.0",
         "provider": "ReviewsProvider",
         "create_runtime": "createReviewsRuntime",
         "register_i18n": "registerReviewsI18n",
@@ -807,7 +1066,7 @@ FRONTEND_REACT_LIBS = {
     "search": {
         # No STAPEL_LIBS entry — see the dict docstring.
         "package": "@stapel/search-react",
-        "version": "0.5.0",
+        "version": "0.7.0",
         "provider": "SearchProvider",
         "create_runtime": "createSearchRuntime",
         "register_i18n": "registerSearchI18n",
@@ -840,11 +1099,23 @@ FRONTEND_REACT_LIBS = {
     },
     "video": {
         "package": "@stapel/video-react",
-        "version": "0.1.0",
+        "version": "0.2.1",
         "provider": "VideoProvider",
         "create_runtime": "createVideoRuntime",
         "register_i18n": "registerVideoI18n",
         "nav": [
+            {
+                "id": "video.rooms",
+                "labelKey": "video.rooms.heading",
+                "icon": "MessageOutlined",
+                "route": {"path": "meetings"},
+                "component": {"export": "RoomsPane", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 40,
+            },
             {
                 "id": "admin.usage",
                 "labelKey": "video.usage.heading",
@@ -861,10 +1132,90 @@ FRONTEND_REACT_LIBS = {
     },
     "workspaces": {
         "package": "@stapel/workspaces-react",
-        "version": "0.17.0",
+        "version": "0.19.0",
         "provider": "WorkspacesProvider",
         "create_runtime": "createWorkspacesRuntime",
         "register_i18n": "registerWorkspacesI18n",
+        # Five account screens plus `workspaces.invite`, which is PUBLIC and
+        # absolute (`/invite/:token`): an invitee opens it before they have an
+        # account, so it cannot hang under `account.root`. `workspaceId` is
+        # optional on all five account screens precisely because this contract
+        # ROUTES them — the runtime's active selection is what they read (see
+        # the `default_component` note in this dict's docstring).
+        "nav": [
+            {
+                "id": "workspaces.list",
+                "labelKey": "workspaces.nav.workspaces",
+                "icon": "AppstoreOutlined",
+                "route": {"path": "workspaces"},
+                "component": {"export": "WorkspacesPage", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 10,
+            },
+            {
+                "id": "workspaces.settings",
+                "labelKey": "workspaces.nav.settings",
+                "icon": "ProfileOutlined",
+                "route": {"path": "workspaces/settings"},
+                "component": {"export": "WorkspaceSettings", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 11,
+            },
+            {
+                "id": "workspaces.members",
+                "labelKey": "workspaces.nav.members",
+                "icon": "UserOutlined",
+                "route": {"path": "workspaces/members"},
+                "component": {"export": "MembersManager", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 12,
+            },
+            {
+                "id": "workspaces.invitations",
+                "labelKey": "workspaces.nav.invitations",
+                "icon": "MessageOutlined",
+                "route": {"path": "workspaces/invitations"},
+                "component": {"export": "InvitationsPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 13,
+            },
+            {
+                "id": "workspaces.audit",
+                "labelKey": "workspaces.nav.audit",
+                "icon": "AuditOutlined",
+                "route": {"path": "workspaces/audit"},
+                "component": {"export": "AuditTrailPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 14,
+            },
+            {
+                "id": "workspaces.invite",
+                "labelKey": "workspaces.nav.invite",
+                "icon": "MessageOutlined",
+                "route": {"path": "/invite/:token"},
+                "component": {"export": "InviteAcceptPage", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 0,
+            },
+        ],
     },
 }
 # ---------------------------------------------------------------------------
@@ -1118,13 +1469,13 @@ FRONTEND_ROUTER_DEPS = {
 # project with routing active but no nav-bearing module (e.g. `--landing`
 # alone never needs the shell).
 FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
-FRONTEND_SHELL_REACT_VERSION = "0.6.0"
+FRONTEND_SHELL_REACT_VERSION = "0.7.1"
 
 # The first `@stapel/shell-react` release that themes ITSELF and reads the
 # container's staff answer. Two facts, one release, because they are one
 # change in the pair:
 #
-#   * `mode` becomes OPTIONAL. Up to and including the published 0.6.0 it is
+#   * `mode` becomes OPTIONAL. Up to and including 0.6.0 it is
 #     `readonly mode: ThemeMode` — REQUIRED (verified against the 0.6.0
 #     tarball's `dist/default/AppShell.d.ts` and `PublicShell.d.ts`), so a
 #     generated container that stops passing it does not typecheck. From this
@@ -1133,17 +1484,19 @@ FRONTEND_SHELL_REACT_VERSION = "0.6.0"
 #   * `AppShellProps` gains `staff` — the fact the container reads off auth's
 #     session (`user.is_staff`), because the shell reads no session itself.
 #
-# Both exist in the stapel-react checkout and neither is published as of
-# 0.6.0. Emitting them regardless is the same "mirror ahead of npm" class that
-# broke the 0.54.0 publish, wearing a TypeScript costume instead of a
-# resolution one — so the emission is gated on the PIN, not on memory: raise
-# `FRONTEND_SHELL_REACT_VERSION` to the release that ships them and the
-# generated container changes shape in the same commit. Below the floor a
+# Both are PUBLISHED as of 0.7.1 — `readonly mode?: ThemeMode` and
+# `readonly staff?: boolean` read off the 0.7.1 tarball's own
+# `dist/default/AppShell.d.ts` / `PublicShell.d.ts` (2026-08-27), not off the
+# sibling checkout. Emitting them before that was the same "mirror ahead of
+# npm" class that broke the 0.54.0 publish, wearing a TypeScript costume
+# instead of a resolution one — so the emission stays gated on the PIN, not on
+# memory: move `FRONTEND_SHELL_REACT_VERSION` and the generated container
+# changes shape in the same commit. Below the floor a
 # generated project keeps `mode="light"` (the published contract requires an
 # answer, and a scaffold has no better one) and no `staff`, which leaves the
 # admin section listed switched-off for everyone — wrong for staff, and
 # honestly wrong rather than uncompilable.
-FRONTEND_SHELL_SELF_THEMING_FLOOR = "0.6.1"
+FRONTEND_SHELL_SELF_THEMING_FLOOR = "0.7.1"
 
 
 def shell_self_themes(version: str | None = None) -> bool:
@@ -1475,8 +1828,9 @@ def _write_env_local(
     gate keys on. ``env_preset`` picks standalone (default) vs studio
     (email/oauth STUBS only — see _local_env_templates.py's docstring).
 
-    ``billing_unconfigured`` — True when stapel-billing is selected and no
-    Stripe secret was supplied at generation time: splices in
+    ``billing_unconfigured`` — True when stapel-billing is selected and the
+    project runs the library's own default payment provider
+    (``_billing_dev_hatch_needed``): splices in
     ``DEV_BILLING_UNCONFIGURED_BLOCK`` (see _local_env_templates.py) so a
     fresh dev checkout can boot at all despite stapel_billing.E104. Never
     True for the prod template (.env.example) — that split is the guard."""
@@ -1932,6 +2286,50 @@ def _write_frontend_scaffold(
     _write(frontend / "README.md", r(F.README_MD))
 
 
+def _billing_dev_hatch_needed(
+    billing_selected: bool, module_config: dict | None
+) -> bool:
+    """Does this generated project need stapel-billing's dev-only E104 hatch
+    (``ALLOW_UNCONFIGURED_PAYMENT_PROVIDER``)?
+
+    Yes exactly when billing is selected AND the project boots on the
+    provider the LIBRARY ships by default — the Stripe one, whose only
+    credential is ``STRIPE_SECRET_KEY``, a secret that reaches a deployment
+    through the environment and can never be known at generation time. So
+    `manage.py check` on a fresh checkout meets E104 unless the hatch is open.
+
+    This used to ask ``module_config["billing"]["STRIPE_SECRET_KEY"]``, and
+    that question could not be answered ``yes`` by anybody:
+    ``validate_module_config`` REFUSES the key (stapel-billing's
+    capabilities.json declares one billing axis, ``PAYMENT_PROVIDER``, and a
+    secret is deliberately not among the keys a generator renders into a
+    committed settings block). The branch was unreachable, so the hatch went
+    into every billing project including the ones that had named their own
+    payment backend — a dev placebo silently suppressing the one check that
+    would have told them their provider was not configured.
+
+    The real axis answers it. A project that names its own ``PAYMENT_PROVIDER``
+    gets NO hatch: its provider is host code with host credentials, this
+    generator knows nothing about whether it is configured, and E104 is
+    exactly the right way for it to find out. Restating the library's own
+    default is not naming your own — hence the comparison against
+    capabilities.json rather than against "is the key present".
+    """
+    if not billing_selected:
+        return False
+    from ._module_config import axis_default
+
+    supplied = (module_config or {}).get("billing", {}).get("PAYMENT_PROVIDER")
+    if not supplied:
+        return True
+    default = axis_default("billing", "PAYMENT_PROVIDER")
+    # An unswept/unreadable capabilities.json means the default is unknown;
+    # a project that went to the trouble of naming a provider is then taken
+    # at its word, because opening the hatch on a guess is the failure mode
+    # this function exists to end.
+    return supplied == default
+
+
 def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False):
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
@@ -1954,15 +2352,14 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     slug = ctx["slug"]
     dir_name = ctx["service_dir_name"]  # "svc-<slug>" — the backend's own dir
     backend_upstream_default = f"{dir_name}:8000"
-    # stapel-billing selected with no Stripe secret supplied at generation
-    # time (see stapel_tools/_local_env_templates.DEV_BILLING_UNCONFIGURED_
-    # BLOCK / _compose_templates.PROD_BILLING_COMMENT_BLOCK docstrings): the
-    # dev env opens stapel_billing's E104 hatch, the prod template never
-    # does — that split is the guard.
+    # stapel-billing selected on the library's DEFAULT payment provider (see
+    # _billing_dev_hatch_needed, and the docstrings of
+    # _local_env_templates.DEV_BILLING_UNCONFIGURED_BLOCK /
+    # _compose_templates.PROD_BILLING_COMMENT_BLOCK): the dev env opens
+    # stapel_billing's E104 hatch, the prod template never does — that split
+    # is the guard.
     billing_selected = "billing" in (feature_libs or [])
-    billing_unconfigured = billing_selected and not (
-        (module_config or {}).get("billing", {}).get("STRIPE_SECRET_KEY")
-    )
+    billing_unconfigured = _billing_dev_hatch_needed(billing_selected, module_config)
     # Reserved backend prefixes — generated from the actual lib selection
     # (owner directive), rendered into local-nginx, prod-nginx AND the Vite
     # proxy from the same list so they can never drift apart. Also written
@@ -2000,7 +2397,10 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         ),
     )
     env_example_text = render_env(MONOLITH_ENV_TEMPLATE, broker, ctx, task_broker)
-    if billing_selected:
+    # The prod placeholder names STRIPE_SECRET_KEY, which only the default
+    # provider reads: a project running its own PAYMENT_PROVIDER would get a
+    # committed prompt for a credential nothing in it consults.
+    if billing_unconfigured:
         env_example_text += PROD_BILLING_COMMENT_BLOCK
     _write(project_dir / ".env.example", env_example_text)
     _write_env_local(
@@ -2235,14 +2635,14 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     # _write_env_from_ctx() call in create_project() turns it into a real
     # .env with a freshly generated secret (SEC-6), same as monolith/
     # microservices.
-    # stapel-billing selected with no Stripe secret supplied at generation
-    # time: open the dev-only E104 hatch so `manage.py check`/migrate can
-    # even boot (see MINIMAL_BILLING_UNCONFIGURED_BLOCK's own docstring —
-    # this preset has one env file, so removing the flag before
+    # stapel-billing selected on the library's DEFAULT payment provider: open
+    # the dev-only E104 hatch so `manage.py check`/migrate can even boot (see
+    # _billing_dev_hatch_needed and MINIMAL_BILLING_UNCONFIGURED_BLOCK's own
+    # docstring — this preset has one env file, so removing the flag before
     # DJANGO_ENV=prod is on the operator, same as SECRET_KEY/DEBUG already
     # are here).
-    billing_unconfigured = "billing" in feature_modules and not (
-        (module_config or {}).get("billing", {}).get("STRIPE_SECRET_KEY")
+    billing_unconfigured = _billing_dev_hatch_needed(
+        "billing" in feature_modules, module_config
     )
     env_example_text = r(MINIMAL_ENV_EXAMPLE)
     if billing_unconfigured:

@@ -682,10 +682,20 @@ class TestFrontendReactWiring:
         pkg = json.loads((proj / "frontend" / "package.json").read_text())
         deps = pkg["dependencies"]
         react_deps = {k for k in deps if k.endswith("-react")}
-        assert react_deps == {"@stapel/billing-react", "@stapel/calendar-react"}
-        # headless-only pairs (no `/default` skin) never pull antd in
-        assert "antd" not in deps
-        assert "@stapel/tokens-antd" not in deps
+        # The pairs the selection asked for, and NOT a third pair's package —
+        # that is the invariant here. `@stapel/shell-react` is not a third
+        # pair: both of these publish a nav manifest, so the container routes
+        # their screens and needs the shell that draws the menu (and the antd
+        # skin the shell is written against). This test used to assert the
+        # opposite about antd on the belief that billing and calendar were
+        # headless; both ship a `./default` subpath and an antd peer dep.
+        assert react_deps == {
+            "@stapel/billing-react",
+            "@stapel/calendar-react",
+            "@stapel/shell-react",
+        }
+        assert "antd" in deps
+        assert "@stapel/tokens-antd" in deps
         # support deps every react pair needs are present
         assert "@stapel/core" in deps
         assert "@tanstack/react-query" in deps
@@ -713,16 +723,19 @@ class TestFrontendReactWiring:
         generated App.tsx + modules.tsx and assert each non-relative spec's
         package is declared in package.json (dependencies or
         devDependencies) — proof the generated app wouldn't 501 on
-        `npm install` with a missing/undeclared package. Modules with no
-        FRONTEND_REACT_LIBS "nav" mirror (billing/calendar/recordings/
-        workspaces) — a nav-bearing selection (auth/profiles/notifications)
-        activates react-router routing instead of App.tsx (P1,
-        TestFrontendNavWiring's own equivalent gate covers THAT shape)."""
+        `npm install` with a missing/undeclared package. The subject is a
+        selection of pairs that publish NO nav manifest — cdn, reviews and
+        attributes, each for a reason recorded in the pair itself — because a
+        nav-bearing selection activates react-router routing instead of
+        App.tsx (P1, TestFrontendNavWiring's own equivalent gate covers THAT
+        shape). It used to be billing/calendar/recordings/workspaces, which
+        were nav-less only because this registry had not mirrored the
+        manifests they publish."""
         import json
 
         proj = _create(
             tmp_path, "app", "monolith",
-            modules=["core", "billing", "calendar", "recordings", "workspaces"],
+            modules=["core", "cdn", "reviews", "attributes"],
         )
         frontend = proj / "frontend"
         app_tsx = (frontend / "src" / "App.tsx").read_text()
@@ -797,11 +810,12 @@ class TestFrontendReactWiring:
         assert '@stapel/workspaces-react/default"' not in modules_tsx
 
     def test_app_tsx_switches_to_module_aware_template_and_mounts_modules_provider(self, tmp_path):
-        """"billing" carries no FRONTEND_REACT_LIBS "nav" mirror, so it
+        """"reviews" publishes no nav manifest (reviews render inside a
+        listing page and a seller page, never on a route of their own), so it
         stays on the flat single-page App.tsx/ModulesPanel shape — a
-        nav-bearing selection like "profiles" activates react-router
-        routing instead (P1, TestFrontendNavWiring)."""
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "billing"])
+        nav-bearing selection like "profiles" or "billing" activates
+        react-router routing instead (P1, TestFrontendNavWiring)."""
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "reviews"])
         app_tsx = (proj / "frontend" / "src" / "App.tsx").read_text()
         assert 'from "./modules.js"' in app_tsx
         assert "<ModulesProvider>" in app_tsx
@@ -957,14 +971,17 @@ class TestFrontendNavWiring:
         """``--modules auth,profiles,notifications --auth --landing``:
         routes.tsx has a "/login" route importing AuthPanel, and
         nav.generated.ts's baked INSTALLED_NAV_MANIFESTS resolves (via the
-        Python resolveNav port above) to EXACTLY 2 top-level menuVisible
-        entries — notifications.feed and profiles.settings (with
-        auth.security nested as profiles.settings' one child). auth.login is
-        NOT a 3rd top-level entry: its mirrored `menuVisibleDefault` is
-        `false` (a sign-in screen is never a menu tab), so the real
-        resolveNav algorithm filters it out of RESOLVED_NAV entirely — it
-        still gets its own "/login" ROUTE (routing != the menu), just no
-        tab. auth.security is a submenu, never a 4th top-level entry."""
+        Python resolveNav port above) to EXACTLY the top-level menuVisible
+        entries these three pairs declare — notifications.feed,
+        profiles.settings, profiles.connections — plus the container's own
+        admin root, which joins because auth's admin skin hangs five screens
+        from it. auth.login is NOT among them: its mirrored
+        `menuVisibleDefault` is `false` (a sign-in screen is never a menu
+        tab), so the real resolveNav algorithm filters it out of RESOLVED_NAV
+        entirely — it still gets its own "/login" ROUTE (routing != the menu),
+        just no tab. Same for profiles.public (`/u/:userId` is reached from a
+        listing or a conversation, never from the chrome). Submenu entries
+        (auth.security, notifications.push) are never top-level either."""
         proj = _create(
             tmp_path, "app", "monolith",
             modules=["core", "auth", "profiles", "notifications"],
@@ -980,10 +997,14 @@ class TestFrontendNavWiring:
         manifests = self._extract_installed_manifests(nav_ts)
         resolved = self._resolve_nav_mirror(manifests)
         top_ids = [e["id"] for e in resolved]
-        assert top_ids == ["notifications.feed", "profiles.settings"]
-        assert len(resolved) == 2
+        assert top_ids == [
+            "notifications.feed", "profiles.settings", "profiles.connections",
+            "admin.root",
+        ]
         settings = next(e for e in resolved if e["id"] == "profiles.settings")
-        assert [c["id"] for c in settings["children"]] == ["auth.security"]
+        assert [c["id"] for c in settings["children"]] == [
+            "auth.security", "notifications.push",
+        ]
 
     def test_the_generated_container_speaks_the_pinned_shells_contract(self, tmp_path):
         """Whatever the pin says, the generated project must TYPECHECK against
@@ -1059,7 +1080,7 @@ class TestFrontendNavWiring:
 
         assert shell_self_themes("0.6.0") is False
         assert shell_self_themes(FRONTEND_SHELL_SELF_THEMING_FLOOR) is True
-        assert shell_self_themes("0.7.0") is True
+        assert shell_self_themes("0.7.2") is True
         assert shell_self_themes("1.0.0") is True
 
     def test_without_auth_there_is_no_staff_fact_to_hand_down(self, tmp_path):
