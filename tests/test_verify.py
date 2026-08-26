@@ -56,10 +56,11 @@ def make_dirty_project(tmp_path):
       while the project's pyproject declares it in neither ``dependencies`` nor
       the ``test`` extra — added by the caller that writes a pyproject, since
       without one there is no declaration to check against.
-    - SCHEMA001 (api-lint, warning): an emitted ``docs/schema.json`` whose
-      ``info.version`` is the drf-spectacular placeholder rather than the
-      package version. API001-003 need a git baseline, which a tmp_path
-      fixture has no business faking — they have their own suite.
+    - SCHEMA001 (api-lint, warning): an emitted ``docs/schema.json`` that
+      writes the package version into ``info.version`` instead of the fleet
+      convention (the drf defaults the monolith aggregate emits). API001-003
+      need a git baseline, which a tmp_path fixture has no business faking —
+      they have their own suite.
     """
     workspace = tmp_path
     module = workspace / "stapel-verifyfixture"
@@ -106,7 +107,10 @@ def make_dirty_project(tmp_path):
     (proj / "docs").mkdir()
     (proj / "docs" / "schema.json").write_text(json.dumps({
         "openapi": "3.0.3",
-        "info": {"title": "", "version": "0.0.0"},
+        # SCHEMA001: the package version written into the emitted contract —
+        # the divergence from the fleet convention (drf defaults: "0.0.0" with
+        # an empty title, byte-identical to the monolith aggregate's slice).
+        "info": {"title": "", "version": "0.0.1"},
         "paths": {"/proj/api/v1/ping": {"get": {"responses": {"200": {}}}}},
     }))
     (proj / "requirements.txt").write_text("stapel_verifyfixture\nPyJWT\n")

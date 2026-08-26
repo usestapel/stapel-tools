@@ -2,6 +2,42 @@
 
 ## [Unreleased]
 
+## [0.55.2] — 2026-08-26
+
+### SCHEMA001 stops warning on the correct state
+
+`stapel-api-lint`'s SCHEMA001 demanded that `docs/schema.json`'s
+`info.version` equal the package version — and all 24 sibling libs emit
+`"0.0.0"` there on purpose, so the rule warned on every one of them. A gate
+that reds the correct state is a gate the fleet learns to scroll past.
+
+The convention, now written down and enforced instead of fought: `info.version`
+is NOT the contract's version. Every lib leaves `SPECTACULAR_SETTINGS` unset in
+its `_codegen_settings.py` so its emitted triad stays byte-identical to the
+monolith aggregate's slice, and the aggregate runs on the drf-spectacular
+defaults — `info.version: "0.0.0"` with an empty `info.title`. The version a
+consumer pins lives in `pyproject.toml` and in the pair's `manifest.json`
+(`backend.contract`).
+
+SCHEMA001 therefore now fires on divergence *from* the convention:
+
+* `info.version == "0.0.0"` **and** `info.title == ""` — clean, no finding;
+* a lib that writes its package version into `info.version` (`package=` /
+  `version=` passed to `get_spectacular_settings`) — flagged, with the
+  convention named in the message and the fix stated: drop those kwargs and
+  re-emit. This is a real defect, not a cosmetic one — the slice stops
+  matching the aggregate byte-for-byte, which is what the per-lib triad exists
+  to guarantee;
+* anything else (a stale hand-set version, a title beside the placeholder) —
+  still flagged, as before.
+
+Still a warning, still promoted by `--strict`. Documented in the linter's
+module docstring, the README rule table, `stapel_tools.codegen`'s emitter
+docstring, and the `stapel-new-library` MODULE.md template (the scaffold has
+no `_codegen_settings.py` of its own yet — geo is the etalon a module copies
+when it grows a contract harness, and the template now says what to leave
+unset when it does).
+
 ## [0.55.1] — 2026-08-26
 
 ### What 0.55.0's own CI caught, which is the point of having one

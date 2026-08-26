@@ -12,6 +12,14 @@ sqlite). From it we emit three language-agnostic artifacts:
     gate needs. The runtime ``/schema/`` endpoint stays available for the
     frontend dev loop; it is the same generator, same SPECTACULAR_SETTINGS.
 
+    ``info.version`` in that document is NOT the contract's version: the
+    aggregate emits under the drf-spectacular defaults (``"0.0.0"`` with an
+    empty ``info.title``), and every per-lib emitter leaves
+    ``SPECTACULAR_SETTINGS`` unset so its slice stays byte-identical to this
+    one. The version a consumer pins lives in ``pyproject.toml`` and in the
+    pair's ``manifest.json`` (``backend.contract``). ``stapel-api-lint``'s
+    SCHEMA001 holds that convention.
+
   - flows.json   — the ``generate_flow_docs`` machine artifact (flows +
     endpoint bindings), language-agnostic per flow-system.md §2.
 

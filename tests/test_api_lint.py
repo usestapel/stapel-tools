@@ -398,7 +398,7 @@ def test_no_tag_means_no_baseline_and_no_api_findings(tmp_path):
     git(repo, "commit", "-qm", "base")
     notes: list[str] = []
     findings = api_lint.lint_project(repo, notes=notes)
-    assert rules(findings) == []  # info.version 0.0.0 == pyproject 0.0.0
+    assert rules(findings) == []  # info block follows the fleet convention
     assert any("no v<semver> tag" in n for n in notes)
 
 
@@ -408,7 +408,7 @@ def test_additive_release_is_clean(tmp_path):
     after["paths"]["/auth/api/v1/logout"] = {"post": op()}
     rewrite(repo, schema=after, version="0.5.0")
     findings = api_lint.lint_project(repo)
-    assert rules(findings) == ["SCHEMA001"]  # info.version still the placeholder
+    assert rules(findings) == []  # info block follows the fleet convention
 
 
 def test_api001_breaking_change_on_a_patch_bump(tmp_path):
@@ -564,17 +564,43 @@ def test_api003_quiet_once_the_sunset_has_passed(tmp_path):
     assert "API003" not in rules(findings)
 
 
-def test_schema001_flags_the_placeholder_version(tmp_path):
+def test_schema001_silent_on_the_convention(tmp_path):
+    """Arm 1: the drf defaults every lib emits under are the CORRECT state."""
     repo = make_repo(tmp_path, BASE, "0.4.2")
+    assert [f for f in api_lint.lint_project(repo) if f.rule == "SCHEMA001"] == []
+
+
+def test_schema001_flags_a_lib_that_sets_its_version_in_the_contract(tmp_path):
+    """Arm 2: writing the package version into info.version diverges from the
+    aggregate — the slice stops being byte-identical."""
+    repo = make_repo(tmp_path, doc({}, version="0.4.2"), "0.4.2")
     findings = [f for f in api_lint.lint_project(repo) if f.rule == "SCHEMA001"]
     assert len(findings) == 1
     assert findings[0].level == "warning"
-    assert "0.0.0" in findings[0].message
+    assert "0.4.2" in findings[0].message
+    assert "SPECTACULAR_SETTINGS" in findings[0].message
+    assert "backend.contract" in findings[0].message
 
 
-def test_schema001_quiet_when_info_version_tracks_the_package(tmp_path):
-    repo = make_repo(tmp_path, doc({}, version="0.4.2"), "0.4.2")
-    assert api_lint.lint_project(repo) == []
+def test_schema001_still_flags_any_other_mismatch(tmp_path):
+    """Arm 3: a hand-set version that is neither the convention nor the
+    release stays a finding."""
+    repo = make_repo(tmp_path, doc({}, version="0.3.9"), "0.4.2")
+    findings = [f for f in api_lint.lint_project(repo) if f.rule == "SCHEMA001"]
+    assert len(findings) == 1
+    assert "0.3.9" in findings[0].message and "0.4.2" in findings[0].message
+    assert "neither the release nor the convention" in findings[0].message
+
+
+def test_schema001_flags_a_title_beside_the_placeholder_version(tmp_path):
+    """Half the convention is not the convention: the aggregate emits an empty
+    info.title too."""
+    titled = doc({})
+    titled["info"]["title"] = "Thing API"
+    repo = make_repo(tmp_path, titled, "0.4.2")
+    findings = [f for f in api_lint.lint_project(repo) if f.rule == "SCHEMA001"]
+    assert len(findings) == 1
+    assert "info.title" in findings[0].message
 
 
 def test_explicit_base_ref_overrides_the_tag_search(tmp_path):
@@ -603,7 +629,8 @@ def test_cli_json_output_and_exit_code(tmp_path, capsys):
 
 
 def test_cli_strict_turns_a_warning_into_a_failure(tmp_path, capsys):
-    repo = make_repo(tmp_path, BASE, "0.4.2")
+    # a SCHEMA001 divergence: the package version written into info.version
+    repo = make_repo(tmp_path, doc({}, version="0.4.2"), "0.4.2")
     assert api_lint.main([str(repo)]) == 0
     capsys.readouterr()
     assert api_lint.main([str(repo), "--strict"]) == 1

@@ -77,16 +77,34 @@ API003  (error) A version ``vN`` present at the baseline is gone from the
         reversible-floor check: you may not drop the old shape in the same
         release that stops needing it.
 
-SCHEMA001 (warning) ``docs/schema.json``'s ``info.version`` does not equal the
-        package version in ``pyproject.toml``. Today every module emits the
-        drf-spectacular placeholder ``"0.0.0"``, so the version shown in
-        Swagger UI and baked into the published contract lies about which
-        release it describes. Warning rather than error on purpose: the
-        per-module emitters deliberately run on drf defaults to stay
-        byte-identical with the monolith aggregate (see any module's
-        ``_codegen_settings.py``), so making this an error would red-wall the
-        fleet over a fix that has to be designed, not swept. Named next to
-        REL001/REL002 in the release manifest, per §3.4.
+SCHEMA001 (warning) ``docs/schema.json``'s ``info`` block diverges from the
+        fleet convention.
+
+        The convention (owner decision, and the state of all 24 libs):
+        ``info.version`` is NOT the contract's version. Every per-lib emitter
+        leaves ``SPECTACULAR_SETTINGS`` unset in its ``_codegen_settings.py``
+        so its triad stays byte-identical to the monolith aggregate's slice —
+        and the aggregate runs on drf defaults, which emit
+        ``info.version: "0.0.0"`` with an empty ``info.title``. That pair is
+        therefore the CORRECT state and is silent here. The version of the
+        contract lives where a consumer can actually pin it: ``version`` in
+        ``pyproject.toml`` and ``backend.contract`` in the pair's
+        ``manifest.json``.
+
+        So the rule fires on divergence FROM the convention, not on the
+        convention itself:
+          * ``info.version == "0.0.0"`` and ``info.title == ""`` — clean;
+          * a lib that writes its package version into ``info.version``
+            (``package=``/``version=`` passed to ``get_spectacular_settings``
+            in the codegen settings) — flagged: the emitted slice no longer
+            matches the aggregate byte-for-byte, which is what the whole
+            per-lib triad exists to guarantee;
+          * anything else (a stale hand-set version, a non-empty title beside
+            the placeholder) — flagged as before.
+
+        Warning rather than error: a divergence is a contract-pipeline defect
+        to fix, not a release blocker, and ``--strict`` promotes it. Named
+        next to REL001/REL002 in the release manifest, per §3.4.
 
 Baseline
 --------
@@ -665,23 +683,52 @@ def upgrade_records(project: Path) -> list:
 # ---------------------------------------------------------------------------
 
 
+# The drf-spectacular defaults the whole fleet emits under: a per-lib triad is
+# byte-identical to the monolith aggregate's slice only if its emitter runs on
+# the same (unset) SPECTACULAR_SETTINGS the aggregate does.
+CONVENTION_INFO_VERSION = "0.0.0"
+CONVENTION_INFO_TITLE = ""
+
+CONVENTION_NOTE = (
+    'the convention is that info.version is NOT the contract version: every lib '
+    'leaves SPECTACULAR_SETTINGS unset in _codegen_settings.py, so the emitted '
+    'info block is the drf default (version "0.0.0", empty title) and the triad '
+    'stays byte-identical to the monolith aggregate. The version lives in '
+    "pyproject.toml and in the pair's manifest.json (backend.contract)"
+)
+
+
 def check_schema001(project: Path, doc: Optional[dict], pyproject_version: Optional[str]) -> list:
-    """SCHEMA001 — ``info.version`` must name the release it describes."""
+    """SCHEMA001 — the emitted ``info`` block must follow the fleet convention."""
     if doc is None or not pyproject_version:
         return []
     info = doc.get("info")
     if not isinstance(info, dict):
         return []
     declared = info.get("version")
-    if declared == pyproject_version:
+    title = info.get("title")
+    if declared == CONVENTION_INFO_VERSION and title == CONVENTION_INFO_TITLE:
         return []
-    return [Finding(
-        SCHEMA_REL, 1, "SCHEMA001",
-        f"info.version is {declared!r} but the package is {pyproject_version!r} — "
-        f"the published contract does not say which release it describes "
-        f"(pass package=/version= to get_spectacular_settings)",
-        level="warning",
-    )]
+    if declared == CONVENTION_INFO_VERSION:
+        message = (
+            f"info.title is {title!r}, not '' — info.version follows the convention but "
+            f"the title does not, so the emitted slice diverges from the aggregate: "
+            f"{CONVENTION_NOTE}"
+        )
+    elif declared == pyproject_version:
+        message = (
+            f"info.version is {declared!r} — this lib writes its package version into "
+            f"the emitted contract, so its slice no longer matches the aggregate: "
+            f"{CONVENTION_NOTE}. Drop package=/version= from get_spectacular_settings "
+            f"and re-emit the contract"
+        )
+    else:
+        message = (
+            f"info.version is {declared!r} but the package is {pyproject_version!r} — "
+            f"the emitted contract matches neither the release nor the convention: "
+            f"{CONVENTION_NOTE}"
+        )
+    return [Finding(SCHEMA_REL, 1, "SCHEMA001", message, level="warning")]
 
 
 def check_api001(project: Path, breaking: list, before_version: Optional[str],

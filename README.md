@@ -418,7 +418,18 @@ do not know.
 | API001 | error | a breaking diff must be carried by BOTH a sufficient version bump (pre-1.0 minor, post-1.0 major — library-standard §1.4) AND a `docs/UPGRADE.json` record of `kind: "api_change"` for the new version |
 | API002 | error | a breaking change may not land in place: `vN+1` must appear beside the frozen `vN`, and `urls.py` must still mount `urls_vN.py` — a version in the schema but not in the URLconf is documented, not served |
 | API003 | error | a `vN` present at the baseline may not disappear before its `x-stapel-sunset` date (or with no sunset ever declared — a window that never opened cannot have closed) |
-| SCHEMA001 | warning | `docs/schema.json`'s `info.version` must equal the package version; today every module emits the drf-spectacular placeholder `"0.0.0"` |
+| SCHEMA001 | warning | `docs/schema.json`'s `info` block must follow the fleet convention (below): the drf defaults `info.version: "0.0.0"` + empty `info.title` are clean; a lib that writes its package version there, or any other `info` shape, is flagged |
+
+**The `info.version` convention.** `info.version` is *not* the contract's
+version. Every lib leaves `SPECTACULAR_SETTINGS` unset in its
+`_codegen_settings.py` so its emitted triad stays byte-identical to the
+monolith aggregate's slice — and the aggregate runs on drf defaults, which
+emit `info.version: "0.0.0"` with an empty `info.title`. That pair is the
+correct state and SCHEMA001 is silent on it. The version a consumer pins
+lives in `pyproject.toml` and in the pair's `manifest.json`
+(`backend.contract`). SCHEMA001 therefore fires on *divergence from* the
+convention — most usefully when a lib passes `package=`/`version=` to
+`get_spectacular_settings` and quietly stops matching the aggregate.
 
 No baseline (no git repo, no `v<semver>` tag, or no schema at that ref) means
 API001-003 do not run, and the linter says so in a note rather than inventing

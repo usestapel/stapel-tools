@@ -676,6 +676,19 @@ own.
 |---|---|---|---|
 | Function (provides) | `{{SLUG}}.ping` | `{}` -> `{greeting}` | `schemas/functions/{{SLUG}}.ping.json` |
 
+## Contract emission — the `info.version` convention
+
+When this module grows a contract harness (`_codegen_settings.py` +
+`make contract`, geo is the etalon), leave `SPECTACULAR_SETTINGS` **unset**
+there: the emitted `docs/schema.json` must stay byte-identical to the
+monolith aggregate's slice of this module, and the aggregate runs on the
+drf-spectacular defaults — `info.version: "0.0.0"` with an empty
+`info.title`. That is the convention, not a bug to fix: `info.version` is
+not the contract's version. The version a consumer pins lives in
+`pyproject.toml` and in the pair's `manifest.json` (`backend.contract`).
+Passing `package=`/`version=` to `get_spectacular_settings` breaks the
+byte-identity and is what `stapel-api-lint`'s SCHEMA001 flags.
+
 ## Anti-patterns
 
 - **Don't fork to change behavior** — every knob above is a seam; if a
