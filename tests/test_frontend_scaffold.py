@@ -985,34 +985,82 @@ class TestFrontendNavWiring:
         settings = next(e for e in resolved if e["id"] == "profiles.settings")
         assert [c["id"] for c in settings["children"]] == ["auth.security"]
 
-    def test_the_shell_gets_the_staff_fact_and_no_pinned_theme(self, tmp_path):
-        """Two defects of one shape: a generator answering a question it
-        cannot know, and not answering one it can.
+    def test_the_generated_container_speaks_the_pinned_shells_contract(self, tmp_path):
+        """Whatever the pin says, the generated project must TYPECHECK against
+        the shell it installs: `mode` required below the floor, absent above
+        it (see FRONTEND_SHELL_SELF_THEMING_FLOOR)."""
+        from stapel_tools.create_project import shell_self_themes
 
-        `mode="light"` was a wrong answer on every dark deployment — the shell
-        follows the document's live `data-theme` through SkinTheme, and pinning
-        a side from a scaffold overrides the person's own setting.
-
-        `staff` is the opposite: `<AppShell/>` reads no session by design (the
-        same rule that keeps `resolveNav` pure), so the container has to hand
-        down `user.is_staff` — the very field `AdminGate` refuses on. Without
-        it the shell's `staff` defaults to false and the admin section is drawn
-        switched-off for the staff who own it.
-        """
         proj = _create(
             tmp_path, "app", "monolith",
             modules=["core", "auth", "profiles", "notifications"],
             want_auth=True,
         )
         routes_tsx = (proj / "frontend" / "src" / "routes.tsx").read_text()
-        assert 'mode="light"' not in routes_tsx
-        assert "function AppChrome()" in routes_tsx
-        assert (
-            "<AppShell nav={RESOLVED_NAV} staff={user?.is_staff === true} />"
-            in routes_tsx
+        if shell_self_themes():
+            assert 'mode="light"' not in routes_tsx
+        else:
+            assert 'mode="light"' in routes_tsx
+
+    def test_the_staff_fact_is_handed_down_once_the_shell_pin_carries_the_prop(
+        self, monkeypatch
+    ):
+        """`<AppShell/>` reads no session by design (the rule that keeps
+        `resolveNav` pure), so the container hands down `user.is_staff` — the
+        very field `AdminGate` refuses on, so the menu and the screen cannot
+        disagree. Gated on the PIN, because the prop is not in every published
+        shell (see FRONTEND_SHELL_STAFF_PROP_FLOOR)."""
+        from stapel_tools import _frontend_templates as F
+        from stapel_tools import create_project as C
+
+        monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION",
+                            C.FRONTEND_SHELL_SELF_THEMING_FLOOR)
+        pairs = F.nav_wired_pairs(
+            [{"key": k, **C.FRONTEND_REACT_LIBS[k]} for k in ("auth", "profiles")],
+            auth_wired=True,
         )
-        assert 'import { useAuthSessionState } from "@stapel/auth-react";' in routes_tsx
-        assert "<AppChrome />" in routes_tsx
+        src = F.render_routes_tsx(
+            F.build_nav_route_plan(pairs),
+            auth_wired=True, want_landing=False, app_route_present=True,
+        )
+        assert "function AppChrome()" in src
+        assert "<AppShell nav={RESOLVED_NAV} staff={user?.is_staff === true} />" in src
+        assert 'import { useAuthSessionState } from "@stapel/auth-react";' in src
+        assert "<AppChrome />" in src
+
+    def test_a_shell_pin_without_the_prop_does_not_get_it_invented(self, monkeypatch):
+        """The 0.54.0 class in a TypeScript costume: the prop exists in the
+        stapel-react checkout and not in the published tarball, and a scaffold
+        that emitted it regardless generated a project that does not compile.
+        The pin decides, so the emission moves in the same commit the pin
+        does."""
+        from stapel_tools import _frontend_templates as F
+        from stapel_tools import create_project as C
+
+        monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION", "0.6.0")
+        pairs = F.nav_wired_pairs(
+            [{"key": k, **C.FRONTEND_REACT_LIBS[k]} for k in ("auth", "profiles")],
+            auth_wired=True,
+        )
+        src = F.render_routes_tsx(
+            F.build_nav_route_plan(pairs),
+            auth_wired=True, want_landing=False, app_route_present=True,
+        )
+        assert "AppChrome" not in src
+        assert "staff=" not in src
+        # ...and it keeps the `mode` the published shell REQUIRES.
+        assert '<AppShell nav={RESOLVED_NAV} mode="light" />' in src
+
+    def test_the_shell_floor_is_measured_not_remembered(self):
+        from stapel_tools.create_project import (
+            FRONTEND_SHELL_SELF_THEMING_FLOOR,
+            shell_self_themes,
+        )
+
+        assert shell_self_themes("0.6.0") is False
+        assert shell_self_themes(FRONTEND_SHELL_SELF_THEMING_FLOOR) is True
+        assert shell_self_themes("0.7.0") is True
+        assert shell_self_themes("1.0.0") is True
 
     def test_without_auth_there_is_no_staff_fact_to_hand_down(self, tmp_path):
         """No auth pair, no session: the shell's own default (absent means
@@ -1022,8 +1070,7 @@ class TestFrontendNavWiring:
             tmp_path, "app", "monolith", modules=["core", "notifications"],
         )
         routes_tsx = (proj / "frontend" / "src" / "routes.tsx").read_text()
-        assert "element: <AppShell nav={RESOLVED_NAV} />," in routes_tsx
-        assert 'mode="light"' not in routes_tsx
+        assert "element: <AppShell nav={RESOLVED_NAV}" in routes_tsx
         assert "AppChrome" not in routes_tsx
         assert "useAuthSessionState" not in routes_tsx
 

@@ -1019,7 +1019,15 @@ def render_routes_tsx(
     # operate the product — with `user.is_staff`, the very field `AdminGate`
     # refuses on, so the menu and the screen can never disagree. It has to be a
     # component: a route object cannot call a hook.
-    if app_route_present and auth_wired:
+    from .create_project import shell_self_themes
+
+    # Below the floor the published shell REQUIRES `mode` and has no `staff`
+    # (see FRONTEND_SHELL_SELF_THEMING_FLOOR) — the generated container speaks
+    # the contract that is actually installable.
+    self_theming = shell_self_themes()
+    shell_props = "" if self_theming else ' mode="light"'
+    staff_prop = auth_wired and self_theming
+    if app_route_present and staff_prop:
         lines.append('import type { ReactElement } from "react";')
         lines.append('import { useAuthSessionState } from "@stapel/auth-react";')
         lines.append("")
@@ -1061,15 +1069,19 @@ def render_routes_tsx(
         lines.append("  {")
         lines.append('    path: "/app",')
         if auth_wired:
+            chrome = (
+                "<AppChrome />" if staff_prop
+                else f"<AppShell nav={{RESOLVED_NAV}}{shell_props} />"
+            )
             lines.append("    element: (")
             lines.append("      <ProtectedRoute>")
-            lines.append("        <AppChrome />")
+            lines.append(f"        {chrome}")
             lines.append("      </ProtectedRoute>")
             lines.append("    ),")
         else:
             # No auth pair, no session, no staff fact — and the shell's own
             # default (`staff` absent means false) is then the honest answer.
-            lines.append("    element: <AppShell nav={RESOLVED_NAV} />,")
+            lines.append(f"    element: <AppShell nav={{RESOLVED_NAV}}{shell_props} />,")
         if app_children:
             lines.append("    children: [")
             for c in app_children:
@@ -2705,7 +2717,7 @@ def render_public_routes_tsx(
     return "\n".join(lines)
 
 
-STOREFRONT_SHELL_TSX = '''\
+STOREFRONT_SHELL_TSX_TEMPLATE = '''\
 /**
  * GENERATED — the storefront's chrome.
  *
@@ -2740,12 +2752,27 @@ import { RESOLVED_NAV_MEMBER, RESOLVED_NAV_PUBLIC } from "./nav.generated.js";
 export function StorefrontShell(): ReactElement {
   const principal = useMandatePrincipal();
   const nav = principal === "member" ? RESOLVED_NAV_MEMBER : RESOLVED_NAV_PUBLIC;
-  // No `mode`: the shell follows the document's live `data-theme` through
-  // SkinTheme. Pinning it to "light" here was a wrong answer on every dark
-  // deployment, decided by a generator that cannot know the deployment.
-  return <PublicShell nav={nav} />;
+  return <PublicShell nav={nav}{{SHELL_PROPS}} />;
 }
 '''
+
+def render_storefront_shell_tsx() -> str:
+    """``src/StorefrontShell.tsx`` — the chrome, speaking the PINNED shell's
+    contract.
+
+    `mode` is not a choice a generator gets to make: from
+    `FRONTEND_SHELL_SELF_THEMING_FLOOR` the shell follows the document's live
+    `data-theme` through `SkinTheme` and the prop is optional, so the generated
+    container stops answering a question it cannot know. Below that floor the
+    published `PublicShellProps` REQUIRES `mode`, and a container that omitted
+    it would not typecheck — so the pin decides, and the emission moves in the
+    same commit the pin does.
+    """
+    from .create_project import shell_self_themes
+
+    props = "" if shell_self_themes() else ' mode="light"'
+    return STOREFRONT_SHELL_TSX_TEMPLATE.replace("{{SHELL_PROPS}}", props)
+
 
 STOREFRONT_HOME_TSX = '''\
 /**

@@ -267,7 +267,7 @@ def public_source_plan(
         "src/nav.generated.ts": F.render_public_nav_generated_ts(manifests),
         "src/routes.tsx": F.render_public_routes_tsx(plan, options, pairs=selected),
         "src/MemberGate.tsx": F.MEMBER_GATE_TSX,
-        "src/StorefrontShell.tsx": F.STOREFRONT_SHELL_TSX,
+        "src/StorefrontShell.tsx": F.render_storefront_shell_tsx(),
         "src/StorefrontHome.tsx": F.STOREFRONT_HOME_TSX,
         "src/AccountHome.tsx": F.ACCOUNT_HOME_TSX,
         "src/i18n/keys.ts": F.render_storefront_i18n_ts(locale),

@@ -2,7 +2,35 @@
 
 ## [Unreleased]
 
-## [0.55.0] — 2026-08-26
+## [0.55.1] — 2026-08-26
+
+### What 0.55.0's own CI caught, which is the point of having one
+
+0.55.0 was tagged and never published: its e2e job failed on the generated
+frontend, and its test job failed on a test that had never run before. Both
+failures are the same class this release is about — code that is correct
+against a sibling's WORKING TREE and wrong against what is published — so they
+are fixed here rather than waved through.
+
+* **`mode` is required on the published shell.** `@stapel/shell-react` 0.6.0
+  declares `readonly mode: ThemeMode` for both `AppShell` and `PublicShell`
+  (verified against the 0.6.0 tarball's `.d.ts`), and the optional-`mode` +
+  `staff` shell exists only in the stapel-react checkout. Dropping `mode` and
+  adding `staff` therefore generated a project that does not typecheck. Both
+  emissions now hang off `FRONTEND_SHELL_SELF_THEMING_FLOOR` and the
+  `FRONTEND_SHELL_REACT_VERSION` pin: below the floor a generated container
+  keeps `mode="light"` and no `staff`; raise the pin to the release that ships
+  them and the container changes shape in the same commit. Proven by building
+  the generated frontend against the real registry, which is the step that
+  failed.
+* **A generated project carrying cdn does not boot without libvips.**
+  `stapel_cdn.images.E001` fails `manage.py check`, and the URL-resolution test
+  that boots a generated project for real had been SKIPPING on every CI run
+  this repo ever had — the `importorskip` this release replaced. Its first
+  actual run on a runner found it. `pyvips[binary]` is now declared in the
+  `test` extra and named in the test's `requires(...)`.
+
+## [0.55.0] — 2026-08-26 (tagged, not published — see 0.55.1)
 
 ### `stapel-sibling-lint` — three red releases in one night, as a machine check
 

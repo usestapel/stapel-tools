@@ -1119,7 +1119,7 @@ class TestMultiLibMonolithMountsEachLibUnderItsOwnPrefix:
         assert result.returncode == 0, result.stdout + result.stderr
         assert "ALL_RESOLVED" in result.stdout
 
-    @requires("stapel_profiles", "stapel_calendar", "stapel_cdn")
+    @requires("stapel_profiles", "stapel_calendar", "stapel_cdn", "pyvips")
     def test_resolves_end_to_end_under_django_full_lib_set(self, tmp_path):
         """Same proof as above, over the exact auth/profiles/calendar/cdn
         set the coordinating task named — including a BARE-mounted lib
@@ -1130,7 +1130,14 @@ class TestMultiLibMonolithMountsEachLibUnderItsOwnPrefix:
         The three siblings are declared in the `test` extra, so CI has them
         and STAPEL_TEST_STRICT_SIBLINGS=1 makes their absence a failure there.
         On a laptop that ran `pip install -e .` this skips with a named
-        reason — the only environment where a skip is honest."""
+        reason — the only environment where a skip is honest.
+
+        `pyvips` is in that list for a reason worth writing down: a generated
+        project carrying cdn enables its `images` submodule, and check
+        stapel_cdn.images.E001 fails `manage.py check` where libvips is
+        absent. This test boots the generated project for real, so it needs a
+        real image decoder — and the day this stopped skipping on CI is the
+        day we learned that."""
         result = self._resolve_check(
             tmp_path, ["auth", "profiles", "calendar", "cdn"],
             [

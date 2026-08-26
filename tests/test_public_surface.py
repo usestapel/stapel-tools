@@ -139,13 +139,22 @@ class TestRoutesRenderer:
         assert "element: <StorefrontShell />," in src
         assert "{ index: true, element: <StorefrontHome /> }," in src
 
-    def test_the_storefront_chrome_pins_no_theme(self):
-        """`mode="light"` is a generator answering a question it cannot know:
-        the shell follows the document's live `data-theme` through SkinTheme,
-        and a pinned side overrides the reader's own setting on every dark
-        deployment."""
-        assert 'mode="light"' not in F.STOREFRONT_SHELL_TSX
-        assert "<PublicShell nav={nav} />" in F.STOREFRONT_SHELL_TSX
+    def test_the_storefront_chrome_stops_pinning_a_theme_at_the_shell_floor(
+        self, monkeypatch
+    ):
+        """`mode="light"` is a generator answering a question it cannot know —
+        the shell follows the document's live `data-theme` through SkinTheme.
+        It is gated on the PIN because the published `PublicShellProps` still
+        REQUIRES `mode`: a container that dropped it there would not compile,
+        which is the 0.54.0 class in a TypeScript costume."""
+        from stapel_tools import create_project as C
+
+        monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION",
+                            C.FRONTEND_SHELL_SELF_THEMING_FLOOR)
+        assert "<PublicShell nav={nav} />" in F.render_storefront_shell_tsx()
+
+        monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION", "0.6.0")
+        assert '<PublicShell nav={nav} mode="light" />' in F.render_storefront_shell_tsx()
 
     def test_account_subtree_sits_inside_the_member_gate(self):
         src = self._routes()

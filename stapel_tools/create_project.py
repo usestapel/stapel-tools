@@ -1120,6 +1120,50 @@ FRONTEND_ROUTER_DEPS = {
 FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
 FRONTEND_SHELL_REACT_VERSION = "0.6.0"
 
+# The first `@stapel/shell-react` release that themes ITSELF and reads the
+# container's staff answer. Two facts, one release, because they are one
+# change in the pair:
+#
+#   * `mode` becomes OPTIONAL. Up to and including the published 0.6.0 it is
+#     `readonly mode: ThemeMode` — REQUIRED (verified against the 0.6.0
+#     tarball's `dist/default/AppShell.d.ts` and `PublicShell.d.ts`), so a
+#     generated container that stops passing it does not typecheck. From this
+#     floor the shell follows the document's live `data-theme` through
+#     `SkinTheme` and the prop only PINS a side.
+#   * `AppShellProps` gains `staff` — the fact the container reads off auth's
+#     session (`user.is_staff`), because the shell reads no session itself.
+#
+# Both exist in the stapel-react checkout and neither is published as of
+# 0.6.0. Emitting them regardless is the same "mirror ahead of npm" class that
+# broke the 0.54.0 publish, wearing a TypeScript costume instead of a
+# resolution one — so the emission is gated on the PIN, not on memory: raise
+# `FRONTEND_SHELL_REACT_VERSION` to the release that ships them and the
+# generated container changes shape in the same commit. Below the floor a
+# generated project keeps `mode="light"` (the published contract requires an
+# answer, and a scaffold has no better one) and no `staff`, which leaves the
+# admin section listed switched-off for everyone — wrong for staff, and
+# honestly wrong rather than uncompilable.
+FRONTEND_SHELL_SELF_THEMING_FLOOR = "0.6.1"
+
+
+def shell_self_themes(version: str | None = None) -> bool:
+    """Does the PINNED `@stapel/shell-react` theme itself and take `staff`?
+
+    The pin is read at CALL time, never bound as a default: a default argument
+    would freeze the value at import and make the answer unmovable by the very
+    constant that is supposed to decide it.
+    """
+    version = FRONTEND_SHELL_REACT_VERSION if version is None else version
+
+    def parts(text: str) -> tuple:
+        out = []
+        for chunk in text.split("."):
+            digits = "".join(c for c in chunk if c.isdigit())
+            out.append(int(digits) if digits else 0)
+        return tuple(out)
+
+    return parts(version) >= parts(FRONTEND_SHELL_SELF_THEMING_FLOOR)
+
 # The source-agnostic image renderer — added whenever a media source is wired
 # (cdn, or a profiles avatar), so <Image meta={...image}> can render the
 # StapelImage descriptor the backend denormalizes (AGENTS.md §7).
