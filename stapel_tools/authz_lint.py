@@ -87,6 +87,29 @@ AUTHZ005  (error) A blacklist/revocation entry read or written through
           borrows the deployment's own connection with ``KEY_PREFIX`` and
           ``VERSION`` forced to fleet values.
 
+AUTHZ006  (error) A DRF view or ``@action`` that is reachable **without
+          authentication** (``AllowAny``, an empty ``permission_classes``, or
+          ``IsAuthenticatedOrReadOnly`` on a read method) reads a manager that
+          **bypasses the default visibility filter** (``all_objects``,
+          ``_base_manager``, ``with_deleted()``, ``all_with_deleted()``,
+          ``only_deleted()``) and answers with **identity or moderation
+          state** — ``owner``/``owner_id``/``user_id``/``created_by``,
+          ``moderation_*``, or the lifecycle ``status`` of a row the default
+          filter would have hidden. Each half is ordinary on its own;
+          together they are an enumeration oracle. This is stapel-listings
+          0.8.0 verbatim: ``GET /listings/{pk}/status/`` was ``AllowAny``,
+          read ``Listing.all_objects`` and returned ``owner_id`` plus
+          ``moderation_status``. Listing ids are sequential, so an anonymous
+          walk of the ids harvested — for every listing in the deployment,
+          other people's drafts, rejected and soft-deleted rows included — who
+          owns it and what a moderator decided. Found by doing exactly that
+          against a live stand; AUTHZ001-005 were blind to it because nothing
+          on that path mints a credential or overrides ``get_user``.
+
+          A branch on ownership or permission inside the function (or a named
+          predicate in the same module) silences the rule, because that is
+          precisely the fix — see ``_MSG_006``.
+
 Suppression
 -----------
 ``# noqa: AUTHZ00N`` on the reported line, same escape as every other stapel
@@ -195,6 +218,96 @@ CACHE_OPS = frozenset({
     "set", "add", "get", "delete", "clear", "touch",
     "set_many", "get_many", "delete_many", "incr", "decr",
 })
+
+# --- AUTHZ006 vocabulary ---------------------------------------------------
+
+#: DRF permission classes that let an UNAUTHENTICATED caller through on any
+#: method.
+OPEN_PERMISSIONS = frozenset({"AllowAny"})
+
+#: DRF permission classes that let an unauthenticated caller through on a SAFE
+#: method only. They are treated exactly like ``AllowAny`` for a read handler:
+#: a signed-in stranger is still a stranger, and an oracle that costs an
+#: attacker one free account is not meaningfully closed.
+READ_OPEN_PERMISSIONS = frozenset({
+    "IsAuthenticatedOrReadOnly",
+    "DjangoModelPermissionsOrAnonReadOnly",
+})
+
+#: HTTP methods that make an ``@action`` a read.
+SAFE_HTTP_METHODS = frozenset({"get", "head", "options"})
+
+#: DRF handler methods that are reads on a generic view / viewset.
+READ_HANDLERS = frozenset({"get", "list", "retrieve"})
+
+#: Manager attributes that deliberately escape the default visibility filter.
+#: ``_default_manager`` is NOT here — it IS the default filter. Derived from
+#: the fleet's own soft-delete conventions (``stapel-listings``' ``objects =
+#: ListingManager()`` / ``all_objects = models.Manager()``, and the legacy
+#: marketplace copy of the same pair).
+UNFILTERED_MANAGERS = frozenset({
+    "all_objects",
+    "_base_manager",
+    "unfiltered_objects",
+    "objects_with_deleted",
+    "raw_objects",
+    "all_objects_including_deleted",
+})
+
+#: Queryset/manager methods that re-admit the rows the default manager hides.
+#: ``only_deleted`` is included: it is not a narrowing of the default filter,
+#: it is a jump over it into exactly the rows nobody outside is meant to see.
+UNFILTERED_QUERYSET_CALLS = frozenset({
+    "with_deleted",
+    "all_with_deleted",
+    "including_deleted",
+    "only_deleted",
+    "unfiltered",
+})
+
+#: Response field names that name a PERSON or a MODERATOR'S VERDICT. Anything
+#: here, reached anonymously over an id space, is an enumeration oracle.
+#: ``status`` earns its place only in this rule's company: AUTHZ006 already
+#: requires that the row came from the unfiltered manager, so the status being
+#: disclosed is the status of a row the default filter would have hidden —
+#: someone else's draft, rejected or soft-deleted listing.
+DISCLOSURE_FIELDS = frozenset({
+    "owner",
+    "owner_id",
+    "user_id",
+    "created_by",
+    "created_by_id",
+    "author",
+    "author_id",
+    "status",
+})
+
+#: Prefix match, so ``moderation_status``/``moderation_reason``/
+#: ``moderation_notes`` are all covered without enumerating them.
+DISCLOSURE_PREFIXES = ("moderation",)
+
+#: Names whose appearance IN A DECISION means the code asked "may THIS caller
+#: see THIS row?". Reading ``owner_id`` into a response is a disclosure;
+#: comparing it is a gate — which is why this vocabulary is only ever consulted
+#: inside a boolean expression (see ``_gate_tests``).
+GATE_ATTRS = frozenset({
+    "owner",
+    "owner_id",
+    "user_id",
+    "created_by",
+    "created_by_id",
+    "author_id",
+    "is_authenticated",
+    "is_anonymous",
+}) | AUTHZ_ATTRS
+
+#: Calls that ARE such a decision. ``has_permission`` covers the fleet's
+#: ``IsServiceRequest().has_permission(request, None)`` idiom.
+GATE_CALLS = frozenset({
+    "has_permission",
+    "has_object_permission",
+    "check_object_permissions",
+}) | AUTHZ_CALLS
 
 
 @dataclass
@@ -700,6 +813,314 @@ def _check_authz005(tree: ast.Module) -> list:
 
 
 # ---------------------------------------------------------------------------
+# AUTHZ006 — an anonymous read of the unfiltered manager that names people
+# ---------------------------------------------------------------------------
+
+
+def _is_disclosure_field(name: str) -> bool:
+    return bool(name) and (
+        name in DISCLOSURE_FIELDS or name.startswith(DISCLOSURE_PREFIXES)
+    )
+
+
+def _string_items(node: ast.AST) -> list:
+    """String constants of a list/tuple/set literal (``fields = [...]``)."""
+    if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return []
+    return [
+        el.value for el in node.elts
+        if isinstance(el, ast.Constant) and isinstance(el.value, str)
+    ]
+
+
+def _is_serializer_class(cls: ast.ClassDef) -> bool:
+    if cls.name.endswith("Serializer"):
+        return True
+    return any(_final_name(b).endswith("Serializer") for b in cls.bases)
+
+
+def _serializer_disclosures(tree: ast.Module) -> dict:
+    """``{serializer class name: {disclosing field names}}`` for one module.
+
+    Three declaration shapes, because all three are in the fleet:
+
+    * explicit fields (``owner_id = serializers.CharField()``);
+    * ``Meta.fields`` / ``Meta.read_only_fields`` string lists;
+    * the literal dict a hand-written ``to_representation`` returns.
+
+    ``fields = "__all__"`` is deliberately NOT expanded into the model's
+    columns — there is no model resolution here, and guessing would be the
+    rule's first false positive. It reads as "no declared disclosure", which
+    is a blind spot the message states out loud.
+    """
+    index: dict = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef) or not _is_serializer_class(node):
+            continue
+        fields = set()
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Assign):
+                for target in sub.targets:
+                    name = _final_name(target)
+                    if _is_disclosure_field(name):
+                        fields.add(name)
+                    if name in ("fields", "read_only_fields"):
+                        fields.update(
+                            f for f in _string_items(sub.value)
+                            if _is_disclosure_field(f)
+                        )
+            elif isinstance(sub, ast.AnnAssign):
+                name = _final_name(sub.target)
+                if _is_disclosure_field(name):
+                    fields.add(name)
+            elif isinstance(sub, ast.Dict):
+                fields.update(
+                    key.value for key in sub.keys
+                    if isinstance(key, ast.Constant)
+                    and isinstance(key.value, str)
+                    and _is_disclosure_field(key.value)
+                )
+        # Same name in two modules merges rather than overwrites: the index is
+        # keyed by bare name (no import resolution), so the honest reading of
+        # a collision is "one of these is what the view returns".
+        index.setdefault(node.name, set()).update(fields)
+    return index
+
+
+def _gate_tests(node: ast.AST) -> list:
+    """Boolean expressions this function makes a DECISION on.
+
+    A gate is a branch, so only branch conditions count: ``if`` / ``while`` /
+    ternary / ``assert`` tests, and a boolean expression that is returned or
+    assigned (``return str(user.pk) == str(listing.owner_id)`` — the shape the
+    real fix's predicate ends in).
+
+    A plain ``return f(x)`` is NOT a gate region. That distinction is the whole
+    point: ``return Response({"owner_id": obj.owner_id})`` must stay a
+    disclosure and not be mistaken for an ownership check.
+    """
+    out = []
+    for sub in ast.walk(node):
+        if isinstance(sub, (ast.If, ast.IfExp, ast.While, ast.Assert)):
+            out.append(sub.test)
+        elif isinstance(sub, ast.Return) and isinstance(
+            sub.value, (ast.Compare, ast.BoolOp, ast.UnaryOp)
+        ):
+            out.append(sub.value)
+        elif isinstance(sub, ast.Assign) and isinstance(
+            sub.value, (ast.Compare, ast.BoolOp, ast.UnaryOp)
+        ):
+            out.append(sub.value)
+    return out
+
+
+def _has_gate(node: ast.AST, helpers: frozenset) -> bool:
+    for test in _gate_tests(node):
+        for sub in ast.walk(test):
+            ident = ""
+            if isinstance(sub, ast.Attribute):
+                ident = sub.attr
+            elif isinstance(sub, ast.Name):
+                ident = sub.id
+            elif isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                ident = sub.value
+            elif isinstance(sub, ast.keyword):
+                ident = sub.arg or ""
+            if ident in GATE_ATTRS:
+                return True
+            if isinstance(sub, ast.Call) and (
+                _call_name(sub) in GATE_CALLS or _call_name(sub) in helpers
+            ):
+                return True
+    return False
+
+
+def _gate_helpers(tree: ast.Module) -> frozenset:
+    """Same-module functions that are themselves an authorization decision.
+
+    One transitive layer to a fixed point, exactly as ``_authz_helpers`` does
+    for AUTHZ001/002: the real stapel-listings fix extracted the decision into
+    ``_may_see_full_status(request, listing)``, and a rule that read a named
+    predicate as absence would flag the remedy.
+    """
+    names = set()
+    bodies: dict = {}
+    for func, _cls in _functions(tree):
+        bodies.setdefault(func.name, []).append(func)
+        if _has_gate(func, frozenset()):
+            names.add(func.name)
+    for _ in range(3):
+        grew = False
+        for name, funcs in bodies.items():
+            if name in names:
+                continue
+            for func in funcs:
+                if _has_gate(func, frozenset(names)):
+                    names.add(name)
+                    grew = True
+                    break
+        if not grew:
+            break
+    return frozenset(names)
+
+
+def _decorator_calls(func: ast.AST, name: str) -> list:
+    return [
+        d for d in getattr(func, "decorator_list", [])
+        if isinstance(d, ast.Call) and _call_name(d) == name
+    ]
+
+
+def _kwarg(call: ast.Call, name: str):
+    for kw in call.keywords:
+        if kw.arg == name:
+            return kw.value
+    return None
+
+
+def _permission_names(node) -> Optional[list]:
+    """Permission class names of a ``permission_classes`` list literal.
+
+    ``None`` means "not declared here"; ``[]`` means an explicitly empty list,
+    which in DRF is no permission at all.
+    """
+    if node is None:
+        return None
+    if not isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        # A computed value (``PERMS``, ``a + b``) is not read. Unknown, not open.
+        return None
+    return [_final_name(el) for el in node.elts]
+
+
+def _class_permission_names(cls: Optional[ast.ClassDef]) -> Optional[list]:
+    if cls is None:
+        return None
+    for sub in cls.body:
+        if isinstance(sub, ast.Assign) and any(
+            _final_name(t) == "permission_classes" for t in sub.targets
+        ):
+            return _permission_names(sub.value)
+    return None
+
+
+def _is_open(perms: Optional[list], read_only: bool) -> bool:
+    """Can an UNAUTHENTICATED caller reach this handler?
+
+    DRF ANDs the list, so ``[AllowAny, IsOwner]`` is *not* open — every entry
+    has to be permissive for the handler to be.
+    """
+    if perms is None:
+        # Undeclared. The project's DEFAULT_PERMISSION_CLASSES decides, and
+        # settings are not resolved here — silence, not a guess.
+        return False
+    if not perms:
+        return True
+    allowed = OPEN_PERMISSIONS | (READ_OPEN_PERMISSIONS if read_only else frozenset())
+    return all(p in allowed for p in perms)
+
+
+def _handler_shape(func, cls) -> Optional[tuple]:
+    """``(permission names, read_only)`` if ``func`` is an anonymous-reachable
+    HTTP handler, else ``None``.
+
+    Three shapes, and nothing else: a DRF ``@action``, a read handler on a
+    view class, and an ``@api_view`` function. ``get_queryset`` and friends
+    are deliberately not handlers — they are not what a URL routes to, and
+    judging them would double every finding.
+    """
+    actions = _decorator_calls(func, "action")
+    if actions:
+        methods = _string_items(_kwarg(actions[0], "methods")) or ["get"]
+        read_only = all(m.lower() in SAFE_HTTP_METHODS for m in methods)
+        perms = _permission_names(_kwarg(actions[0], "permission_classes"))
+        if perms is None:
+            perms = _class_permission_names(cls)
+        return perms, read_only
+
+    api_views = _decorator_calls(func, "api_view")
+    if api_views:
+        methods = _string_items(api_views[0].args[0] if api_views[0].args else None)
+        read_only = bool(methods) and all(
+            m.lower() in SAFE_HTTP_METHODS for m in methods
+        )
+        perms = None
+        for dec in _decorator_calls(func, "permission_classes"):
+            perms = _permission_names(dec.args[0] if dec.args else None)
+        return perms, read_only
+
+    if cls is not None and func.name in READ_HANDLERS:
+        return _class_permission_names(cls), True
+
+    return None
+
+
+def _unfiltered_reads(func: ast.AST) -> list:
+    """``(lineno, source-ish name)`` for every escape of the default filter."""
+    hits = []
+    for sub in ast.walk(func):
+        if isinstance(sub, ast.Attribute) and sub.attr in UNFILTERED_MANAGERS:
+            hits.append((sub.lineno, sub.attr))
+        elif isinstance(sub, ast.Call) and _call_name(sub) in UNFILTERED_QUERYSET_CALLS:
+            hits.append((sub.lineno, f"{_call_name(sub)}()"))
+    return hits
+
+
+def _response_disclosures(func: ast.AST, index: dict) -> set:
+    """Disclosing fields this handler can put on the wire.
+
+    Two sources, both syntactic: a serializer class named anywhere in the
+    handler (its body or its ``@extend_schema(responses=...)``) whose declared
+    fields the index knows, and the string keys of a literal dict built in the
+    body.
+    """
+    fields: set = set()
+    for sub in ast.walk(func):
+        if isinstance(sub, (ast.Name, ast.Attribute)):
+            fields |= index.get(_final_name(sub), set())
+    for stmt in getattr(func, "body", []):
+        for sub in ast.walk(stmt):
+            if isinstance(sub, ast.Dict):
+                fields.update(
+                    key.value for key in sub.keys
+                    if isinstance(key, ast.Constant)
+                    and isinstance(key.value, str)
+                    and _is_disclosure_field(key.value)
+                )
+    return fields
+
+
+def _check_authz006(tree: ast.Module, index: dict) -> list:
+    helpers = _gate_helpers(tree)
+    found = []
+    for func, cls in _functions(tree):
+        shape = _handler_shape(func, cls)
+        if shape is None:
+            continue
+        perms, read_only = shape
+        if not _is_open(perms, read_only):
+            continue
+        unfiltered = _unfiltered_reads(func)
+        if not unfiltered:
+            continue
+        fields = _response_disclosures(func, index)
+        if not fields:
+            continue
+        if _has_gate(func, helpers):
+            # The handler decides who sees what. That IS the remedy — keep the
+            # capability, narrow the disclosure — so it must not be flagged.
+            continue
+        perm_text = ", ".join(perms) if perms else "no permission_classes"
+        found.append((
+            func.lineno,
+            func.name,
+            perm_text,
+            sorted({name for _line, name in unfiltered})[0],
+            sorted(fields),
+        ))
+    return found
+
+
+# ---------------------------------------------------------------------------
 # messages
 # ---------------------------------------------------------------------------
 
@@ -753,18 +1174,72 @@ _MSG_005 = (
     "namespace: stapel_core.core.revocation_store.revocation_cache()"
 )
 
+_MSG_006 = (
+    "{func}() is reachable with no authentication ({perm}), reads {mgr} — the "
+    "manager that deliberately bypasses the default visibility filter — and "
+    "answers with {fields}. Each half is ordinary alone; together they are an "
+    "enumeration oracle. Ids are usually sequential, so an anonymous walk of "
+    "them harvests who owns every row in the deployment and what a moderator "
+    "decided about it, other people's drafts, rejected and soft-deleted rows "
+    "included. This is stapel-listings 0.8.0 verbatim: GET "
+    "/listings/{{pk}}/status/ was AllowAny over Listing.all_objects returning "
+    "owner_id and moderation_status, and it was found by walking the ids "
+    "against a live stand. The fix is NOT to delete the endpoint or lock it to "
+    "services: a real browser client needs this probe to tell 'removed' from "
+    "'never existed', and locking it broke the product. KEEP THE CAPABILITY, "
+    "REMOVE THE DISCLOSURE — full view for a fleet service and for the row's "
+    "own owner, one boolean for everyone else (a signed-in stranger is still "
+    "a stranger, or the oracle costs an attacker one free account). Branch on "
+    "ownership/permission in this function, or call a named predicate in this "
+    "module, and the rule goes quiet, because that branch IS the fix. WHAT "
+    "THIS RULE CANNOT SEE: it reads statically declared serializer fields and "
+    "literal dict keys only — a serializer chosen at runtime, a response built "
+    "from **kwargs or a comprehension, fields='__all__', and a column aliased "
+    "to an innocuous name are all invisible to it, so silence here is not "
+    "proof the response is clean. Suppress with '# noqa: AUTHZ006' and write "
+    "the reason"
+)
+
 
 # ---------------------------------------------------------------------------
 # lint driver
 # ---------------------------------------------------------------------------
 
 
-def lint_file(path: Path) -> list:
+def _parse(path: Path):
     try:
         src = path.read_text(encoding="utf-8")
-        tree = ast.parse(src, filename=str(path))
+        return src, ast.parse(src, filename=str(path))
     except (OSError, SyntaxError, UnicodeDecodeError, ValueError):
+        return None, None
+
+
+def build_serializer_index(root: Path) -> dict:
+    """Serializer-name -> disclosing fields, across a whole tree.
+
+    AUTHZ006 needs it because the view names ``ListingStatusSerializer`` and
+    the fields live in ``serializers.py`` next door. There is no import
+    resolution: the index is keyed by the bare class name and a collision
+    merges. Linting a SINGLE FILE builds the index from that file alone, so a
+    serializer defined elsewhere is invisible — the documented cost of not
+    building a cross-module symbol table in a linter.
+    """
+    index: dict = {}
+    for py in _walk_py(root):
+        _src, tree = _parse(py)
+        if tree is None:
+            continue
+        for name, fields in _serializer_disclosures(tree).items():
+            index.setdefault(name, set()).update(fields)
+    return index
+
+
+def lint_file(path: Path, serializer_index: Optional[dict] = None) -> list:
+    src, tree = _parse(path)
+    if tree is None:
         return []
+    if serializer_index is None:
+        serializer_index = _serializer_disclosures(tree)
 
     lines = src.splitlines()
     helpers = _authz_helpers(tree)
@@ -783,6 +1258,13 @@ def lint_file(path: Path) -> list:
         raw.append(Violation(str(path), line, "AUTHZ004", _MSG_004.format(cls=cls_name)))
     for line, op in _check_authz005(tree):
         raw.append(Violation(str(path), line, "AUTHZ005", _MSG_005.format(op=op)))
+    for line, func_name, perm, mgr, fields in _check_authz006(tree, serializer_index):
+        raw.append(Violation(
+            str(path), line, "AUTHZ006",
+            _MSG_006.format(
+                func=func_name, perm=perm, mgr=mgr, fields=", ".join(fields),
+            ),
+        ))
 
     violations = []
     for violation in raw:
@@ -798,9 +1280,10 @@ def lint_project(project: Path, notes: Optional[list] = None) -> list:
     project = Path(project).resolve()
     violations: list = []
     scanned = 0
+    index = build_serializer_index(project)
     for py in _walk_py(project):
         scanned += 1
-        violations.extend(lint_file(py))
+        violations.extend(lint_file(py, index))
     if notes is not None:
         notes.append(f"stapel-authz-lint: {scanned} python file(s) scanned")
     violations.sort(key=lambda v: (v.path, v.line, v.rule))
@@ -814,7 +1297,13 @@ def lint_paths(paths: Iterable) -> list:
         if not root.exists():
             raise SystemExit(f"Error: path does not exist: {root}")
         if root.is_file():
-            violations.extend(lint_file(root))
+            # AUTHZ006 needs the serializers that live NEXT TO the view, so a
+            # single-file run indexes the file's own directory. Wider than the
+            # module, narrower than the repo, and it makes `stapel-authz-lint
+            # views.py` behave the way the caller expects.
+            violations.extend(
+                lint_file(root, build_serializer_index(root.parent))
+            )
         else:
             violations.extend(lint_project(root))
     violations.sort(key=lambda v: (v.path, v.line, v.rule))

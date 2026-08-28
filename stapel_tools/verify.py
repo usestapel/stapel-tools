@@ -24,7 +24,7 @@ Linters composed (in this order)
   installed gdpr data owner reachable by an erasure)
 * ``stapel_tools.url_lint``        — URL001 (bare ``URLField()`` truncation
   trap)
-* ``stapel_tools.authz_lint``      — AUTHZ001-005 (the "credentials verified,
+* ``stapel_tools.authz_lint``      — AUTHZ001-006 (the "credentials verified,
   authorization never asked" class that stapel-core 0.38.0-0.43.0 closed in
   five releases: a ``LoginView.form_valid`` that minted fleet-wide JWTs for
   any active account because no staff gate sat on the minting path, a
@@ -34,7 +34,12 @@ Linters composed (in this order)
   ``django.core.cache.cache``, whose per-service ``KEY_PREFIX`` made "log out
   everywhere" invisible to peers. Every one of those was found by a human
   reading code — each component's own suite was green, because the defect
-  lived in what was NOT written and nothing in the fleet read for absence.)
+  lived in what was NOT written and nothing in the fleet read for absence.
+  AUTHZ006 joined in 0.56.0 for the second defect the family was paid for:
+  stapel-listings' ``GET /{pk}/status/`` was ``AllowAny`` over
+  ``Listing.all_objects`` and returned ``owner_id`` and ``moderation_status``,
+  so an anonymous walk of the sequential ids harvested owners and moderation
+  verdicts for every listing in the deployment.)
 * ``stapel_tools.api_lint``        — API001-003 + SCHEMA001 (HTTP surface
                                      versioning: a breaking OpenAPI diff must
                                      carry a bump, an UPGRADE.json record and a

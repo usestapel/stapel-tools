@@ -2,6 +2,124 @@
 
 ## [Unreleased]
 
+## [0.56.0] — 2026-08-28
+
+### AUTHZ006 — the enumeration oracle: anonymous, unfiltered, and it names people
+
+The `stapel-authz-lint` family's house rule is that a rule earns its place by
+having caught something real. AUTHZ006 is the second defect this family was
+paid for, and AUTHZ001-005 were structurally blind to it: nothing on its path
+mints a credential or overrides `get_user`.
+
+`stapel-listings` had, in `views.py`:
+
+```python
+@action(detail=True, methods=["get"], permission_classes=[AllowAny])
+def status(self, request, pk=None):
+    listing = Listing.all_objects.get(pk=pk)                  # the UNFILTERED manager
+    return StapelResponse(ListingStatusSerializer(listing))   # owner_id, moderation_status, …
+```
+
+Live on a production stand, unauthenticated, over sequential ids:
+
+```
+GET /listings/api/v1/listings/10/status/
+→ 200 {"status":"draft","moderation_status":"pending","is_deleted":true,
+       "owner_id":"720a67e2-…"}
+```
+
+An anonymous walk of the ids harvested the owner's user UUID and the moderation
+verdict for every listing in the deployment — other people's drafts, rejected
+and soft-deleted rows included. Fixed in stapel-listings 0.8.0 (`4f1bd8d`).
+
+**The shape, stated so it can be detected:** a view or `@action` reachable
+without authentication reads a queryset that deliberately bypasses the default
+visibility filter, and returns identity or moderation state. Each half is fine
+alone — `AllowAny` on a public read is normal, `all_objects` in an owner-scoped
+view is normal — and the conjunction is an oracle.
+
+Three conditions, all required:
+
+1. **Unauthenticated reach.** `AllowAny`, an explicitly empty
+   `permission_classes`, or `IsAuthenticatedOrReadOnly` /
+   `DjangoModelPermissionsOrAnonReadOnly` on a read method. The read-only pair
+   counts because a signed-in stranger is still a stranger; the shipped fix
+   treats them the same, since otherwise the oracle costs an attacker one free
+   account. DRF ANDs the list, so `[AllowAny, IsOwner]` is *not* open. An
+   `@action` with no `permission_classes` inherits the class's.
+2. **A manager that escapes the default filter** — `all_objects`,
+   `_base_manager`, `with_deleted()`, `all_with_deleted()`, `only_deleted()`,
+   `unfiltered_objects`, `objects_with_deleted`, `raw_objects`. Derived from
+   the fleet's own soft-delete conventions (`stapel-listings` `models.py`, and
+   the legacy marketplace copy of the same pair). `_default_manager` is
+   deliberately absent: it *is* the default filter.
+3. **A response that names a person or a verdict** — `owner`, `owner_id`,
+   `user_id`, `created_by`, `author_id`, any `moderation_*`, or `status`.
+   `status` earns its place only in this rule's company: condition 2 already
+   guarantees the row is one the default filter would have hidden, so the
+   status being disclosed is someone else's draft, rejected or deleted row.
+
+**What silences it is the missing decision, not the permission and not the
+manager**, because the shipped fix changed neither. 0.8.0 is still `AllowAny`,
+still `all_objects`, still names the same serializer in its schema — it added
+a branch. A rule keyed on any of the three literal ingredients would have
+called the remedy the defect, which is how a security linter gets switched off.
+
+So a gate is an authorization *decision*: `owner_id`/`user_id`/`created_by`/
+`is_authenticated`/`is_staff` or a permission call, appearing inside an `if` /
+ternary / `while` / `assert` test, or in a boolean expression that is returned
+or assigned. A plain `return f(x)` is not a gate region — that distinction is
+what keeps `return Response({"owner_id": obj.owner_id})` a disclosure instead
+of being mistaken for an ownership check. Same-module predicates are followed
+to a fixed point, as AUTHZ001/002 already do, because the real fix extracted
+its decision into `_may_see_full_status(request, listing)`.
+
+**The hint teaches the repair, not the ban.** Deleting the endpoint or locking
+it to services was tried first and was wrong: `@stapel/listings-react`'s
+`ListingDetail` calls this probe in parallel with the detail read, because
+`GET /{pk}/` 404s identically for a soft-deleted row and a made-up id, and the
+probe is what turns those into two different sentences. Keep the capability,
+remove the disclosure — full view for a fleet service and for the row's own
+owner, one boolean for everyone else.
+
+**Cross-module resolution, the one place this family bends.** The view names
+`ListingStatusSerializer`; the fields live in `serializers.py` next door. So
+`lint_project` now pre-builds a serializer index over the whole tree
+(`build_serializer_index`) and passes it to `lint_file`, which keeps its old
+single-argument signature. A single-file run indexes the file's own directory.
+The index is keyed by bare class name — no import resolution, collisions merge.
+
+**Inversion control**, run against the real `stapel-listings` tree at both
+commits:
+
+| tree | AUTHZ006 | exit |
+| --- | --- | --- |
+| `4cb3e74` (pre-fix) | `views.py:161` — 1 error | 1 |
+| `4f1bd8d` (0.8.0) | none | 0 |
+
+**Fleet sweep** — every `stapel-*` repo, plus `ironmemo-backend` and
+both client fleets: **one** hit, `stapel-studio/.vendor/stapel-listings/views.py:161`
+— a build-time snapshot (gitignored, staged by `make vendor`) still pinned at
+listings 0.7.1, i.e. the studio image would ship the pre-fix probe until it is
+re-vendored. Outside the named sweep, the legacy `marketplace-backend` carries
+the ancestor of the same endpoint at `marketplace-catalog/ads/views.py:170`
+(`Ad.all_objects`, `AdStatusSerializer` with `owner_id`) — the origin
+stapel-listings inherited during the port. Neither is fixed here; a linter
+release reports, it does not patch other repos.
+
+**What the rule cannot see** — written into the hint itself, because a check
+that cannot prove something has to say so: a serializer chosen at runtime, a
+response assembled from `**kwargs` or a comprehension, `fields = "__all__"`, a
+disclosing column aliased to an innocuous name, a `permission_classes` that is
+not a list literal, and a handler that branches on ownership but discloses from
+both arms. Silence from AUTHZ006 is not proof a response is clean.
+
+14 new tests, including the pre-fix/post-fix pair as a project-level control,
+the must-not-fire cases the family requires (an owner-scoped view on
+`all_objects` behind `IsAuthenticated`; an `AllowAny` view on the ordinary
+manager), and the near-misses (`IsAuthenticatedOrReadOnly` on a POST,
+`[AllowAny, IsListingOwner]`, an undeclared permission).
+
 ## [0.55.6] — 2026-08-27
 
 Both halves of the red 0.55.5 CI run, closed by mechanism.

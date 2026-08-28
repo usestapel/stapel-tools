@@ -592,6 +592,399 @@ def blacklist_user(user_id):
 
 
 # ===========================================================================
+# AUTHZ006 — an anonymous read of the unfiltered manager that names people
+# ===========================================================================
+
+
+#: ``stapel-listings`` at 4cb3e74, in shape: the endpoint that was live on a
+#: production stand, answering an unauthenticated GET for any id with
+#: ``owner_id`` and ``moderation_status``, over ``all_objects`` so drafts,
+#: rejected and soft-deleted rows answered too.
+LISTINGS_PRE_FIX_VIEWS = """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
+from drf_spectacular.utils import extend_schema
+
+from .models import Listing
+from .serializers import ListingStatusSerializer
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    queryset = Listing.objects.all()
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    @extend_schema(responses={200: ListingStatusSerializer})
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def status(self, request, pk=None):
+        try:
+            listing = Listing.all_objects.get(pk=pk)
+        except Listing.DoesNotExist:
+            return StapelErrorResponse(404, ERR_404_LISTING_NOT_FOUND)
+        return StapelResponse(ListingStatusSerializer(listing))
+"""
+
+#: ``stapel-listings`` at 4f1bd8d (released 0.8.0). Note what did NOT change:
+#: still ``AllowAny``, still ``all_objects``, still the same serializer in the
+#: schema. The capability was kept and the disclosure was narrowed — which is
+#: exactly why the rule keys on the missing DECISION rather than on the
+#: permission or the manager.
+LISTINGS_POST_FIX_VIEWS = """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAuthenticatedOrReadOnly
+from drf_spectacular.utils import extend_schema
+
+from stapel_core.django.api.permissions import IsServiceRequest
+
+from .models import Listing
+from .serializers import ListingPresenceSerializer, ListingStatusSerializer
+
+
+def _may_see_full_status(request, listing) -> bool:
+    if IsServiceRequest().has_permission(request, None):
+        return True
+    user = getattr(request, "user", None)
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    return str(getattr(user, "pk", "")) == str(listing.owner_id)
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    queryset = Listing.objects.all()
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    @extend_schema(responses={200: ListingStatusSerializer})
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def status(self, request, pk=None):
+        try:
+            listing = Listing.all_objects.get(pk=pk)
+        except Listing.DoesNotExist:
+            return StapelErrorResponse(404, ERR_404_LISTING_NOT_FOUND)
+        if _may_see_full_status(request, listing):
+            return StapelResponse(ListingStatusSerializer(listing))
+        return StapelResponse(ListingPresenceSerializer(listing))
+"""
+
+LISTINGS_SERIALIZERS = """\
+from rest_framework import serializers
+
+
+class ListingPresenceSerializer(serializers.Serializer):
+    is_deleted = serializers.BooleanField()
+
+    def to_representation(self, instance):
+        return {"is_deleted": instance.is_deleted}
+
+
+class ListingStatusSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=ListingStatus.choices)
+    moderation_status = serializers.CharField()
+    is_deleted = serializers.BooleanField()
+    is_expired = serializers.BooleanField()
+    is_active = serializers.BooleanField()
+    owner_id = serializers.CharField()
+"""
+
+
+class TestAuthz006:
+    def test_the_shipped_oracle_is_flagged(self, tmp_path):
+        """The live defect: AllowAny + all_objects + owner_id/moderation."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", LISTINGS_PRE_FIX_VIEWS)
+        violations = [v for v in lint_project(tmp_path) if v.rule == "AUTHZ006"]
+        assert len(violations) == 1
+        # Reported on the `def` line, so a per-rule suppression comment lands
+        # where the module's other per-handler ones already live. (Spelling
+        # the directive out here would make ruff read this line as one.)
+        assert violations[0].line == 16
+        assert "owner_id" in violations[0].message
+        assert "moderation_status" in violations[0].message
+
+    def test_narrowing_the_disclosure_silences_it(self, tmp_path):
+        """The control that proves the rule is not inverted.
+
+        The 0.8.0 fix kept AllowAny AND all_objects AND the full serializer.
+        A rule that keyed on any of those three would call the remedy the
+        defect — which is how a security linter gets switched off."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", LISTINGS_POST_FIX_VIEWS)
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ006"] == []
+
+    def test_an_owner_scoped_view_on_all_objects_is_not_flagged(self, tmp_path):
+        """MUST NOT FIRE: `all_objects` behind IsAuthenticated in an
+        owner-scoped view is the ordinary, correct use of the manager."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
+
+from .models import Listing
+from .serializers import ListingStatusSerializer
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticated]
+
+    @action(detail=True, methods=["get"], permission_classes=[IsAuthenticated])
+    def archived_status(self, request, pk=None):
+        listing = Listing.all_objects.get(pk=pk, owner=request.user)
+        return StapelResponse(ListingStatusSerializer(listing))
+""")
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ006"] == []
+
+    def test_an_allowany_view_on_the_ordinary_manager_is_not_flagged(self, tmp_path):
+        """MUST NOT FIRE: a public read through the DEFAULT manager sees only
+        what the default filter already publishes. AllowAny is not the defect;
+        AllowAny over the filter-bypassing manager is."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
+
+from .models import Listing
+from .serializers import ListingStatusSerializer
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    permission_classes = [AllowAny]
+
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def status(self, request, pk=None):
+        listing = Listing.objects.get(pk=pk)
+        return StapelResponse(ListingStatusSerializer(listing))
+""")
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ006"] == []
+
+    def test_a_boolean_only_response_is_not_flagged(self, tmp_path):
+        """MUST NOT FIRE: the capability with no disclosure. This is the
+        endpoint the browser client actually needs, and the rule has to leave
+        the whole shape alone or the fix has nowhere to land."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
+
+from .models import Listing
+from .serializers import ListingPresenceSerializer
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def status(self, request, pk=None):
+        listing = Listing.all_objects.get(pk=pk)
+        return StapelResponse(ListingPresenceSerializer(listing))
+""")
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ006"] == []
+
+    def test_a_read_under_is_authenticated_or_read_only_is_flagged(self, tmp_path):
+        """A signed-in stranger is still a stranger: an oracle that costs an
+        attacker one free account is not closed. The class-level permission is
+        inherited by an @action that names none of its own."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
+
+from .models import Listing
+from .serializers import ListingStatusSerializer
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    @action(detail=True, methods=["get"])
+    def status(self, request, pk=None):
+        listing = Listing.all_objects.get(pk=pk)
+        return StapelResponse(ListingStatusSerializer(listing))
+""")
+        codes = [v.rule for v in lint_project(tmp_path)]
+        assert "AUTHZ006" in codes
+
+    def test_a_write_under_is_authenticated_or_read_only_is_not_flagged(self, tmp_path):
+        """NEAR MISS: `IsAuthenticatedOrReadOnly` is only permissive on SAFE
+        methods. On a POST it demands a session, so it is not an anonymous
+        surface and the rule must not pretend otherwise."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticatedOrReadOnly
+
+from .models import Listing
+from .serializers import ListingStatusSerializer
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsAuthenticatedOrReadOnly]
+
+    @action(detail=True, methods=["post"])
+    def restore(self, request, pk=None):
+        listing = Listing.all_objects.get(pk=pk)
+        return StapelResponse(ListingStatusSerializer(listing))
+""")
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ006"] == []
+
+    def test_allow_any_anded_with_a_real_permission_is_not_flagged(self, tmp_path):
+        """NEAR MISS: DRF ANDs `permission_classes`, so [AllowAny, IsOwner] is
+        IsOwner. A rule that matched the mere presence of `AllowAny` would be
+        reading the list backwards."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
+
+from .models import Listing
+from .permissions import IsListingOwner
+from .serializers import ListingStatusSerializer
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny, IsListingOwner])
+    def status(self, request, pk=None):
+        listing = Listing.all_objects.get(pk=pk)
+        return StapelResponse(ListingStatusSerializer(listing))
+""")
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ006"] == []
+
+    def test_an_undeclared_permission_is_not_guessed(self, tmp_path):
+        """NEAR MISS: with no `permission_classes` anywhere, DRF's
+        DEFAULT_PERMISSION_CLASSES decides, and settings are not resolved
+        here. Silence, not a guess — the same discipline the rest of the
+        family keeps about what it cannot see."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+
+from .models import Listing
+from .serializers import ListingStatusSerializer
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    @action(detail=True, methods=["get"])
+    def status(self, request, pk=None):
+        listing = Listing.all_objects.get(pk=pk)
+        return StapelResponse(ListingStatusSerializer(listing))
+""")
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ006"] == []
+
+    def test_a_with_deleted_queryset_call_counts_as_an_escape(self, tmp_path):
+        """The other soft-delete convention in the fleet: a manager method
+        rather than a second manager attribute."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
+
+from .models import Listing
+from .serializers import ListingStatusSerializer
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def status(self, request, pk=None):
+        listing = Listing.objects.with_deleted().get(pk=pk)
+        return StapelResponse(ListingStatusSerializer(listing))
+""")
+        codes = [v.rule for v in lint_project(tmp_path)]
+        assert "AUTHZ006" in codes
+
+    def test_a_literal_dict_response_is_read(self, tmp_path):
+        """No serializer at all: the fields are right there in the body. The
+        DYNAMIC dict is what the rule cannot see, not the literal one."""
+        path = _write(tmp_path, "views.py", """\
+from rest_framework.decorators import action, api_view, permission_classes
+from rest_framework.permissions import AllowAny
+
+from .models import Listing
+
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def listing_status(request, pk):
+    listing = Listing.all_objects.get(pk=pk)
+    return Response({
+        "owner_id": str(listing.owner_id),
+        "moderation_status": listing.moderation_status,
+    })
+""")
+        assert "AUTHZ006" in _codes(lint_file(path))
+
+    def test_the_legacy_marketplace_shape_is_flagged(self, tmp_path):
+        """The ancestor of the defect, found by the fleet sweep: the legacy
+        marketplace `ads` app carries the same endpoint, and the serializer
+        declares its fields only inside `to_representation`."""
+        _write(tmp_path, "ads/serializers.py", """\
+from rest_framework import serializers
+
+
+class AdStatusSerializer(serializers.Serializer):
+    def to_representation(self, instance):
+        return {
+            'status': instance.status,
+            'is_deleted': instance.is_deleted,
+            'owner_id': str(instance.owner_id),
+        }
+""")
+        _write(tmp_path, "ads/views.py", """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
+
+from .models import Ad
+from .serializers import AdStatusSerializer
+
+
+class AdViewSet(viewsets.ModelViewSet):
+    @action(detail=True, methods=['get'], permission_classes=[AllowAny])
+    def status(self, request, pk=None):
+        ad = Ad.all_objects.get(pk=pk)
+        serializer = AdStatusSerializer(ad)
+        return Response(serializer.data)
+""")
+        assert [v.rule for v in lint_project(tmp_path) if v.rule == "AUTHZ006"] == [
+            "AUTHZ006",
+        ]
+
+    def test_noqa_suppresses_it(self, tmp_path):
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        _write(tmp_path, "views.py", """\
+from rest_framework import viewsets
+from rest_framework.decorators import action
+from rest_framework.permissions import AllowAny
+
+from .models import Listing
+from .serializers import ListingStatusSerializer
+
+
+class ListingViewSet(viewsets.ModelViewSet):
+    @action(detail=True, methods=["get"], permission_classes=[AllowAny])
+    def status(self, request, pk=None):  # noqa: AUTHZ006 - internal-only network
+        listing = Listing.all_objects.get(pk=pk)
+        return StapelResponse(ListingStatusSerializer(listing))
+""")
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ006"] == []
+
+    def test_a_serializer_in_a_sibling_module_is_resolved(self, tmp_path):
+        """The whole reason lint_project builds a cross-file index: the view
+        names the serializer, the fields live next door. Linting the view file
+        alone with no directory context sees no fields and stays silent —
+        the documented cost of having no import resolution."""
+        _write(tmp_path, "serializers.py", LISTINGS_SERIALIZERS)
+        view = _write(tmp_path, "views.py", LISTINGS_PRE_FIX_VIEWS)
+        assert "AUTHZ006" in [v.rule for v in lint_project(tmp_path)]
+        # The bare-module index (no sibling): silent, and honestly so.
+        assert "AUTHZ006" not in _codes(lint_file(view))
+
+
+# ===========================================================================
 # the whole-tree control: pre-fix vs post-fix
 # ===========================================================================
 

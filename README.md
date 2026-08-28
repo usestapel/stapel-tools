@@ -469,9 +469,46 @@ absence.
 | AUTHZ003 | warning | an explicit `refresh_access_token(x, None)` re-mints from the presented token's own claims (up to `JWT_REFRESH_TOKEN_LIFETIME`, 7 days), resurrecting revoked flags. Since core 0.39.0 the django-layer default is the database loader, so the bare call is the safe form and only the typed-out `None` is flagged — it must be a decision, not an omission |
 | AUTHZ004 | error | a `get_user()` **method** override returning `objects.get()` needs an `is_active`/`user_can_authenticate` check. `get_user` resolves `request.user` on every request after the one that authenticated, so dropping it lets a deactivated account keep a live session for the life of the session cookie |
 | AUTHZ005 | error | a revocation/blacklist entry read or written through `django.core.cache.cache`. Django builds the real key from *this deployment's* `KEY_PREFIX`, so `auth` wrote `auth:1:jwt_blacklist:<jti>` while `profiles` read `stapel_profiles:1:jwt_blacklist:<jti>` — use `stapel_core.core.revocation_store.revocation_cache()` |
+| AUTHZ006 | error | a view or `@action` reachable **without authentication** (`AllowAny`, an empty `permission_classes`, `IsAuthenticatedOrReadOnly` on a read) that reads a **filter-bypassing manager** (`all_objects`, `_base_manager`, `with_deleted()`, `all_with_deleted()`, `only_deleted()`) and answers with **identity or moderation state** (`owner`/`owner_id`/`user_id`/`created_by`, `moderation_*`, or the `status` of a row the default filter hides). Each half is ordinary; together they are an enumeration oracle |
 
 Suppress with `# noqa: AUTHZ00N` on the reported line; a written reason after
 the code on the same line is read fine, and is the point.
+
+**AUTHZ006 — the second defect this family was paid for.** On 2026-08-28
+`stapel-listings` shipped 0.8.0 for a hole none of AUTHZ001-005 could see,
+because nothing on the path minted a credential or overrode `get_user`:
+
+```python
+@action(detail=True, methods=["get"], permission_classes=[AllowAny])
+def status(self, request, pk=None):
+    listing = Listing.all_objects.get(pk=pk)                  # the UNFILTERED manager
+    return StapelResponse(ListingStatusSerializer(listing))   # owner_id, moderation_status, …
+```
+
+Live on a production stand, unauthenticated, over sequential ids:
+
+```
+GET /listings/api/v1/listings/10/status/
+→ 200 {"status":"draft","moderation_status":"pending","is_deleted":true,
+       "owner_id":"720a67e2-…"}
+```
+
+An anonymous walk of the ids harvested the owner's user UUID and the moderation
+verdict for every listing in the deployment — other people's drafts, rejected
+and soft-deleted rows included.
+
+The rule keys on **the missing decision**, not on the permission and not on the
+manager, because the shipped fix changed neither: 0.8.0 is still `AllowAny`,
+still `all_objects`, still the same serializer in the schema. Deleting the
+endpoint or locking it to services was the *wrong* fix and was tried first — a
+real browser client (`@stapel/listings-react`'s `ListingDetail`) needs the
+probe to tell "removed" from "never existed", since `GET /{pk}/` 404s
+identically for a deleted row and a made-up id. **Keep the capability, remove
+the disclosure:** full view for a fleet service and for the row's own owner,
+one boolean for everyone else — a signed-in stranger included, or the oracle
+costs an attacker one free account. A branch on ownership or permission in the
+handler (or a named predicate in the same module) is what silences the rule,
+because that branch *is* the fix.
 
 **What these rules cannot catch, stated plainly** — a rule that pretends to
 cover more than it does is worse than one whose edge is written down:
@@ -504,6 +541,28 @@ cover more than it does is worse than one whose edge is written down:
   how a rule earns its first blanket suppression. A revocation key built from
   a constant imported from elsewhere and named nothing revocation-ish is
   missed.
+- AUTHZ006 reads **statically declared** response fields: serializer class
+  attributes, `Meta.fields`/`read_only_fields` string lists, the literal dict a
+  hand-written `to_representation` returns, and a literal dict built in the
+  handler itself. It does **not** see a serializer chosen at runtime, a
+  response assembled from `**kwargs` or a comprehension, `fields = "__all__"`
+  (no model resolution, and guessing would be its first false positive), or a
+  disclosing column aliased to an innocuous name. Silence from AUTHZ006 is not
+  proof a response is clean, and the message says so on every hit.
+- AUTHZ006's serializer index is keyed by **bare class name** across the
+  project — no import resolution, so two same-named serializers in different
+  apps merge. Linting a single file indexes that file's own directory; linting
+  a project indexes the whole tree.
+- AUTHZ006 reads permissions only from a **list literal** — `permission_classes
+  = PUBLIC_PERMS` or a computed list is "not declared", and with nothing
+  declared anywhere the project's `DEFAULT_PERMISSION_CLASSES` decides, which
+  is a setting this linter does not resolve. Undeclared means silent, not
+  assumed-open.
+- AUTHZ006 treats any ownership/permission decision in the handler as the fix,
+  without checking that the disclosing branch is the guarded one. A handler
+  that branches on `owner_id` and then returns the full serializer from *both*
+  arms passes. Source-order and branch-reachability are outside every rule in
+  this family.
 
 Composed into `stapel-verify` (surface `python`), so a project picks the gate
 up on its next stapel-tools upgrade with nothing to regenerate.
