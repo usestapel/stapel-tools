@@ -82,6 +82,17 @@ class TestExp001:
         assert [f.rule for f in found] == ["EXP001"]
         assert found[0].path.endswith("thing.py") and found[0].line == 1
 
+    def test_excepted_token_is_not_a_hit(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme", "!acme-widget")))
+        root = _lib(tmp_path, body='OPTION = "acme-widget"  # a public dataset code\n')
+        assert lint_project(root) == []
+
+    def test_exception_covers_only_its_own_token(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme", "!acme-widget")))
+        root = _lib(tmp_path, body='X = "acme-widget"\nY = "acme"\nZ = "acme-widgets"\n')
+        found = lint_project(root)
+        assert [f.line for f in found] == [2, 3]
+
     def test_generated_schema_is_not_skipped(self, tmp_path, monkeypatch):
         """docs/schema.json ships in the wheel — the hit that matters most."""
         monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))

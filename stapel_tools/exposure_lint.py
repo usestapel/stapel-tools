@@ -28,9 +28,15 @@ The list
 --------
 The names are private too, so they live outside every repository:
 ``$STAPEL_PRIVATE_NAMES_FILE`` or ``~/.stapel/private-names`` — one name per
-line, ``#`` comments allowed. With no list the lint emits a note and no
-findings: a CI runner without the file cannot check, and must not pretend it
-did. The owner's machine, where every push originates, has the file.
+line, ``#`` comments allowed. A line starting with ``!`` is an EXCEPTION: a
+longer token that merely contains a private name but is not one — a
+dictionary word in another language, an option code from a public dataset
+(``!otdayu-besplatno`` for a name ``besplatno``). A hit is dropped only when every
+occurrence on the line sits inside an excepted token, and the exception lives
+in the same owner-held file, never in a repository. With no list the lint
+emits a note and no findings: a CI runner without the file cannot check, and
+must not pretend it did. The owner's machine, where every push originates,
+has the file.
 
 Scope
 -----
@@ -165,11 +171,33 @@ def _walk_text(root: Path) -> Iterable[Path]:
             yield p
 
 
+_TOKEN = re.compile(r"[a-z0-9._-]+")
+
+
+def _split_names(names: list[str]) -> tuple[list[str], set[str]]:
+    """Private names and the ``!``-prefixed excepted tokens, separately."""
+    plain = [n for n in names if not n.startswith("!")]
+    exceptions = {n[1:] for n in names if n.startswith("!") and len(n) > 1}
+    return plain, exceptions
+
+
+def _excepted(low: str, name: str, exceptions: set[str]) -> bool:
+    """True when every occurrence of *name* on the line is inside an excepted token."""
+    if not exceptions:
+        return False
+    carriers = [tok for tok in _TOKEN.findall(low) if name in tok]
+    # An occurrence outside any token (e.g. spanning punctuation the token
+    # class excludes) is not carried by an exception: count them too.
+    return bool(carriers) and low.count(name) == sum(tok.count(name) for tok in carriers) \
+        and all(tok in exceptions for tok in carriers)
+
+
 def _hits(text: str, names: list[str]) -> Iterable[tuple[int, str]]:
+    plain, exceptions = _split_names(names)
     for lineno, line in enumerate(text.splitlines(), 1):
         low = line.lower()
-        for name in names:
-            if name in low:
+        for name in plain:
+            if name in low and not _excepted(low, name, exceptions):
                 yield lineno, name
                 break
 

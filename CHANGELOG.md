@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.57.2] — 2026-08-30
+
+### Added
+- `stapel-exposure-lint`: a `!token` line in the owner-held private-names
+  file excepts one longer token that merely contains a private name (a
+  dictionary word in another language, an option code from a public
+  dataset). A hit is dropped only when every occurrence on the line sits
+  inside an excepted token; the exception never lives in a repository, so a
+  public tree cannot silence the lint about itself. Found by the source-catalogue rule
+  corpus: the option code `otdayu-besplatno` («Отдаю бесплатно», "giving away for
+  free") is a Russian phrase, not a client.
+
 ## [0.57.1] — 2026-08-30
 
 ### The generated rule corpus: a `nomatch` that matched, and three missing effects
