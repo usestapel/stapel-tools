@@ -2,6 +2,64 @@
 
 ## [Unreleased]
 
+## [0.57.1] — 2026-08-30
+
+### The generated rule corpus: a `nomatch` that matched, and three missing effects
+
+Found by recording 0.57.0's `--emit-rule-cases` output through the Python
+evaluator in `stapel-attributes` — which is the whole point of a shared corpus,
+and the first thing it caught was the generator that fed it.
+
+**1. A `nomatch` case that fires.** The source catalogue spells a disjunction as several
+one-value branches on the *same* controlling field:
+
+```
+"when": {"any": [{"feature": "direction", "op": "in", "values": ["audit-i-ocenka"]},
+                 {"feature": "direction", "op": "in", "values": ["kadrovye-uslugi"]},
+                 …
+                 {"feature": "direction", "op": "in", "values": ["drugoe"]}]}
+```
+
+The generator chose a value one condition at a time and wrote them into one
+`{feature: value}` map, so the last branch won the key: avoiding `drugoe` it
+picked `audit-i-ocenka` — the *first* branch's value. `catalog-0bfce4b16a-nomatch`
+therefore recorded `visible: true`. 10 of 1185 rules had a repeated controlling
+field and 8 files were wrong.
+
+The plan is now built for the rule as a whole: a `nomatch` set must falsify
+**every** condition whatever the connective (for `in`, a value outside the union
+of every condition's values on that field — an option of the controller nobody
+names, else the synthetic `__none__`; for `not_in`, one of the named values;
+`filled` becomes absent, `empty` becomes present), and a `match` set satisfies
+all conditions for `all`, or the first branch alone for `any` with every other
+feature falsified. Conjunctions naming disjoint sets on one field get a list
+value, which `stringify` flattens and `in` any-matches. A rule whose two
+polarities are not both expressible (`filled` and `empty` on one feature) is
+skipped and counted, not emitted as a lie.
+
+**2. Only three of five effects were represented.** `forbid_option` and `limit`
+come overwhelmingly from `values_by_group`, a table with no sentence to hash,
+and only sentence-derived rules were being recorded. They now carry their own
+deterministic id, `catalog-vbg-<sha1 of (controller slug, target slug, rule)>`.
+
+The full corpus goes from **2370 files / 3 effects** to **7780 files / 5**:
+3890 distinct rules — show 1020, require 153, hide 12, forbid_option 2689,
+limit 16 — none skipped, byte-stable across runs.
+
+**3. The gate that would have caught both.** `tests/test_catalog_import.py` now
+carries an oracle implementing the §1.2/§1.3 semantics and asserts, for every
+emitted pair, that the rule fires in `-match` and does not in `-nomatch`, and
+that the state its effect owns actually flips (`visible`, `required`, the
+forbidden option, the bounds). All five effects must appear or the test fails.
+Verified against all 7780 files of the full run: zero polarity failures.
+
+**Not a defect, worth recording:** no `forbid_option` case comes from prose.
+All 248 `value_not_applicable_if` occurrences are one sentence about
+`SparePartType`; in 130 leaves that field does not exist (an error in the source catalogue's
+own documentation, §6 of the mapping report), and in the other 118 it is a
+single-option select echoing the category path, so it is a `core` field and
+never a feature. The rule is dropped as `controller_not_a_feature`, correctly.
+
 ## [0.57.0] — 2026-08-30
 
 ### `stapel-catalog-import` — an external classified schema, imported as fixtures
