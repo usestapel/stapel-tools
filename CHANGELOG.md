@@ -2,6 +2,74 @@
 
 ## [Unreleased]
 
+## [0.57.0] — 2026-08-30
+
+### `stapel-catalog-import` — an external classified schema, imported as fixtures
+
+Slice S4 of the attributes-v2 spec. A competitor's entire autoload schema —
+3444 categories, 2901 leaves, 138 872 field occurrences, 49 933 Russian
+dependency sentences — becomes `stapel-categories` catalog fixtures plus
+vocabulary fixtures, with a counter for every decision it made.
+
+```bash
+stapel-catalog-import --dataset data/ --catalogs catalogs/ --all --out fixtures/catalog
+stapel-catalog-import --dataset data/ --all --emit-rule-cases tests/golden/rules/catalog
+```
+
+Django-free by construction: no settings module, no database, no network. A
+full 2901-leaf run with all ten catalogues resolved takes **14.9 s** and 750 MB
+of RSS; the 20-leaf acceptance run is the same 15 s, because the whole tree is
+always read (see below).
+
+**What it emits, and the numbers of the full run.** 3444 categories, 3202 root
+features, 11 207 inline overrides, 19 729 rules, 10 vocabularies holding 130 443
+terms and 388 207 edges. The field buckets reconcile exactly with the machine
+classification the mapping report was built from: 39 664 core (9889 of them the
+category path the source catalogue re-emits as single-option selects), 44 196 platform-only,
+2468 composite, 52 488 attributes.
+
+**Four decisions the output rests on.**
+
+- *The whole tree is parsed whatever you emit.* `Category.slug` is globally
+  unique with no auto-dedup, and 343 name slugs collide across 1041 nodes
+  (`другое` alone on 97). A colliding slug is prefixed with ancestor slugs until
+  unique, computed over all 3444 nodes — so `--leaves 129639` and `--all` name
+  the same category identically, which is the only way an incremental import is
+  safe. The longest slug the catalogue produces is 73 characters.
+- *Conditional prose becomes a rule or nothing.* The dependency-sentence parser
+  is a verbatim port of the tool that measured its own 99.88 % parse rate
+  (49 871 of 49 933 occurrences), reproduced by a `slow`-marked test. On top of
+  it sits one normalizer for the mixed «не заполнено или "В наличии"» form,
+  which closes 46 of the 62 remaining misses and lifts the rate to 99.97 %.
+  Sentences whose controlling field is a listing column (151), does not resolve
+  (175), is not a feature in that leaf (144), or that stay unparsed (32) are
+  **dropped with a reason and counted** — never approximated into a rule that
+  would silently misfire in a form.
+- *A large `values_link` catalogue becomes a vocabulary, not inline options.*
+  `--catalogs` maps a URL to a local XML by basename. A parentless level with at
+  most `--inline-threshold` (50) terms is inlined as an ordinary `select`;
+  everything else becomes a `ref_select` whose `optionsRef.parentFeature` links
+  it to the level above — 17 Autocatalog fields become 17 linked selects, not
+  one cascader, because `show_at_title`, badges and search facets are all
+  addressed by feature slug. 259 of the 2874 `values_link` fields resolve this
+  way; the other 2615 have no catalogue file and become a hinted `string`.
+- *A truncated download is data, not an error.* The 85 MB `Autocatalog.xml`
+  arrives at 62 MB. The parser commits per top-level record, so every complete
+  `<Make>` before the cut is kept and the partial tail is dropped, with
+  `truncated: true` in the report rather than a stack trace.
+
+**Byte-stable, and tested that way.** Fixtures are written with the same
+canonical encoding as `stapel-categories/catalog_fixtures` (sorted keys,
+`indent=2`, `ensure_ascii=False`); two runs of the same input produce identical
+files, so a re-import diffs to nothing. The vocabulary fixtures are validated
+against a local copy of the spec §3.6 schema in
+`stapel_tools/catalog_import/schemas/`.
+
+**Fixtures are the real slice.** `tests/fixtures/catalog/dataset` carries the
+whole 3444-node tree plus the raw documentation of the 20 priority leaves, so
+the slug-collision numbers the tests assert are the production ones. The
+catalogue XMLs beside it are synthetic miniatures of the three real shapes.
+
 ## [0.56.0] — 2026-08-28
 
 ### AUTHZ006 — the enumeration oracle: anonymous, unfiltered, and it names people

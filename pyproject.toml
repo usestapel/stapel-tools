@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.56.0"
+version = "0.57.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -114,10 +114,17 @@ stapel-docs = "stapel_tools.api_docs:main"
 stapel-readme = "stapel_tools.readme:main"
 stapel-storefront = "stapel_tools.storefront:main"
 stapel-disk = "stapel_tools.disk_guard:main"
+stapel-catalog-import = "stapel_tools.catalog_import.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["stapel_tools*"]
+
+# The importer reads two data files at run time — the show_at_title source table
+# and the vocabulary-fixture schema it validates its own output against — so the
+# wheel has to carry them, not just the .py files.
+[tool.setuptools.package-data]
+"stapel_tools.catalog_import" = ["flags_default.json", "schemas/*.json"]
 
 [tool.pytest.ini_options]
 # tests/fixtures holds INPUT trees — repositories-in-miniature the linters are
@@ -140,3 +147,10 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# A verbatim port of tasks/catalog-scraping/tools/map_to_stapel.py, whose measured
+# 99.88 % parse rate is the reason it exists. Reformatting it would break the
+# only property that makes the copy trustworthy: that it is byte-comparable to
+# the original. E702 is the original's `out.append(x); i += 1` style.
+"stapel_tools/catalog_import/dependency_parser.py" = ["E702"]

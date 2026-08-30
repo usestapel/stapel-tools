@@ -927,6 +927,57 @@ The `trap` is the point: a crashed run is exactly the run that leaks, so the
 reaper has to fire on failure as well as success. Generated projects inherit
 `disk-guard` / `disk-doctor` targets from the scaffold.
 
+### `stapel-catalog-import` — an external classified schema as reviewable fixtures
+
+```bash
+# the 20 acceptance leaves, with the values_link catalogues resolved locally
+stapel-catalog-import --dataset data/ --catalogs catalogs/ --out fixtures/catalog
+
+# the whole catalogue: 3444 categories, 2901 leaves
+stapel-catalog-import --dataset data/ --catalogs catalogs/ --all --out fixtures/catalog
+
+# a named subset
+stapel-catalog-import --dataset data/ --leaves 129639,67035 --out fixtures/catalog
+
+# the generated half of the shared rule corpus (stapel-attributes §1.5)
+stapel-catalog-import --dataset data/ --all --emit-rule-cases tests/golden/rules/catalog
+```
+
+Django-free: no settings module, no database, no network. It reads the source catalogue's
+autoload dataset (`catalog-autoload-full.json`, `fields.jsonl`) and writes
+
+```
+<out>/catalog/features.json      root FeatureDefs — stapel-categories catalog_fixtures format
+<out>/catalog/categories.json    the tree, parent_slug edges, per-category feature lists
+<out>/vocabularies/<slug>.json   levels + terms + edges, for load_vocabulary
+<out>/report.{json,md}           every counter of the run
+```
+
+which `manage.py load_vocabulary` and `manage.py load_catalog` apply. Fixtures
+are byte-stable — two runs of the same input produce identical files, so a
+re-import diffs to nothing and a real change shows up as a real diff.
+
+Four decisions worth knowing before you read the output:
+
+- **The whole tree is always parsed, whichever leaves you emit.** Category slugs
+  are transliterated from the node name and, on a global collision, prefixed
+  with ancestor slugs until unique — 343 slugs collide across 1041 nodes, and a
+  20-leaf import must name a category exactly as a full import does.
+- **Not every source-catalogue field becomes a feature.** Listing columns (`Title`,
+  `Price`, `Address`, …), the source catalogue's own monetization and logistics enums, the
+  category path the source catalogue re-emits as single-option selects, and the two composite
+  list fields are counted and skipped, with the counts in the report.
+- **Conditional prose becomes rules, or nothing.** The dependency sentences are
+  parsed into the closed `require`/`show`/`hide`/`forbid_option`/`limit`
+  grammar; a sentence whose controlling field is a listing column, or which does
+  not parse, is dropped *with a reason* rather than approximated.
+- **A big `values_link` catalogue becomes a vocabulary, not inline options.**
+  `--catalogs` maps a `values_link` URL to a local XML by basename; a parentless
+  level with at most `--inline-threshold` terms is inlined as a plain `select`,
+  everything else becomes a `ref_select` pointing at the vocabulary fixture, with
+  `parentFeature` linking it to the level above. A truncated download is
+  tolerated: complete top-level records are kept, the partial tail is dropped.
+
 ## Project layout
 
 Generated projects follow the mainstream Django community canon so the shape is
