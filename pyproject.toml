@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.57.3"
+version = "0.58.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -42,6 +42,10 @@ test = [
     "djangorestframework",
     "drf-spectacular",
     "stapel-core>=0.45.0,<1",
+    # The catalog_import suite validates its emitted `group` fixtures against the
+    # live engine — a fixture is only worth anything if the library that will
+    # load it accepts it, and that is not a claim a self-test can make.
+    "stapel-attributes>=0.6.0,<1",
     # These two are reached by a SUBPROCESS, not an import: the generator
     # tests boot a generated project's Django and resolve its URLs, and that
     # interpreter imports the libs the project selected. No AST here can see

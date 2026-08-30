@@ -964,9 +964,17 @@ Four decisions worth knowing before you read the output:
   with ancestor slugs until unique — 343 slugs collide across 1041 nodes, and a
   20-leaf import must name a category exactly as a full import does.
 - **Not every source-catalogue field becomes a feature.** Listing columns (`Title`,
-  `Price`, `Address`, …), the source catalogue's own monetization and logistics enums, the
-  category path the source catalogue re-emits as single-option selects, and the two composite
-  list fields are counted and skipped, with the counts in the report.
+  `Price`, `Address`, …), the source catalogue's own monetization and logistics enums and the
+  category path the source catalogue re-emits as single-option selects are counted and skipped,
+  with the counts in the report.
+- **A `children` field becomes a `group`.** The two composite list fields —
+  `DiscountLadderList` (2 454 leaves) and `CompatibleCars` (14) — are a table:
+  a list of rows, each row a set of ordinary fields. They emit the composite
+  `group` kind (stapel-attributes 0.6.0), each child through the same type
+  rules as a top-level field. The parent's own `values_range` is the **row
+  cap** (`{"max": 5}` = five ladder steps), so it becomes `repeat`, not a value
+  bound. A child's conditional prose is dropped and counted: the rule engine
+  reads a flat map of top-level slugs, so a rule inside a row could never fire.
 - **Conditional prose becomes rules, or nothing.** The dependency sentences are
   parsed into the closed `require`/`show`/`hide`/`forbid_option`/`limit`
   grammar; a sentence whose controlling field is a listing column, or which does

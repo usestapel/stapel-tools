@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+## [0.58.0] — 2026-08-31
+
+### Added
+
+- `stapel-catalog-import`: composite fields become the `group` kind instead of
+  being counted and dropped. 2 468 raw source-catalogue fields carry `children` — 2 454
+  `DiscountLadderList` ("quantity from N, discount M %", up to five steps) and
+  14 `CompatibleCars` (up to twenty cars, six Autocatalog levels each) — and
+  until stapel-attributes 0.6.0 there was no kind that could hold a table, so
+  §4.2 skipped them with a counter. They are now emitted: **2 468 fields
+  unlocked, 4 992 child fields, 2 group roots** on a full corpus run.
+
+  - A child record is the *same schema as a top-level field*, so each one goes
+    through `build_config` unchanged — the composite inherits every type rule
+    for free, and a child of a kind the importer already handles needs no code.
+  - **The parent's own `values_range` is the row cap, not a value bound.**
+    `DiscountLadderList` carries `{"max": 5}` (five ladder steps) and
+    `CompatibleCars` `{"max": 20}` (twenty cars). Feeding either to the number
+    branch would have produced a plausible-looking `int{max: 5}` — a field that
+    accepts 3 and rejects a 10 % discount. It becomes `repeat: {min, max}`.
+  - **A composite's `values_link` children get their own catalogue-binding
+    pass** (`Importer._bindings_for`), so their levels are assigned among their
+    own siblings: a leaf carrying both a top-level `Make` and a
+    `CompatibleCars.Make` never has the two compete for one Autocatalog level.
+    Inside a row, `optionsRef.parentFeature` points at a sibling *of the same
+    row*, which is exactly how the engine reads it.
+  - **A child's conditional prose is dropped and counted**
+    (`rule_drops.composite_child_condition` — 46 sentences in the full corpus,
+    all from `CompatibleCars`). stapel-attributes refuses `rules` on a group
+    child because the rule engine reads a flat map of top-level slugs, so a
+    rule inside a row could never fire; dropping it with a number in the report
+    beats emitting one that silently never matches. The rule on the *composite
+    itself* survives intact — `DiscountLadderList`'s "обязательно, если тип
+    скидок…" is emitted as a `require` rule on the group.
+
+  Report: the `fields` block replaces `composite_skipped` with `composite`,
+  `composite_emitted`, `composite_children` and `composite_without_children`.
+
 ## [0.57.3] — 2026-08-31
 
 ### Fixed
