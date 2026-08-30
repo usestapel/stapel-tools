@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+## [0.57.3] — 2026-08-31
+
+### Fixed
+
+- `stapel-catalog-import`: a term-code dedup suffix that collided with the data.
+  The suffix for a repeated slug was `-2`, `-3`… counted per base slug and
+  handed out blind, so it could take a code another label already owned:
+  the source catalogue's complectations `Exclusive`, `Exclusive 2` and `Exclusive+` slugify to
+  `exclusive`, `exclusive-2`, `exclusive` — and the third was given
+  `exclusive-2`, the second's own code. 23 pairs collided across the ten
+  reference vocabularies of one client fleet's fixture run (18 `Complectation`,
+  3 phone `Model`, 2 motorcycle `Model`), and `manage.py load_vocabulary` rejected the
+  file on the stand: `terms[26420] declares Complectation:exclusive-2 twice`.
+  The suffix now skips every code already spoken for — one handed out earlier
+  in the same level *and* one some other label slugifies to on its own — so it
+  is still a pure function of the level's sorted labels and still stable across
+  runs. 26 term codes moved in that fixture set, all inside the colliding
+  families.
+
+### Added
+
+- `stapel-catalog-import` fails the build on a duplicate `(level, code)` in a
+  vocabulary it is about to write (`VocabularyCodeCollision`, naming the count,
+  the total and the first five colliding labels). A term code is the identity a
+  facet, a rule and a stored listing value address; a converter bug that hands
+  two labels the same one is caught at generation time, not by the loader on
+  the stand 26 000 terms in.
+
 ## [0.57.2] — 2026-08-30
 
 ### Added
