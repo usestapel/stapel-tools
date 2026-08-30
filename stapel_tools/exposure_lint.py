@@ -31,7 +31,7 @@ The names are private too, so they live outside every repository:
 line, ``#`` comments allowed. A line starting with ``!`` is an EXCEPTION: a
 longer token that merely contains a private name but is not one — a
 dictionary word in another language, an option code from a public dataset
-(``!otdayu-besplatno`` for a name ``besplatno``). A hit is dropped only when every
+(``!acme-widget`` for a name ``acme``). A hit is dropped only when every
 occurrence on the line sits inside an excepted token, and the exception lives
 in the same owner-held file, never in a repository. With no list the lint
 emits a note and no findings: a CI runner without the file cannot check, and
