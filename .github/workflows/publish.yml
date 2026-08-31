@@ -26,16 +26,17 @@ jobs:
           pip install ruff --quiet
           ruff check . --select E,F,W --ignore E501
 
-      # The declared `test` extra, plus the three siblings this generator is
+      # The declared `test` extra, plus the four siblings this generator is
       # exercised against at their main HEAD. See ci.yml for why the list is
-      # not typed out here any more.
+      # not typed out here any more, and why chat is on it.
       - name: Install test dependencies (the declared `test` extra)
         run: |
           pip install -e ".[test]" "psycopg[binary]" --quiet
           pip install --quiet \
             "stapel-core @ git+https://github.com/usestapel/stapel-core.git" \
             "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" \
-            "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git"
+            "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" \
+            "stapel-chat @ git+https://github.com/usestapel/stapel-chat.git"
 
       - name: The suite declares its own siblings (SIB001-006)
         run: python -m stapel_tools.sibling_lint .

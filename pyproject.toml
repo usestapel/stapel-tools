@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.58.0"
+version = "0.59.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -53,6 +53,13 @@ test = [
     "stapel-auth>=0.28.0,<1",   # noqa: SIB005 - imported by the generated project under test
     "stapel-gdpr>=0.5.0,<1",    # noqa: SIB005 - imported by the generated project under test
     "stapel-profiles>=0.16.0,<1",
+    # The gdpr derivation's fleet test covers BOTH participation shapes, and
+    # chat is the only in-process `GDPRProvider` in the selection. Undeclared,
+    # its four tests skipped on every runner — a bare `skipif` that
+    # STAPEL_TEST_STRICT_SIBLINGS cannot see — while a `settings` source token
+    # in chat's own CONFIG.MD made `assemble_scaffold` raise for that same
+    # selection in a published release.
+    "stapel-chat>=0.7.3,<1",
     "stapel-calendar>=0.6.0,<1",
     "stapel-cdn>=0.17.0,<1",
     # Reached as DATA, not as an import: the billing env-hatch tests read

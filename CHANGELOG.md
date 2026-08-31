@@ -2,6 +2,101 @@
 
 ## [Unreleased]
 
+## [0.59.0] — 2026-08-31
+
+### Added
+
+- **The `vocabularies` pair, and the cross-pair seam it exists for.**
+  `@stapel/vocabularies-react` 0.1.0 was on npm and absent from
+  `FRONTEND_REACT_LIBS`, so no generated project could install it — and the
+  join it exists for (attributes-v2 §3.4: this pair's `createVocabularyClient`
+  handed to `@stapel/attributes-react`'s `VocabularyClientProvider`) sat
+  OUTSIDE the generated provider nesting. Every storefront that wanted a
+  `ref_select` editor hand-edited those four lines into a GENERATED file,
+  which is a merge conflict on the next re-generation and a silent regression
+  when it is resolved the wrong way.
+
+  - `FRONTEND_REACT_LIBS["vocabularies"]` carries the runtime, provider and
+    catalogue like every other pair, plus a new `seam` key naming both ends of
+    the join and the pair that owns the provider. `_frontend_templates`
+    emits it from there into BOTH containers' `modules.tsx` (monolith and
+    public storefront), gated on the declaring pair being selected too — the
+    provider is `@stapel/attributes-react`'s export, so emitting it without
+    that package would be a build error rather than a missing feature.
+  - No `nav` mirror, and none is missing: the pair publishes no
+    `nav-manifest.json` at all. Its term select is drawn inside somebody
+    else's editor, exactly like cdn's uploader and reviews' stars.
+  - `STAPEL_LIBS["vocabularies"]` (stapel-vocabularies 0.1.1, PyPI-matched)
+    makes the backend selectable, which is what reserves `/vocabularies/api`
+    for a monolith; a public container already reserves it off the pair list.
+    Its `requires: ["attributes"]` is the module's own pyproject floor
+    (`stapel-attributes>=0.5`, where the `VocabularyResolver` protocol lives).
+  - `shop`, `classified` and `booking` install it. Not a taste call:
+    stapel-attributes 0.5's `ref_select` carries a POINTER instead of a list,
+    and without a client every such field draws the unsupported notice and
+    blocks the submit — a catalogue preset that ships that way ships a
+    composer nobody can finish.
+
+### Fixed
+
+- **`stapel-catalog-import`: the `Справочник` hint that was declared and never
+  emitted.** `VALUES_LINK_HINT_TITLE` had sat unused since the module landed,
+  so a field whose source-catalogue record pointed at a catalogue we hold no XML for came
+  out as `string{maxLength: 128}` and nothing else — byte-identical to a
+  free-text note, in a form where the answer is supposed to come from a closed
+  list. Everything the import knew (that a closed list exists, and WHERE) was
+  discarded at that branch. `build_hints` now takes the type rule and attaches
+  `{title: "Справочник", content: …}` on it — the catalogue's own name when the
+  link names an XML feed (`holodilniki.xml`, the file a later run fetches and
+  matches on), the raw URL when it is a per-field `…/values-xml` document with
+  no name of its own. Composite ROWS degrade the same way and get the same
+  hint.
+
+  The report has called this outcome "`string` + hint" since the first run, so
+  the count of hints ACTUALLY emitted is now reported beside it
+  (`values_link_fields.hints_emitted`) instead of asserted. Making the two
+  agree exposed a second mislabel: `Year`/`NumberStone` carry a `values_link`
+  and take a type override to `int`, and were being counted as degraded
+  strings — they get their own `overridden` row. On the fixture corpus: 39
+  degraded fields, 39 hints, 4 overridden (was "43 strings", 0 hints).
+
+- **The nav mirror and the pins the attributes-v2 wave left behind.**
+  `scripts/check_nav_manifest_sync.py` was red on five pairs. Every pin
+  re-verified against `npm view` on 2026-08-31: auth 0.17.1→0.18.1, attributes
+  0.3.1→0.5.0, categories 0.5.0→0.5.1, chat 0.4.0→0.6.1, listings 0.7.0→0.9.1,
+  reviews 0.5.0→0.6.0, search 0.7.0→0.9.1. **No nav entry changed** — only the
+  versions did, which is exactly the drift a reader diffing entries cannot
+  see. The substrate moves with them, or the install is an ERESOLVE:
+  `@stapel/core` 0.18.1→0.20.0 and `@stapel/tokens-antd` 0.7.0→0.8.1 (chat,
+  vocabularies, shell and tokens-antd itself all peer `core >=0.20.0`),
+  `@stapel/shell-react` 0.7.2→0.9.0, `react-router` 7.18.2→7.18.3,
+  `@stapel/image` 0.4.1→0.4.2, antd 6.6.1→6.6.2, `@tanstack/react-query`
+  5.102.0→5.102.8. The generated containers' dev deps follow
+  `@stapel/tokens` ^0.5.1→^0.6.0 because tokens-antd 0.8.1 *depends* on ^0.6.0
+  — a container holding the older range installs two copies of the token
+  vocabulary, the bridge themed off one and its own `cssVar` calls reading the
+  other — and `@stapel/eslint-plugin` ^0.11.0→^0.12.1 with it.
+
+  The `pending` reasons on the composite presets stopped being true while
+  nobody was looking: `@stapel/geo-react` 0.4.0, `@stapel/moderation-react`
+  0.1.1 and `@stapel/currencies-react` 0.2.0 are all published now. They are
+  still not registered here — moderation needs `NAV_ENTRY_MOUNTS` rows for its
+  four entries — but the presets now say that instead of "no such package".
+
+- **The gdpr fleet test that had never run, and the sibling drift it was
+  guarding.** `TestAgainstTheRealFleet`'s four tests hung off a bare
+  `pytest.mark.skipif`, which `STAPEL_TEST_STRICT_SIBLINGS=1` cannot see:
+  `stapel_chat` was the one member nobody had declared, so all four skipped
+  silently on every runner this repo has ever had. Behind them,
+  stapel-chat's `CONFIG.MD` declared two keys with a `settings` source — a
+  token the two-token contract (`env|vault`, spec §2, and the 32 other fleet
+  modules) has no room for — so `assemble_scaffold` RAISED for any selection
+  including chat. Fixed upstream (the same keys are `env` in stapel-cdn, whose
+  media-kind registry chat's row cites by name); the four tests now go through
+  `siblings.requires`, `stapel-chat` is declared in the `test` extra, and both
+  workflows pin it to main HEAD the way core/gdpr/auth already are — the
+  published 0.7.3 wheel still carries the broken row.
+
 ## [0.58.0] — 2026-08-31
 
 ### Added

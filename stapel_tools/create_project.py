@@ -163,8 +163,13 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Typed attributes engine (feature-def/DTO/DAO) — L1 library",
         "default": False,
-        "pin": "0.3.3",
-        "ahead_of_pypi": False,  # matches PyPI 0.3.3 @ 2026-07-11
+        # 0.6.1: the attributes-v2 minor that adds `ref_select` /
+        # `ref_hierarchical_select` and the `VocabularyResolver` protocol
+        # `stapel-vocabularies` implements — that module floors itself at
+        # `stapel-attributes>=0.5`, so the old 0.3.3 pin and a vocabularies
+        # selection could not resolve together at pip time.
+        "pin": "0.6.1",
+        "ahead_of_pypi": False,  # matches PyPI 0.6.1 @ 2026-08-31
         # No models/migrations/views/urls/comm surface of its own (its own
         # __init__.py: "This is an L1 library"). Not a Django app: absent from
         # INSTALLED_APPS, mounted nowhere — a pure pip dependency for
@@ -371,6 +376,26 @@ STAPEL_LIBS = {
         "url_prefix": "video/",
         "requires": [],
     },
+    "vocabularies": {
+        "repo": "https://github.com/usestapel/stapel-vocabularies.git",
+        "dir": "stapel_vocabularies",
+        "required": False,
+        "description": "Reference vocabularies (levels, terms, edges) behind ref_select features",
+        "default": False,
+        "pin": "0.1.1",
+        "ahead_of_pypi": False,  # matches PyPI 0.1.1 @ 2026-08-31
+        # Its own `urls.py` contributes the `api/v1/` half, so the host mounts
+        # it bare under `vocabularies/` — the third-wave shape, not
+        # categories' `categories/api/`.
+        "http": True,
+        "url_prefix": "vocabularies/",
+        # pyproject.toml: `stapel-attributes>=0.5,<1.0`. A FLOOR, not a
+        # preference — the `VocabularyResolver` protocol this module
+        # implements lives in L1, and without it every `ref_select` feature
+        # in the deployment refuses to save while the term endpoints keep
+        # answering.
+        "requires": ["attributes"],
+    },
     # ── Composites (projections-and-composition §3/§4) ─────────────────────
     # A composite writes NO business logic: an INSTALLED_APPS/urls/config
     # preset over member modules + cross-domain Projection glue. Two flags
@@ -453,11 +478,17 @@ STAPEL_LIBS = {
 # and because the nav mirror below is what the drift gate checks. Splitting it
 # into a second registry would mean two places to pin one package.
 #
-# Pins verified 2026-08-27 against BOTH the sibling stapel-react checkout's
-# `packages/<key>-react/package.json` `version` AND the live
+# Pins verified 2026-08-31 against BOTH the sibling stapel-react checkout's
+# `packages/<key>-react/nav-manifest.json` `version` AND the live
 # `npm view @stapel/<key>-react version` (identical for every entry — the
 # workspace checkout is not ahead of its own last publish for these
-# packages). `@stapel/core`/`@tanstack/react-query`/`antd`/
+# packages). The attributes-v2 wave moved seven of them at once
+# (auth 0.18.1, attributes 0.5.0, categories 0.5.1, chat 0.6.1,
+# listings 0.9.1, reviews 0.6.0, search 0.9.1) and NONE of their nav
+# surfaces changed — only the pins did, which is exactly the drift
+# `scripts/check_nav_manifest_sync.py` exists to catch, since a version
+# mismatch is invisible to a reader diffing entries.
+# `@stapel/core`/`@tanstack/react-query`/`antd`/
 # `@stapel/tokens-antd` pins come from the live npm registry (the ACTUAL
 # resolution a fresh `npm install` gets), not the sibling checkout's
 # workspace-protocol devDependency pins (those can trail npm — e.g.
@@ -504,7 +535,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.17.1",
+        "version": "0.18.1",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
@@ -617,7 +648,7 @@ FRONTEND_REACT_LIBS = {
     "attributes": {
         # L0 — no client, no provider, no runtime. See the dict docstring.
         "package": "@stapel/attributes-react",
-        "version": "0.3.1",
+        "version": "0.5.0",
         "register_i18n": "registerAttributesI18n",
     },
     "billing": {
@@ -681,7 +712,7 @@ FRONTEND_REACT_LIBS = {
     },
     "categories": {
         "package": "@stapel/categories-react",
-        "version": "0.5.0",
+        "version": "0.5.1",
         "provider": "CategoriesProvider",
         "create_runtime": "createCategoriesRuntime",
         "register_i18n": "registerCategoriesI18n",
@@ -725,7 +756,7 @@ FRONTEND_REACT_LIBS = {
     },
     "chat": {
         "package": "@stapel/chat-react",
-        "version": "0.4.0",
+        "version": "0.6.1",
         "provider": "ChatProvider",
         "create_runtime": "createChatRuntime",
         "register_i18n": "registerChatI18n",
@@ -852,7 +883,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.7.0",
+        "version": "0.9.1",
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -1064,7 +1095,7 @@ FRONTEND_REACT_LIBS = {
         # No nav manifest either — reviews render inside a listing page and a
         # seller page, never on a route of their own (§13.8 item 11).
         "package": "@stapel/reviews-react",
-        "version": "0.5.0",
+        "version": "0.6.0",
         "provider": "ReviewsProvider",
         "create_runtime": "createReviewsRuntime",
         "register_i18n": "registerReviewsI18n",
@@ -1072,7 +1103,7 @@ FRONTEND_REACT_LIBS = {
     "search": {
         # No STAPEL_LIBS entry — see the dict docstring.
         "package": "@stapel/search-react",
-        "version": "0.7.0",
+        "version": "0.9.1",
         "provider": "SearchProvider",
         "create_runtime": "createSearchRuntime",
         "register_i18n": "registerSearchI18n",
@@ -1135,6 +1166,48 @@ FRONTEND_REACT_LIBS = {
                 "order": 30,
             },
         ],
+    },
+    "vocabularies": {
+        # No `nav` mirror, and none is missing: `@stapel/vocabularies-react`
+        # publishes NO `nav-manifest.json` at all (verified against the
+        # sibling checkout — the gate's "claims nothing, publishes nothing"
+        # case, which is in sync by its own rules). The pair draws a term
+        # SELECT inside somebody else's editor — a listing composer's
+        # `ref_select` field — exactly as cdn's uploader and reviews' stars
+        # do, so a "Vocabularies" menu row leading nowhere would be worse
+        # than its absence.
+        #
+        # No `default_component` for the same reason: `/default` ships
+        # `VocabularyTermSelect`, which REQUIRES `vocabulary`/`level`/`value`
+        # props a scaffold cannot fabricate.
+        "package": "@stapel/vocabularies-react",
+        "version": "0.1.0",
+        "provider": "VocabulariesProvider",
+        "create_runtime": "createVocabulariesRuntime",
+        "register_i18n": "registerVocabulariesI18n",
+        # The attributes-v2 §3.4 SEAM, and the first entry in this registry to
+        # declare one. `@stapel/attributes-react` DECLARES the
+        # `VocabularyClient` interface and reads it through
+        # `<VocabularyClientProvider>`; this pair IMPLEMENTS it structurally,
+        # and neither package imports the other — two L2 pairs that stay
+        # independently releasable, joined by the container. That container is
+        # what a generator writes, so the join belongs here rather than in
+        # every storefront's hand-written `modules.tsx` (a client fleet's
+        # storefront hand-wired exactly this, and nothing here could have
+        # caught it).
+        #
+        # `provider_package` is a pair KEY's package, deliberately: the
+        # emission is gated on `attributes` ALSO being selected, because the
+        # provider is that package's export. Vocabularies without attributes
+        # installs a client nothing reads, which is wiring, not a screen —
+        # so the seam is simply not emitted and the runtime still is.
+        "seam": {
+            "factory": "createVocabularyClient",
+            "provider": "VocabularyClientProvider",
+            "provider_package": "@stapel/attributes-react",
+            "provider_pair": "attributes",
+            "base_url": "/vocabularies/api/v1/",
+        },
     },
     "workspaces": {
         "package": "@stapel/workspaces-react",
@@ -1264,11 +1337,14 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "profiles",
             "reviews",
             "search",
+            "vocabularies",
         ],
         "pending": {
             "currencies": (
-                "no @stapel/currencies-react yet — every price on the "
-                "storefront renders unformatted until it exists"
+                "@stapel/currencies-react 0.2.0 IS published (npm, "
+                "2026-08-31) but is not registered in FRONTEND_REACT_LIBS "
+                "yet, so every price on the storefront renders unformatted "
+                "until it is"
             ),
         },
         "why": {
@@ -1276,6 +1352,12 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "profiles": "the seller's own settings screen",
             "cdn": "the photo pipe the listing composer publishes from",
             "search": "browse: the storefront's own way into the catalogue",
+            "vocabularies": (
+                "the terms behind a category's ref_select features — a "
+                "vendor/model list too large to inline. Without it every "
+                "ref field in the composer draws the unsupported notice "
+                "and blocks the submit"
+            ),
         },
     },
     "classified": {
@@ -1291,17 +1373,26 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "profiles",
             "reviews",
             "search",
+            "vocabularies",
         ],
         "pending": {
             "geo": (
-                "no @stapel/geo-react yet — the composer asks a seller for a "
-                "raw lat/lon pair until it exists (named on the page)"
+                "@stapel/geo-react 0.4.0 IS published (npm, 2026-08-31) but "
+                "is not registered in FRONTEND_REACT_LIBS yet, so the "
+                "composer asks a seller for a raw lat/lon pair until it is "
+                "(named on the page)"
             ),
             "moderation": (
-                "no @stapel/moderation-react yet — stapel-classified registers "
-                "listing/review report targets that nothing renders a button for"
+                "@stapel/moderation-react 0.1.1 IS published (npm, "
+                "2026-08-31) and carries a four-entry nav manifest, but "
+                "registering it needs those entries' NAV_ENTRY_MOUNTS rows; "
+                "until then stapel-classified registers listing/review "
+                "report targets that nothing renders a button for"
             ),
-            "currencies": "no @stapel/currencies-react yet — prices go unformatted",
+            "currencies": (
+                "@stapel/currencies-react 0.2.0 IS published but is not "
+                "registered in FRONTEND_REACT_LIBS yet — prices go unformatted"
+            ),
         },
         "why": {
             "auth": "a storefront always generates sign-in",
@@ -1309,6 +1400,12 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "cdn": "the photo pipe the listing composer publishes from",
             "search": "browse: the storefront's own way into the catalogue",
             "chat": "buyer↔seller messaging is the classified's own surface",
+            "vocabularies": (
+                "the terms behind a category's ref_select features — a "
+                "vendor/model list too large to inline. Without it every "
+                "ref field in the composer draws the unsupported notice "
+                "and blocks the submit"
+            ),
         },
     },
     "booking": {
@@ -1323,6 +1420,7 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "listings",
             "profiles",
             "search",
+            "vocabularies",
         ],
         "pending": {},
         "why": {
@@ -1330,6 +1428,12 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "profiles": "the owner's own settings screen",
             "cdn": "photos of the resource being booked",
             "search": "browse: finding a resource before booking it",
+            "vocabularies": (
+                "the terms behind a category's ref_select features — a "
+                "vendor/model list too large to inline. Without it every "
+                "ref field in the composer draws the unsupported notice "
+                "and blocks the submit"
+            ),
         },
     },
     "social": {
@@ -1426,7 +1530,7 @@ def composite_report(name: str) -> list[str]:
 
 # Support packages the generated app needs alongside any FRONTEND_REACT_LIBS
 # selection — pins from the live npm registry (`npm view <pkg> version`,
-# 2026-08-27), see the FRONTEND_REACT_LIBS docstring above for why npm (not
+# 2026-08-31), see the FRONTEND_REACT_LIBS docstring above for why npm (not
 # the sibling checkout's workspace pin) is the source of truth here.
 #
 # THE SUBSTRATE MOVES WITH THE PAIRS. Every pin below is checked against the
@@ -1435,8 +1539,11 @@ def composite_report(name: str) -> list[str]:
 # 0.55.5 e2e (ERESOLVE, not a missing version), and a pair can raise its own
 # floor in another repo with no commit here at all.
 FRONTEND_REACT_CORE_DEPS = {
-    # 0.18.1, not 0.15.0/0.17.0: the 2026-08 pairs declare
-    # `"@stapel/core": ">=0.18.1 <1.0.0"` as a peer — 16 of the 17 do, so an
+    # 0.20.0, not 0.18.1: the attributes-v2 wave raised the floor again —
+    # `@stapel/chat-react` 0.6.1, `@stapel/vocabularies-react` 0.1.0,
+    # `@stapel/shell-react` 0.9.0 and `@stapel/tokens-antd` 0.8.1 all peer
+    # `"@stapel/core": ">=0.20.0 <1.0.0"` (0.20.0 is where `useOptionalSite`
+    # ships, which is what `<PublicShell/>`'s brand/legal slots read). An
     # older core is an ERESOLVE at install, not a subtle runtime gap. The
     # older reasons still hold underneath it and are why the pin is EXACT
     # rather than a wide range: the wave-4 pairs bind two core surfaces that
@@ -1449,8 +1556,8 @@ FRONTEND_REACT_CORE_DEPS = {
     # catch either — npm installs happily and the generated frontend fails at
     # BUILD time on a missing export, or worse, at RUNTIME on a silently
     # dropped filter.
-    "@stapel/core": "0.18.1",
-    "@tanstack/react-query": "5.102.0",
+    "@stapel/core": "0.20.0",
+    "@tanstack/react-query": "5.102.8",
 }
 # Only pulled in when >=1 selected module's registry entry has
 # "default_component" set (i.e. the scaffold actually imports a `/default`
@@ -1458,12 +1565,14 @@ FRONTEND_REACT_CORE_DEPS = {
 # headless-only ones (billing/calendar/recordings), so a project selecting
 # only those stays antd-free.
 FRONTEND_REACT_ANTD_DEPS = {
-    "antd": "6.6.1",
-    # 0.7.0: every skinned pair peers `"@stapel/tokens-antd": ">=0.7.0"`, the
-    # release whose bridge reads the neutral colour-role dictionary the
-    # generated `stapel.theme.json` emits. 0.5.0 was an ERESOLVE against all
-    # 17 of them.
-    "@stapel/tokens-antd": "0.7.0",
+    "antd": "6.6.2",
+    # 0.8.1: `@stapel/chat-react` 0.6.1 and `@stapel/vocabularies-react` 0.1.0
+    # peer `">=0.8.0"`, so the older 0.7.0 pin is an ERESOLVE for any project
+    # selecting either. The reason the pin existed at all still holds
+    # underneath: 0.7.0 is the release whose bridge reads the neutral
+    # colour-role dictionary the generated `stapel.theme.json` emits, and
+    # 0.5.0 was an ERESOLVE against all 17 pairs.
+    "@stapel/tokens-antd": "0.8.1",
 }
 
 # Scripted-fullstack navigation (P1) — router deps for the generated
@@ -1474,9 +1583,10 @@ FRONTEND_REACT_ANTD_DEPS = {
 # view react-router version` dist-tag is a v8 major (verified 2026-07-20:
 # `8.2.0`), which would silently pull an incompatible major; the pin below
 # is the latest v7 release instead (`npm view "react-router@^7" version` ->
-# `7.18.2`, matching stapel-react's own shell-react devDependency range).
+# `7.18.3` on 2026-08-31, matching stapel-react's own shell-react
+# devDependency range).
 FRONTEND_ROUTER_DEPS = {
-    "react-router": "7.18.2",
+    "react-router": "7.18.3",
 }
 
 # `@stapel/shell-react` — published since 0.5.0 (`npm view
@@ -1490,13 +1600,16 @@ FRONTEND_ROUTER_DEPS = {
 # project with routing active but no nav-bearing module (e.g. `--landing`
 # alone never needs the shell).
 FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
-# 0.7.2 (`npm view @stapel/shell-react version`, 2026-08-27) — the patch that
-# fixes `matchesLocation` for MULTI-SEGMENT relative paths, so a nav entry like
-# `workspaces/settings` highlights instead of never matching. Every generated
-# container with a nested nav entry benefits; the self-theming floor below is a
-# different number on purpose (the first release with the contract, not the
-# latest one).
-FRONTEND_SHELL_REACT_VERSION = "0.7.2"
+# 0.9.0 (`npm view @stapel/shell-react version`, 2026-08-31) — the minor where
+# `<PublicShell/>` fills its brand and legal-footer slots from core's site seam
+# (`useOptionalSite`, hence the `@stapel/core` >=0.20.0 peer floor above), on
+# top of 0.8.0's classified layout and 0.7.2's `matchesLocation` fix for
+# MULTI-SEGMENT relative paths (a nav entry like `workspaces/settings`
+# highlights instead of never matching). The generated container passes neither
+# slot, so it INHERITS the brand rather than needing new emission; the
+# self-theming floor below is a different number on purpose (the first release
+# with the contract, not the latest one).
+FRONTEND_SHELL_REACT_VERSION = "0.9.0"
 
 # The first `@stapel/shell-react` release that themes ITSELF and reads the
 # container's staff answer. Two facts, one release, because they are one
@@ -1548,12 +1661,12 @@ def shell_self_themes(version: str | None = None) -> bool:
 # (cdn, or a profiles avatar), so <Image meta={...image}> can render the
 # StapelImage descriptor the backend denormalizes (AGENTS.md §7).
 FRONTEND_IMAGE_PACKAGE = "@stapel/image"
-# 0.4.1 (`npm view @stapel/image version`, 2026-08-27). `@stapel/search-react`
+# 0.4.2 (`npm view @stapel/image version`, 2026-08-31). `@stapel/search-react`
 # peers `">=0.3.0"` and listings/profiles/cdn peer `">=0.2.0"`, so 0.3.0 was
 # still resolvable — but the pin follows the registry, not the floor: a
 # generated project that installs the pairs' own image renderer at a version
 # BELOW what those pairs ship against gets two copies of it in the tree.
-FRONTEND_IMAGE_VERSION = "0.4.1"
+FRONTEND_IMAGE_VERSION = "0.4.2"
 
 
 # Broker per project type: minimal never gets one, microservices requires one

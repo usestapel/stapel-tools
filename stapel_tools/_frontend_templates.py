@@ -56,8 +56,8 @@ PACKAGE_JSON = """\
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@stapel/eslint-plugin": "^0.11.0",
-    "@stapel/tokens": "^0.5.1",
+    "@stapel/eslint-plugin": "^0.12.1",
+    "@stapel/tokens": "^0.6.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
@@ -366,6 +366,53 @@ def _profile_settings_jsx(has_cdn: bool) -> str:
     )
 
 
+def seam_pairs(entries: list[dict]) -> list[dict]:
+    """The selected entries whose registry ``seam`` can actually be emitted.
+
+    A ``seam`` (create_project.FRONTEND_REACT_LIBS) is a cross-pair join: one
+    pair exports a FACTORY, a DIFFERENT pair exports the PROVIDER that reads
+    what the factory returns, and neither imports the other — they agree
+    structurally, which is what keeps two L2 pairs independently releasable.
+    The container is the only place the two ends meet, so the generator is the
+    only thing that can write the join.
+
+    Emission is gated on the DECLARING pair being selected too
+    (``seam["provider_pair"]``): the provider is that package's export, so
+    without it there is nothing to import. A selection with the implementor
+    and not the declarer still gets the implementor's runtime and provider —
+    it just has no consumer to hand the client to, and inventing an import
+    for one would be a build error rather than a missing feature.
+    """
+    selected = {e["key"] for e in entries}
+    return [
+        e for e in entries
+        if e.get("seam") and e["seam"]["provider_pair"] in selected
+    ]
+
+
+def _seam_import_names(seams: list[dict]) -> dict[str, list[str]]:
+    """``package -> extra import names`` the seams add: the factory on the
+    implementing pair's package, the provider on the declaring pair's."""
+    extra: dict[str, list[str]] = {}
+    for e in seams:
+        for package, name in (
+            (e["package"], e["seam"]["factory"]),
+            (e["seam"]["provider_package"], e["seam"]["provider"]),
+        ):
+            names = extra.setdefault(package, [])
+            if name not in names:
+                names.append(name)
+    return extra
+
+
+def _seam_client_const(entry: dict) -> str:
+    """``const <key>Client = <factory>({ baseUrl: … });`` — the one line that
+    builds a seam's client, named off the registry key like every runtime."""
+    return 'const %sClient = %s({ baseUrl: %s });' % (
+        entry["key"], entry["seam"]["factory"], json.dumps(entry["seam"]["base_url"])
+    )
+
+
 def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
     """Generates ``frontend/src/modules.tsx`` — the DATA-DRIVEN registry of
     every selected ``@stapel/<module>-react`` pair (create_project.py's
@@ -426,6 +473,9 @@ def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
     # not merely unnecessary, it would shadow it.
     cdn_pair_wired = any(e["key"] == "cdn" for e in entries)
     stopgap_cdn_client = has_cdn and not cdn_pair_wired
+    # Cross-pair seams (`vocabularies` -> attributes' VocabularyClientProvider).
+    seams = seam_pairs(entries)
+    seam_imports = _seam_import_names(seams)
 
     lines: list[str] = [
         "/**",
@@ -448,6 +498,7 @@ def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
             for n in (e.get("create_runtime"), e.get("provider"), e["register_i18n"])
             if n
         ]
+        names += [n for n in seam_imports.get(e["package"], ()) if n not in names]
         lines.append(f'import {{ {", ".join(names)} }} from "{e["package"]}";')
         if e.get("default_component"):
             lines.append(f'import {{ {e["default_component"]} }} from "{e["package"]}/default";')
@@ -464,6 +515,13 @@ def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
                 f'const {key}Runtime = {e["create_runtime"]}({{ baseUrl: "/{key}/api/v1/" }});'
             )
         lines.append(f"{e['register_i18n']}(i18n);")
+    if seams:
+        lines.append("")
+        lines.append("// Cross-pair seam(s): the implementing pair's factory, read by")
+        lines.append("// the DECLARING pair's provider below. Neither package imports")
+        lines.append("// the other — this container is where the two ends meet.")
+        for e in seams:
+            lines.append(_seam_client_const(e))
     # The container's OWN nav copy — the labels of the sections no pair owns
     # (`/app/account`, `/app/admin`). Without it the shell renders the raw key.
     # English only, for the same reason the storefront's floor is: a generator
@@ -520,7 +578,13 @@ def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
     for e in runtime_entries:
         lines.append(f'{indent}<{e["provider"]} runtime={{{e["key"]}Runtime}}>')
         indent += "  "
+    for e in seams:
+        lines.append(f'{indent}<{e["seam"]["provider"]} value={{{e["key"]}Client}}>')
+        indent += "  "
     lines.append(f"{indent}{{children}}")
+    for e in reversed(seams):
+        indent = indent[:-2]
+        lines.append(f'{indent}</{e["seam"]["provider"]}>')
     for e in reversed(runtime_entries):
         indent = indent[:-2]
         lines.append(f'{indent}</{e["provider"]}>')
@@ -3140,6 +3204,12 @@ def render_public_modules_tsx(
     others = [e for e in runtime_entries if e is not primary]
     locale_suffix = locale[:1].upper() + locale[1:]
     localized = locale in PAIR_LOCALES
+    # Cross-pair seams (`vocabularies` -> attributes' VocabularyClientProvider).
+    # The storefront is the container that needed this first: a listing
+    # composer's `ref_select` editor reads the client through attributes'
+    # provider, and hand-wiring it is what every storefront was doing.
+    seams = seam_pairs(entries)
+    seam_imports = _seam_import_names(seams)
 
     lines: list[str] = [
         "/**",
@@ -3155,6 +3225,7 @@ def render_public_modules_tsx(
     ]
     for e in entries:
         names = [n for n in (e.get("create_runtime"), e.get("provider"), e["register_i18n"]) if n]
+        names += [n for n in seam_imports.get(e["package"], ()) if n not in names]
         lines.append(f'import {{ {", ".join(names)} }} from "{e["package"]}";')
         if localized:
             lines.append(
@@ -3184,6 +3255,13 @@ def render_public_modules_tsx(
             lines.append(
                 f'const {key}Runtime = {e["create_runtime"]}({{ baseUrl: "/{key}/api/v1/" }});'
             )
+    if seams:
+        lines.append("")
+        lines.append("// Cross-pair seam(s): the implementing pair's factory, read by")
+        lines.append("// the DECLARING pair's provider below. Neither package imports")
+        lines.append("// the other — this container is where the two ends meet.")
+        for e in seams:
+            lines.append(_seam_client_const(e))
     lines.append("")
     lines.append("// The `en` floor of every catalogue first, then this locale's real")
     lines.append("// catalogue on top, then the container's own copy last.")
@@ -3238,7 +3316,13 @@ def render_public_modules_tsx(
     for e in runtime_entries:
         lines.append(f'{indent}<{e["provider"]} runtime={{{e["key"]}Runtime}}>')
         indent += "  "
+    for e in seams:
+        lines.append(f'{indent}<{e["seam"]["provider"]} value={{{e["key"]}Client}}>')
+        indent += "  "
     lines.append(f"{indent}<MandateGateway>{{children}}</MandateGateway>")
+    for e in reversed(seams):
+        indent = indent[:-2]
+        lines.append(f'{indent}</{e["seam"]["provider"]}>')
     for e in reversed(runtime_entries):
         indent = indent[:-2]
         lines.append(f'{indent}</{e["provider"]}>')
@@ -3257,14 +3341,20 @@ def render_public_modules_tsx(
 #
 # The two `@stapel/*` entries are the exception that proves it: the monorepo
 # carries them as `workspace:*`, so the published version IS the mirror
-# (`npm view`, 2026-08-27 — eslint-plugin 0.11.0, tokens 0.5.1). They had
+# (`npm view`, 2026-08-31 — eslint-plugin 0.12.1, tokens 0.6.0). They had
 # drifted apart from the minimal template's copy above (^0.10.0 here, ^0.3.0
 # there); both tables are now checked by `scripts/check_npm_peer_graph.py`,
 # which reads THESE constants rather than a copy.
+#
+# `@stapel/tokens` moves to ^0.6.0 with the `@stapel/tokens-antd` 0.8.1 pin,
+# not on its own: 0.8.1 DEPENDS on `"@stapel/tokens": "^0.6.0"` (a real
+# dependency, not a peer), so a container holding ^0.5.1 installs two copies
+# of the token vocabulary — the bridge themed off one, the container's own
+# `cssVar` calls reading the other.
 PUBLIC_DEV_DEPS = {
     "@eslint/js": "^9.30.0",
-    "@stapel/eslint-plugin": "^0.11.0",
-    "@stapel/tokens": "^0.5.1",
+    "@stapel/eslint-plugin": "^0.12.1",
+    "@stapel/tokens": "^0.6.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",

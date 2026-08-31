@@ -1182,10 +1182,16 @@ class TestFrontendNavWiring:
         create_project.FRONTEND_ROUTER_DEPS's own comment."""
         import json
 
+        from stapel_tools.create_project import FRONTEND_ROUTER_DEPS
+
         proj = _create(tmp_path, "app", "monolith", modules=["core"], want_landing=True)
         pkg = json.loads((proj / "frontend" / "package.json").read_text())
-        assert pkg["dependencies"]["react-router"] == "^7.18.2"
-        assert not pkg["dependencies"]["react-router"].startswith("^8")
+        # The MAJOR is the assertion; the patch is read off the constant
+        # rather than retyped here, because a second copy of a pin is a second
+        # place to forget when the pin moves — and this test would then be
+        # red for a reason that has nothing to do with what it guards.
+        assert pkg["dependencies"]["react-router"] == "^" + FRONTEND_ROUTER_DEPS["react-router"]
+        assert pkg["dependencies"]["react-router"].startswith("^7.")
 
 
 class TestGeneratedCeleryWiring:
@@ -1585,3 +1591,122 @@ class TestFrontendAxis:
 
         with pytest.raises(ValueError, match="no frontend mounted at"):
             render_nginx_conf(NGINX_CONF, [Frontend(name="kmp", mount="/kmp")])
+
+
+class TestVocabulariesPairAndTheVocabularyClientSeam:
+    """`@stapel/vocabularies-react` 0.1.0 was on npm and absent from
+    FRONTEND_REACT_LIBS, so no generated project could install it — and the
+    seam it exists for (attributes-v2 §3.4: this pair's
+    `createVocabularyClient` handed to `@stapel/attributes-react`'s
+    `VocabularyClientProvider`) sat OUTSIDE the generated provider nesting.
+    Every storefront that wanted a `ref_select` editor hand-wired those four
+    lines into a GENERATED file, which is a merge conflict on the next
+    re-generation and a silent regression when it is resolved the wrong way.
+
+    The join is a property of the CONTAINER, and the container is what this
+    repo writes — so it is declared once, in the registry's `seam` key, and
+    emitted from there.
+    """
+
+    def test_the_pair_is_registered_with_its_published_version(self):
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        entry = FRONTEND_REACT_LIBS["vocabularies"]
+        assert entry["package"] == "@stapel/vocabularies-react"
+        assert entry["create_runtime"] == "createVocabulariesRuntime"
+        assert entry["provider"] == "VocabulariesProvider"
+        assert entry["register_i18n"] == "registerVocabulariesI18n"
+
+    def test_the_pair_claims_no_nav_surface_because_it_publishes_none(self):
+        """Not an oversight: the pair ships no `nav-manifest.json` at all —
+        its term select is drawn inside somebody else's editor, exactly like
+        cdn's uploader and reviews' stars. The drift gate's own rule for that
+        case is "claims nothing, publishes nothing = in sync"; a mirror here
+        would make `check_nav_manifest_sync` red, not greener."""
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        assert "nav" not in FRONTEND_REACT_LIBS["vocabularies"]
+        assert "default_component" not in FRONTEND_REACT_LIBS["vocabularies"]
+
+    def test_the_seam_declares_both_ends_and_the_pair_that_owns_the_provider(self):
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        seam = FRONTEND_REACT_LIBS["vocabularies"]["seam"]
+        assert seam["factory"] == "createVocabularyClient"
+        assert seam["provider"] == "VocabularyClientProvider"
+        assert seam["provider_pair"] == "attributes"
+        assert (
+            seam["provider_package"]
+            == FRONTEND_REACT_LIBS[seam["provider_pair"]]["package"]
+        )
+        assert seam["base_url"] == "/vocabularies/api/v1/"
+
+    def test_a_monolith_selecting_it_installs_the_pair_and_reserves_its_api(
+        self, tmp_path
+    ):
+        proj = _create(
+            tmp_path, "app", "monolith", modules=["attributes", "vocabularies"]
+        )
+        pkg = json.loads((proj / "frontend" / "package.json").read_text())
+        assert pkg["dependencies"]["@stapel/vocabularies-react"] == "^0.1.0"
+        reserved = json.loads((proj / "reserved-paths.json").read_text())
+        assert "/vocabularies/api" in reserved["reservedPathPrefixes"]
+        # The bare root is the SPA's, as for every other module.
+        assert "/vocabularies" not in reserved["reservedPathPrefixes"]
+
+    def test_the_seam_is_emitted_inside_the_generated_nesting(self, tmp_path):
+        proj = _create(
+            tmp_path, "app", "monolith", modules=["attributes", "vocabularies"]
+        )
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        # The provider comes from the DECLARING pair's package, merged into
+        # the import that package already had — not a second import line.
+        assert (
+            'import { registerAttributesI18n, VocabularyClientProvider } '
+            'from "@stapel/attributes-react";' in modules_tsx
+        )
+        assert "createVocabularyClient" in modules_tsx
+        assert (
+            'const vocabulariesClient = createVocabularyClient('
+            '{ baseUrl: "/vocabularies/api/v1/" });' in modules_tsx
+        )
+        # Inside the nesting, wrapping children — not beside it.
+        assert "<VocabularyClientProvider value={vocabulariesClient}>" in modules_tsx
+        assert "</VocabularyClientProvider>" in modules_tsx
+        opened = modules_tsx.index("<VocabularyClientProvider")
+        assert modules_tsx.index("<VocabulariesProvider") < opened
+        assert opened < modules_tsx.index("{children}")
+
+    def test_a_monolith_cannot_select_it_without_attributes(self, tmp_path):
+        """The backend registry settles this half: `stapel-vocabularies`
+        floors itself at `stapel-attributes>=0.5` (the `VocabularyResolver`
+        protocol lives in L1), so `requires` pulls attributes in and the seam
+        is always emittable in a monolith."""
+        from stapel_tools.create_project import _expand_with_requires
+
+        assert _expand_with_requires(["vocabularies"]) == [
+            "attributes", "vocabularies",
+        ]
+        proj = _create(tmp_path, "app", "monolith", modules=["vocabularies"])
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert "<VocabularyClientProvider value={vocabulariesClient}>" in modules_tsx
+
+    def test_a_container_without_attributes_gets_the_runtime_and_no_seam(self):
+        """A public container names its pairs DIRECTLY, with no backend
+        `requires` to expand — so this selection is reachable there. The
+        provider is `@stapel/attributes-react`'s export, and emitting it for
+        a container that does not install that package is a build error, so
+        the seam is simply not written. The pair's own runtime and provider
+        still are: a client nothing reads is wiring, not a broken screen."""
+        from stapel_tools import _frontend_templates as F
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        entries = [
+            {"key": k, **FRONTEND_REACT_LIBS[k]} for k in ("auth", "vocabularies")
+        ]
+        assert F.seam_pairs(entries) == []
+        modules_tsx = F.render_public_modules_tsx(entries)
+        assert "createVocabulariesRuntime" in modules_tsx
+        assert "<VocabulariesProvider runtime={vocabulariesRuntime}>" in modules_tsx
+        assert "VocabularyClientProvider" not in modules_tsx
+        assert "createVocabularyClient" not in modules_tsx

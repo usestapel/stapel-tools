@@ -66,14 +66,22 @@ jobs:
       - name: Install test dependencies (the declared `test` extra)
         run: |
           pip install -e ".[test]" "psycopg[binary]" --quiet
-          # ...and the three siblings the scaffold generates against are ALSO
+          # ...and the four siblings the scaffold generates against are ALSO
           # taken from main, so a generator change meets the real fleet rather
           # than last week's release. The extra floors them; this pins them to
           # HEAD on top of it.
+          #
+          # stapel-chat joined the list with the gdpr fleet test that reaches
+          # it: `config_manifest.lib_config_md` reads the INSTALLED
+          # distribution's CONFIG.MD when there is no workspace checkout, and
+          # the 0.7.3 wheel's copy carries the `settings` source token that
+          # made `assemble_scaffold` raise. main has the correction; the wheel
+          # will have it at the next chat release.
           pip install --quiet \
             "stapel-core @ git+https://github.com/usestapel/stapel-core.git" \
             "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" \
-            "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git"
+            "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" \
+            "stapel-chat @ git+https://github.com/usestapel/stapel-chat.git"
 
       - name: The suite declares its own siblings (SIB001-006)
         run: python -m stapel_tools.sibling_lint .

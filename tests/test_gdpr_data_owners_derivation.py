@@ -16,12 +16,12 @@ forked) and the in-process ``GDPRProvider``. What cannot be read is a hard
 failure naming the library: a guessed owner is a store nobody asks and nobody
 waits for, which is silent retention with a receipt that says DELETED.
 """
-import importlib.util
 import json
 import re
 from datetime import date
 
 import pytest
+from siblings import requires
 
 from stapel_tools._gdpr_owners import (
     data_owners_version,
@@ -38,10 +38,6 @@ from stapel_tools.create_project import create_project
 from stapel_tools.new_service import scaffold_service
 
 ERASURE_SCHEMA = json.dumps({"type": "object"})
-
-
-def _importable(module: str) -> bool:
-    return importlib.util.find_spec(module) is not None
 
 
 def _lib(root, name):
@@ -284,12 +280,26 @@ class TestRenderedSettings:
 FLEET_LIBS = ["gdpr", "auth", "profiles", "cdn", "chat"]
 
 
-@pytest.mark.skipif(
-    not all(_importable(f"stapel_{lib}") for lib in [*FLEET_LIBS, "core"]),
-    reason="requires the fleet libraries importable (true in the shared workspace "
-    "venv; not installed for a bare stapel-tools checkout)",
-)
+#: Every one of them, through `siblings.requires` rather than a bare skipif.
+#: The class used to carry `pytest.mark.skipif(not all(_importable(...)))`,
+#: which is invisible to STAPEL_TEST_STRICT_SIBLINGS: `stapel_chat` was the
+#: one member nobody had declared, so all four of these silently did not run
+#: on any runner — and the drift they exist to catch (stapel-chat's CONFIG.MD
+#: declaring a `settings` source the two-token contract has no room for, which
+#: made `assemble_scaffold` raise for the whole fleet selection) sat in a
+#: published release. A gate that cannot see the thing it guards is worse than
+#: no gate, because it is believed.
+#:
+#: Each `@requires` below spells its modules out as LITERALS, and lists only
+#: what that test actually reaches: `stapel-sibling-lint` reads them out of
+#: the AST to check the `test` extra still describes the suite, and a name
+#: assembled at runtime is invisible to it — which is a second way to lose
+#: exactly what was lost here.
+
+
 class TestAgainstTheRealFleet:
+    @requires("stapel_core", "stapel_gdpr", "stapel_auth", "stapel_profiles",
+              "stapel_cdn", "stapel_chat")
     def test_the_studio_call_shape_generates_without_a_config(self, tmp_path):
         """``assemble_scaffold(..., config=None)`` — studio_orchestrator's exact
         call, which used to die on 'required module settings are missing'."""
@@ -300,6 +310,8 @@ class TestAgainstTheRealFleet:
         assert "STAPEL_GDPR = {" in settings
         assert '"DATA_OWNERS_VERSION"' in settings
 
+    @requires("stapel_core", "stapel_gdpr", "stapel_auth", "stapel_profiles",
+              "stapel_cdn", "stapel_chat")
     def test_the_map_matches_what_each_library_declares(self, tmp_path):
         derived = derive_data_owners(FLEET_LIBS)
         # The erasure-protocol half, read straight from the libraries.
@@ -312,6 +324,7 @@ class TestAgainstTheRealFleet:
         assert "cdn" not in derived and "media" in derived
         assert "profiles" not in derived and "profile" in derived
 
+    @requires("stapel_core", "stapel_auth", "stapel_profiles")
     def test_a_project_without_gdpr_emits_no_inventory(self, tmp_path):
         result = assemble_scaffold(
             "nogdpr", libs=["auth", "profiles"], output_dir=tmp_path, verify=False
@@ -319,6 +332,7 @@ class TestAgainstTheRealFleet:
         settings = (result.project_dir / "config" / "settings.py").read_text()
         assert "STAPEL_GDPR" not in settings
 
+    @requires("stapel_core", "stapel_gdpr", "stapel_auth", "stapel_chat")
     def test_a_fleet_service_gets_the_inventory_of_its_own_apps(self, tmp_path):
         """A service is its own deployment: the map lists the stores THAT
         service installs, not the fleet's."""

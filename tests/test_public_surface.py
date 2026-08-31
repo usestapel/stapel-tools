@@ -355,6 +355,55 @@ class TestModulesRegistry:
         assert "not de" in str(excinfo.value) or "'de'" in str(excinfo.value)
 
 
+class TestVocabularyClientSeam:
+    """attributes-v2 §3.4. `@stapel/attributes-react` DECLARES the
+    `VocabularyClient` interface and reads it through
+    `<VocabularyClientProvider>`; `@stapel/vocabularies-react` IMPLEMENTS it
+    structurally, and neither imports the other. The container is the only
+    place the two ends meet — which means a hand-written container is the only
+    thing that could join them, and every storefront was hand-editing a
+    GENERATED file to do it."""
+
+    PAIRS = [*STOREFRONT_PAIRS, "vocabularies"]
+
+    def test_the_client_is_built_and_provided_inside_the_nesting(self):
+        src = _plan(pairs=self.PAIRS)["files"]["src/modules.tsx"]
+        assert (
+            'const vocabulariesClient = createVocabularyClient('
+            '{ baseUrl: "/vocabularies/api/v1/" });' in src
+        )
+        assert "<VocabularyClientProvider value={vocabulariesClient}>" in src
+        # Innermost, around what renders — the ref editors read a context,
+        # so anything above them is fine, but beside them is not.
+        assert src.index("<VocabularyClientProvider") < src.index("<MandateGateway>")
+        assert src.index("</VocabularyClientProvider>") > src.index("<MandateGateway>")
+
+    def test_the_provider_joins_the_declaring_packages_existing_import(self):
+        src = _plan(pairs=self.PAIRS)["files"]["src/modules.tsx"]
+        assert (
+            'import { registerAttributesI18n, VocabularyClientProvider } '
+            'from "@stapel/attributes-react";' in src
+        )
+        assert src.count('from "@stapel/attributes-react";') == 1
+
+    def test_the_terms_api_is_a_reserved_backend_prefix(self):
+        files = _plan(pairs=self.PAIRS)["files"]
+        reserved = json.loads(files["reserved-paths.json"])["reservedPathPrefixes"]
+        assert "/vocabularies/api" in reserved
+        assert "/vocabularies" not in reserved
+
+    def test_the_storefront_presets_install_it(self):
+        """Not a taste call: `stapel-attributes` 0.5's `ref_select` /
+        `ref_hierarchical_select` carry a POINTER instead of a list, and
+        without a client every such field draws the unsupported notice and
+        blocks the submit. A catalogue preset that ships that way ships a
+        composer nobody can finish."""
+        from stapel_tools.create_project import composite_pairs
+
+        for preset in ("shop", "classified", "booking"):
+            assert "vocabularies" in composite_pairs(preset), preset
+
+
 class TestRealtimeSeam:
     def test_sockets_are_off_by_default_and_say_so(self):
         src = _plan()["files"]["src/modules.tsx"]
