@@ -2,6 +2,77 @@
 
 ## [Unreleased]
 
+## [0.60.0] — 2026-08-31
+
+### Fixed
+
+Three defects a client fleet's live storefront run of 2026-08-31 measured on
+the imported source catalogue, all three visible on «Мобильные телефоны» (leaf
+129639). Fixing them changes the FIXTURES an existing dataset produces, hence
+the minor.
+
+- **«Заполните, если …» forced a seller to lie.** The importer turned every
+  such sentence into a `require` rule and ignored the record's own `required`
+  flag — which is the only thing that tells the two readings apart.
+  `ScreenCondition`/`CaseCondition` are `required: true` and their options open
+  with «Без дефектов»; `CameraFlaws`/`SensorsFlaws` are `required: false` and
+  list **defects only** («Не работает вспышка», «GPS», «Wi-Fi»), because there
+  the sentence means *fill this in if it applies*. As `require` they made an
+  honest empty answer `mandatory_missing`: 24 of 42 seeded listings refused,
+  and a seller of a working used phone had no way through but to tick a fault
+  that does not exist. A `require` on a field the source marks optional is now
+  emitted as `show`, counted under
+  `rules.require_downgraded_on_optional_field` (7 228 field occurrences of the
+  2 901-leaf corpus; 19 406 are genuinely required and unchanged). No «нет
+  дефектов» option is synthesized — the source has no such value.
+
+- **A Да/Нет field whose answer is demanded collapsed into `bool`.** A `bool`
+  draws a switch, and a switch's rest state already SHOWS one of the two
+  answers while the model holds nothing — so `BoxSealed` («Коробка
+  запечатана», `select {Да, Нет}` with `required: true` and a `require` rule
+  behind «Состояние = Новое») left the seller of a new but unsealed phone
+  reading «Нет» on screen and a permanently grey publish button. 105
+  occurrences in the corpus demand an answer and now keep two explicit
+  options; the other 6 418 are still `bool`.
+
+- **Every conditional requirement now also SCOPES its field.** «Заполните,
+  если …» says the field belongs to that case, not merely that it is demanded
+  there, so each `require` is paired with a `show` on the same condition. This
+  is what stops seven wholesale fields — «Тип минимального заказа», «Фасовка»
+  («поддон», «big-бег», «мешок»), «Количество в фасовке», «Скидка за опт» —
+  standing open for somebody selling one phone.
+
+- **Groups are emitted in form order, not feed order.** The source catalogue's
+  `field_groups` arrive in XML-column order, which put «Доставка» and a video
+  link above the phone's manufacturer and model: 9 589 px of form, 11.4 phone
+  screens. `catalog_import/groups.py` is the ordering table — identity groups
+  first, the vertical's own groups next in source order, the plumbing of
+  selling (delivery, wholesale, VAT, promotion, contact) last. A group name
+  that repeats in one document becomes one contiguous run.
+
+- **`description`, `hints` and `example` were the autoload documentation,
+  verbatim.** Live forms carried «Для формата XML ссылка на видео должна быть
+  внутри CDATA», «Если скидки нет, … оставьте DiscountLadderList пустым»,
+  «Если параметр не указан в файле …», and — where `plain_text` had stripped a
+  `<Tag>` as HTML — the truncated «Значение – текст внутри из» and
+  «Обязательно, если вы указали в поле , что коробка есть».
+  `catalog_import/prose.py` resolves every field reference (`<Set>`,
+  `WholesaleMinOrderType`, and the group names the source also writes in angle
+  brackets) to the Russian label the seller reads on that field, and drops any
+  sentence about the file, the feed, a column, XML, CDATA or the seller
+  cabinet. A reference that resolves to nothing takes its sentence with it.
+  `example` is the placeholder, so it is reduced to one sample — the first `|`
+  alternative, past any heading line, which is what put «Как должны(могут)
+  выглядеть ссылки:» in a field's placeholder and leaked «Не включается |
+  Включается» as if it were an option list.
+
+- **The root variant of a feature defined by several leaves is now tied on
+  first-seen leaf, not on the variant hash.** `vendor` is defined once by
+  «Ноутбуки» and once by «Мобильные телефоны», one leaf each, so which becomes
+  the root is a coin flip either way — but a hash tie-break re-rolled it
+  whenever any copy in the body changed, which is exactly what the prose fix
+  above did.
+
 ## [0.59.1] — 2026-08-31
 
 ### Fixed

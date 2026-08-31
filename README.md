@@ -957,7 +957,7 @@ which `manage.py load_vocabulary` and `manage.py load_catalog` apply. Fixtures
 are byte-stable — two runs of the same input produce identical files, so a
 re-import diffs to nothing and a real change shows up as a real diff.
 
-Four decisions worth knowing before you read the output:
+The decisions worth knowing before you read the output:
 
 - **The whole tree is always parsed, whichever leaves you emit.** Category slugs
   are transliterated from the node name and, on a global collision, prefixed
@@ -979,6 +979,48 @@ Four decisions worth knowing before you read the output:
   parsed into the closed `require`/`show`/`hide`/`forbid_option`/`limit`
   grammar; a sentence whose controlling field is a listing column, or which does
   not parse, is dropped *with a reason* rather than approximated.
+- **«Заполните, если …» demands an answer only when the source catalogue says the field is
+  required.** The same sentence sits on two kinds of field, and the record's own
+  `required` flag is what tells them apart. On «Мобильные телефоны» all five
+  defect fields carry «Заполните, если в поле Condition указано не 'Новое'»;
+  `ScreenCondition`/`CaseCondition` are `required: true` and their option lists
+  open with «Без дефектов», while `CameraFlaws`/`SensorsFlaws` are
+  `required: false` and list **defects only** — «Не работает вспышка», «GPS»,
+  «Wi-Fi» — because the sentence means *fill this in if it applies*. Imported as
+  `require` regardless, that pair made an honest empty answer
+  `mandatory_missing`: on a client fleet's live stand it refused 24 of 42 seeded
+  listings and left a seller of a working used phone no way through but to tick
+  a fault that does not exist. So a `require` on a field the source marks
+  optional is emitted as `show`, counted in the report under
+  `rules.require_downgraded_on_optional_field` (7 228 field occurrences of the
+  full corpus). **No «нет дефектов» option is synthesized** — the source has no
+  such value, and a code no source-catalogue feed can produce is not data. Every
+  conditional requirement is additionally paired with the `show` that scopes it:
+  the sentence says the field belongs to that case, which is what stops the
+  seven wholesale fields standing open for somebody selling one phone.
+- **A Да/Нет list stays a `select` when an answer is demanded.** It collapses to
+  `bool` — a switch, whose rest state already *shows* one of the two answers —
+  only where nothing requires it (6 418 occurrences). Where the source says
+  `required: true` (105 occurrences, `BoxSealed` among them) the two options are
+  kept explicit, so «Нет» is an answer the seller gave rather than a control's
+  default that no model holds.
+- **Groups are emitted in form order, not feed order.** The source catalogue's `field_groups`
+  arrive in XML-column order, which put «Доставка» and a Rutube video link above
+  the phone's manufacturer and closed the form with «Оптовые продажи» — 9 589 px,
+  11.4 phone screens. `catalog_import/groups.py` is the ordering table: identity
+  groups first, the vertical's own groups next in source order, the plumbing of
+  selling (delivery, wholesale, VAT, promotion, contact) last. A group name that
+  repeats in one document becomes one contiguous run.
+- **A `description` is rewritten for a seller, not copied from the feed docs.**
+  `catalog_import/prose.py` resolves every field reference — `<Set>`,
+  `WholesaleMinOrderType`, and the group names the source also writes in angle
+  brackets — to the Russian label the seller reads on that field, and drops any
+  sentence about the file, the feed, a column, XML, CDATA or the source catalogue's seller
+  cabinet. A reference that resolves to nothing takes its sentence with it: the
+  old `<...>`-as-HTML strip left «Значение – текст внутри из» and «Обязательно,
+  если вы указали в поле , что коробка есть» standing under live form fields.
+  `example` is the field's placeholder, so it is reduced to ONE sample — the
+  first `|` alternative, past any heading line.
 - **A big `values_link` catalogue becomes a vocabulary, not inline options.**
   `--catalogs` maps a `values_link` URL to a local XML by basename; a parentless
   level with at most `--inline-threshold` terms is inlined as a plain `select`,
