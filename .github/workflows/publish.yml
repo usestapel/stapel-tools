@@ -32,7 +32,9 @@ jobs:
       - name: Install test dependencies (the declared `test` extra)
         run: |
           pip install -e ".[test]" "psycopg[binary]" --quiet
-          pip install --quiet \
+          # --force-reinstall --no-deps: see ci.yml for why the plain form
+          # was a no-op whenever main and PyPI carried the same version.
+          pip install --quiet --force-reinstall --no-deps \
             "stapel-core @ git+https://github.com/usestapel/stapel-core.git" \
             "stapel-gdpr @ git+https://github.com/usestapel/stapel-gdpr.git" \
             "stapel-auth @ git+https://github.com/usestapel/stapel-auth.git" \

@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+## [0.59.1] — 2026-08-31
+
+### Fixed
+
+- **The CI step that pinned four siblings to main HEAD, and installed none of
+  them.** `pip install "stapel-x @ git+…"` after the `test` extra has already
+  pulled the same version from PyPI is a NO-OP: pip resolves the URL, sees
+  that version installed and reports "Requirement already satisfied". So the
+  suite ran against last week's WHEEL while the log said HEAD — for
+  stapel-core, stapel-gdpr and stapel-auth since the day the pins were added,
+  and visibly on the 0.59.0 run, where stapel-chat's CONFIG.MD correction was
+  on main, the wheel's copy was not, and the test read the wheel. Both
+  workflows now pass `--force-reinstall --no-deps` there. This is the same
+  class as the skip the release above uncovered: a step whose log describes
+  work it did not do.
+
 ## [0.59.0] — 2026-08-31
 
 ### Added
