@@ -1031,6 +1031,14 @@ The decisions worth knowing before you read the output:
   everything else becomes a `ref_select` pointing at the vocabulary fixture, with
   `parentFeature` linking it to the level above. A truncated download is
   tolerated: complete top-level records are kept, the partial tail is dropped.
+- **A per-field catalogue is named by its FIELD.** `…/category/<c>/field/<f>/values-xml`
+  has no file name in it — every one of them ends in the same segment — so the
+  file is `field-<f>[-<valuesTags>].xml`, which is what the harvester
+  (`tasks/catalog-scraping/tools/vocab-harvest.py`) writes. The category in the URL
+  is not part of the identity: the same field under different categories serves
+  byte-identical documents, measured per catalogue at collection time. These
+  documents are flat — `<SizeValues><Size>44 (S)</Size>…`, labels as element text
+  — and have their own parser.
 
 ## Project layout
 

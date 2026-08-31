@@ -2,6 +2,45 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every per-field `values_link` resolved to nothing, so 1 699 field
+  occurrences degraded to `string` no matter what was on disk.** A shared feed
+  names its own file (`holodilniki.xml`); a per-field document does not — all of
+  them end in the same `…/category/<c>/field/<f>/values-xml` segment, and
+  `catalog_basename` handed the store `values-xml`, which is not an `.xml` name
+  and never matched a file. A test asserted this as intended behaviour. Two
+  measurements changed the picture: the document is scoped to the FIELD (the
+  same field under two different categories serves byte-identical bytes — the
+  2026-08-31 harvest re-checked this per catalogue and recorded every
+  comparison), and the `valuesTags[]` filter, where a link carries one, selects
+  a different subset and so is part of the identity. `values_xml_basename` now
+  derives `field-<id>[-<tags>].xml` from the URL, which is exactly the name the
+  harvester writes. The seam is one naming rule and fails loudly: a name that
+  does not match resolves to no file and the field degrades with its hint
+  counted, so a mismatch costs a `ref_select` and can never bind the wrong
+  catalogue.
+
+- **`parse_nested_xml` read those documents as empty.** They are a third shape:
+  `<SizeValues><Size>44 (S)</Size>…` — one flat level, labels as element TEXT,
+  no attributes at all — and the nested parser takes labels from a `name`
+  attribute, so it walked the whole file and returned a catalogue with no
+  levels, which the store then reported as a failure. `parse_flat_values` reads
+  them; the store falls back to the nested parser if a per-field document ever
+  turns out to be nested.
+
+The `Справочник` hint on a still-degraded per-field field keeps carrying the
+ADDRESS rather than the new file name: the name is ours, means nothing to the
+person reading the hint, and cannot be opened.
+
+Measured on the 2 901-leaf corpus against the 438 catalogues the 2026-08-31
+harvest collected (`tasks/catalog-scraping/raw/vocabularies/`): 0.60.1 gets **678
+`ref_select` / 28 inline `select` / 2 236 `string`** out of them, this code gets
+**1 669 / 725 / 548** — 217 vocabularies emitted, no catalogue failure, the
+duplicate-`(level, code)` gate clean. A short list (at or under the inline
+threshold) reaches the form as options rather than as a vocabulary reference,
+which is why the middle counter matters as much as the first.
+
 ## [0.60.1] — 2026-08-31
 
 ### Fixed
