@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.60.1] — 2026-08-31
+
+### Fixed
+
+- **Two counts in 0.60.0's own documentation were not measured.** The entry
+  below, the README's decision list and
+  `rules.rule_from_sentence`'s docstring all said the downgrade covers "7 228
+  field occurrences of the 2 901-leaf corpus; 19 406 are genuinely required".
+  Neither number is in any run's output and neither is derivable from the
+  dataset. The measured shape, from `stapel-catalog-import --all`'s own
+  `report.json` and from a pass over `fields.jsonl`:
+  **74** rules downgraded against **13 039** `require`s kept, and «Заполните,
+  если …» appears **47** times in the corpus's **138 872** field occurrences —
+  26 on a `required: true` field, 21 on a `required: false` one. (The
+  downgrade counter exceeds those 21 because the other sentence kinds in
+  `EFFECT_BY_KIND` also produce `require`.) The Да/Нет counts in the same
+  entry — 105 / 6 418 of 6 523 — were re-measured and are correct.
+
+No behaviour changed: prose and one docstring only, hence the patch.
+
 ## [0.60.0] — 2026-08-31
 
 ### Fixed
@@ -22,9 +42,10 @@ the minor.
   and a seller of a working used phone had no way through but to tick a fault
   that does not exist. A `require` on a field the source marks optional is now
   emitted as `show`, counted under
-  `rules.require_downgraded_on_optional_field` (7 228 field occurrences of the
-  2 901-leaf corpus; 19 406 are genuinely required and unchanged). No «нет
-  дефектов» option is synthesized — the source has no such value.
+  `rules.require_downgraded_on_optional_field` (74 rules over a full 2 901-leaf
+  import; 13 039 `require`s stand — see 0.60.1, which corrected the two numbers
+  first published here). No «нет дефектов» option is synthesized — the source
+  has no such value.
 
 - **A Да/Нет field whose answer is demanded collapsed into `bool`.** A `bool`
   draws a switch, and a switch's rest state already SHOWS one of the two

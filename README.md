@@ -988,12 +988,16 @@ The decisions worth knowing before you read the output:
   `required: false` and list **defects only** — «Не работает вспышка», «GPS»,
   «Wi-Fi» — because the sentence means *fill this in if it applies*. Imported as
   `require` regardless, that pair made an honest empty answer
-  `mandatory_missing`: on a client fleet's live stand it refused 24 of 42 seeded
-  listings and left a seller of a working used phone no way through but to tick
-  a fault that does not exist. So a `require` on a field the source marks
-  optional is emitted as `show`, counted in the report under
-  `rules.require_downgraded_on_optional_field` (7 228 field occurrences of the
-  full corpus). **No «нет дефектов» option is synthesized** — the source has no
+  `mandatory_missing`: on a live classified deployment's stand it refused 24 of
+  42 seeded listings and left a seller of a working used phone no way through
+  but to tick a fault that does not exist. So a `require` on a field the source
+  marks optional is emitted as `show`, counted in the report under
+  `rules.require_downgraded_on_optional_field` — 74 rules over a full
+  2 901-leaf import, against 13 039 `require`s that stand
+  («Заполните, если …» itself appears 47 times in the corpus's 138 872 field
+  occurrences: 26 on a `required: true` field, 21 on a `required: false` one;
+  the counter is larger because other sentence kinds also produce `require`).
+  **No «нет дефектов» option is synthesized** — the source has no
   such value, and a code no source-catalogue feed can produce is not data. Every
   conditional requirement is additionally paired with the `show` that scopes it:
   the sentence says the field belongs to that case, which is what stops the
