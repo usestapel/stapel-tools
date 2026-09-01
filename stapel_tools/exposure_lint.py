@@ -46,6 +46,24 @@ a repository for containing its own name. Generated artifacts are not
 skipped: ``docs/schema.json`` carries docstrings into the published wheel,
 so a hit there is exactly the one that matters — fix the docstring and
 regenerate.
+
+Modes
+-----
+``stapel-exposure-lint [DIR] [--commits]``
+    The working tree (EXP001) and, with ``--commits``, the messages of
+    commits no remote holds (EXP002). For a person at a keyboard.
+
+``stapel-exposure-lint [DIR] --pushed LOCAL_SHA [--remote REMOTE_SHA]``
+    What is being PUSHED, and nothing else: EXP001 over the committed tree
+    at ``LOCAL_SHA`` (read with ``git ls-tree``/``git cat-file``, including
+    the ``pyproject.toml``/``package.json`` that decide whether the project
+    is public), EXP002 over ``REMOTE_SHA..LOCAL_SHA`` — or, for a new branch
+    (no ``--remote``, or the all-zero sha git passes), over the commits
+    reachable from ``LOCAL_SHA`` that no remote holds. The filesystem is
+    never read. This is the mode the generated ``.githooks/pre-push`` uses:
+    two sessions sharing one worktree once had a peer's UNCOMMITTED files
+    fail the other's push, because the hook scanned ``.`` — a pre-push hook
+    judges the commits being pushed, never the working tree.
 """
 from __future__ import annotations
 
@@ -122,22 +140,37 @@ def load_private_names(path: Optional[Path] = None) -> Optional[list[str]]:
 # ---------------------------------------------------------------------------
 
 
-def _pyproject_name(project: Path) -> Optional[str]:
-    try:
-        text = (project / "pyproject.toml").read_text(encoding="utf-8")
-    except OSError:
+def _pyproject_name_of(text: Optional[str]) -> Optional[str]:
+    if text is None:
         return None
     m = re.search(r'(?m)^\s*name\s*=\s*["\']([^"\']+)["\']', text)
     return m.group(1) if m else None
 
 
-def _package_json_public(path: Path) -> bool:
+def _package_json_is_public(text: Optional[str]) -> bool:
+    if text is None:
+        return False
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        data = json.loads(text)
+    except ValueError:
         return False
     name = data.get("name") or ""
     return name.startswith("@stapel/") and not data.get("private", False)
+
+
+def _read(path: Path) -> Optional[str]:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _pyproject_name(project: Path) -> Optional[str]:
+    return _pyproject_name_of(_read(project / "pyproject.toml"))
+
+
+def _package_json_public(path: Path) -> bool:
+    return _package_json_is_public(_read(path))
 
 
 def is_public_project(project: Path) -> bool:
@@ -253,6 +286,196 @@ def lint_commits(project: Path, names: list[str]) -> list[Finding]:
     return findings
 
 
+# ---------------------------------------------------------------------------
+# the pushed commits — the only honest input for a pre-push hook
+# ---------------------------------------------------------------------------
+
+ZERO_SHA = "0" * 40
+
+
+def _is_zero(sha: Optional[str]) -> bool:
+    return not sha or set(sha) == {"0"}
+
+
+def _git(project: Path, args: list[str], *, stdin: bytes = b"") -> Optional[bytes]:
+    try:
+        proc = subprocess.run(
+            ["git", *args], cwd=project, input=stdin,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return proc.stdout
+
+
+def _tree_paths(project: Path, sha: str) -> list[str]:
+    """Every path in the committed tree at *sha*, scannable ones only."""
+    out = _git(project, ["ls-tree", "-r", "-z", "--name-only", sha])
+    if out is None:
+        return []
+    paths = []
+    for raw in out.split(b"\0"):
+        if not raw:
+            continue
+        try:
+            path = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        parts = path.split("/")
+        if any(part in _SKIP_DIRS for part in parts[:-1]):
+            continue
+        if Path(parts[-1]).suffix.lower() in _SKIP_SUFFIXES:
+            continue
+        paths.append(path)
+    return paths
+
+
+def _blob(project: Path, sha: str, path: str) -> Optional[str]:
+    out = _git(project, ["cat-file", "blob", f"{sha}:{path}"])
+    if out is None:
+        return None
+    try:
+        return out.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+def _blobs(project: Path, sha: str, paths: list[str]) -> Iterable[tuple[str, str]]:
+    """``(path, text)`` for the tree's blobs, in one ``git cat-file --batch``."""
+    if not paths:
+        return
+    stdin = b"".join(f"{sha}:{p}\n".encode("utf-8") for p in paths)
+    buf = _git(project, ["cat-file", "--batch"], stdin=stdin)
+    if buf is None:
+        return
+    pos = 0
+    for path in paths:
+        nl = buf.find(b"\n", pos)
+        if nl == -1:
+            return
+        header = buf[pos:nl].split()
+        pos = nl + 1
+        if len(header) < 3:  # "<object> missing"
+            continue
+        try:
+            size = int(header[2])
+        except ValueError:
+            return
+        raw, pos = buf[pos:pos + size], pos + size + 1
+        try:
+            yield path, raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+
+
+def is_public_tree(project: Path, sha: str, paths: Optional[list[str]] = None) -> bool:
+    """``is_public_project`` decided from the committed tree, not from disk."""
+    if paths is None:
+        paths = _tree_paths(project, sha)
+    known = set(paths)
+    if "pyproject.toml" in known:
+        name = _pyproject_name_of(_blob(project, sha, "pyproject.toml"))
+        if name and name.startswith("stapel-"):
+            return True
+    if "package.json" in known and _package_json_is_public(
+        _blob(project, sha, "package.json")
+    ):
+        return True
+    return any(
+        p.startswith("packages/") and p.count("/") == 2
+        and p.endswith("/package.json")
+        and _package_json_is_public(_blob(project, sha, p))
+        for p in paths
+    )
+
+
+def lint_tree_at(
+    project: Path, sha: str, names: list[str],
+    paths: Optional[list[str]] = None,
+) -> list[Finding]:
+    if paths is None:
+        paths = _tree_paths(project, sha)
+    findings: list[Finding] = []
+    for path, text in _blobs(project, sha, paths):
+        for lineno, name in _hits(text, names):
+            findings.append(Finding(
+                path, lineno, "EXP001",
+                f"private name {name!r} in a public project — a client's "
+                f"name, domain or deploy path does not belong in a published "
+                f"tree; say 'a client fleet' / 'the storefront spec' instead "
+                f"(generated? fix the source and regenerate)",
+            ))
+    return findings
+
+
+def _range_commits(
+    project: Path, local_sha: str, remote_sha: Optional[str] = None
+) -> list[tuple[str, str]]:
+    """``(sha, message)`` for the commits this push would publish."""
+    fmt = ["--format=%H%x00%B%x1e"]
+    # a new branch: everything on local_sha that no remote already holds
+    unpushed = ["log", *fmt, local_sha, "--not", "--remotes"]
+    if _is_zero(remote_sha):
+        out = _git(project, unpushed)
+    else:
+        out = _git(project, ["log", *fmt, f"{remote_sha}..{local_sha}"])
+        if out is None:
+            # the remote sha is not an object here (a stale ref, a force-push
+            # from elsewhere): fall back rather than check nothing
+            out = _git(project, unpushed)
+    if out is None:
+        return []
+    commits = []
+    for chunk in out.decode("utf-8", "replace").split("\x1e"):
+        chunk = chunk.strip("\n")
+        if not chunk:
+            continue
+        sha, _, message = chunk.partition("\x00")
+        commits.append((sha.strip(), message))
+    return commits
+
+
+def lint_pushed(
+    project: Path,
+    local_sha: str,
+    remote_sha: Optional[str] = None,
+    *,
+    notes: Optional[list[str]] = None,
+    names: Optional[list[str]] = None,
+) -> list[Finding]:
+    """EXP001 over the committed tree at *local_sha*, EXP002 over the commit
+    messages this push would publish. The working tree is never read."""
+    project = project.resolve()
+    if names is None:
+        names = load_private_names()
+    if names is None:
+        if notes is not None:
+            notes.append(
+                f"stapel-exposure-lint: no private-names list at {list_path()} "
+                f"(or ${LIST_ENV}) — nothing checked"
+            )
+        return []
+    paths = _tree_paths(project, local_sha)
+    if not is_public_tree(project, local_sha, paths):
+        if notes is not None:
+            notes.append(
+                "stapel-exposure-lint: not a public stapel distribution — "
+                "not applicable"
+            )
+        return []
+    findings: list[Finding] = lint_tree_at(project, local_sha, names, paths)
+    for sha, message in _range_commits(project, local_sha, remote_sha):
+        for lineno, name in _hits(message, names):
+            findings.append(Finding(
+                f"commit {sha[:10]}", lineno, "EXP002",
+                f"private name {name!r} in a commit message being pushed — a "
+                f"published message cannot be taken back without rewriting "
+                f"history; reword it now (git commit --amend / rebase)",
+            ))
+            break
+    return findings
+
+
 def lint_project(
     project: Path,
     *,
@@ -302,8 +525,24 @@ def main(argv: Optional[list] = None) -> int:
         "--commits", action="store_true",
         help="Also check the messages of commits not yet on any remote (EXP002)",
     )
+    parser.add_argument(
+        "--pushed", metavar="LOCAL_SHA",
+        help="Push mode: scan the committed tree at LOCAL_SHA (EXP001) and the "
+             "messages of the commits this push publishes (EXP002). The "
+             "working tree is never read — see the module docstring.",
+    )
+    parser.add_argument(
+        "--remote", metavar="REMOTE_SHA",
+        help="With --pushed: the sha the remote already holds. The all-zero "
+             "sha (a new branch) means 'whatever no remote holds'.",
+    )
     parser.add_argument("--json", action="store_true", help="Machine output")
     args = parser.parse_args(argv)
+
+    if args.remote and not args.pushed:
+        parser.error("--remote requires --pushed")
+    if args.commits and args.pushed:
+        parser.error("--commits is the working-tree mode; --pushed covers EXP002")
 
     project = Path(args.project_dir)
     if not project.is_dir():
@@ -311,7 +550,16 @@ def main(argv: Optional[list] = None) -> int:
         return 2
 
     notes: list[str] = []
-    findings = lint_project(project, commits=args.commits, notes=notes)
+    if args.pushed:
+        if _git(project, ["rev-parse", "--verify", "--quiet",
+                          f"{args.pushed}^{{commit}}"]) is None:
+            # a gate that cannot read the commit must say so, not pass
+            print(f"Error: not a commit in {project}: {args.pushed}",
+                  file=sys.stderr)
+            return 2
+        findings = lint_pushed(project, args.pushed, args.remote, notes=notes)
+    else:
+        findings = lint_project(project, commits=args.commits, notes=notes)
     if args.json:
         print(json.dumps(
             {

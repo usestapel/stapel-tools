@@ -2023,8 +2023,11 @@ def _write_deploy_scripts(project_dir: Path):
     from ._deploy_templates import (
         CHECK_ENV_SH,
         DEPLOY_SH,
+        EACH_SH,
         PREFLIGHT_SH,
+        RELEASE_STATIC_SH,
         SMOKE_SERVICES_SH,
+        VERIFY_HOST_CONFIG_SH,
         VERIFY_STAND_STATE_SH,
     )
 
@@ -2034,6 +2037,13 @@ def _write_deploy_scripts(project_dir: Path):
         "preflight.sh": PREFLIGHT_SH,
         "verify-stand-state.sh": VERIFY_STAND_STATE_SH,
         "smoke-services.sh": SMOKE_SERVICES_SH,
+        # Wave 2026-08-30 deploy-incident gates (see _deploy_templates.py):
+        # host facts + releases/current canon, per-element outcomes, and the
+        # config-outside-the-repo detector deploy.sh runs when a
+        # host-config.manifest exists.
+        "release-static.sh": RELEASE_STATIC_SH,
+        "each.sh": EACH_SH,
+        "verify-host-config.sh": VERIFY_HOST_CONFIG_SH,
     }
     for name, content in scripts.items():
         path = project_dir / "deploy" / name

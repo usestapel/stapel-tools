@@ -1,6 +1,8 @@
 """stapel-new-library scaffold tests: file plan, rendering hygiene, kinds."""
 import compileall
 import json
+import shutil
+import subprocess
 
 from stapel_tools.new_library import build_context, file_plan, scaffold_library
 
@@ -206,3 +208,114 @@ def test_scaffolded_pyproject_ships_the_contract_documents_in_the_wheel():
         for entry in ("docs/capabilities.json", "docs/flows.json",
                       "docs/errors.json", "CONFIG.MD"):
             assert entry in package_data, f"{kind}: {entry} missing"
+
+
+# ---------------------------------------------------------------------------
+# the pre-push hook scans the pushed commits, never the working tree
+# ---------------------------------------------------------------------------
+
+
+class TestPrePushScansWhatIsPushed:
+    """A shared worktree turned the old `ruff check .` / `stapel-exposure-lint
+    . --commits` hook into a cross-session blocker: a peer's uncommitted files
+    failed someone else's push. The hook must read stdin and judge the
+    committed trees named there."""
+
+    def test_template_no_longer_scans_the_working_tree(self):
+        from stapel_tools._library_templates import PRE_PUSH
+
+        assert "ruff check ." not in PRE_PUSH
+        assert "stapel-exposure-lint . --commits" not in PRE_PUSH
+        # reads the standard pre-push stdin lines
+        assert "read -r local_ref local_sha remote_ref remote_sha" in PRE_PUSH
+        assert "git archive" in PRE_PUSH
+        assert "--pushed" in PRE_PUSH
+
+    def _git(self, root, *args):
+        return subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+            cwd=root, capture_output=True, text=True,
+        )
+
+    def _repo_with_hook(self, tmp_path):
+        from stapel_tools._library_templates import PRE_PUSH
+
+        remote = tmp_path / "remote.git"
+        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+        root = tmp_path / "work"
+        root.mkdir()
+        assert self._git(root, "init", "-q", "-b", "main").returncode == 0
+        hooks = root / ".githooks"
+        hooks.mkdir()
+        hook = hooks / "pre-push"
+        hook.write_text(PRE_PUSH, encoding="utf-8")
+        hook.chmod(0o755)
+        self._git(root, "config", "core.hooksPath", ".githooks")
+        self._git(root, "remote", "add", "origin", str(remote))
+        return root
+
+    def test_dirty_worktree_does_not_fail_a_clean_push(self, tmp_path, monkeypatch):
+        if not (shutil.which("ruff") and shutil.which("git")):
+            import pytest
+            pytest.skip("ruff/git unavailable")
+        monkeypatch.setenv(
+            "STAPEL_PRIVATE_NAMES_FILE", str(tmp_path / "no-such-list")
+        )
+        root = self._repo_with_hook(tmp_path)
+        (root / "clean.py").write_text("VALUE = 1\n", encoding="utf-8")
+        self._git(root, "add", "clean.py")
+        self._git(root, "commit", "-q", "-m", "feat: a clean file")
+        # a peer's uncommitted, untracked file with a real ruff error
+        (root / "peer_wip.py").write_text(
+            "import os\nimport sys\n", encoding="utf-8"
+        )
+
+        pushed = self._git(root, "push", "-q", "origin", "main")
+        assert pushed.returncode == 0, pushed.stdout + pushed.stderr
+
+    def test_a_committed_ruff_error_still_fails_the_push(self, tmp_path, monkeypatch):
+        if not (shutil.which("ruff") and shutil.which("git")):
+            import pytest
+            pytest.skip("ruff/git unavailable")
+        monkeypatch.setenv(
+            "STAPEL_PRIVATE_NAMES_FILE", str(tmp_path / "no-such-list")
+        )
+        root = self._repo_with_hook(tmp_path)
+        (root / "broken.py").write_text("def f(:\n", encoding="utf-8")
+        self._git(root, "add", "broken.py")
+        self._git(root, "commit", "-q", "-m", "feat: a syntax error")
+
+        pushed = self._git(root, "push", "-q", "origin", "main")
+        assert pushed.returncode != 0
+
+    def test_exposure_lint_judges_the_pushed_tree_only(self, tmp_path, monkeypatch):
+        """EXP001 through the hook: committed hit blocks, uncommitted does not."""
+        import pytest
+        if not (shutil.which("ruff") and shutil.which("git")
+                and shutil.which("stapel-exposure-lint")):
+            pytest.skip("ruff/git/stapel-exposure-lint unavailable")
+        names = tmp_path / "private-names"
+        names.write_text("acme\n", encoding="utf-8")
+        monkeypatch.setenv("STAPEL_PRIVATE_NAMES_FILE", str(names))
+
+        root = self._repo_with_hook(tmp_path)
+        (root / "pyproject.toml").write_text(
+            '[project]\nname = "stapel-thing"\nversion = "0.1.0"\n', encoding="utf-8"
+        )
+        (root / "clean.py").write_text("VALUE = 1\n", encoding="utf-8")
+        self._git(root, "add", "-A")
+        self._git(root, "commit", "-q", "-m", "feat: a clean file")
+        # a peer's untracked note naming a client must not block this push
+        (root / "peer_notes.md").write_text("acme.example\n", encoding="utf-8")
+        ok = self._git(root, "push", "-q", "origin", "main")
+        assert ok.returncode == 0, ok.stdout + ok.stderr
+
+        # the same name, committed, does block it
+        (root / "clean.py").write_text(
+            "VALUE = 1  # seen on acme.example\n", encoding="utf-8"
+        )
+        self._git(root, "add", "-A")
+        self._git(root, "commit", "-q", "-m", "chore: a note")
+        blocked = self._git(root, "push", "-q", "origin", "main")
+        assert blocked.returncode != 0
+        assert "EXP001" in blocked.stdout + blocked.stderr

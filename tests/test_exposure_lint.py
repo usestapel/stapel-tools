@@ -10,10 +10,13 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from stapel_tools.exposure_lint import (
     LIST_ENV,
     is_public_project,
     lint_project,
+    lint_pushed,
     load_private_names,
     main,
 )
@@ -134,3 +137,129 @@ class TestExp002:
         root = _lib(tmp_path, body="acme\n")
         assert main([str(root)]) == 1
         assert main([str(_lib(tmp_path, name="stapel-clean"))]) == 0
+
+
+# ---------------------------------------------------------------------------
+# --pushed: scan the commits being pushed, never the working tree
+# ---------------------------------------------------------------------------
+
+
+def _git(root, *args) -> str:
+    return subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+        cwd=root, capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def _repo(tmp_path, name="stapel-thing", body="x = 1\n") -> Path:
+    root = tmp_path / "repo"
+    root.mkdir(parents=True)
+    _git(root, "init", "-q", "-b", "main")
+    (root / "pyproject.toml").write_text(
+        f'[project]\nname = "{name}"\nversion = "0.1.0"\n', encoding="utf-8"
+    )
+    (root / "thing.py").write_text(body, encoding="utf-8")
+    _git(root, "add", "-A")
+    _git(root, "commit", "-q", "-m", "init")
+    return root
+
+
+class TestPushedMode:
+    """A pre-push hook must judge what is being pushed. A shared worktree made
+    the old `.` scan block a push on a PEER's uncommitted files."""
+
+    def test_committed_hit_is_exp001(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path, body="# found on the Acme.example deploy\n")
+        found = lint_pushed(root, _git(root, "rev-parse", "HEAD"))
+        assert [f.rule for f in found] == ["EXP001"]
+        assert found[0].path == "thing.py" and found[0].line == 1
+
+    def test_untracked_file_is_invisible(self, tmp_path, monkeypatch):
+        """THE regression: a peer's uncommitted file must not fail my push."""
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path)
+        (root / "peer_wip.py").write_text("# acme.example\n", encoding="utf-8")
+        (root / "thing.py").write_text("# acme in my dirty tree\n", encoding="utf-8")
+        assert lint_pushed(root, _git(root, "rev-parse", "HEAD")) == []
+        # and the old working-tree mode would have flagged both
+        assert len(lint_project(root)) == 2
+
+    def test_committed_hit_survives_a_clean_working_tree(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path, body="# acme.example\n")
+        sha = _git(root, "rev-parse", "HEAD")
+        (root / "thing.py").write_text("x = 1\n", encoding="utf-8")
+        assert lint_project(root) == []
+        assert [f.rule for f in lint_pushed(root, sha)] == ["EXP001"]
+
+    def test_scope_is_read_from_the_tree_not_from_disk(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path, name="acme-fleet", body="# acme.example\n")
+        sha = _git(root, "rev-parse", "HEAD")
+        # disk claims a public distribution; the pushed tree does not
+        (root / "pyproject.toml").write_text(
+            '[project]\nname = "stapel-thing"\n', encoding="utf-8"
+        )
+        notes = []
+        assert lint_pushed(root, sha, notes=notes) == []
+        assert any("not applicable" in n for n in notes)
+
+    def test_binaries_and_vendor_dirs_are_skipped_in_the_tree(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path)
+        (root / "node_modules" / "dep").mkdir(parents=True)
+        (root / "node_modules" / "dep" / "index.js").write_text("acme", encoding="utf-8")
+        (root / "logo.png").write_bytes(b"acme")
+        _git(root, "add", "-Af")
+        _git(root, "commit", "-q", "-m", "vendor")
+        assert lint_pushed(root, _git(root, "rev-parse", "HEAD")) == []
+
+    def test_exp002_range_excludes_commits_behind_the_remote_sha(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path)
+        _git(root, "commit", "-q", "--allow-empty", "-m", "chore: acme is already out")
+        base = _git(root, "rev-parse", "HEAD")
+        _git(root, "commit", "-q", "--allow-empty", "-m", "fix: found on the acme fleet")
+        head = _git(root, "rev-parse", "HEAD")
+
+        found = lint_pushed(root, head, base)
+        assert [f.rule for f in found] == ["EXP002"]
+        assert found[0].path.startswith("commit ")
+        assert lint_pushed(root, base, base) == []
+
+    def test_exp002_without_remote_uses_the_unpushed_set(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path)
+        _git(root, "commit", "-q", "--allow-empty", "-m", "fix: the acme fleet")
+        head = _git(root, "rev-parse", "HEAD")
+        assert [f.rule for f in lint_pushed(root, head)] == ["EXP002"]
+        # the zero sha of a brand-new branch means the same thing
+        assert [f.rule for f in lint_pushed(root, head, "0" * 40)] == ["EXP002"]
+
+    def test_cli(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path, body="# acme.example\n")
+        head = _git(root, "rev-parse", "HEAD")
+        assert main([str(root), "--pushed", head]) == 1
+        assert "EXP001" in capsys.readouterr().out
+
+        clean = _repo(tmp_path / "clean")
+        assert main([str(clean), "--pushed", _git(clean, "rev-parse", "HEAD")]) == 0
+
+    def test_cli_refuses_an_unreadable_sha(self, tmp_path, monkeypatch):
+        """A gate that cannot read the commit must not report a pass."""
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        assert main([str(_repo(tmp_path)), "--pushed", "deadbeef"]) == 2
+
+    def test_cli_rejects_remote_without_pushed(self, tmp_path):
+        with pytest.raises(SystemExit):
+            main([str(tmp_path), "--remote", "0" * 40])
+
+    def test_unknown_remote_sha_falls_back_to_the_unpushed_set(self, tmp_path, monkeypatch):
+        """A stale remote ref must not silently check nothing."""
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path)
+        _git(root, "commit", "-q", "--allow-empty", "-m", "fix: the acme fleet")
+        head = _git(root, "rev-parse", "HEAD")
+        assert [f.rule for f in lint_pushed(root, head, "b" * 40)] == ["EXP002"]

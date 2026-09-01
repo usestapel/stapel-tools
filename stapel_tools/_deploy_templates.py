@@ -55,6 +55,37 @@ Two files, both POSIX sh (no bashisms — runs on any stand):
   verdict. Two traps it is built not to have: a loop that ``set -e``s out on
   the first unreachable service (reporting two of eight while exiting zero),
   and a check whose subject is absent reading as healthy.
+
+Three more, each one a live incident turned into a gate:
+
+- ``deploy/release-static.sh <built-dir> <target-root> [release-id]`` — the
+  canonical ``releases/`` + ``current`` static deploy, so nobody hand-rolls
+  one from a memory note again. INCIDENT: a static frontend was deployed by
+  following a stale note instead of reading the host, and ``rsync --delete``
+  ran over the release ROOT — the root held the ``current`` symlink, so the
+  live release was deleted (15 minutes of 404s). Two rules fall out and both
+  are mechanical here: deploy control reads FACTS from the target
+  (``readlink current`` before AND after, the after being the verdict), and
+  ``--delete`` is refused anywhere but inside the fresh per-release dir
+  (``refuse_delete_over_root``). Standalone — deploy.sh does not call it.
+
+- ``deploy/each.sh <list-file> <cmd> [args...]`` — the per-element outcome
+  gate. INCIDENT: ``while read domain; do docker compose run certbot ...;
+  done < list`` — the inner command ate the loop's stdin, so only the FIRST
+  domain got a certificate, and the check accepted "certificate issued for
+  the first site" as success FOR ALL of them. Rules: N inputs -> N verified
+  outcomes (a result count that does not match the item count is itself a
+  failure), and every item runs with stdin detached (``</dev/null``).
+  Standalone — the runbooks call it.
+
+- ``deploy/verify-host-config.sh`` — config that lives OUTSIDE the repo,
+  detected at deploy time. INCIDENT: one vhost's CSP existed in two layers —
+  a file in the repo and a hand-edited file on the host — and they drifted.
+  Reads ``deploy/host-config.manifest`` (``<repo-relative-path>
+  <target-absolute-path>`` per line), diffs each declared file against the
+  target, and sweeps every managed target DIRECTORY for files no manifest
+  line declares. Wired into deploy.sh right after check-env.sh, i.e. BEFORE
+  build/up, while the old stand is still serving.
 """
 
 CHECK_ENV_SH = """\
@@ -244,6 +275,15 @@ cd "$PROJECT_ROOT"
 ENV_FILE="${1:-.env}"
 
 sh "$SCRIPT_DIR/check-env.sh" "$ENV_FILE"
+
+# Config the repo declares but the HOST owns. Runs BEFORE build/up on purpose:
+# a file hand-edited on the host outside the repo (the vhost CSP incident) must
+# surface while the old stand is still serving and nothing has been rebuilt —
+# after `up` the drift is either shipped over or silently still there.
+if [ -f "$SCRIPT_DIR/host-config.manifest" ]; then
+    sh "$SCRIPT_DIR/verify-host-config.sh"
+fi
+
 sh "$SCRIPT_DIR/preflight.sh" "$ENV_FILE"
 
 echo "deploy: building images (docker-compose.yml, env: $ENV_FILE)..."
@@ -555,3 +595,367 @@ if [ "$failures" -ne 0 ]; then
 fi
 echo "OK: $declared/$declared services healthy and serving a schema probe"
 """
+
+RELEASE_STATIC_SH = '''\
+#!/bin/sh
+# deploy/release-static.sh - the canonical releases/ + current static deploy.
+#
+# INCIDENT this exists to make unrepeatable: a static frontend was deployed by
+# following a stale memory note about the host's layout instead of reading the
+# host, and `rsync --delete` was pointed at the release ROOT. The root is where
+# the `current` symlink lives, so --delete removed the live release: 15 minutes
+# of 404s. Two rules, both mechanical below:
+#
+#   1. FACTS FIRST. `readlink <root>/current` is read from the TARGET before
+#      anything happens and again after the flip. The second read is the
+#      VERDICT - this script cannot report a successful deploy it did not
+#      observe. A note, a runbook or a memory is never the input.
+#   2. `rsync --delete` is allowed ONLY into the fresh per-release directory,
+#      never against <root> (refuse_delete_over_root below).
+#
+# Usage: deploy/release-static.sh <built-dir> <target-root> [release-id]
+# Env:   DEPLOY_HOST     ssh host; empty = <target-root> is a LOCAL path
+#        KEEP_RELEASES   how many release dirs to keep (default 5)
+set -eu
+
+SRC="${1:?usage: release-static.sh <built-dir> <target-root> [release-id]}"
+ROOT="${2:?usage: release-static.sh <built-dir> <target-root> [release-id]}"
+ROOT="${ROOT%/}"
+SRC="${SRC%/}"
+DEPLOY_HOST="${DEPLOY_HOST:-}"
+KEEP_RELEASES="${KEEP_RELEASES:-5}"
+
+refuse() {
+    echo "release-static: REFUSING: $*" >&2
+    exit 1
+}
+
+[ -d "$SRC" ] || refuse "built dir $SRC does not exist"
+
+# One indirection for every target-side command, so local and remote runs
+# cannot diverge (and so the whole script is testable without a host).
+run_target() {
+    if [ -n "$DEPLOY_HOST" ]; then
+        ssh "$DEPLOY_HOST" "$1"
+    else
+        sh -c "$1"
+    fi
+}
+
+# Content hash with POSIX tools only (cksum, not sha256sum/shasum - those two
+# have different names on different stands, which is how a "deterministic" id
+# becomes a stand-specific one).
+content_hash() {
+    ( cd "$1" && find . -type f | LC_ALL=C sort | while IFS= read -r f; do
+        printf '%s ' "$f"
+        cksum < "$f"
+    done ) | cksum | awk '{printf "%08x", $1}'
+}
+
+RELEASE_ID="${3:-}"
+if [ -z "$RELEASE_ID" ]; then
+    RELEASE_ID="$(date -u '+%Y%m%dT%H%M%SZ')-$(content_hash "$SRC")"
+fi
+DEST="$ROOT/releases/$RELEASE_ID"
+
+# --- FACTS, read from the target, before anything changes -----------------
+before="$(run_target "readlink '$ROOT/current' 2>/dev/null || true")"
+echo "release-static: target=${DEPLOY_HOST:-<local>} root=$ROOT"
+echo "release-static: current(before)=${before:-<none>}"
+
+# A `current` that exists but is not a symlink means the layout is NOT the one
+# this script assumes. Guessing here is the incident, so it refuses instead:
+# the flip below would move the new link INTO that directory.
+if run_target "[ -e '$ROOT/current' ] && [ ! -L '$ROOT/current' ]"; then
+    refuse "$ROOT/current exists and is NOT a symlink. This script only manages a releases/ + current layout; it will not guess what to do with a real file/directory there. Nothing has been changed."
+fi
+
+run_target "mkdir -p '$ROOT/releases'"
+
+# --- the --delete guard ---------------------------------------------------
+refuse_delete_over_root() {
+    dest="${1%/}"
+    if [ "$dest" = "$ROOT" ]; then
+        refuse "rsync --delete destination is the release ROOT ($ROOT). That root holds the 'current' symlink and the other releases - deleting into it is exactly the incident (15 min of 404s). --delete only ever goes inside $ROOT/releases/<id>/."
+    fi
+    case "$dest" in
+        "$ROOT"/releases/?*) : ;;
+        *) refuse "rsync --delete destination '$dest' is not inside $ROOT/releases/. --delete is allowed nowhere else." ;;
+    esac
+    # A symlink in the destination listing means this is not the fresh
+    # per-release dir it is supposed to be (a release root, or a reused path
+    # someone linked into). --delete would follow the layout down.
+    links="$(run_target "find '$dest' -maxdepth 1 -type l -print 2>/dev/null | head -n 5 || true")"
+    if [ -n "$links" ]; then
+        refuse "rsync --delete destination '$dest' contains symlink(s): $(echo $links). This is not a fresh release directory."
+    fi
+}
+
+run_target "mkdir -p '$DEST'"
+refuse_delete_over_root "$DEST"
+
+# The default id embeds the content hash, so re-running the same build is a
+# no-op into the same dir. An EXPLICIT id that is already the live release is
+# not: --delete then edits what is being served right now. Said out loud
+# rather than refused - the runbooks do use a fixed id on purpose.
+if [ "$before" = "releases/$RELEASE_ID" ]; then
+    echo "release-static: NOTE - releases/$RELEASE_ID is the LIVE release; this uploads into the directory currently being served (no atomic flip is possible for it)."
+fi
+
+echo "release-static: uploading $SRC -> $DEST"
+if [ -n "$DEPLOY_HOST" ]; then
+    rsync -a --delete "$SRC/" "$DEPLOY_HOST:$DEST/"
+else
+    rsync -a --delete "$SRC/" "$DEST/"
+fi
+
+# --- the flip -------------------------------------------------------------
+# `mv -Tf` (never dereference the destination) is GNU-only: on BSD/macOS mv it
+# is an illegal option. And plain `mv -f newlink current` is NOT a portable
+# substitute - when `current` is a symlink to a directory, both GNU mv (without
+# -T) and BSD mv FOLLOW it and drop the new link INSIDE the old release, so the
+# site stays on the old release while the deploy reports success. Verified on
+# darwin. So: try the GNU form, fall back to `ln -sfn` (-n/-h = do not follow,
+# supported by GNU, BSD and busybox ln), and let the post-fact readlink below
+# be the actual verdict either way.
+TMPLINK="current.flip.$$"
+if ! run_target "cd '$ROOT' && ln -s 'releases/$RELEASE_ID' '$TMPLINK' && mv -Tf '$TMPLINK' current 2>/dev/null"; then
+    run_target "cd '$ROOT' && rm -f '$TMPLINK'"
+    run_target "cd '$ROOT' && ln -sfn 'releases/$RELEASE_ID' current"
+fi
+
+# --- POST-FACT: the verdict is what the target says, not what we did ------
+after="$(run_target "readlink '$ROOT/current' 2>/dev/null || true")"
+echo "release-static: current(after)=${after:-<none>}"
+if [ "$after" != "releases/$RELEASE_ID" ]; then
+    refuse "the flip did not take: $ROOT/current points at '${after:-<none>}', expected 'releases/$RELEASE_ID'. The new release is uploaded at $DEST; the site is NOT on it."
+fi
+
+# --- prune, only ever inside releases/ ------------------------------------
+listing="$(run_target "ls -1 '$ROOT/releases' 2>/dev/null || true" | LC_ALL=C sort)"
+total="$(printf '%s\\n' "$listing" | grep -c '^..*$' || true)"
+if [ "${total:-0}" -gt "$KEEP_RELEASES" ]; then
+    prune=$((total - KEEP_RELEASES))
+    printf '%s\\n' "$listing" | head -n "$prune" | while IFS= read -r old; do
+        [ -n "$old" ] || continue
+        # never the one current points at, and never a path outside releases/
+        [ "$old" != "$RELEASE_ID" ] || continue
+        case "$old" in */*|..|.) continue ;; esac
+        echo "release-static: pruning old release $old"
+        run_target "rm -rf '$ROOT/releases/$old'"
+    done
+fi
+
+echo "release-static: OK - $ROOT/current -> releases/$RELEASE_ID (kept last $KEEP_RELEASES releases)"
+'''
+
+EACH_SH = '''\
+#!/bin/sh
+# deploy/each.sh - run a command once per list item and verify EVERY outcome.
+#
+# INCIDENT: `while read domain; do docker compose run certbot ...; done < list`
+# — the inner command inherited (and ate) the loop's stdin, so the loop saw EOF
+# after the first line and only the FIRST domain got a certificate. The check
+# then read "certificate issued for the FIRST site" and accepted it as success FOR
+# ALL the domains. One success must never pass for all.
+#
+# So, two rules, both here:
+#   * every item runs with stdin detached (`</dev/null`) - the inner command
+#     cannot consume the list;
+#   * N inputs -> N verified outcomes. Exit 0 only if every item passed AND the
+#     number of results equals the number of items; a short result table is a
+#     failure in itself, not a shorter success.
+#
+# Usage: deploy/each.sh <list-file> <cmd> [args...]
+#   Runs: <cmd> [args...] <item>    once per non-empty, non-comment line.
+# Exit:  0 = all items passed; 1 = any item failed or the tally is short.
+set -u
+
+LIST="${1:?usage: each.sh <list-file> <cmd> [args...]}"
+shift
+if [ "$#" -lt 1 ]; then
+    echo "each: no command given (usage: each.sh <list-file> <cmd> [args...])" >&2
+    exit 2
+fi
+if [ ! -f "$LIST" ]; then
+    echo "each: list file $LIST does not exist" >&2
+    exit 2
+fi
+
+ITEMS="${TMPDIR:-/tmp}/stapel-each-items.$$"
+trap 'rm -f "$ITEMS"' EXIT
+
+sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$LIST" \\
+    | grep -v '^#' | grep -v '^$' > "$ITEMS" || true
+total="$(grep -c '^' "$ITEMS" || true)"
+total="${total:-0}"
+
+if [ "$total" -eq 0 ]; then
+    # "nothing was checked" is not a pass - that is the same shape of claim the
+    # incident made.
+    echo "each: $LIST contains no items - nothing was run, so nothing is verified." >&2
+    exit 1
+fi
+
+echo "each: $total item(s) from $LIST, command: $*"
+
+passed=0
+results=0
+while IFS= read -r item; do
+    [ -n "$item" ] || continue
+    # </dev/null is the fix: the inner command gets an empty stdin of its own
+    # and can never swallow the remaining items.
+    if "$@" "$item" </dev/null; then
+        rc=0
+    else
+        rc=$?
+    fi
+    results=$((results + 1))
+    if [ "$rc" -eq 0 ]; then
+        passed=$((passed + 1))
+        printf '  PASS  %s\\n' "$item"
+    else
+        printf '  FAIL  %s (exit %s)\\n' "$item" "$rc"
+    fi
+done < "$ITEMS"
+
+echo "each: $passed/$total passed"
+
+if [ "$results" -ne "$total" ]; then
+    echo "each: INCOMPLETE - $results outcome(s) for $total item(s). Some items were never run; a short table is not a shorter success." >&2
+    exit 1
+fi
+if [ "$passed" -ne "$total" ]; then
+    echo "each: FAILED - $((total - passed)) of $total item(s) did not pass." >&2
+    exit 1
+fi
+'''
+
+VERIFY_HOST_CONFIG_SH = '''\
+#!/bin/sh
+# deploy/verify-host-config.sh - config that lives OUTSIDE the repo, found at
+# deploy time.
+#
+# INCIDENT: the same vhost's CSP existed in two layers - one file in the repo,
+# one hand-edited on the host - and they drifted. Nothing in the deploy ever
+# compared them, so the repo said one thing and the served site did another.
+#
+# What it checks, against deploy/host-config.manifest:
+#   <repo-relative-path> <target-absolute-path>     one pair per line, # comments
+#   1. every declared file: target content == repo content (missing on the
+#      target counts as drift - the repo declares it should be there);
+#   2. every managed target DIRECTORY: any file in it that no manifest line
+#      declares is config outside the repo - the incident's second layer.
+#
+# Usage: deploy/verify-host-config.sh
+# Env:   DEPLOY_HOST            ssh host; empty = the target paths are local
+#        HOST_CONFIG_MANIFEST   manifest path (default deploy/host-config.manifest)
+#
+# Deliberately not `set -e` (same stance as verify-stand-state.sh): every
+# finding is reported, then the verdict. A gate that stops at the first drift
+# tells you about one of four.
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+
+MANIFEST="${HOST_CONFIG_MANIFEST:-$SCRIPT_DIR/host-config.manifest}"
+DEPLOY_HOST="${DEPLOY_HOST:-}"
+
+if [ ! -f "$MANIFEST" ]; then
+    echo "verify-host-config: no host-config manifest at $MANIFEST - nothing declared, nothing checked."
+    exit 0
+fi
+
+run_target() {
+    if [ -n "$DEPLOY_HOST" ]; then
+        ssh "$DEPLOY_HOST" "$1"
+    else
+        sh -c "$1"
+    fi
+}
+
+findings=0
+finding() {
+    findings=$((findings + 1))
+    echo "  $*" >&2
+}
+
+WORK="${TMPDIR:-/tmp}/stapel-host-config.$$"
+PAIRS="$WORK.pairs"
+TARGETS="$WORK.targets"
+DIRS="$WORK.dirs"
+trap 'rm -f "$WORK".*' EXIT
+: > "$TARGETS"
+: > "$DIRS"
+
+grep -v '^[[:space:]]*#' "$MANIFEST" | grep -v '^[[:space:]]*$' > "$PAIRS" || true
+
+# Pass 1: collect the declared targets first, so the unmanaged sweep in pass 3
+# knows the whole declared set regardless of the order lines appear in.
+while read -r repo_path target_path rest; do
+    [ -n "${repo_path:-}" ] || continue
+    if [ "$repo_path" = "dir" ]; then
+        finding "MANIFEST: the 'dir <repo-dir> <target-dir>' form is not supported in v1 - declare each file as its own <repo-path> <target-path> pair."
+        continue
+    fi
+    if [ -z "${target_path:-}" ]; then
+        finding "MANIFEST: line '$repo_path' has no target path (expected: <repo-relative-path> <target-absolute-path>)"
+        continue
+    fi
+    echo "$target_path" >> "$TARGETS"
+    dirname "$target_path" >> "$DIRS"
+done < "$PAIRS"
+
+# Pass 2: content, per declared file.
+echo "verify-host-config: target=${DEPLOY_HOST:-<local>} manifest=$MANIFEST"
+checked=0
+while read -r repo_path target_path rest; do
+    [ -n "${repo_path:-}" ] || continue
+    [ "$repo_path" != "dir" ] || continue
+    [ -n "${target_path:-}" ] || continue
+    checked=$((checked + 1))
+    if [ ! -f "$PROJECT_ROOT/$repo_path" ]; then
+        finding "MANIFEST: $repo_path is declared but does not exist in the repo"
+        continue
+    fi
+    if ! run_target "[ -f '$target_path' ]"; then
+        finding "DRIFT: $target_path is MISSING on the target (the repo declares $repo_path belongs there)"
+        continue
+    fi
+    run_target "cat '$target_path'" > "$WORK.file" 2>/dev/null
+    if diff -u "$PROJECT_ROOT/$repo_path" "$WORK.file" > "$WORK.diff" 2>&1; then
+        echo "  ok:    $repo_path == $target_path"
+    else
+        finding "DRIFT: $target_path differs from $repo_path - the host copy was edited outside the repo"
+        sed -n '1,20p' "$WORK.diff" | sed 's/^/         /' >&2
+    fi
+    rm -f "$WORK.file" "$WORK.diff"
+done < "$PAIRS"
+
+# Pass 3: the unmanaged sweep. Every DISTINCT directory the manifest names is
+# listed on the target; a file there that no manifest line declares is the
+# second layer of config nobody's repo owns.
+sort -u "$DIRS" > "$WORK.dirs.uniq"
+while IFS= read -r d; do
+    [ -n "$d" ] || continue
+    # `! -type d`, not `-type f`: a hand-placed SYMLINK into another config is
+    # the same second layer, and -type f would not see it.
+    run_target "find '$d' -maxdepth 1 ! -type d -print 2>/dev/null || true" > "$WORK.listing"
+    while IFS= read -r f; do
+        [ -n "$f" ] || continue
+        if ! grep -Fxq "$f" "$TARGETS"; then
+            finding "OUTSIDE THE REPO: $f lives in the managed directory $d but no manifest line declares it - config outside the repo drifts by construction (nothing in the repo can review it)."
+        fi
+    done < "$WORK.listing"
+    rm -f "$WORK.listing"
+done < "$WORK.dirs.uniq"
+
+if [ "$findings" -ne 0 ]; then
+    echo "" >&2
+    echo "verify-host-config: $findings finding(s). Either the host copy is wrong (re-deploy it from the repo) or the repo is out of date (adopt the host's version into the repo, or declare the extra file in deploy/host-config.manifest). Two layers of the same config always drift." >&2
+    exit 1
+fi
+echo "verify-host-config: OK - $checked declared file(s) match the target, no unmanaged config in the managed directories."
+'''
