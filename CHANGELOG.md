@@ -80,10 +80,17 @@
 ### Note on exposure
 
 Removing a name from `main` does not remove it from what is already published.
-`stapel-tools` **0.57.0, 0.57.1, 0.57.2, 0.57.3, 0.58.0, 0.59.0, 0.59.1,
-0.60.0 and 0.60.1** ship that importer inside their wheels and sdists, and the
-repository's git history still contains it. Both are owner decisions
-and neither is done by this release. `stapel-exposure-lint`'s owner-held
+Measured against PyPI, not assumed: **0.57.0, 0.57.1, 0.57.2, 0.57.3, 0.58.0
+and 0.59.1** each carry 16 files of that importer inside the wheel plus 10
+`METADATA` lines naming the source; **0.60.0 and 0.60.1** carry 18 files and 16
+lines. Eight published releases. (0.59.0 was tagged and never published, so it
+is not one of them.) The repository's git history still contains it too.
+
+Also measured: **stapel-vocabularies 0.1.1** names the source in six of its
+`METADATA` lines — its README, not its code. 0.1.2 is already clean.
+
+Taking any of that back means yanking those releases and rewriting history.
+Both are owner decisions and neither is done here. `stapel-exposure-lint`'s owner-held
 private-names list now carries the source's name, so no future commit or commit
 message in a public tree can reintroduce it.
 
