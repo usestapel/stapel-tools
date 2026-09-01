@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.61.1] — 2026-09-01
+
+### Fixed
+
+- **The scaffold pinned `@stapel/tokens-antd` 0.8.1 against a peer floor of
+  `>=0.11.0`, so a generated project that selects calendar fails `npm install`
+  with ERESOLVE.** `@stapel/calendar-react` 0.8.1 raised that floor in another
+  repository, which is a change no commit here can see — the drift class this
+  repo's `check_npm_peer_graph.py` exists for. The pin is now `0.11.0`
+  (`npm view @stapel/tokens-antd version`, 2026-09-01), and the gate is green.
+
+  This is also why **0.61.0 is a tag with no PyPI release**: the same gate is
+  release-gating in `publish.yml`, and it stopped that publish at the e2e job.
+  0.61.0's content is below and is unchanged; this patch is what carries it to
+  PyPI.
+
 ## [0.61.0] — 2026-09-01
 
 ### Removed — **BREAKING**

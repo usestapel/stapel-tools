@@ -1566,13 +1566,18 @@ FRONTEND_REACT_CORE_DEPS = {
 # only those stays antd-free.
 FRONTEND_REACT_ANTD_DEPS = {
     "antd": "6.6.2",
-    # 0.8.1: `@stapel/chat-react` 0.6.1 and `@stapel/vocabularies-react` 0.1.0
-    # peer `">=0.8.0"`, so the older 0.7.0 pin is an ERESOLVE for any project
-    # selecting either. The reason the pin existed at all still holds
-    # underneath: 0.7.0 is the release whose bridge reads the neutral
-    # colour-role dictionary the generated `stapel.theme.json` emits, and
-    # 0.5.0 was an ERESOLVE against all 17 pairs.
-    "@stapel/tokens-antd": "0.8.1",
+    # 0.11.0, not 0.8.1: `@stapel/calendar-react` 0.8.1 peers
+    # `">=0.11.0"`, and 0.8.1 is therefore an ERESOLVE for any project that
+    # selects calendar — which is what failed the 0.61.0 publish, in the
+    # release-gating e2e and not in anybody's laptop. `npm view
+    # @stapel/tokens-antd version` -> 0.11.0 (2026-09-01); the pin is that
+    # command's output. The reasons the pin existed at all still hold
+    # underneath: 0.8.0 is the floor `@stapel/chat-react` 0.6.1 and
+    # `@stapel/vocabularies-react` 0.1.0 peer, 0.7.0 is the release whose
+    # bridge reads the neutral colour-role dictionary the generated
+    # `stapel.theme.json` emits, and 0.5.0 was an ERESOLVE against all 17
+    # pairs.
+    "@stapel/tokens-antd": "0.11.0",
 }
 
 # Scripted-fullstack navigation (P1) — router deps for the generated
