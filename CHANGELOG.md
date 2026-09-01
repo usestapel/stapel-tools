@@ -1,45 +1,75 @@
 # Changelog
 
-## [Unreleased]
+## [0.61.0] — 2026-09-01
 
-### Fixed
+### Removed — **BREAKING**
 
-- **Every per-field `values_link` resolved to nothing, so 1 699 field
-  occurrences degraded to `string` no matter what was on disk.** A shared feed
-  names its own file (`holodilniki.xml`); a per-field document does not — all of
-  them end in the same `…/category/<c>/field/<f>/values-xml` segment, and
-  `catalog_basename` handed the store `values-xml`, which is not an `.xml` name
-  and never matched a file. A test asserted this as intended behaviour. Two
-  measurements changed the picture: the document is scoped to the FIELD (the
-  same field under two different categories serves byte-identical bytes — the
-  2026-08-31 harvest re-checked this per catalogue and recorded every
-  comparison), and the `valuesTags[]` filter, where a link carries one, selects
-  a different subset and so is part of the identity. `values_xml_basename` now
-  derives `field-<id>[-<tags>].xml` from the URL, which is exactly the name the
-  harvester writes. The seam is one naming rule and fails loudly: a name that
-  does not match resolves to no file and the field degrades with its hint
-  counted, so a mismatch costs a `ref_select` and can never bind the wrong
-  catalogue.
+- **The source-specific catalogue importer is gone from this distribution**
+  — its package, its console script, its suite and its golden fixture dataset
+  (16 modules, ~3 300 lines).  The script was named after the marketplace it
+  parsed; it is not in this package's `[project.scripts]` any more and neither
+  is anything else that reads that source. It was a parser for ONE external marketplace's
+  autoload documentation — that source's document shapes, its Russian
+  dependency sentences, its per-field catalogue routes — and a parser for a
+  named third party has no business in a published library. It now lives in the
+  private fleet that actually runs it, and the fixtures it produces are
+  byte-identical to what 0.60.1 + this repo's unreleased fix produced here (23
+  of 23 files, sha256-equal, on the real dataset).
 
-- **`parse_nested_xml` read those documents as empty.** They are a third shape:
-  `<SizeValues><Size>44 (S)</Size>…` — one flat level, labels as element TEXT,
-  no attributes at all — and the nested parser takes labels from a `name`
-  attribute, so it walked the whole file and returned a catalogue with no
-  levels, which the store then reported as a failure. `parse_flat_values` reads
-  them; the store falls back to the nested parser if a per-field document ever
-  turns out to be nested.
+  **If you called that script**, there is no drop-in replacement in this
+  package and there will not be one; an importer belongs beside the dataset it
+  reads, in the tree that owns it. What is offered instead is the half that was never
+  source-specific — below.
 
-The `Справочник` hint on a still-degraded per-field field keeps carrying the
-ADDRESS rather than the new file name: the name is ours, means nothing to the
-person reading the hint, and cannot be opened.
+- The `test` extra no longer declares `stapel-attributes`: the test that
+  validated emitted `group` fixtures against the live engine left with the
+  importer, and a declared sibling nothing imports is SIB005.
 
-Measured on the 2 901-leaf corpus against the 438 catalogues the 2026-08-31
-harvest collected (`tasks/catalog-scraping/raw/vocabularies/`): 0.60.1 gets **678
-`ref_select` / 28 inline `select` / 2 236 `string`** out of them, this code gets
-**1 669 / 725 / 548** — 217 vocabularies emitted, no catalogue failure, the
-duplicate-`(level, code)` gate clean. A short list (at or under the inline
-threshold) reaches the form as options rather than as a vocabulary reference,
-which is why the middle counter matters as much as the first.
+### Added
+
+- **`stapel-fixture-lint` and `stapel_tools.catalog_fixtures` — the generic
+  half, kept deliberately.** A catalogue importer's *output* contract is not
+  specific to anybody's source, and three importers re-inventing it is three
+  chances to get a term code wrong. What stays:
+
+  - `catalog_fixtures.slug` — the deterministic transliteration, slug,
+    feature-slug and term-code rules, and the `dedup` that reserves every code
+    the data itself claims before handing out a `-2` suffix. `vocabulary_slug`
+    now takes a `prefix`, because the slug is the vocabulary's identity in a
+    database and two sources both shipping a `brands.xml` must not fight over
+    it; the prefix is charged to the caller's stem budget, so it can never push
+    the slug past the schema's 64-character cap.
+  - `catalog_fixtures.writer` — the byte-stable fixture writer
+    (`canonical_json`, `write_catalog`, `write_vocabularies`).
+  - `catalog_fixtures.validate` + the `stapel-fixture-lint` console script —
+    the gate over what was emitted: `VOC001` schema, `VOC002` duplicate
+    `(level, code)`, `VOC003` level graph, `VOC004` term order, `VOC005` edge
+    endpoints, `VOC006` edge levels, `VOC007` edge order, `VOC008` canonical
+    bytes, `CAT001` the catalogue half's bytes. `assert_unique_codes` is
+    `VOC002` as a raising call, for an importer that wants to stop during the
+    build rather than after writing the file.
+  - `schemas/vocabulary-fixture.schema.json`, which moved here from the
+    importer package and is now what the lint reads.
+
+  Its first run over a real client fleet's 483 generated vocabularies found a
+  defect nobody had reported: one file whose level name is 70 characters
+  against the schema's cap of 64 — which `load_vocabulary` would have refused
+  on the stand. That is the gate's whole justification, and it is why the
+  removal above did not simply take everything with it.
+
+  `jsonschema` joins the `test` extra: `VOC001`'s schema branch is an optional
+  import, and an optional import no runner ever satisfies is a rule nobody has
+  ever run.
+
+### Note on exposure
+
+Removing a name from `main` does not remove it from what is already published.
+`stapel-tools` **0.57.0, 0.57.1, 0.57.2, 0.57.3, 0.58.0, 0.59.0, 0.59.1,
+0.60.0 and 0.60.1** ship that importer inside their wheels and sdists, and the
+repository's git history still contains it. Both are owner decisions
+and neither is done by this release. `stapel-exposure-lint`'s owner-held
+private-names list now carries the source's name, so no future commit or commit
+message in a public tree can reintroduce it.
 
 ## [0.60.1] — 2026-08-31
 
@@ -50,7 +80,7 @@ which is why the middle counter matters as much as the first.
   `rules.rule_from_sentence`'s docstring all said the downgrade covers "7 228
   field occurrences of the 2 901-leaf corpus; 19 406 are genuinely required".
   Neither number is in any run's output and neither is derivable from the
-  dataset. The measured shape, from `stapel-catalog-import --all`'s own
+  dataset. The measured shape, from a full import run's own
   `report.json` and from a pass over `fields.jsonl`:
   **74** rules downgraded against **13 039** `require`s kept, and «Заполните,
   если …» appears **47** times in the corpus's **138 872** field occurrences —
@@ -66,7 +96,7 @@ No behaviour changed: prose and one docstring only, hence the patch.
 ### Fixed
 
 Three defects a client fleet's live storefront run of 2026-08-31 measured on
-the imported source catalogue, all three visible on «Мобильные телефоны» (leaf
+an imported external catalogue, all three visible on «Мобильные телефоны» (leaf
 129639). Fixing them changes the FIXTURES an existing dataset produces, hence
 the minor.
 
@@ -102,10 +132,10 @@ the minor.
   («поддон», «big-бег», «мешок»), «Количество в фасовке», «Скидка за опт» —
   standing open for somebody selling one phone.
 
-- **Groups are emitted in form order, not feed order.** The source catalogue's
+- **Groups are emitted in form order, not feed order.** The source's
   `field_groups` arrive in XML-column order, which put «Доставка» and a video
   link above the phone's manufacturer and model: 9 589 px of form, 11.4 phone
-  screens. `catalog_import/groups.py` is the ordering table — identity groups
+  screens. The importer's group table decides the order — identity groups
   first, the vertical's own groups next in source order, the plumbing of
   selling (delivery, wholesale, VAT, promotion, contact) last. A group name
   that repeats in one document becomes one contiguous run.
@@ -116,7 +146,7 @@ the minor.
   «Если параметр не указан в файле …», and — where `plain_text` had stripped a
   `<Tag>` as HTML — the truncated «Значение – текст внутри из» and
   «Обязательно, если вы указали в поле , что коробка есть».
-  `catalog_import/prose.py` resolves every field reference (`<Set>`,
+  The importer's prose pass resolves every field reference (`<Set>`,
   `WholesaleMinOrderType`, and the group names the source also writes in angle
   brackets) to the Russian label the seller reads on that field, and drops any
   sentence about the file, the feed, a column, XML, CDATA or the seller
@@ -186,9 +216,9 @@ the minor.
 
 ### Fixed
 
-- **`stapel-catalog-import`: the `Справочник` hint that was declared and never
+- **The catalogue importer's `Справочник` hint was declared and never
   emitted.** `VALUES_LINK_HINT_TITLE` had sat unused since the module landed,
-  so a field whose source-catalogue record pointed at a catalogue we hold no XML for came
+  so a field whose source record pointed at a catalogue we hold no XML for came
   out as `string{maxLength: 128}` and nothing else — byte-identical to a
   free-text note, in a form where the answer is supposed to come from a closed
   list. Everything the import knew (that a closed list exists, and WHERE) was
@@ -248,8 +278,8 @@ the minor.
 
 ### Added
 
-- `stapel-catalog-import`: composite fields become the `group` kind instead of
-  being counted and dropped. 2 468 raw source-catalogue fields carry `children` — 2 454
+- The catalogue importer: composite fields become the `group` kind instead of
+  being counted and dropped. 2 468 raw source fields carry `children` — 2 454
   `DiscountLadderList` ("quantity from N, discount M %", up to five steps) and
   14 `CompatibleCars` (up to twenty cars, six Autocatalog levels each) — and
   until stapel-attributes 0.6.0 there was no kind that could hold a table, so
@@ -286,10 +316,10 @@ the minor.
 
 ### Fixed
 
-- `stapel-catalog-import`: a term-code dedup suffix that collided with the data.
+- The catalogue importer: a term-code dedup suffix that collided with the data.
   The suffix for a repeated slug was `-2`, `-3`… counted per base slug and
   handed out blind, so it could take a code another label already owned:
-  the source catalogue's complectations `Exclusive`, `Exclusive 2` and `Exclusive+` slugify to
+  A car catalogue's trim levels `Exclusive`, `Exclusive 2` and `Exclusive+` slugify to
   `exclusive`, `exclusive-2`, `exclusive` — and the third was given
   `exclusive-2`, the second's own code. 23 pairs collided across the ten
   reference vocabularies of one client fleet's fixture run (18 `Complectation`,
@@ -303,7 +333,7 @@ the minor.
 
 ### Added
 
-- `stapel-catalog-import` fails the build on a duplicate `(level, code)` in a
+- The catalogue importer fails the build on a duplicate `(level, code)` in a
   vocabulary it is about to write (`VocabularyCodeCollision`, naming the count,
   the total and the first five colliding labels). A term code is the identity a
   facet, a rule and a stored listing value address; a converter bug that hands
@@ -318,8 +348,8 @@ the minor.
   dictionary word in another language, an option code from a public
   dataset). A hit is dropped only when every occurrence on the line sits
   inside an excepted token; the exception never lives in a repository, so a
-  public tree cannot silence the lint about itself. Found by the source-catalogue rule
-  corpus: the option code `otdayu-besplatno` («Отдаю бесплатно», "giving away for
+  public tree cannot silence the lint about itself. Found by an imported rule
+  corpus: the option code it carried for «Отдаю бесплатно» ("giving away for
   free") is a Russian phrase, not a client.
 
 ## [0.57.1] — 2026-08-30
@@ -330,7 +360,7 @@ Found by recording 0.57.0's `--emit-rule-cases` output through the Python
 evaluator in `stapel-attributes` — which is the whole point of a shared corpus,
 and the first thing it caught was the generator that fed it.
 
-**1. A `nomatch` case that fires.** The source catalogue spells a disjunction as several
+**1. A `nomatch` case that fires.** The source spells a disjunction as several
 one-value branches on the *same* controlling field:
 
 ```
@@ -342,7 +372,7 @@ one-value branches on the *same* controlling field:
 
 The generator chose a value one condition at a time and wrote them into one
 `{feature: value}` map, so the last branch won the key: avoiding `drugoe` it
-picked `audit-i-ocenka` — the *first* branch's value. `catalog-0bfce4b16a-nomatch`
+picked `audit-i-ocenka` — the *first* branch's value. The `…-nomatch` case
 therefore recorded `visible: true`. 10 of 1185 rules had a repeated controlling
 field and 8 files were wrong.
 
@@ -360,13 +390,13 @@ skipped and counted, not emitted as a lie.
 **2. Only three of five effects were represented.** `forbid_option` and `limit`
 come overwhelmingly from `values_by_group`, a table with no sentence to hash,
 and only sentence-derived rules were being recorded. They now carry their own
-deterministic id, `catalog-vbg-<sha1 of (controller slug, target slug, rule)>`.
+deterministic id, `vbg-<sha1 of (controller slug, target slug, rule)>`.
 
 The full corpus goes from **2370 files / 3 effects** to **7780 files / 5**:
 3890 distinct rules — show 1020, require 153, hide 12, forbid_option 2689,
 limit 16 — none skipped, byte-stable across runs.
 
-**3. The gate that would have caught both.** `tests/test_catalog_import.py` now
+**3. The gate that would have caught both.** The importer's suite now
 carries an oracle implementing the §1.2/§1.3 semantics and asserts, for every
 emitted pair, that the rule fires in `-match` and does not in `-nomatch`, and
 that the state its effect owns actually flips (`visible`, `required`, the
@@ -375,14 +405,14 @@ Verified against all 7780 files of the full run: zero polarity failures.
 
 **Not a defect, worth recording:** no `forbid_option` case comes from prose.
 All 248 `value_not_applicable_if` occurrences are one sentence about
-`SparePartType`; in 130 leaves that field does not exist (an error in the source catalogue's
-own documentation, §6 of the mapping report), and in the other 118 it is a
+`SparePartType`; in 130 leaves that field does not exist (an error in the
+source's own documentation, §6 of the mapping report), and in the other 118 it is a
 single-option select echoing the category path, so it is a `core` field and
 never a feature. The rule is dropped as `controller_not_a_feature`, correctly.
 
 ## [0.57.0] — 2026-08-30
 
-### `stapel-catalog-import` — an external classified schema, imported as fixtures
+### The catalogue importer — an external classified schema, imported as fixtures
 
 Slice S4 of the attributes-v2 spec. A competitor's entire autoload schema —
 3444 categories, 2901 leaves, 138 872 field occurrences, 49 933 Russian
@@ -390,8 +420,8 @@ dependency sentences — becomes `stapel-categories` catalog fixtures plus
 vocabulary fixtures, with a counter for every decision it made.
 
 ```bash
-stapel-catalog-import --dataset data/ --catalogs catalogs/ --all --out fixtures/catalog
-stapel-catalog-import --dataset data/ --all --emit-rule-cases tests/golden/rules/catalog
+catalog-import --dataset data/ --catalogs catalogs/ --all --out fixtures/
+catalog-import --dataset data/ --all --emit-rule-cases tests/golden/rules/
 ```
 
 Django-free by construction: no settings module, no database, no network. A
@@ -403,7 +433,7 @@ always read (see below).
 features, 11 207 inline overrides, 19 729 rules, 10 vocabularies holding 130 443
 terms and 388 207 edges. The field buckets reconcile exactly with the machine
 classification the mapping report was built from: 39 664 core (9889 of them the
-category path the source catalogue re-emits as single-option selects), 44 196 platform-only,
+category path the source re-emits as single-option selects), 44 196 platform-only,
 2468 composite, 52 488 attributes.
 
 **Four decisions the output rests on.**
@@ -441,9 +471,9 @@ canonical encoding as `stapel-categories/catalog_fixtures` (sorted keys,
 `indent=2`, `ensure_ascii=False`); two runs of the same input produce identical
 files, so a re-import diffs to nothing. The vocabulary fixtures are validated
 against a local copy of the spec §3.6 schema in
-`stapel_tools/catalog_import/schemas/`.
+`stapel_tools/catalog_fixtures/schemas/`.
 
-**Fixtures are the real slice.** `tests/fixtures/catalog/dataset` carries the
+**Fixtures are the real slice.** The importer's fixture dataset carries the
 whole 3444-node tree plus the raw documentation of the 20 priority leaves, so
 the slug-collision numbers the tests assert are the production ones. The
 catalogue XMLs beside it are synthetic miniatures of the three real shapes.

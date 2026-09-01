@@ -26,6 +26,20 @@ jobs:
           pip install ruff --quiet
           ruff check . --select E,F,W --ignore E501
 
+      # A wheel is the one artifact that cannot be taken back, so the exposure
+      # gate runs here too. See ci.yml's copy for why it needs the
+      # STAPEL_PRIVATE_NAMES secret and what it does without one.
+      - name: No private name in the tree being published (stapel-exposure-lint)
+        env:
+          STAPEL_PRIVATE_NAMES: ${{ secrets.STAPEL_PRIVATE_NAMES }}
+        run: |
+          if [ -z "$STAPEL_PRIVATE_NAMES" ]; then
+            echo "::warning title=exposure gate inactive::STAPEL_PRIVATE_NAMES is not set — this release was NOT checked for private names on the runner"
+            exit 0
+          fi
+          printf '%s\n' "$STAPEL_PRIVATE_NAMES" > "$RUNNER_TEMP/private-names"
+          STAPEL_PRIVATE_NAMES_FILE="$RUNNER_TEMP/private-names" stapel-exposure-lint .
+
       # The declared `test` extra, plus the four siblings this generator is
       # exercised against at their main HEAD. See ci.yml for why the list is
       # not typed out here any more, and why chat is on it.

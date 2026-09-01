@@ -927,118 +927,73 @@ The `trap` is the point: a crashed run is exactly the run that leaks, so the
 reaper has to fire on failure as well as success. Generated projects inherit
 `disk-guard` / `disk-doctor` targets from the scaffold.
 
-### `stapel-catalog-import` — an external classified schema as reviewable fixtures
+### `stapel-fixture-lint` — the catalogue/vocabulary fixture contract
 
-```bash
-# the 20 acceptance leaves, with the values_link catalogues resolved locally
-stapel-catalog-import --dataset data/ --catalogs catalogs/ --out fixtures/catalog
-
-# the whole catalogue: 3444 categories, 2901 leaves
-stapel-catalog-import --dataset data/ --catalogs catalogs/ --all --out fixtures/catalog
-
-# a named subset
-stapel-catalog-import --dataset data/ --leaves 129639,67035 --out fixtures/catalog
-
-# the generated half of the shared rule corpus (stapel-attributes §1.5)
-stapel-catalog-import --dataset data/ --all --emit-rule-cases tests/golden/rules/catalog
-```
-
-Django-free: no settings module, no database, no network. It reads the source catalogue's
-autoload dataset (`catalog-autoload-full.json`, `fields.jsonl`) and writes
+A catalogue importer turns some external classified's schema into two kinds of
+file, which `manage.py load_catalog` and `manage.py load_vocabulary` apply:
 
 ```
 <out>/catalog/features.json      root FeatureDefs — stapel-categories catalog_fixtures format
 <out>/catalog/categories.json    the tree, parent_slug edges, per-category feature lists
 <out>/vocabularies/<slug>.json   levels + terms + edges, for load_vocabulary
-<out>/report.{json,md}           every counter of the run
 ```
 
-which `manage.py load_vocabulary` and `manage.py load_catalog` apply. Fixtures
-are byte-stable — two runs of the same input produce identical files, so a
-re-import diffs to nothing and a real change shows up as a real diff.
+The importers themselves are specific to their source and belong to whoever
+owns that source. What is here is the part every one of them shares:
+`stapel_tools.catalog_fixtures` — the deterministic slug/term-code/dedup rules,
+the byte-stable writer, the shipped `vocabulary-fixture.schema.json`, and the
+gate over what was emitted.
 
-The decisions worth knowing before you read the output:
+```bash
+stapel-fixture-lint out/                 # out/{vocabularies,catalog}/*.json
+stapel-fixture-lint out/vocabularies     # or one half
+stapel-fixture-lint one-fixture.json     # or one file
+stapel-fixture-lint out/ --json
+```
 
-- **The whole tree is always parsed, whichever leaves you emit.** Category slugs
-  are transliterated from the node name and, on a global collision, prefixed
-  with ancestor slugs until unique — 343 slugs collide across 1041 nodes, and a
-  20-leaf import must name a category exactly as a full import does.
-- **Not every source-catalogue field becomes a feature.** Listing columns (`Title`,
-  `Price`, `Address`, …), the source catalogue's own monetization and logistics enums and the
-  category path the source catalogue re-emits as single-option selects are counted and skipped,
-  with the counts in the report.
-- **A `children` field becomes a `group`.** The two composite list fields —
-  `DiscountLadderList` (2 454 leaves) and `CompatibleCars` (14) — are a table:
-  a list of rows, each row a set of ordinary fields. They emit the composite
-  `group` kind (stapel-attributes 0.6.0), each child through the same type
-  rules as a top-level field. The parent's own `values_range` is the **row
-  cap** (`{"max": 5}` = five ladder steps), so it becomes `repeat`, not a value
-  bound. A child's conditional prose is dropped and counted: the rule engine
-  reads a flat map of top-level slugs, so a rule inside a row could never fire.
-- **Conditional prose becomes rules, or nothing.** The dependency sentences are
-  parsed into the closed `require`/`show`/`hide`/`forbid_option`/`limit`
-  grammar; a sentence whose controlling field is a listing column, or which does
-  not parse, is dropped *with a reason* rather than approximated.
-- **«Заполните, если …» demands an answer only when the source catalogue says the field is
-  required.** The same sentence sits on two kinds of field, and the record's own
-  `required` flag is what tells them apart. On «Мобильные телефоны» all five
-  defect fields carry «Заполните, если в поле Condition указано не 'Новое'»;
-  `ScreenCondition`/`CaseCondition` are `required: true` and their option lists
-  open with «Без дефектов», while `CameraFlaws`/`SensorsFlaws` are
-  `required: false` and list **defects only** — «Не работает вспышка», «GPS»,
-  «Wi-Fi» — because the sentence means *fill this in if it applies*. Imported as
-  `require` regardless, that pair made an honest empty answer
-  `mandatory_missing`: on a live classified deployment's stand it refused 24 of
-  42 seeded listings and left a seller of a working used phone no way through
-  but to tick a fault that does not exist. So a `require` on a field the source
-  marks optional is emitted as `show`, counted in the report under
-  `rules.require_downgraded_on_optional_field` — 74 rules over a full
-  2 901-leaf import, against 13 039 `require`s that stand
-  («Заполните, если …» itself appears 47 times in the corpus's 138 872 field
-  occurrences: 26 on a `required: true` field, 21 on a `required: false` one;
-  the counter is larger because other sentence kinds also produce `require`).
-  **No «нет дефектов» option is synthesized** — the source has no
-  such value, and a code no source-catalogue feed can produce is not data. Every
-  conditional requirement is additionally paired with the `show` that scopes it:
-  the sentence says the field belongs to that case, which is what stops the
-  seven wholesale fields standing open for somebody selling one phone.
-- **A Да/Нет list stays a `select` when an answer is demanded.** It collapses to
-  `bool` — a switch, whose rest state already *shows* one of the two answers —
-  only where nothing requires it (6 418 occurrences). Where the source says
-  `required: true` (105 occurrences, `BoxSealed` among them) the two options are
-  kept explicit, so «Нет» is an answer the seller gave rather than a control's
-  default that no model holds.
-- **Groups are emitted in form order, not feed order.** The source catalogue's `field_groups`
-  arrive in XML-column order, which put «Доставка» and a Rutube video link above
-  the phone's manufacturer and closed the form with «Оптовые продажи» — 9 589 px,
-  11.4 phone screens. `catalog_import/groups.py` is the ordering table: identity
-  groups first, the vertical's own groups next in source order, the plumbing of
-  selling (delivery, wholesale, VAT, promotion, contact) last. A group name that
-  repeats in one document becomes one contiguous run.
-- **A `description` is rewritten for a seller, not copied from the feed docs.**
-  `catalog_import/prose.py` resolves every field reference — `<Set>`,
-  `WholesaleMinOrderType`, and the group names the source also writes in angle
-  brackets — to the Russian label the seller reads on that field, and drops any
-  sentence about the file, the feed, a column, XML, CDATA or the source catalogue's seller
-  cabinet. A reference that resolves to nothing takes its sentence with it: the
-  old `<...>`-as-HTML strip left «Значение – текст внутри из» and «Обязательно,
-  если вы указали в поле , что коробка есть» standing under live form fields.
-  `example` is the field's placeholder, so it is reduced to ONE sample — the
-  first `|` alternative, past any heading line.
-- **A big `values_link` catalogue becomes a vocabulary, not inline options.**
-  `--catalogs` maps a `values_link` URL to a local XML by basename; a parentless
-  level with at most `--inline-threshold` terms is inlined as a plain `select`,
-  everything else becomes a `ref_select` pointing at the vocabulary fixture, with
-  `parentFeature` linking it to the level above. A truncated download is
-  tolerated: complete top-level records are kept, the partial tail is dropped.
-- **A per-field catalogue is named by its FIELD.** `…/category/<c>/field/<f>/values-xml`
-  has no file name in it — every one of them ends in the same segment — so the
-  file is `field-<f>[-<valuesTags>].xml`, which is what the harvester
-  (`tasks/catalog-scraping/tools/vocab-harvest.py`) writes. The category in the URL
-  is not part of the identity: the same field under different categories serves
-  byte-identical documents, measured per catalogue at collection time. These
-  documents are flat — `<SizeValues><Size>44 (S)</Size>…`, labels as element text
-  — and have their own parser.
+Django-free: no settings module, no database, no network. A fixture is checked
+as a file, hours or weeks before anything tries to load it — which is the point,
+because the alternative is the loader rejecting a 25 MB file on the stand at
+term 26 420.
+
+| Rule | What it catches |
+|---|---|
+| `VOC001` | not JSON, or not the vocabulary-fixture schema (through `jsonschema`, when installed; the checks below run either way) |
+| `VOC002` | two terms of one level share a code |
+| `VOC003` | a level's `parent` is not a level declared before it |
+| `VOC004` | terms are not in canonical `(level index, code)` order |
+| `VOC005` | an edge names a term the fixture does not declare |
+| `VOC006` | an edge joins two levels that are not a declared parent/child pair |
+| `VOC007` | edges unsorted, or one repeated |
+| `VOC008` | the file's bytes are not the canonical rendering of its own content |
+| `CAT001` | a catalogue half is not valid JSON or not canonical bytes |
+
+The decisions worth knowing:
+
+- **A term code is an identity, so `VOC002` is an error and not a warning.** It
+  is what a facet, a rule and a listing's stored value all address. The
+  collision that motivated the rule was three trim levels — `Exclusive`,
+  `Exclusive 2` and `Exclusive+` — where the first and third both slugify to
+  `exclusive` and a blind `-2` on the third hands `exclusive-2` to two different
+  terms. `slug.dedup` reserves every code the data itself claims before it hands
+  out a suffix, in either direction; `assert_unique_codes` is the same check as
+  a raising call, for an importer that wants to stop during the build rather
+  than after writing the file.
+- **Byte stability is a contract, not a nicety.** Fixtures are reviewed as code:
+  two runs over the same input must produce files a `diff` calls identical,
+  otherwise every regeneration is an unreadable churn commit. `VOC004`,
+  `VOC007` and `VOC008` are the three ways an emitter breaks it — an order that
+  depends on a dict's iteration, an unsorted edge list, and a hand-edited or
+  differently-serialised file.
+- **A prefix namespaces one source's vocabularies.** `vocabulary_slug` takes
+  one, because the slug is the vocabulary's identity in the database and two
+  sources both shipping a `brands.xml` must not fight over it. The prefix is
+  charged to the caller's stem budget, so it can never push the slug past the
+  schema's 64-character cap.
+- **The catalogue half's INNER shape is not this gate's business.**
+  `stapel-categories`' loader owns that contract and checks it properly;
+  `CAT001` is only about the file being parseable and canonical, which is what
+  makes it reviewable.
 
 ## Project layout
 

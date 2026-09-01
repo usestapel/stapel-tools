@@ -35,6 +35,27 @@ jobs:
           pip install ruff --quiet
           ruff check . --select E,F,W --ignore E501
 
+      # No private client name reaches this published tree (EXP001/EXP002).
+      # The names are private themselves, so they live outside every
+      # repository and a runner can only check when it is handed one:
+      # STAPEL_PRIVATE_NAMES, a repository secret holding the list verbatim
+      # (one name per line, `#` comments, `!token` exceptions). WITHOUT the
+      # secret this step checks nothing and says so in the log rather than
+      # printing a green tick it has not earned — the live gate is then the
+      # owner's `.githooks/pre-push`, which every push to this repo passes
+      # through, and which also covers EXP002 on the message of a commit that
+      # cannot be un-published once it is out.
+      - name: No private name in this public tree (stapel-exposure-lint)
+        env:
+          STAPEL_PRIVATE_NAMES: ${{ secrets.STAPEL_PRIVATE_NAMES }}
+        run: |
+          if [ -z "$STAPEL_PRIVATE_NAMES" ]; then
+            echo "::warning title=exposure gate inactive::STAPEL_PRIVATE_NAMES is not set on this repository — stapel-exposure-lint checked NOTHING here; the pre-push hook on the owner's machine is the only live gate"
+            exit 0
+          fi
+          printf '%s\n' "$STAPEL_PRIVATE_NAMES" > "$RUNNER_TEMP/private-names"
+          STAPEL_PRIVATE_NAMES_FILE="$RUNNER_TEMP/private-names" stapel-exposure-lint .
+
       # The nav-manifest mirror gate (spec §3.8). FRONTEND_REACT_LIBS[key]
       # ["nav"] is a hand-pinned copy of each pair's own nav-manifest.json,
       # and until this step existed the script that checks it was wired into
