@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.62.1 — 2026-09-02
+
+### catalog_fixtures: a vocabulary term row may carry an explicit sort rank
+
+The contract said row order is canonical `(level index, code)` — VOC004,
+reviewability — while the vocabularies loader turns row order into
+`Term.sort`. Two rules, one channel: every picker on every stand was doomed
+to code-alphabetical order («0.1 МБ» first, «10 ГБ» before «2 ГБ» on a live
+RAM picker), and any importer that fixed the order broke the review gate.
+The term row grows an optional 5th column — an integer sort rank within the
+level — so review order and display order stop fighting: VOC004 stands
+untouched, stapel-vocabularies >= 0.1.4 prefers the rank over row order,
+4-column rows keep the historical behavior byte-for-byte.
+
 ## [0.62.0] — 2026-09-02
 
 ### Added

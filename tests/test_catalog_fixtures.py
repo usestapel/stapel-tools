@@ -135,6 +135,33 @@ def test_a_well_formed_fixture_has_no_findings():
     assert validate.validate_vocabulary(_fixture()) == []
 
 
+def test_a_term_row_may_carry_an_explicit_sort_rank():
+    """The optional 5th column: sort rank within the level.
+
+    Fixture ROW order is canonical (level, code) for reviewability — VOC004
+    — while the loader turns row order into ``Term.sort``, so without this
+    column every picker on every stand was doomed to code-alphabetical order
+    («0.1 МБ» first, «10 ГБ» before «2 ГБ» on a live RAM picker). The rank
+    is data IN the row: review order and display order stop fighting.
+    """
+    ranked = _fixture(terms=[
+        ["Vendor", "alpha", "Alpha", None, 0],
+        ["Model", "one", "One", None, 2],
+        ["Model", "two", "Two", "42", 1],
+    ])
+    assert validate.validate_vocabulary(ranked) == []
+    # Mixed arity is fine — the column is per-row optional.
+    mixed = _fixture(terms=[
+        ["Vendor", "alpha", "Alpha", None],
+        ["Model", "one", "One", None, 1],
+        ["Model", "two", "Two", "42"],
+    ])
+    assert validate.validate_vocabulary(mixed) == []
+    # But it is a rank, not free text.
+    junk = _fixture(terms=[["Vendor", "alpha", "Alpha", None, "first"]], edges=[])
+    assert _rules(validate.validate_vocabulary(junk)) == ["VOC001"]
+
+
 def test_VOC001_an_unknown_key_and_a_missing_one():
     assert _rules(validate.validate_vocabulary(_fixture(colour="red"))) == ["VOC001"]
     broken = _fixture()

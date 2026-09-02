@@ -4,7 +4,13 @@
   "title": "Vocabulary fixture",
   "description": "Local copy of stapel-vocabularies/docs/vocabulary-fixture.schema.json (attributes-v2 spec §3.6). A vocabulary is levels + terms + edges (a DAG), not a tree of paths: a Term is unique by (vocabulary, level, code) and a TermEdge joins two terms of adjacent levels. Byte-stable: terms sorted by (level index, code), edges sorted as tuples.",
   "type": "object",
-  "required": ["slug", "name", "levels", "terms", "edges"],
+  "required": [
+    "slug",
+    "name",
+    "levels",
+    "terms",
+    "edges"
+  ],
   "additionalProperties": false,
   "properties": {
     "slug": {
@@ -13,18 +19,37 @@
       "maxLength": 64,
       "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
     },
-    "name": {"type": "string", "minLength": 1, "maxLength": 200},
-    "source": {"type": "string", "maxLength": 255},
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "source": {
+      "type": "string",
+      "maxLength": 255
+    },
     "levels": {
       "type": "array",
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name"],
+        "required": [
+          "name"
+        ],
         "additionalProperties": false,
         "properties": {
-          "name": {"type": "string", "minLength": 1, "maxLength": 64},
-          "parent": {"type": ["string", "null"], "maxLength": 64}
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          }
         }
       }
     },
@@ -33,12 +58,36 @@
       "items": {
         "type": "array",
         "minItems": 4,
-        "maxItems": 4,
+        "maxItems": 5,
         "prefixItems": [
-          {"type": "string", "minLength": 1, "maxLength": 64},
-          {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"},
-          {"type": "string", "minLength": 1, "maxLength": 255},
-          {"type": ["string", "null"], "maxLength": 64}
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
+          },
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
+          },
+          {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 64
+          },
+          {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Optional explicit sort rank within the level. The loader (stapel-vocabularies >= 0.1.4) prefers it over fixture row order; row order itself stays canonical (level index, code) for reviewability (VOC004). Omitted = row order, the historical behavior."
+          }
         ],
         "items": false
       }
@@ -50,10 +99,26 @@
         "minItems": 4,
         "maxItems": 4,
         "prefixItems": [
-          {"type": "string", "minLength": 1, "maxLength": 64},
-          {"type": "string", "minLength": 1, "maxLength": 128},
-          {"type": "string", "minLength": 1, "maxLength": 64},
-          {"type": "string", "minLength": 1, "maxLength": 128}
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          }
         ],
         "items": false
       }
