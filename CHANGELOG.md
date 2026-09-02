@@ -1,5 +1,163 @@
 # Changelog
 
+## [0.62.0] — 2026-09-02
+
+### Added
+
+- **Three published pairs the registry could not see: `@stapel/geo-react`
+  0.6.0, `@stapel/moderation-react` 0.1.1, `@stapel/currencies-react`
+  0.3.0.** All three backends had been selectable since their modules landed
+  (`STAPEL_LIBS`), so `--modules geo` scaffolded a backend and a frontend that
+  could not reach it — and two storefront presets carried hand-written
+  `pending` lines saying exactly that. Versions come from `npm view`, never a
+  typed number.
+
+  - **moderation** brings a four-entry nav mirror and its four
+    `NAV_ENTRY_MOUNTS` rows: `moderation.policy` (the one PUBLIC entry — a DSA
+    disclosure a signed-out visitor may read), `account.appeals` under the
+    container's `account.root`, and `admin.moderation` /
+    `admin.moderation-appeals` under `admin.root` (so the console screens
+    arrive inside the container's own staff gate). All four `/default`
+    components take zero required props — read off the pair's own
+    `PolicyDisclosurePaneProps` / `AppealPanelProps` / `ModerationQueueProps` /
+    `AppealsQueueProps`, not assumed — so each mounts directly. The pair stays
+    provider-only otherwise: its screens are ROUTES, and a second bare copy on
+    the module panel would be the same screen twice.
+  - **geo** and **currencies** publish no nav surface (geo ships no manifest,
+    currencies ships an empty one) and mount no default component: both are a
+    FIELD drawn inside somebody else's form, the way cdn's uploader and
+    vocabularies' term select are.
+
+- **`base_url` in `FRONTEND_REACT_LIBS` — a `baseUrl` that ends at the module
+  MOUNT.** `@stapel/geo-react` spells `MAP_CONFIG_PATH = "api/v1/map/config"`
+  in its own api layer (the other four paths are handed to it by that call's
+  `endpoints` table) and `@stapel/currencies-react` spells
+  `CURRENCIES_LIST_PATH = "api/v1/"`. The registry's uniform `/<key>/api/v1/`
+  would have sent every read to `/geo/api/v1/api/v1/map/config` — a 404 behind
+  a screen that looks perfectly wired. The shape is now a registry fact the
+  departing pair declares, read by both containers' emitters through
+  `pair_base_url`, never a branch.
+
+- **The phone dock, the badge channel and the site seam are wired,
+  statically, from the manifests** (`@stapel/shell-react` pin 0.9.0 → 0.12.0,
+  `@stapel/core` 0.20.0 → 0.22.0):
+
+  - `phoneChrome="dock"` on the storefront's `<PublicShell/>`. A storefront's
+    phone traffic is the majority of it and a hamburger is a menu a thumb has
+    to go looking for; the dock puts the destinations on screen, with a sticky
+    single-row header keeping search and account beside them.
+  - `navBadges` — the runtime channel over the static nav manifest, declared
+    in a new `NAV_BADGE_SOURCES` table keyed by the nav id the manifest
+    already gave the entry. One source today
+    (`notifications.feed` ← `useUnreadCount()`), and only when the container
+    actually mounts that destination. The hook is session-gated inside its own
+    pair, so it is safe on a shell an anonymous visitor sees. Emitted into
+    both containers; the monolith grows the local `AppChrome` component for a
+    badge the same way it already had one for the staff fact.
+  - `<SiteProvider/>` above everything that renders, gated on the auth pair
+    that serves `GET <auth-base>site/`. `<PublicShell/>` has read its brand and
+    its legal footer off core's site seam since shell 0.9.0 and the container
+    provided nothing for it to read, so the brand slot resolved from `null` on
+    every storefront the scaffold has ever written. The fallback names no
+    brand it cannot know.
+  - The theme control needs no emission (it is ON by default from shell
+    0.10.0) — what the new `FRONTEND_SHELL_THEME_CONTROL_FLOOR` decides is that
+    the container stops pinning `mode`, because a pinned mode is a switch that
+    cannot switch anything.
+
+  Each floor is MEASURED off the published `.d.ts` of the release that
+  introduced it (`themeControl` absent in 0.9.0 / present in 0.10.0;
+  `phoneChrome` and `navBadges` absent in 0.10.0 / present in 0.11.0), so a pin
+  that ever moves back degrades the emission instead of emitting a prop the
+  installed shell does not have.
+
+- **The listing composer's last two named gaps are wired.**
+  `COMPOSITE_PAGES` gains `optional` members beside its required ones:
+  `geo` fills `locationPicker` and `currencies` fills `renderCurrencyPicker`.
+  The location adapter is emitted as a HOISTED component, because
+  `locationPicker` is a `ComponentType` and an inline arrow is a new identity
+  on every render — the map would close under the person's finger the first
+  time the draft autosaved. Without geo the page keeps the notice naming the
+  gap; without currencies the price field states the deployment's currency,
+  which is the pair's own designed degradation, so there is no notice for that
+  one. `ListingComposePage.tsx` is assembled rather than templated: a
+  container with geo must not go on importing the `Alert` and the `useT` only
+  the notice used, and `noUnusedLocals` makes a leftover import a failed
+  build.
+
+### Fixed
+
+- **A generated monolith that selected any of six pairs did not typecheck.**
+  `NAV_ENTRY_MOUNTS` decides how a nav entry is mounted, and exactly one of the
+  two containers read it: the public storefront ran the table through
+  `public_mount_plan`, the monolith mounted `<{Component} />` bare. Measured,
+  not remembered — `tsc -b` over a container with every selectable pair
+  reported nine `TS2741 Property '<x>' is missing` errors
+  (`InviteAcceptPage.token`, `ListingDetailPane.id`,
+  `ListingComposerPage.features`, `SharedRecordingView.linkToken`,
+  `PublicProfilePage.userId`, `RecordingDetailPane.recordingId`,
+  `PushSettingsPane.getToken`, `FormBuilderPane.formId`,
+  `ResponsesPane.formId`), every one already answered by a row that renderer
+  never read. The new `monolith_mount_plan` closes it: route-parameter
+  wrappers, the named placeholder for a prop no container can mint, and the
+  cross-pair composer — the same machinery, one table, two containers. The
+  same container now typechecks, builds and emits nine wrapper pages.
+
+- **The monolith never registered the shell's own i18n catalogue.** The
+  storefront has called `registerShellI18n` since it was written; the monolith
+  did not, so "Open menu", the admin section's staff-only reason and — from
+  shell 0.10.0 — the four `shell.theme.*` labels of the switch at the foot of
+  the Sider rendered as raw keys on a surface every route shares. It also now
+  registers the container's own copy, which the mount pass's placeholder
+  needs.
+
+- **`<Alert message=…>` in eight generated files.** The prop is deprecated in
+  antd 6 (pinned 6.6.2) and the repo's own `stapel/antd-alert-title` rule says
+  so; a prop a major stops reading fails silently, on the one component whose
+  entire job is to be read. `eslint` over a generated storefront went from 15
+  errors to 7.
+
+### Changed
+
+- **Six registry pins caught up with npm**: calendar 0.8.0 → 0.8.1,
+  categories 0.5.1 → 0.9.1, listings 0.9.1 → 0.14.1, search 0.9.1 → 0.15.0,
+  attributes 0.5.0 → 0.8.1, vocabularies 0.1.0 → 0.2.1. Four of them had
+  drifted far enough that `check_nav_manifest_sync.py` was RED on `main`
+  before this wave. The re-mirrored entries carry the new `shortLabelKey`
+  field listings and search now publish — the short label the phone dock
+  draws, and the reason `@stapel/core` moves to 0.22.0 (the field is absent
+  from 0.20.0's and 0.21.0's `dist/nav.d.ts` and present in 0.22.0's, so an
+  older core turns it into an excess-property error at build time).
+
+- **`shop` and `classified` install what their `pending` lines named.** shop
+  gains currencies; classified gains geo, moderation and currencies. Both
+  presets' `pending` maps are now empty, and a new test refuses a `pending`
+  entry for a pair that IS registered — a stale reason on a CLI report and in
+  a generated README tells a reader a screen is missing that is right there.
+
+- **`check_nav_manifest_sync.py` tells an unpublished bump apart from
+  drift.** The registry pins what npm SERVES (a pin npm does not serve is a
+  404 on `npm install` for every generated project), so between a workspace
+  bump and its publish the sibling checkout is not a valid stand-in for the
+  registry. A checkout strictly AHEAD of the pin whose entries are
+  byte-identical is now an `UNPUBLISHED BUMP` line printed on every run,
+  exit 0. Everything else — a checkout behind the pin, or any difference in
+  the entries at all — still fails: then the two sides disagree about what a
+  container mounts and only a person can say which is right.
+
+### Known, unclosed
+
+- A generated monolith's `eslint.config.js` configures no TypeScript parser
+  and no `dist` ignore, so `npx eslint .` reports a parse error for every
+  source file (8 files on a two-pair project). The storefront's generator
+  (`render_public_eslint_config_js`) has both; the monolith's constant does
+  not, and CI lints neither. Left because the fix also moves the generated
+  `devDependencies` table.
+- A generated storefront's `/admin/*` routes collide with the backend's
+  reserved `/admin` prefix — 6 of the 7 lint errors that remain after the
+  `<Alert>` rename, and they predate this wave (five of them are auth's). The
+  container root's path is a fleet-wide decision, not a scaffold patch.
+
 ## [0.61.1] — 2026-09-01
 
 ### Fixed

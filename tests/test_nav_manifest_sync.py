@@ -62,9 +62,46 @@ def test_matching_mirror_passes(gate, tmp_path, monkeypatch):
 
 
 def test_version_drift_fails(gate, tmp_path, monkeypatch):
-    _pair(tmp_path, "demo", "@stapel/demo-react", "1.2.3", [ENTRY])
+    """A version drift the gate can act on: the registry claims a version the
+    workspace has never built. That is the stale-mirror direction — the one
+    this gate exists for — and it is told apart from the unpublished-bump
+    direction below by which side is newer, nothing else.
+    """
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.0.0", [ENTRY])
     _registry(monkeypatch, {
-        "demo": {"package": "@stapel/demo-react", "version": "1.0.0", "nav": [ENTRY]}
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
+    })
+    assert gate.check(tmp_path) == 1
+
+
+def test_a_checkout_bumped_ahead_with_identical_entries_is_not_drift(
+    gate, tmp_path, monkeypatch, capsys
+):
+    """The registry pins what npm SERVES. Between a workspace bump and its
+    publish the checkout is ahead, and the mirror may not follow — pinning an
+    unpublished version is a 404 on `npm install` for every generated
+    project. Nothing a container mounts differs, so this is a printed line,
+    not a failure."""
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.3.0", [ENTRY])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
+    })
+    assert gate.check(tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "UNPUBLISHED BUMP" in out
+    assert "demo" in out
+
+
+def test_a_checkout_bumped_ahead_with_DIFFERENT_entries_still_fails(
+    gate, tmp_path, monkeypatch
+):
+    """The narrow exemption is for a version and nothing else. The moment the
+    entries disagree, the checkout and the registry disagree about what a
+    container mounts and only a person can say which is right."""
+    moved = {**ENTRY, "order": 99}
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.3.0", [moved])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
     })
     assert gate.check(tmp_path) == 1
 

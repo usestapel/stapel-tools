@@ -648,7 +648,7 @@ FRONTEND_REACT_LIBS = {
     "attributes": {
         # L0 — no client, no provider, no runtime. See the dict docstring.
         "package": "@stapel/attributes-react",
-        "version": "0.5.0",
+        "version": "0.8.1",
         "register_i18n": "registerAttributesI18n",
     },
     "billing": {
@@ -676,7 +676,7 @@ FRONTEND_REACT_LIBS = {
     },
     "calendar": {
         "package": "@stapel/calendar-react",
-        "version": "0.8.0",
+        "version": "0.8.1",
         "provider": "CalendarProvider",
         "create_runtime": "createCalendarRuntime",
         "register_i18n": "registerCalendarI18n",
@@ -712,7 +712,7 @@ FRONTEND_REACT_LIBS = {
     },
     "categories": {
         "package": "@stapel/categories-react",
-        "version": "0.5.1",
+        "version": "0.9.1",
         "provider": "CategoriesProvider",
         "create_runtime": "createCategoriesRuntime",
         "register_i18n": "registerCategoriesI18n",
@@ -774,6 +774,31 @@ FRONTEND_REACT_LIBS = {
                 "order": 25,
             },
         ],
+    },
+    "currencies": {
+        # No `nav` mirror, and none is missing: `@stapel/currencies-react`
+        # 0.3.0 publishes a `nav-manifest.json` whose `entries` array is
+        # EMPTY (verified against the sibling checkout — the gate's "claims
+        # nothing, publishes nothing" case). Money is drawn inside somebody
+        # else's screen: a price on a listing card, a total in a wallet, a
+        # picker in the composer. A "Currencies" menu row leading nowhere
+        # would be worse than its absence.
+        #
+        # No `default_component`: every `/default` export needs props a
+        # scaffold cannot fabricate — `Price` an amount, `CurrencyField` a
+        # value, `CurrencyPicker` `value`/`onChange`/`options`, `RateTable`
+        # `rates`/`base` (read off the pair's own `src/default/*.tsx`).
+        "package": "@stapel/currencies-react",
+        "version": "0.3.0",
+        "provider": "CurrenciesProvider",
+        "create_runtime": "createCurrenciesRuntime",
+        "register_i18n": "registerCurrenciesI18n",
+        # The pair's api layer spells `api/v1/` ITSELF
+        # (`api/currenciesApi.ts`: `CURRENCIES_LIST_PATH = "api/v1/"`), so its
+        # `baseUrl` ends at the MOUNT. The registry's uniform
+        # `/<key>/api/v1/` would send every catalogue read to
+        # `/currencies/api/v1/api/v1/` — a 404 on a screen that looks wired.
+        "base_url": "/currencies/",
     },
     "forms": {
         # The backend has been selectable since the forms module landed
@@ -881,9 +906,32 @@ FRONTEND_REACT_LIBS = {
             },
         ],
     },
+    "geo": {
+        # No `nav` mirror, and none is missing: `@stapel/geo-react` publishes
+        # NO `nav-manifest.json` at all (verified against the sibling
+        # checkout). The whole pair is one FIELD drawn inside somebody else's
+        # form — the listing composer's `locationPicker` slot — exactly as
+        # cdn's uploader and vocabularies' term select are.
+        #
+        # No `default_component`: `/default` ships `LocationField`, whose
+        # every prop is optional but which is meaningless outside a form that
+        # reads its answer. It reaches a container through the composite
+        # seam below, never as a panel tile.
+        "package": "@stapel/geo-react",
+        "version": "0.6.0",
+        "provider": "GeoProvider",
+        "create_runtime": "createGeoRuntime",
+        "register_i18n": "registerGeoI18n",
+        # The mount, not the versioned prefix: `api/geoApi.ts` spells
+        # `MAP_CONFIG_PATH = "api/v1/map/config"` itself, and the other four
+        # paths are HANDED to it by that call's `endpoints` table. The
+        # uniform `/geo/api/v1/` would make the bootstrap read
+        # `/geo/api/v1/api/v1/map/config` and the picker would never open.
+        "base_url": "/geo/",
+    },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.9.1",
+        "version": "0.14.1",
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -903,6 +951,9 @@ FRONTEND_REACT_LIBS = {
             {
                 "id": "listings.compose",
                 "labelKey": "listings.nav.compose",
+                # The dock's own label: five destinations across a phone
+                # cannot each carry "Post a listing".
+                "shortLabelKey": "listings.nav.compose.short",
                 "icon": "PlusOutlined",
                 "route": {"path": "/new"},
                 "component": {"export": "ListingComposerPage", "subpath": "default"},
@@ -915,6 +966,7 @@ FRONTEND_REACT_LIBS = {
             {
                 "id": "listings.mine",
                 "labelKey": "listings.nav.mine",
+                "shortLabelKey": "listings.nav.mine.short",
                 "icon": "ProfileOutlined",
                 "route": {"path": "listings"},
                 "component": {"export": "MyListingsPane", "subpath": "default"},
@@ -935,6 +987,95 @@ FRONTEND_REACT_LIBS = {
                 "requiresAuth": True,
                 "surface": "member",
                 "order": 20,
+            },
+        ],
+    },
+    "moderation": {
+        # The pair that closes the loop stapel-classified opens: the backend
+        # registers listing/review report targets, and until this entry
+        # existed nothing in a generated container rendered a button for one.
+        #
+        # No `default_component`: all four `/default` screens take zero
+        # required props (`PolicyDisclosurePaneProps`, `AppealPanelProps`,
+        # `ModerationQueueProps`, `AppealsQueueProps` — every field optional,
+        # read off the pair's own `src/default/*.tsx`), so a bare mount would
+        # COMPILE. It is still wrong: each of the four is a ROUTE in the nav
+        # mirror below, and a second copy dropped on the module panel is the
+        # same screen twice — the reason billing/calendar/recordings are
+        # provider-only too.
+        #
+        # `ReportButton`/`ReportSheet` stay unmounted for the opposite
+        # reason: they take a `targetType`/`targetKey` that only the screen
+        # embedding them knows (a listing card knows it is a listing), so
+        # they belong inside another pair's screen and nowhere a generator
+        # can put them.
+        "package": "@stapel/moderation-react",
+        "version": "0.1.1",
+        "provider": "ModerationProvider",
+        "create_runtime": "createModerationRuntime",
+        "register_i18n": "registerModerationI18n",
+        # Two `admin.*` entries hang from the container-owned `admin.root`
+        # and `account.appeals` from `account.root`, so an install with no
+        # such section drops them by resolveNav's own orphan rule.
+        # `moderation.policy` is the one PUBLIC entry: a disclosure page a
+        # signed-out visitor may read (DSA transparency), off the menu.
+        "nav": [
+            {
+                "id": "moderation.policy",
+                "labelKey": "moderation.nav.policy",
+                "icon": "SafetyCertificateOutlined",
+                "route": {"path": "policy"},
+                "component": {
+                    "export": "PolicyDisclosurePane",
+                    "subpath": "default",
+                },
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 90,
+            },
+            {
+                "id": "account.appeals",
+                "labelKey": "moderation.nav.appeals",
+                "icon": "AuditOutlined",
+                "route": {"path": "appeals"},
+                "component": {"export": "AppealPanel", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 40,
+            },
+            {
+                "id": "admin.moderation",
+                "labelKey": "moderation.nav.moderation",
+                "icon": "SafetyCertificateOutlined",
+                "route": {"path": "moderation"},
+                "component": {
+                    "export": "ModerationQueue",
+                    "subpath": "default/admin",
+                },
+                "placement": {"level": "submenu", "parentId": "admin.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 20,
+            },
+            {
+                "id": "admin.moderation-appeals",
+                "labelKey": "moderation.nav.appeals",
+                "icon": "AuditOutlined",
+                "route": {"path": "moderation-appeals"},
+                "component": {
+                    "export": "AppealsQueue",
+                    "subpath": "default/admin",
+                },
+                "placement": {"level": "submenu", "parentId": "admin.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 21,
             },
         ],
     },
@@ -1103,14 +1244,14 @@ FRONTEND_REACT_LIBS = {
     "search": {
         # No STAPEL_LIBS entry — see the dict docstring.
         "package": "@stapel/search-react",
-        "version": "0.9.1",
+        "version": "0.15.0",
         "provider": "SearchProvider",
         "create_runtime": "createSearchRuntime",
         "register_i18n": "registerSearchI18n",
         "nav": [
             {
                 "id": "search.results",
-                "labelKey": "search.results.title",
+                "labelKey": "search.nav.results",
                 "icon": "SearchOutlined",
                 "route": {"path": "/s"},
                 "component": {"export": "SearchPage", "subpath": "default"},
@@ -1122,7 +1263,8 @@ FRONTEND_REACT_LIBS = {
             },
             {
                 "id": "search.ranking",
-                "labelKey": "search.ranking.title",
+                "labelKey": "search.nav.ranking",
+                "shortLabelKey": "search.nav.ranking.short",
                 "icon": "OrderedListOutlined",
                 "route": {"path": "/ranking-disclosure"},
                 "component": {"export": "RankingDisclosurePane", "subpath": "default"},
@@ -1181,7 +1323,7 @@ FRONTEND_REACT_LIBS = {
         # `VocabularyTermSelect`, which REQUIRES `vocabulary`/`level`/`value`
         # props a scaffold cannot fabricate.
         "package": "@stapel/vocabularies-react",
-        "version": "0.1.0",
+        "version": "0.2.1",
         "provider": "VocabulariesProvider",
         "create_runtime": "createVocabulariesRuntime",
         "register_i18n": "registerVocabulariesI18n",
@@ -1333,22 +1475,22 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "attributes",
             "categories",
             "cdn",
+            "currencies",
             "listings",
             "profiles",
             "reviews",
             "search",
             "vocabularies",
         ],
-        "pending": {
-            "currencies": (
-                "@stapel/currencies-react 0.2.0 IS published (npm, "
-                "2026-08-31) but is not registered in FRONTEND_REACT_LIBS "
-                "yet, so every price on the storefront renders unformatted "
-                "until it is"
-            ),
-        },
+        "pending": {},
         "why": {
             "auth": "a storefront always generates sign-in",
+            "currencies": (
+                "one formatter for the whole fleet: prices on a card, in the "
+                "composer and in a wallet are spelled the same way, and the "
+                "composer's currency chooser is filled instead of the price "
+                "field stating a code the seller cannot change"
+            ),
             "profiles": "the seller's own settings screen",
             "cdn": "the photo pipe the listing composer publishes from",
             "search": "browse: the storefront's own way into the catalogue",
@@ -1369,33 +1511,28 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "categories",
             "cdn",
             "chat",
+            "currencies",
+            "geo",
             "listings",
+            "moderation",
             "profiles",
             "reviews",
             "search",
             "vocabularies",
         ],
-        "pending": {
-            "geo": (
-                "@stapel/geo-react 0.4.0 IS published (npm, 2026-08-31) but "
-                "is not registered in FRONTEND_REACT_LIBS yet, so the "
-                "composer asks a seller for a raw lat/lon pair until it is "
-                "(named on the page)"
-            ),
-            "moderation": (
-                "@stapel/moderation-react 0.1.1 IS published (npm, "
-                "2026-08-31) and carries a four-entry nav manifest, but "
-                "registering it needs those entries' NAV_ENTRY_MOUNTS rows; "
-                "until then stapel-classified registers listing/review "
-                "report targets that nothing renders a button for"
-            ),
-            "currencies": (
-                "@stapel/currencies-react 0.2.0 IS published but is not "
-                "registered in FRONTEND_REACT_LIBS yet — prices go unformatted"
-            ),
-        },
+        "pending": {},
         "why": {
             "auth": "a storefront always generates sign-in",
+            "currencies": (
+                "one formatter for the whole fleet — see the shop preset; a "
+                "classified's prices are the same prices"
+            ),
+            "moderation": (
+                "stapel-classified registers listing and review report "
+                "targets, and until this pair was installed nothing rendered "
+                "a button for one: the queue, the appeals and the public "
+                "policy disclosure are all this pair's screens"
+            ),
             "profiles": "the seller's own settings screen",
             "cdn": "the photo pipe the listing composer publishes from",
             "search": "browse: the storefront's own way into the catalogue",
@@ -1556,7 +1693,18 @@ FRONTEND_REACT_CORE_DEPS = {
     # catch either — npm installs happily and the generated frontend fails at
     # BUILD time on a missing export, or worse, at RUNTIME on a silently
     # dropped filter.
-    "@stapel/core": "0.20.0",
+    # 0.22.0, not 0.20.0, and the reason is one FIELD. `@stapel/core`'s
+    # `NavEntry` grew `shortLabelKey` there (measured, not remembered: the
+    # 0.20.0 and 0.21.0 tarballs' `dist/nav.d.ts` do not carry it, the 0.22.0
+    # one does), and `@stapel/listings-react` 0.14.1 and
+    # `@stapel/search-react` 0.15.0 now PUBLISH it — the short label the phone
+    # dock draws, because five destinations across a phone cannot each carry
+    # "Post a listing". The mirror emits what the pair publishes, and
+    # `INSTALLED_NAV_MANIFESTS` is typed `readonly PackageNavManifest[]`, so
+    # an older core turns that field into an excess-property error at BUILD
+    # time — a generated project that does not compile, which is the one
+    # failure mode a pin exists to prevent.
+    "@stapel/core": "0.22.0",
     "@tanstack/react-query": "5.102.8",
 }
 # Only pulled in when >=1 selected module's registry entry has
@@ -1605,16 +1753,20 @@ FRONTEND_ROUTER_DEPS = {
 # project with routing active but no nav-bearing module (e.g. `--landing`
 # alone never needs the shell).
 FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
-# 0.9.0 (`npm view @stapel/shell-react version`, 2026-08-31) — the minor where
-# `<PublicShell/>` fills its brand and legal-footer slots from core's site seam
-# (`useOptionalSite`, hence the `@stapel/core` >=0.20.0 peer floor above), on
-# top of 0.8.0's classified layout and 0.7.2's `matchesLocation` fix for
-# MULTI-SEGMENT relative paths (a nav entry like `workspaces/settings`
-# highlights instead of never matching). The generated container passes neither
-# slot, so it INHERITS the brand rather than needing new emission; the
-# self-theming floor below is a different number on purpose (the first release
-# with the contract, not the latest one).
-FRONTEND_SHELL_REACT_VERSION = "0.9.0"
+# 0.12.0 (`npm view @stapel/shell-react version`, 2026-09-02) — the minor where
+# `resolveNav` carries `shortLabelKey` through, which is what the phone dock
+# draws and what `@stapel/listings-react` 0.14.1 and `@stapel/search-react`
+# 0.15.0 publish. Underneath it: 0.11.0's `phoneChrome`/`navBadges`, 0.10.0's
+# `themeControl`, 0.9.0's brand and legal-footer slots off core's site seam
+# (`useOptionalSite`), 0.8.0's classified layout and 0.7.2's `matchesLocation`
+# fix for MULTI-SEGMENT relative paths (a nav entry like `workspaces/settings`
+# highlights instead of never matching).
+#
+# The three floors below are separate numbers on purpose — each is the FIRST
+# release carrying its contract, measured off that release's own published
+# `.d.ts` rather than remembered, so a pin that ever moves BACK degrades the
+# emission instead of emitting a prop the installed shell does not have.
+FRONTEND_SHELL_REACT_VERSION = "0.12.0"
 
 # The first `@stapel/shell-react` release that themes ITSELF and reads the
 # container's staff answer. Two facts, one release, because they are one
@@ -1661,6 +1813,55 @@ def shell_self_themes(version: str | None = None) -> bool:
         return tuple(out)
 
     return parts(version) >= parts(FRONTEND_SHELL_SELF_THEMING_FLOOR)
+
+
+# The first `@stapel/shell-react` release carrying `themeControl?: boolean` on
+# both shells, and with it `<ShellThemeControl/>` at the foot of the Sider and
+# the phone sheet. MEASURED, like the floor above: `themeControl` is absent
+# from the 0.9.0 tarball's `dist/default/AppShell.d.ts` and present in
+# 0.10.0's, and `dist/default/ShellThemeControl.js` first exists in 0.10.0.
+#
+# Nothing is EMITTED for it — the control is ON by default and the container
+# wants the default. What the floor decides is the opposite: below it the
+# container must keep pinning `mode`, and a pinned mode makes a theme switch
+# that cannot switch anything. So this floor is what lets the generated
+# container stop answering a question the shell now answers better.
+FRONTEND_SHELL_THEME_CONTROL_FLOOR = "0.10.0"
+
+# The first release carrying `phoneChrome?: "drawer" | "dock"` and
+# `navBadges?: Readonly<Record<string, number>>` — both absent from 0.10.0's
+# `dist/default/PublicShell.d.ts` and present in 0.11.0's.
+#
+# BOTH are emitted, and neither could be before: a `phoneChrome` prop the
+# installed shell does not declare is a TypeScript error in a generated
+# project, which is the failure this repo pins against.
+FRONTEND_SHELL_PHONE_CHROME_FLOOR = "0.11.0"
+
+
+def _shell_at_least(floor: str, version: str | None = None) -> bool:
+    """Is the PINNED shell at or above *floor*? Reads the pin at CALL time for
+    the same reason `shell_self_themes` does — a default argument freezes the
+    answer at import and makes it unmovable by the constant that decides it."""
+    version = FRONTEND_SHELL_REACT_VERSION if version is None else version
+
+    def parts(text: str) -> tuple:
+        out = []
+        for chunk in text.split("."):
+            digits = "".join(c for c in chunk if c.isdigit())
+            out.append(int(digits) if digits else 0)
+        return tuple(out)
+
+    return parts(version) >= parts(floor)
+
+
+def shell_has_theme_control(version: str | None = None) -> bool:
+    """Does the pinned shell draw its own theme switch?"""
+    return _shell_at_least(FRONTEND_SHELL_THEME_CONTROL_FLOOR, version)
+
+
+def shell_has_phone_chrome(version: str | None = None) -> bool:
+    """Does the pinned shell take `phoneChrome` and `navBadges`?"""
+    return _shell_at_least(FRONTEND_SHELL_PHONE_CHROME_FLOOR, version)
 
 # The source-agnostic image renderer — added whenever a media source is wired
 # (cdn, or a profiles avatar), so <Image meta={...image}> can render the
@@ -2383,8 +2584,22 @@ def _write_frontend_scaffold(
     _write(frontend / "vite.config.ts", r(F.VITE_CONFIG_TS))
     _write(frontend / "index.html", r(F.INDEX_HTML))
 
+    mount_files = (
+        F.monolith_mount_plan(
+            route_plan, pairs=tuple(e["key"] for e in react_entries)
+        )
+        if routing_active and shell_react_needed
+        else {"pages": {}, "needs_placeholder": False}
+    )
+    container_i18n = bool(mount_files["pages"]) or mount_files["needs_placeholder"]
     if react_entries:
-        _write(frontend / "src" / "modules.tsx", F.render_modules_tsx(react_entries, has_cdn=has_cdn))
+        _write(
+            frontend / "src" / "modules.tsx",
+            F.render_modules_tsx(
+                react_entries, has_cdn=has_cdn, shell_react=shell_react_needed,
+                container_i18n=container_i18n,
+            ),
+        )
 
     if needs_cdn_avatar_lib:
         _write(frontend / "src" / "lib" / "cdn.ts", F.render_cdn_lib_ts(ctx["slug"]))
@@ -2416,10 +2631,27 @@ def _write_frontend_scaffold(
                 frontend / "src" / f"{component}.tsx",
                 F.render_section_home_tsx(root_id, children),
             )
+        pair_keys = tuple(e["key"] for e in react_entries)
         _write(frontend / "src" / "routes.tsx", F.render_routes_tsx(
             route_plan, auth_wired=auth_wired, want_landing=bool(want_landing),
             app_route_present=app_route_present, has_cdn=has_cdn,
+            pairs=pair_keys,
         ))
+        # The mount pass's own files. The monolith had none of them: it mounted
+        # every nav entry bare, so nine published screens that REQUIRE a prop
+        # (the id their address carries, a slot no container can fabricate)
+        # produced a container that did not typecheck. Wrappers and the named
+        # placeholder are the same machinery the public storefront has always
+        # emitted — one table, one behaviour, two containers.
+        mounts = F.monolith_mount_plan(route_plan, pairs=pair_keys)
+        if mounts["pages"] or mounts["needs_placeholder"]:
+            _write(frontend / "src" / "NavPlaceholder.tsx", F.NAV_PLACEHOLDER_TSX)
+            _write(
+                frontend / "src" / "i18n" / "keys.ts",
+                F.render_storefront_i18n_ts("en"),
+            )
+        for rel, content in mounts["pages"].items():
+            _write(frontend / rel, content)
         if auth_wired:
             _write(frontend / "src" / "ProtectedRoute.tsx", F.PROTECTED_ROUTE_TSX)
         if want_landing:

@@ -159,10 +159,50 @@ class TestRoutesRenderer:
 
         monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION",
                             C.FRONTEND_SHELL_SELF_THEMING_FLOOR)
-        assert "<PublicShell nav={nav} />" in F.render_storefront_shell_tsx()
+        src = F.render_storefront_shell_tsx()
+        assert "      nav={nav}" in src
+        assert "mode=" not in src
 
         monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION", "0.6.0")
-        assert '<PublicShell nav={nav} mode="light" />' in F.render_storefront_shell_tsx()
+        src = F.render_storefront_shell_tsx()
+        assert '      mode="light"' in src
+
+    def test_the_phone_dock_and_the_badge_channel_move_with_the_pin(
+        self, monkeypatch
+    ):
+        """`phoneChrome` and `navBadges` are 0.11.0 props. Emitting either
+        against an older pin generates a project that does not typecheck —
+        the same class the `mode` gate above exists for — so the floor is
+        MEASURED off the published `.d.ts` and the emission follows it.
+
+        A storefront's phone traffic is the majority of it, so above the floor
+        the dock is the default the generator picks: destinations on screen
+        where the thumb is, instead of a hamburger it has to go looking for.
+        """
+        from stapel_tools import create_project as C
+
+        monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION",
+                            C.FRONTEND_SHELL_PHONE_CHROME_FLOOR)
+        src = F.render_storefront_shell_tsx(["notifications.feed"])
+        assert '      phoneChrome="dock"' in src
+        assert 'import { useUnreadCount } from "@stapel/notifications-react";' in src
+        assert "      navBadges={{" in src
+        assert '? { "notifications.feed": unreadNotifications.data }' in src
+
+        # One below the floor: neither prop, and no counting hook imported for
+        # a channel that does not exist.
+        monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION", "0.10.0")
+        src = F.render_storefront_shell_tsx(["notifications.feed"])
+        assert "phoneChrome" not in src
+        assert "navBadges" not in src
+        assert "useUnreadCount" not in src
+
+    def test_a_badge_is_only_wired_for_a_destination_this_container_mounts(self):
+        """A count fetched for a screen that does not exist is a request
+        nobody can act on."""
+        src = F.render_storefront_shell_tsx(["listings.compose"])
+        assert "navBadges" not in src
+        assert "useUnreadCount" not in src
 
     def test_account_subtree_sits_inside_the_member_gate(self):
         src = self._routes()
@@ -187,9 +227,66 @@ class TestRoutesRenderer:
         # sit on screen.
         assert page.count("useUploadQueue(") == 1
         assert "<MediaGalleryField bag={images} />" in page
-        # The slot it CANNOT fill is named on the page, not papered over.
-        assert "renderLocationPicker" in page
+        # STOREFRONT_PAIRS carries neither geo nor currencies, so the two
+        # optional slots stay unfilled — and the one the composer cannot
+        # degrade around is NAMED on the page, not papered over.
         assert "compose-location-gap" in page
+        assert 'from "@stapel/geo-react/default";' not in page
+        assert 'from "@stapel/currencies-react";' not in page
+        assert "locationPicker=" not in page
+        assert "renderCurrencyPicker=" not in page
+
+    def test_the_location_slot_is_wired_the_moment_geo_is_installed(self):
+        """The composer's `locationPicker` was the scaffold's longest-standing
+        named gap: with no pair for a geocoder the page carried a permanent
+        notice saying it asks a seller for a raw lat/lon pair.
+        `@stapel/geo-react` is registered now, so the slot is FILLED and the
+        notice is gone — and the adapter is a HOISTED component, because
+        `locationPicker` is a ComponentType and an inline arrow is a new
+        identity every render (the map would close under the person's finger
+        the first time the draft autosaved)."""
+        page = _plan(pairs=[*STOREFRONT_PAIRS, "geo"])["files"][
+            "src/pages/ListingComposePage.tsx"
+        ]
+        assert 'import { LocationField } from "@stapel/geo-react/default";' in page
+        assert (
+            "import type { ComposerLocationPickerProps } "
+            'from "@stapel/listings-react/default";' in page
+        )
+        assert "function ComposerLocationField({" in page
+        assert "        locationPicker={ComposerLocationField}" in page
+        # The notice, and everything only the notice used, is gone — the
+        # generated tsconfig turns a leftover import into a failed build.
+        assert "compose-location-gap" not in page
+        assert "Alert" not in page
+        assert "useT" not in page
+        assert "STOREFRONT_I18N_KEYS" not in page
+
+    def test_the_currency_slot_is_wired_the_moment_currencies_is_installed(self):
+        """Unfilled, the price field states the deployment's currency — the
+        pair's own designed degradation, so there is no notice for this one.
+        Filled, the catalogue comes from `useCurrencies()` and the CHOICE
+        stays the draft's (the slot's own value/setCurrency), never this
+        pair's display preference."""
+        page = _plan(pairs=[*STOREFRONT_PAIRS, "currencies"])["files"][
+            "src/pages/ListingComposePage.tsx"
+        ]
+        assert 'import { useCurrencies } from "@stapel/currencies-react";' in page
+        assert (
+            'import { CurrencyPicker } from "@stapel/currencies-react/default";'
+            in page
+        )
+        assert "const currencies = useCurrencies();" in page
+        assert "renderCurrencyPicker={({ value, setCurrency }) => (" in page
+        assert "options={currencies.state}" in page
+        # The location gap is untouched by the currency pair being present.
+        assert "compose-location-gap" in page
+
+    def test_an_optional_member_is_never_a_reason_to_withhold_the_page(self):
+        """`pairs` are required members and gate the whole screen; `optional`
+        ones only decide whether a slot is wired. A selection with neither geo
+        nor currencies still mounts the composer."""
+        assert F.composite_gaps("listings.compose", ("categories", "cdn")) == ()
 
     def test_the_composer_falls_back_to_a_named_gap_without_its_member_pairs(self):
         """A composite screen is only mountable when every pair it composes is
@@ -613,3 +710,86 @@ def test_generated_storefront_installs_typechecks_builds_and_lints(tmp_path):
     run(npm, "exec", "--", "vite", "build")
     run(npm, "exec", "--", "eslint", ".")
     assert (repo / "dist" / "index.html").is_file()
+
+
+class TestSiteSeam:
+    """`<PublicShell/>` has read its brand and its legal footer off core's
+    site seam since shell-react 0.9.0 (`useOptionalSite()`), and the generated
+    container provided nothing for it to read — so the brand slot filled
+    itself from `null` on every storefront the scaffold has ever written, and
+    the pin comment said the container "INHERITS the brand" from a provider
+    that was never emitted.
+    """
+
+    def test_the_site_provider_is_emitted_above_everything_that_renders(self):
+        src = _plan()["files"]["src/modules.tsx"]
+        assert "SiteProvider" in src
+        assert (
+            "<SiteProvider client={authRuntime.client} fallback={SITE_FALLBACK}>"
+            in src
+        )
+        # Above the mandate gateway, hence above the shell and every screen:
+        # two answers to "which site is this" is how a multibrand fleet shows
+        # one brand's footer under another brand's header.
+        assert src.index("<SiteProvider") < src.index("<MandateGateway>")
+
+    def test_the_fallback_names_no_brand_it_cannot_know(self):
+        src = _plan()["files"]["src/modules.tsx"]
+        assert "const SITE_FALLBACK = {" in src
+        assert "brand: null," in src
+        assert "matched: false," in src
+
+    def test_the_seam_is_gated_on_the_auth_pair_that_serves_it(self):
+        """`GET <auth-base>site/` is core's view mounted by stapel-auth's
+        `urls_v1`. With no auth pair there is no client whose baseUrl carries
+        the route, and a provider pointed at a module that does not serve it
+        404s on every load."""
+        src = _plan(pairs=["profiles", "listings"])["files"]["src/modules.tsx"]
+        assert "SiteProvider" not in src
+        assert "SITE_FALLBACK" not in src
+
+
+class TestTheThreeNewPairsInAStorefront:
+    def test_the_presets_that_named_them_pending_now_install_them(self):
+        from stapel_tools.create_project import FRONTEND_COMPOSITES, composite_pairs
+
+        assert "currencies" in composite_pairs("shop")
+        for key in ("geo", "moderation", "currencies"):
+            assert key in composite_pairs("classified")
+        for name in ("shop", "classified"):
+            assert FRONTEND_COMPOSITES[name]["pending"] == {}
+
+    def test_the_moderation_screens_are_routed_not_placeheld(self):
+        files = _plan(pairs=[*STOREFRONT_PAIRS, "moderation"])["files"]
+        src = files["src/routes.tsx"]
+        assert '{ path: "/policy", element: <PolicyDisclosurePane /> },' in src
+        assert '{ path: "appeals", element: <AppealPanel /> },' in src
+        # The two console screens sit inside the storefront's staff gate,
+        # which is a LAYOUT route over the whole `/admin` subtree.
+        assert '{ path: "/admin/moderation", element: <ModerationQueue /> },' in src
+        assert (
+            '{ path: "/admin/moderation-appeals", element: <AppealsQueue /> },' in src
+        )
+        assert src.index("element: <AdminGate />") < src.index("/admin/moderation")
+        # Nothing fell through to the placeholder.
+        assert "moderation" not in src.split("createBrowserRouter")[0].replace(
+            "@stapel/moderation-react", ""
+        )
+        assert 'entryId="moderation.policy"' not in src
+
+    def test_the_admin_console_imports_come_from_the_admin_subpath(self):
+        """`ModerationQueue`/`AppealsQueue` live on `default/admin`, not on
+        `default` — the mount reads the subpath off the manifest rather than
+        assuming one."""
+        src = _plan(pairs=[*STOREFRONT_PAIRS, "moderation"])["files"]["src/routes.tsx"]
+        assert (
+            'import { AppealsQueue, ModerationQueue } '
+            'from "@stapel/moderation-react/default/admin";' in src
+        )
+
+    def test_the_two_mount_relative_pairs_get_the_mount(self):
+        src = _plan(pairs=[*STOREFRONT_PAIRS, "geo", "currencies"])["files"][
+            "src/modules.tsx"
+        ]
+        assert 'createGeoRuntime({ baseUrl: "/geo/" });' in src
+        assert 'createCurrenciesRuntime({ baseUrl: "/currencies/" });' in src

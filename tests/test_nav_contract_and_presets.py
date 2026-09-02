@@ -230,7 +230,13 @@ class TestPublicSurfaceInTheMonolith:
         what keeps auth.qr_confirm (public surface, session required) gated."""
         _, src = self._src(["auth", "gdpr", "recordings"])
         assert '{ path: "/privacy-request", element: <PrivacyRequestPane /> },' in src
-        assert '{ path: "/share/:linkToken", element: <SharedRecordingView /> },' in src
+        # `share.view` carries a BEARER SECRET in its address, so it goes
+        # through the mount table's route-param wrapper like every other
+        # screen whose component requires what the route knows.
+        assert (
+            '{ path: "/share/:linkToken", element: <SharedRecordingViewRoute /> },'
+            in src
+        )
         assert '{ path: "/qr-confirm", element: <ProtectedRoute>' in src
 
     def test_a_member_relative_top_still_hangs_under_app(self):
@@ -302,8 +308,13 @@ class TestNewlyMirroredPairs:
         )
         for component in ("WalletPanel", "Calendar", "AvailabilityPane",
                           "FormsListPane", "RecordingsList", "WorkspacesPage",
-                          "MembersManager", "InviteAcceptPage"):
+                          "MembersManager"):
             assert f"<{component} " in src or f"<{component} />" in src, component
+        # `workspaces.invite` REQUIRES `token`, off its own public
+        # `/invite/:token` route — so it mounts through the wrapper the mount
+        # table has always named, which the monolith now honours. Bare, it did
+        # not typecheck.
+        assert "<InviteAcceptPageRoute />" in src
         assert "NavPlaceholder" not in src
 
 
@@ -340,15 +351,28 @@ class TestComposites:
 
     def test_classified_carries_the_verdict_s_member_set(self):
         """Architect verdict: classified = the shop shape + place + messaging.
-        The three members with no react pair yet are NAMED as pending, not
-        quietly dropped."""
+
+        The three that used to be NAMED as pending — geo, moderation,
+        currencies — are installed now that their pairs are registered, so
+        `pending` is empty: place is a map field in the composer rather than
+        two decimal boxes, a report has a button and a queue, and a price is
+        formatted."""
         pairs = composite_pairs("classified")
         for key in ("auth", "profiles", "categories", "listings", "search",
-                    "reviews", "chat", "cdn"):
+                    "reviews", "chat", "cdn", "geo", "moderation",
+                    "currencies"):
             assert key in pairs
-        assert set(FRONTEND_COMPOSITES["classified"]["pending"]) == {
-            "geo", "moderation", "currencies"
-        }
+        assert FRONTEND_COMPOSITES["classified"]["pending"] == {}
+
+    def test_no_preset_still_names_a_pending_pair_that_is_registered(self):
+        """A `pending` entry is a NAMED gap — "this preset does not install
+        that pair yet, and here is why". The moment the pair is registered the
+        reason is stale, and a stale reason on a CLI report and in a generated
+        README is worse than no reason: it tells a reader a screen is missing
+        that is right there."""
+        for name, preset in FRONTEND_COMPOSITES.items():
+            stale = [k for k in preset["pending"] if k in FRONTEND_REACT_LIBS]
+            assert stale == [], (name, stale)
 
     def test_a_preset_bakes_the_container_roots_into_its_nav_bundle(self):
         ids = {e["id"] for e in composite_nav_entries("classified")}
@@ -374,6 +398,26 @@ class TestComposites:
         assert "classified" in str(exc.value)
 
     def test_the_report_prints_the_pending_members(self):
+        """The mechanism, exercised on a preset that still has one. Nothing
+        in the roster does today, so the check is over a preset built for the
+        test rather than over a real one — the alternative is a test that
+        passes by accident the day the last gap closes."""
+        from stapel_tools import create_project as C
+
+        preset = dict(C.FRONTEND_COMPOSITES["social"])
+        preset["pending"] = {"video": "no product decision to put rooms here yet"}
+        roster = {**C.FRONTEND_COMPOSITES, "social": preset}
+        original = C.FRONTEND_COMPOSITES
+        C.FRONTEND_COMPOSITES = roster
+        try:
+            text = "\n".join(composite_report("social"))
+        finally:
+            C.FRONTEND_COMPOSITES = original
+        assert "NOT INSTALLED — video" in text
+        assert "no product decision to put rooms here yet" in text
+
+    def test_the_classified_report_no_longer_names_a_missing_pair(self):
         text = "\n".join(composite_report("classified"))
-        assert "NOT INSTALLED — moderation" in text
-        assert "NOT INSTALLED — geo" in text
+        assert "NOT INSTALLED" not in text
+        for key in ("geo", "moderation", "currencies"):
+            assert key in text

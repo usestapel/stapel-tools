@@ -837,13 +837,16 @@ class TestFrontendReactWiring:
         gain modules.tsx, must not switch App.tsx templates, and
         package.json's dependencies stay exactly {react, react-dom}.
 
-        This test used to use "gdpr", which was the same shape until
-        `@stapel/gdpr-react` shipped and FRONTEND_REACT_LIBS registered it —
-        the subject moved to "currencies", still genuinely pairless with an
-        empty `requires` list (so nothing it pulls in is paired either)."""
+        This test used to use "gdpr", then "currencies" — each was the same
+        shape until its pair shipped and FRONTEND_REACT_LIBS registered it
+        (`@stapel/currencies-react` 0.3.0, this wave). The subject moves to
+        "docs", still genuinely pairless with an empty `requires` list (so
+        nothing it pulls in is paired either). THAT churn is the test working:
+        the invariant it guards — a lib with no pair contributes nothing to
+        the frontend — has not moved once."""
         import json
 
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "currencies", "translate"])
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "docs", "translate"])
         frontend = proj / "frontend"
         assert not (frontend / "src" / "modules.tsx").exists()
         app_tsx = (frontend / "src" / "App.tsx").read_text()
@@ -947,14 +950,14 @@ class TestFrontendNavWiring:
         routing artifact (routes.tsx/nav.generated.ts/ProtectedRoute.tsx/
         stapel.nav.json/LandingPage.tsx) exists at all.
 
-        Uses "currencies" rather than "gdpr" for the same reason as
-        TestFrontendReactWiring's sibling regression test above: "gdpr" is
-        now react-paired (FRONTEND_REACT_LIBS), so it no longer fits a test
+        Uses "docs" rather than "gdpr"/"currencies" for the same reason as
+        TestFrontendReactWiring's sibling regression test above: both of those
+        are react-paired now (FRONTEND_REACT_LIBS), so neither fits a test
         about the NO-nav-pair shell."""
         import stapel_tools._frontend_templates as F
         from stapel_tools._compose_templates import render_tokens
 
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "currencies", "translate"])
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "docs", "translate"])
         frontend = proj / "frontend"
         app_tsx = (frontend / "src" / "App.tsx").read_text()
         expected_app_tsx = render_tokens(F.APP_TSX, {"SLUG": "app", "TITLE": "App"})
@@ -1045,9 +1048,13 @@ class TestFrontendNavWiring:
             auth_wired=True, want_landing=False, app_route_present=True,
         )
         assert "function AppChrome()" in src
-        assert "<AppShell nav={RESOLVED_NAV} staff={user?.is_staff === true} />" in src
+        assert "      nav={RESOLVED_NAV}" in src
+        assert "      staff={user?.is_staff === true}" in src
         assert 'import { useAuthSessionState } from "@stapel/auth-react";' in src
         assert "<AppChrome />" in src
+        # This pin predates `navBadges`, so no count is handed down and no
+        # pair's counting hook is imported.
+        assert "navBadges" not in src
 
     def test_a_shell_pin_without_the_prop_does_not_get_it_invented(self, monkeypatch):
         """The 0.54.0 class in a TypeScript costume: the prop exists in the
@@ -1086,14 +1093,29 @@ class TestFrontendNavWiring:
     def test_without_auth_there_is_no_staff_fact_to_hand_down(self, tmp_path):
         """No auth pair, no session: the shell's own default (absent means
         false) is then the honest answer, and inventing a session read would
-        not compile."""
+        not compile.
+
+        The chrome COMPONENT can still be there — notifications contributes a
+        `navBadges` count, and a count is not a session. What must be absent
+        is the staff fact and everything that would read one."""
         proj = _create(
             tmp_path, "app", "monolith", modules=["core", "notifications"],
         )
         routes_tsx = (proj / "frontend" / "src" / "routes.tsx").read_text()
+        assert "staff=" not in routes_tsx
+        assert "useAuthSessionState" not in routes_tsx
+        assert "navBadges" in routes_tsx
+
+    def test_a_selection_with_no_badge_source_and_no_auth_mounts_the_shell_bare(
+        self, tmp_path
+    ):
+        """The other half of the same rule: nothing to hand down means no
+        local chrome component at all, and the shell is the route element."""
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "billing"])
+        routes_tsx = (proj / "frontend" / "src" / "routes.tsx").read_text()
         assert "element: <AppShell nav={RESOLVED_NAV}" in routes_tsx
         assert "AppChrome" not in routes_tsx
-        assert "useAuthSessionState" not in routes_tsx
+        assert "navBadges" not in routes_tsx
 
     def test_landing_only_scaffold_has_landing_route_and_no_app_protected_tree(self, tmp_path):
         """``--landing`` with no auth, no nav-bearing module: "/" mounts
@@ -1644,11 +1666,18 @@ class TestVocabulariesPairAndTheVocabularyClientSeam:
     def test_a_monolith_selecting_it_installs_the_pair_and_reserves_its_api(
         self, tmp_path
     ):
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
         proj = _create(
             tmp_path, "app", "monolith", modules=["attributes", "vocabularies"]
         )
         pkg = json.loads((proj / "frontend" / "package.json").read_text())
-        assert pkg["dependencies"]["@stapel/vocabularies-react"] == "^0.1.0"
+        # Read off the registry, never typed: a pin bump must not need a
+        # second edit here to stay honest about what it installed.
+        assert (
+            pkg["dependencies"]["@stapel/vocabularies-react"]
+            == f"^{FRONTEND_REACT_LIBS['vocabularies']['version']}"
+        )
         reserved = json.loads((proj / "reserved-paths.json").read_text())
         assert "/vocabularies/api" in reserved["reservedPathPrefixes"]
         # The bare root is the SPA's, as for every other module.
@@ -1710,3 +1739,309 @@ class TestVocabulariesPairAndTheVocabularyClientSeam:
         assert "<VocabulariesProvider runtime={vocabulariesRuntime}>" in modules_tsx
         assert "VocabularyClientProvider" not in modules_tsx
         assert "createVocabularyClient" not in modules_tsx
+
+
+class TestGeoModerationCurrenciesOnboarding:
+    """Three pairs that were PUBLISHED on npm and absent from
+    FRONTEND_REACT_LIBS, so `--modules geo` (or moderation, or currencies)
+    scaffolded a backend the frontend could not see — and two storefront
+    presets carried hand-written `pending` reasons saying exactly that.
+
+    Each is registered off `npm view`, never a typed number, and each brings a
+    fact the registry had no shape for until now:
+
+      * moderation — a four-entry nav manifest whose screens need
+        NAV_ENTRY_MOUNTS rows.
+      * geo and currencies — a `baseUrl` that ends at the module MOUNT rather
+        than at `/<key>/api/v1/`, because both spell the `api/v1/` half in
+        their own api layer.
+    """
+
+    PAIRS = ("geo", "moderation", "currencies")
+
+    def test_all_three_are_registered(self):
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        for key in self.PAIRS:
+            assert key in FRONTEND_REACT_LIBS, key
+            entry = FRONTEND_REACT_LIBS[key]
+            assert entry["package"] == f"@stapel/{key}-react"
+            assert entry["create_runtime"] == (
+                f"create{key.capitalize()}Runtime"
+                if key != "currencies"
+                else "createCurrenciesRuntime"
+            )
+            assert entry["provider"].endswith("Provider")
+            assert entry["register_i18n"].startswith("register")
+
+    def test_the_backend_registry_already_had_all_three(self):
+        """The whole defect in one assertion: `--modules` drives BOTH sides
+        by construction, and the backend halves had been selectable the whole
+        time."""
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS, STAPEL_LIBS
+
+        for key in self.PAIRS:
+            assert key in STAPEL_LIBS, key
+            assert key in FRONTEND_REACT_LIBS, key
+
+    def test_only_moderation_claims_a_nav_surface(self):
+        """geo is one FIELD inside another pair's form and currencies is a
+        formatter — neither publishes entries (geo publishes no manifest at
+        all; currencies publishes an empty one), which is the sync gate's
+        "claims nothing, publishes nothing" case."""
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        assert FRONTEND_REACT_LIBS["geo"].get("nav") is None
+        assert FRONTEND_REACT_LIBS["currencies"].get("nav") is None
+        assert len(FRONTEND_REACT_LIBS["moderation"]["nav"]) == 4
+
+    def test_moderation_entries_hang_off_the_roots_that_resolve_them(self):
+        from stapel_tools import _frontend_templates as F
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        nav = FRONTEND_REACT_LIBS["moderation"]["nav"]
+        by_id = {e["id"]: e for e in nav}
+        assert set(by_id) == {
+            "moderation.policy",
+            "account.appeals",
+            "admin.moderation",
+            "admin.moderation-appeals",
+        }
+        # The one PUBLIC screen: a DSA disclosure a signed-out visitor reads.
+        assert by_id["moderation.policy"]["surface"] == "public"
+        assert by_id["moderation.policy"]["requiresAuth"] is False
+        assert by_id["account.appeals"]["placement"]["parentId"] == "account.root"
+        for key in ("admin.moderation", "admin.moderation-appeals"):
+            assert by_id[key]["placement"]["parentId"] == "admin.root"
+        # Generation refuses an unknown icon or an undeclared parent rather
+        # than degrading — so the mirror has to pass its own contract.
+        F.validate_nav_entries(nav)
+
+    def test_every_moderation_screen_has_a_mount_row_and_needs_no_prop(self):
+        """All four `/default` components take zero required props (read off
+        the pair's own `src/default/*.tsx`), so each mounts directly — no
+        route params, no container-supplied slot, no placeholder."""
+        from stapel_tools import _frontend_templates as F
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        for entry in FRONTEND_REACT_LIBS["moderation"]["nav"]:
+            mount = F.NAV_ENTRY_MOUNTS.get(entry["id"])
+            assert mount == {}, entry["id"]
+
+    def test_the_mount_table_still_covers_every_registered_entry(self):
+        """The safety net is a placeholder, not the plan: a newly mirrored
+        entry with no row shows up here rather than as a blank page."""
+        from stapel_tools import _frontend_templates as F
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        for pair in FRONTEND_REACT_LIBS.values():
+            for entry in pair.get("nav", ()):
+                assert entry["id"] in F.NAV_ENTRY_MOUNTS, entry["id"]
+
+    def test_geo_and_currencies_take_the_module_mount_as_their_baseUrl(self):
+        """`api/geoApi.ts` spells `MAP_CONFIG_PATH = "api/v1/map/config"` and
+        `api/currenciesApi.ts` spells `CURRENCIES_LIST_PATH = "api/v1/"`, so
+        the runtime's `baseUrl` ends at the MOUNT. The registry's uniform
+        `/<key>/api/v1/` would double the prefix — a 404 behind a screen that
+        looks perfectly wired."""
+        from stapel_tools import _frontend_templates as F
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        for key, expected in (("geo", "/geo/"), ("currencies", "/currencies/")):
+            entry = {"key": key, **FRONTEND_REACT_LIBS[key]}
+            assert F.pair_base_url(entry) == expected
+
+    def test_every_other_pair_keeps_the_uniform_versioned_prefix(self):
+        """The override is a REGISTRY fact declared by the pair that departs
+        from the default, never a branch in the emitter — so the majority is
+        untouched and a reader can see which two are different."""
+        from stapel_tools import _frontend_templates as F
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        overrides = {
+            k for k, v in FRONTEND_REACT_LIBS.items() if v.get("base_url")
+        }
+        assert overrides == {"geo", "currencies"}
+        for key, info in FRONTEND_REACT_LIBS.items():
+            if key in overrides:
+                continue
+            assert F.pair_base_url({"key": key, **info}) == f"/{key}/api/v1/"
+
+    def test_a_monolith_selecting_them_wires_the_runtimes_it_can_reach(
+        self, tmp_path
+    ):
+        import json
+
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["geo", "moderation", "currencies"],
+        )
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert 'const geoRuntime = createGeoRuntime({ baseUrl: "/geo/" });' in modules_tsx
+        assert (
+            'const currenciesRuntime = createCurrenciesRuntime'
+            '({ baseUrl: "/currencies/" });' in modules_tsx
+        )
+        assert (
+            'const moderationRuntime = createModerationRuntime'
+            '({ baseUrl: "/moderation/api/v1/" });' in modules_tsx
+        )
+        pkg = json.loads((proj / "frontend" / "package.json").read_text())
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        for key in self.PAIRS:
+            assert (
+                pkg["dependencies"][f"@stapel/{key}-react"]
+                == f"^{FRONTEND_REACT_LIBS[key]['version']}"
+            )
+
+    def test_the_moderation_screens_become_routes_in_the_monolith(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["auth", "moderation"])
+        routes_tsx = (proj / "frontend" / "src" / "routes.tsx").read_text()
+        for component in ("PolicyDisclosurePane", "AppealPanel", "ModerationQueue",
+                          "AppealsQueue"):
+            assert component in routes_tsx, component
+        # The two admin screens arrive through the container-owned admin root,
+        # which means they are also behind the container's own staff gate.
+        assert "<AdminGate><ModerationQueue /></AdminGate>" in routes_tsx
+
+
+class TestTheShellCatalogueIsRegisteredInTheMonolithToo:
+    """The storefront container registered `registerShellI18n` from the day it
+    was written; the monolith never did. Every string the chrome draws —
+    "Open menu", the admin section's staff-only reason, and from shell 0.10.0
+    the four `shell.theme.*` labels of the switch it now puts at the foot of
+    the Sider — therefore rendered as a raw key on a surface every route
+    shares.
+    """
+
+    def test_a_nav_bearing_monolith_registers_the_shell_catalogue(self, tmp_path):
+        proj = _create(tmp_path, "app", "monolith", modules=["auth", "profiles"])
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert 'import { registerShellI18n } from "@stapel/shell-react";' in modules_tsx
+        assert "registerShellI18n(i18n);" in modules_tsx
+        # The container's own copy still goes on LAST — the documented order.
+        assert modules_tsx.index("registerShellI18n(i18n);") < modules_tsx.index(
+            'i18n.registerBundle("en"'
+        )
+
+    def test_a_container_with_no_shell_does_not_import_one(self, tmp_path):
+        """`@stapel/shell-react` is only a dependency when something mounts
+        it. Registering a catalogue from a package that is not installed is a
+        build error, not a missing string."""
+        import json
+
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
+        pkg = json.loads((proj / "frontend" / "package.json").read_text())
+        assert "@stapel/shell-react" not in pkg["dependencies"]
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert "shell-react" not in modules_tsx
+
+
+class TestTheMonolithHonoursTheMountTable:
+    """`NAV_ENTRY_MOUNTS` decides how a nav entry is mounted, and until now
+    exactly one of the two containers read it. The public storefront ran the
+    table through `public_mount_plan`; the monolith mounted `<{Component} />`
+    for every entry, bare.
+
+    Nine of the fleet's published screens REQUIRE a prop, so a generated
+    monolith that selected the pair did not typecheck. Measured, not
+    remembered: `tsc -b` over a container with every selectable pair reported
+    exactly nine `TS2741 Property '<x>' is missing` errors —
+    `InviteAcceptPage.token`, `ListingDetailPane.id`,
+    `ListingComposerPage.features`, `SharedRecordingView.linkToken`,
+    `PublicProfilePage.userId`, `RecordingDetailPane.recordingId`,
+    `PushSettingsPane.getToken`, `FormBuilderPane.formId`,
+    `ResponsesPane.formId` — every one already answered by a row this
+    renderer never read.
+    """
+
+    ALL_PAIRS = ("auth", "notifications", "profiles", "listings", "categories",
+                 "cdn", "recordings", "forms", "workspaces", "attributes")
+
+    def _routes(self, tmp_path, modules):
+        proj = _create(tmp_path, "app", "monolith", modules=list(modules))
+        return proj, (proj / "frontend" / "src" / "routes.tsx").read_text()
+
+    def test_a_route_parameter_screen_goes_through_a_wrapper(self, tmp_path):
+        proj, src = self._routes(tmp_path, ["auth", "profiles"])
+        assert '{ path: "/u/:userId", element: <PublicProfilePageRoute /> },' in src
+        assert "<PublicProfilePage />" not in src
+        wrapper = (
+            proj / "frontend" / "src" / "pages" / "PublicProfilePageRoute.tsx"
+        ).read_text()
+        assert 'import { useParams } from "react-router";' in wrapper
+        assert "const userId = rawUserId;" in wrapper
+        assert '<RouteParamProblem param="userId" />' in wrapper
+        assert "<PublicProfilePage userId={userId} />" in wrapper
+
+    def test_a_prop_no_container_can_mint_gets_the_named_placeholder(
+        self, tmp_path
+    ):
+        """`PushSettingsPane` needs `getToken()` — a push subscription token
+        minted by the host's OWN service worker. A generated container has
+        none, and a stub returning a fake token registers a device that can
+        never be delivered to."""
+        proj, src = self._routes(tmp_path, ["auth", "notifications", "profiles"])
+        assert 'entryId="notifications.push"' in src
+        assert 'missing={["getToken"]}' in src
+        assert "<PushSettingsPane />" not in src
+        assert (proj / "frontend" / "src" / "NavPlaceholder.tsx").is_file()
+
+    def test_the_placeholder_copy_is_registered_not_left_as_raw_keys(
+        self, tmp_path
+    ):
+        proj, _ = self._routes(tmp_path, ["auth", "notifications", "profiles"])
+        assert (proj / "frontend" / "src" / "i18n" / "keys.ts").is_file()
+        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
+        assert (
+            'import { registerStorefrontI18n } from "./i18n/keys.js";' in modules_tsx
+        )
+        assert 'registerStorefrontI18n(i18n, "en");' in modules_tsx
+
+    def test_the_cross_pair_composer_is_composed_here_too(self, tmp_path):
+        proj, src = self._routes(
+            tmp_path, ["auth", "attributes", "categories", "cdn", "listings"]
+        )
+        assert "<ListingComposePage />" in src
+        page = (
+            proj / "frontend" / "src" / "pages" / "ListingComposePage.tsx"
+        ).read_text()
+        assert "useCategoryFeatures" in page
+        assert "<MediaGalleryField bag={images} />" in page
+
+    def test_a_composite_short_of_a_member_pair_names_the_gap(self, tmp_path):
+        _, src = self._routes(tmp_path, ["auth", "attributes", "categories", "listings"])
+        assert 'entryId="listings.compose"' in src
+        assert "gallerySlot (needs @stapel/cdn-react)" in src
+        assert "<ListingComposePage />" not in src
+
+    def test_no_registered_pair_leaves_a_required_prop_unmounted(self, tmp_path):
+        """The invariant behind the nine: for every screen the monolith
+        routes, the element it emits is either a bare mount whose component
+        needs nothing, a wrapper that supplies what the route knows, a local
+        component, or a placeholder that NAMES what is missing. Never a bare
+        mount of a component with a required prop."""
+        from stapel_tools import _frontend_templates as F
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS, STAPEL_LIBS
+
+        keys = [k for k in FRONTEND_REACT_LIBS if k in STAPEL_LIBS]
+        entries = [{"key": k, **FRONTEND_REACT_LIBS[k]} for k in keys]
+        pairs = F.nav_wired_pairs(entries, auth_wired=True)
+        plan = F.build_nav_route_plan(pairs)
+        mounts = F.monolith_mount_plan(plan, pairs=tuple(keys))
+        for route in (*plan["absolute_routes"], *plan["app_children"]):
+            entry = route["entry"]
+            if entry.get("_local"):
+                continue
+            mount = F.NAV_ENTRY_MOUNTS[entry["id"]]
+            element = mounts["elements"][entry["id"]]
+            needs_more = bool(
+                mount.get("route_params")
+                or mount.get("adapter")
+                or mount.get("container")
+                or mount.get("option_props")
+                or mount.get("composite")
+            )
+            if needs_more:
+                assert element != f'<{entry["component"]["export"]} />', entry["id"]

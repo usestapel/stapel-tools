@@ -413,7 +413,29 @@ def _seam_client_const(entry: dict) -> str:
     )
 
 
-def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
+def pair_base_url(entry: dict) -> str:
+    """The `baseUrl` a pair's `create<Module>Runtime` is handed.
+
+    `/<key>/api/v1/` for the fleet's majority, because a module's `urls.py`
+    contributes the `api/v1/` half and the pair's api layer spells only what
+    comes after it. TWO pairs are built the other way round and say so in
+    their own source — `@stapel/geo-react` (`MAP_CONFIG_PATH =
+    "api/v1/map/config"`, and the four geocoding paths are handed to it by
+    that call's `endpoints` table) and `@stapel/currencies-react`
+    (`CURRENCIES_LIST_PATH = "api/v1/"`). For those the `baseUrl` ends at the
+    MOUNT, and the uniform spelling would have doubled the prefix into
+    `/geo/api/v1/api/v1/map/config`: a 404 behind a screen that looks wired,
+    which is exactly the class of defect this generator exists to make
+    impossible. So the shape is a REGISTRY fact (`base_url`), declared by the
+    pair that departs from the default, never a branch in the emitter.
+    """
+    return entry.get("base_url") or f'/{entry["key"]}/api/v1/'
+
+
+def render_modules_tsx(
+    entries: list[dict], *, has_cdn: bool = False, shell_react: bool = False,
+    container_i18n: bool = False,
+) -> str:
     """Generates ``frontend/src/modules.tsx`` — the DATA-DRIVEN registry of
     every selected ``@stapel/<module>-react`` pair (create_project.py's
     ``FRONTEND_REACT_LIBS``, filtered to the project's actual ``--modules``
@@ -457,7 +479,7 @@ def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
       at all) is wired provider-only here, never guessed into a broken
       mount.
     """
-    needs_antd = any(e.get("default_component") for e in entries)
+    needs_antd = any(e.get("default_component") for e in entries) or shell_react
     # cdn auto-wiring: the avatarUrlFor stopgap only matters where
     # ProfileSettings is actually mounted (this file's ModulesPanel).
     needs_cdn_avatar_helper = has_cdn and any(e["key"] == "profiles" for e in entries)
@@ -489,6 +511,21 @@ def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
         'import type { ReactElement, ReactNode } from "react";',
         'import { createI18n, createStapelQueryClient, StapelProvider } from "@stapel/core";',
     ]
+    if container_i18n:
+        # The CONTAINER's own copy — the sentences on the named placeholder
+        # and the route-parameter problem, which the mount pass emits. The
+        # storefront has registered this since it was written; the monolith
+        # had no mount pass, so it had neither the file nor the line.
+        lines.append('import { registerStorefrontI18n } from "./i18n/keys.js";')
+    if shell_react:
+        # The chrome's OWN catalogue. `<AppShell/>` draws "Open menu", the
+        # admin section's staff-only reason and — from 0.10.0 — the four
+        # `shell.theme.*` labels of the switch it now puts at the foot of the
+        # Sider. Without this line every one of those renders as a raw key
+        # (`shell.nav.admin`) on a screen every route shares: the storefront
+        # container has registered it since it was written, and the monolith
+        # never did, which is the asymmetry this closes.
+        lines.append('import { registerShellI18n } from "@stapel/shell-react";')
     if needs_antd:
         lines.append('import { ConfigProvider } from "antd";')
         lines.append('import { toAntdThemeConfig } from "@stapel/tokens-antd";')
@@ -512,9 +549,15 @@ def render_modules_tsx(entries: list[dict], *, has_cdn: bool = False) -> str:
         key = e["key"]
         if e.get("create_runtime"):
             lines.append(
-                f'const {key}Runtime = {e["create_runtime"]}({{ baseUrl: "/{key}/api/v1/" }});'
+                f'const {key}Runtime = {e["create_runtime"]}'
+                f'({{ baseUrl: {json.dumps(pair_base_url(e))} }});'
             )
         lines.append(f"{e['register_i18n']}(i18n);")
+    if shell_react:
+        lines.append("registerShellI18n(i18n);")
+    if container_i18n:
+        # The container's own copy goes on LAST — the documented order.
+        lines.append('registerStorefrontI18n(i18n, "en");')
     if seams:
         lines.append("")
         lines.append("// Cross-pair seam(s): the implementing pair's factory, read by")
@@ -1014,9 +1057,104 @@ def _is_admin_entry(entry: dict) -> bool:
     )
 
 
+def monolith_mount_plan(route_plan: dict, *, pairs: tuple = ()) -> dict:
+    """How every route in the MONOLITH's plan is mounted — the same pass the
+    public storefront has always had (`public_mount_plan`), over the same
+    `NAV_ENTRY_MOUNTS` table.
+
+    The monolith did not have one, and that was not a stylistic difference: it
+    mounted `<{Component} />` for every nav entry, bare. Nine of the fleet's
+    published screens REQUIRE a prop — the id their own address carries
+    (`listings.detail`, `profiles.public`, `recordings.detail`, `share.view`,
+    `forms.builder`, `forms.responses`, `workspaces.invite`), a slot no
+    container can fabricate (`notifications.push`'s `getToken`) or a whole
+    cross-pair composition (`listings.compose`'s `features`) — so a generated
+    monolith that selected any of those pairs DID NOT TYPECHECK. `tsc -b` over
+    a container with every selectable pair reported exactly those nine, each
+    one already answered by a `NAV_ENTRY_MOUNTS` row this renderer never read.
+
+    Returns the same shape `public_mount_plan` does, plus the two collections
+    the monolith's own emitter needs (`_direct` imports, `_local` names).
+    """
+    entries = [
+        r["entry"]
+        for r in (*route_plan["absolute_routes"], *route_plan["app_children"])
+    ]
+    elements: dict[str, str] = {}
+    pages: dict[str, str] = {}
+    wrapper_imports: list[str] = []
+    direct: dict[tuple[str, str], set[str]] = {}
+    local_imports: set[str] = set()
+    needs_placeholder = False
+
+    for entry in entries:
+        if entry.get("_local"):
+            local_imports.add(entry["_local"])
+            elements[entry["id"]] = f'<{entry["_local"]} />'
+            continue
+        mount = NAV_ENTRY_MOUNTS.get(entry["id"])
+        if mount is None:
+            needs_placeholder = True
+            elements[entry["id"]] = _placeholder_jsx(entry)
+            continue
+        # A prop only a HOST runtime can mint (notifications' `getToken`
+        # needs a service worker a generated container does not have), and a
+        # deployment fact no monolith flag carries. Both get the placeholder
+        # that NAMES the prop rather than a mount that cannot compile.
+        missing = (
+            *tuple(mount.get("container", ())),
+            *tuple(mount.get("option_props") or {}),
+        )
+        if missing:
+            needs_placeholder = True
+            elements[entry["id"]] = _placeholder_jsx(entry, missing)
+            continue
+        if "composite" in mount:
+            spec = COMPOSITE_PAGES[mount["composite"]]
+            gaps = composite_gaps(mount["composite"], pairs)
+            if gaps:
+                needs_placeholder = True
+                elements[entry["id"]] = _placeholder_jsx(entry, gaps)
+                continue
+            name = spec["page"]
+            pages[f"src/pages/{name}.tsx"] = render_listing_compose_page_tsx(pairs)
+            line = f'import {{ {name} }} from "./pages/{name}.js";'
+            if line not in wrapper_imports:
+                wrapper_imports.append(line)
+            elements[entry["id"]] = f"<{name} />"
+            continue
+        if "local" in mount:
+            name = mount["local"]
+            local_imports.add(name)
+            elements[entry["id"]] = f"<{name} />"
+            continue
+        if mount.get("route_params") or mount.get("adapter"):
+            name = _wrapper_name(entry)
+            pages[f"src/pages/{name}.tsx"] = render_nav_page_wrapper_tsx(entry, mount)
+            line = f'import {{ {name} }} from "./pages/{name}.js";'
+            if line not in wrapper_imports:
+                wrapper_imports.append(line)
+            elements[entry["id"]] = f"<{name} />"
+            continue
+        comp = entry["component"]
+        direct.setdefault((entry["_package"], comp["subpath"]), set()).add(
+            comp["export"]
+        )
+        elements[entry["id"]] = f'<{comp["export"]} />'
+
+    return {
+        "elements": elements,
+        "imports": wrapper_imports,
+        "pages": pages,
+        "needs_placeholder": needs_placeholder,
+        "_direct": direct,
+        "_local": local_imports,
+    }
+
+
 def render_routes_tsx(
     route_plan: dict, *, auth_wired: bool, want_landing: bool, app_route_present: bool,
-    has_cdn: bool = False,
+    has_cdn: bool = False, pairs: tuple = (),
 ) -> str:
     """``frontend/src/routes.tsx`` — react-router v7's ``createBrowserRouter``
     (v7 ships v6-future behaviour as ITS OWN default; there is no
@@ -1056,15 +1194,10 @@ def render_routes_tsx(
         _is_admin_entry(c["entry"]) for c in app_children
     )
 
-    component_imports: dict[tuple[str, str], set[str]] = {}
-    local_imports: set[str] = set()
-    for r in (*absolute_routes, *app_children):
-        entry = r["entry"]
-        if entry.get("_local"):
-            local_imports.add(entry["_local"])
-            continue
-        comp = entry["component"]
-        component_imports.setdefault((entry["_package"], comp["subpath"]), set()).add(comp["export"])
+    mounts = monolith_mount_plan(route_plan, pairs=pairs)
+    elements = mounts["elements"]
+    component_imports: dict[tuple[str, str], set[str]] = mounts["_direct"]
+    local_imports: set[str] = mounts["_local"]
     uses_profile_settings = any(
         "ProfileSettings" in exports for exports in component_imports.values()
     )
@@ -1103,6 +1236,9 @@ def render_routes_tsx(
         lines.append(f'import {{ {", ".join(sorted(exports))} }} from "{package}/{subpath}";')
     for name in sorted(local_imports):
         lines.append(f'import {{ {name} }} from "./{name}.js";')
+    if mounts["needs_placeholder"]:
+        lines.append('import { NavPlaceholder } from "./NavPlaceholder.js";')
+    lines.extend(mounts["imports"])
     if needs_cdn_avatar_helper:
         lines.append('import { avatarUrlFor } from "./lib/cdn.js";')
 
@@ -1112,7 +1248,7 @@ def render_routes_tsx(
     # operate the product — with `user.is_staff`, the very field `AdminGate`
     # refuses on, so the menu and the screen can never disagree. It has to be a
     # component: a route object cannot call a hook.
-    from .create_project import shell_self_themes
+    from .create_project import shell_has_phone_chrome, shell_self_themes
 
     # Below the floor the published shell REQUIRES `mode` and has no `staff`
     # (see FRONTEND_SHELL_SELF_THEMING_FLOOR) — the generated container speaks
@@ -1120,19 +1256,57 @@ def render_routes_tsx(
     self_theming = shell_self_themes()
     shell_props = "" if self_theming else ' mode="light"'
     staff_prop = auth_wired and self_theming
-    if app_route_present and staff_prop:
+    # Counts for the destinations this container actually mounts. Both facts
+    # the chrome cannot read for itself — the session and the unread count —
+    # arrive the same way and through the same local component, because a
+    # route object cannot call a hook.
+    badge_sources = (
+        nav_badge_sources(
+            r["entry"]["id"] for r in (*absolute_routes, *app_children)
+        )
+        if shell_has_phone_chrome()
+        else []
+    )
+    chrome_component = app_route_present and (staff_prop or badge_sources)
+    if chrome_component:
         lines.append('import type { ReactElement } from "react";')
-        lines.append('import { useAuthSessionState } from "@stapel/auth-react";')
+        if staff_prop:
+            lines.append('import { useAuthSessionState } from "@stapel/auth-react";')
+        for src in badge_sources:
+            lines.append(f'import {{ {src["hook"]} }} from "{src["package"]}";')
         lines.append("")
         lines.append("/**")
-        lines.append(" * GENERATED — the app chrome plus the one fact the shell cannot read")
-        lines.append(" * for itself. `staff={false}` does not hide the admin section: the")
-        lines.append(" * shell lists it switched off with the reason beside it, because an")
-        lines.append(" * entry that vanishes teaches nobody the screen exists.")
+        lines.append(" * GENERATED — the app chrome plus the facts the shell cannot read")
+        lines.append(" * for itself.")
+        if staff_prop:
+            lines.append(" *")
+            lines.append(" * `staff={false}` does not hide the admin section: the shell lists")
+            lines.append(" * it switched off with the reason beside it, because an entry that")
+            lines.append(" * vanishes teaches nobody the screen exists.")
+        if badge_sources:
+            lines.append(" *")
+            lines.append(" * `navBadges` is the runtime channel over the static nav manifest:")
+            lines.append(" * the manifest says which destinations exist, this says how many")
+            lines.append(" * things are waiting at one. Each count comes from the pair that")
+            lines.append(" * OWNS it — the shell fetches nothing, by the same rule that keeps")
+            lines.append(" * `resolveNav` pure.")
         lines.append(" */")
         lines.append("function AppChrome(): ReactElement {")
-        lines.append("  const { user } = useAuthSessionState();")
-        lines.append("  return <AppShell nav={RESOLVED_NAV} staff={user?.is_staff === true} />;")
+        if staff_prop:
+            lines.append("  const { user } = useAuthSessionState();")
+        for src in badge_sources:
+            lines.append(f'  const {src["var"]} = {src["hook"]}();')
+        lines.append("  return (")
+        lines.append("    <AppShell")
+        lines.append("      nav={RESOLVED_NAV}")
+        if not self_theming:
+            lines.append('      mode="light"')
+        if staff_prop:
+            lines.append("      staff={user?.is_staff === true}")
+        if badge_sources:
+            lines.extend(_nav_badges_lines(badge_sources, "      "))
+        lines.append("    />")
+        lines.append("  );")
         lines.append("}")
     lines.append("")
     lines.append("export const router = createBrowserRouter([")
@@ -1145,7 +1319,11 @@ def render_routes_tsx(
     for r in absolute_routes:
         entry = r["entry"]
         comp = entry["component"]["export"]
-        element = _profile_settings_jsx(has_cdn) if comp == "ProfileSettings" else f'<{comp} />'
+        element = (
+            _profile_settings_jsx(has_cdn)
+            if comp == "ProfileSettings"
+            else elements[entry["id"]]
+        )
         # Per-route `requiresAuth` (shared-layer audit Q3): "/app" is gated as a
         # whole, but an ABSOLUTE-path entry is a sibling of it, so its own flag
         # is the only gate it has. auth.qr_confirm (`surface: "public"`,
@@ -1163,7 +1341,7 @@ def render_routes_tsx(
         lines.append('    path: "/app",')
         if auth_wired:
             chrome = (
-                "<AppChrome />" if staff_prop
+                "<AppChrome />" if chrome_component
                 else f"<AppShell nav={{RESOLVED_NAV}}{shell_props} />"
             )
             lines.append("    element: (")
@@ -1174,13 +1352,23 @@ def render_routes_tsx(
         else:
             # No auth pair, no session, no staff fact — and the shell's own
             # default (`staff` absent means false) is then the honest answer.
-            lines.append(f"    element: <AppShell nav={{RESOLVED_NAV}}{shell_props} />,")
+            # A badge source can still put the chrome behind a component: a
+            # count is not a session.
+            element = (
+                "<AppChrome />" if chrome_component
+                else f"<AppShell nav={{RESOLVED_NAV}}{shell_props} />"
+            )
+            lines.append(f"    element: {element},")
         if app_children:
             lines.append("    children: [")
             for c in app_children:
                 entry = c["entry"]
                 comp = entry["component"]["export"]
-                element = _profile_settings_jsx(has_cdn) if comp == "ProfileSettings" else f'<{comp} />'
+                element = (
+                    _profile_settings_jsx(has_cdn)
+                    if comp == "ProfileSettings"
+                    else elements[entry["id"]]
+                )
                 if admin_gated and _is_admin_entry(entry):
                     element = f"<AdminGate>{element}</AdminGate>"
                 lines.append(f'      {{ path: "{c["path"]}", element: {element} }},')
@@ -1874,6 +2062,22 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     "recordings.list": {},
     "recordings.detail": {"route_params": {"recordingId": "string"}},
     "share.view": {"route_params": {"linkToken": "string"}},
+    # moderation-react 0.1.1 — all four screens take ZERO required props, read
+    # off the pair's own prop interfaces rather than assumed:
+    # `PolicyDisclosurePaneProps` (optional `targetType`), `AppealPanelProps`
+    # (optional `caseId`/`sanctionId`, which the pair's own
+    # `DEFAULT_APPEAL_HREF` puts in the QUERY STRING — `?case=` — not in the
+    # path, so there is no route param to thread), `ModerationQueueProps`
+    # (optional `viewerId`: the module has no `/me` and a container that
+    # invented one would mislabel a colleague's lease as the reader's own,
+    # so it stays unset and every lease reads as somebody's) and
+    # `AppealsQueueProps` (nothing but `data-testid`). Each also extends
+    # `ThemeModeProp`, whose `mode` is optional BY DESIGN — a pair that
+    # defaulted it is how a dark host gets one white rectangle.
+    "moderation.policy": {},
+    "account.appeals": {},
+    "admin.moderation": {},
+    "admin.moderation-appeals": {},
     # workspaces-react 0.19.0 — every account screen's `workspaceId` is
     # optional BECAUSE this nav contract routes it: with none, the active
     # workspace comes from the runtime selection and a screen with no
@@ -2198,7 +2402,7 @@ export function NavPlaceholder(props: NavPlaceholderProps): ReactElement {
       type="info"
       showIcon
       data-testid="nav-placeholder"
-      message={t(STOREFRONT_I18N_KEYS.placeholderTitle)}
+      title={t(STOREFRONT_I18N_KEYS.placeholderTitle)}
       description={
         <Space direction="vertical" size="small">
           <Typography.Paragraph>
@@ -2246,7 +2450,7 @@ export function RouteParamProblem(props: { readonly param: string }): ReactEleme
       type="warning"
       showIcon
       data-testid="route-param-problem"
-      message={t(STOREFRONT_I18N_KEYS.routeInvalidTitle)}
+      title={t(STOREFRONT_I18N_KEYS.routeInvalidTitle)}
       description={
         <Typography.Text type="secondary">
           {t(STOREFRONT_I18N_KEYS.routeInvalidBody)}
@@ -2378,7 +2582,7 @@ function MandateOutage(props: { readonly error: unknown }): ReactElement {
       type="error"
       showIcon
       data-testid="member-gate-outage"
-      message={t(STOREFRONT_I18N_KEYS.gateUnavailableTitle)}
+      title={t(STOREFRONT_I18N_KEYS.gateUnavailableTitle)}
       description={
         <Space direction="vertical" size="small">
           <Typography.Paragraph>
@@ -2534,6 +2738,12 @@ def render_nav_page_wrapper_tsx(
 # page imports, the prop each of them satisfies, and the slots that stay
 # UNFILLED with the pair that would fill them — so the page can say what is
 # missing instead of quietly asking a seller for a latitude.
+#
+# `pairs` are REQUIRED members: without one the screen is not assembled at all
+# and the route gets the placeholder naming the absence. `optional` members
+# fill a slot the composer degrades around on its own — the page is emitted
+# either way, and the pair's presence decides whether the slot is WIRED or
+# whether the page says out loud that it is not.
 COMPOSITE_PAGES: dict[str, dict] = {
     "listings.compose": {
         "page": "ListingComposePage",
@@ -2542,8 +2752,21 @@ COMPOSITE_PAGES: dict[str, dict] = {
             "categories": ("features", "renderCategoryPicker"),
             "cdn": ("gallerySlot", "images"),
         },
-        # composer prop -> the pair that would fill it, once that pair exists
-        "unwired": {"renderLocationPicker": "geo"},
+        # pair key -> the composer prop(s) it fills WHEN INSTALLED. `geo` used
+        # to live in an `unwired` table instead, because there was no react
+        # pair for a geocoder: the page carried a permanent notice saying the
+        # composer asks a seller for a raw lat/lon pair, which was true and
+        # which no scaffolded storefront could do anything about.
+        # `@stapel/geo-react` is published and registered now, so the slot is
+        # FILLED when the pair is selected and the notice is emitted only when
+        # it is not. `currencies` is the same shape one field over: unfilled,
+        # the price field simply states the deployment's currency (the pair's
+        # own designed degradation) — so there is no notice for that one,
+        # only a picker when the pair is there.
+        "optional": {
+            "geo": ("locationPicker",),
+            "currencies": ("renderCurrencyPicker",),
+        },
     },
 }
 
@@ -2552,88 +2775,224 @@ COMPOSITE_PAGES: dict[str, dict] = {
 # and not read off a pair.
 LISTING_GALLERY_MAX = 10
 
-LISTING_COMPOSE_PAGE_TSX = '''\
-/**
- * GENERATED — the listing composer, wired.
- *
- * This is the fleet's one cross-pair screen: `@stapel/listings-react` owns the
- * draft, but the category schema lives in `@stapel/categories-react` and the
- * photo queue in `@stapel/cdn-react`, and an L2 pair may not import another L2
- * pair. So the CONTAINER holds the three together — that is the whole reason
- * this file exists rather than the composer being mounted directly.
- *
- * What is wired here:
- *   features/renderCategoryPicker  <- categories-react (`useCategoryFeatures`,
- *                                     `<CategoryPickerField/>`)
- *   gallerySlot/images             <- cdn-react (ONE `useUploadQueue` bag,
- *                                     drawn by `<MediaGalleryField bag={…}/>`;
- *                                     two queues would publish an empty
- *                                     `images_draft` while photos sat on screen)
- *
- * What is NOT, and says so: `renderLocationPicker`. Omitted, the composer asks
- * for a raw lat/lon pair — the only question it can ask on its own, and one no
- * seller can answer. A geocoder is deployment knowledge (stapel-geo's
- * `/geo/api/v1/` proxy) and there is no react pair for it yet, so the gap is
- * NAMED on the page instead of being papered over.
- */
-import { useState } from "react";
-import type { ReactElement } from "react";
-import { Alert, Flex } from "antd";
-import { useT } from "@stapel/core";
-import { useCategoryFeatures } from "@stapel/categories-react";
-import { CategoryPickerField } from "@stapel/categories-react/default";
-import { useUploadQueue } from "@stapel/cdn-react";
-import { MediaGalleryField } from "@stapel/cdn-react/default";
-import { ListingComposerPage } from "@stapel/listings-react/default";
-import { STOREFRONT_I18N_KEYS } from "../i18n/keys.js";
-
-/** The storefront's photo count — see LISTING_GALLERY_MAX in stapel-tools. */
-const GALLERY_MAX = {{GALLERY_MAX}};
-
-export function ListingComposePage(): ReactElement {
-  const t = useT();
-  // The container owns the chosen category because the same id keys the
-  // feature read; the composer reports every change through onCategoryChange.
-  const [category, setCategory] = useState("");
-  const categoryId = category === "" ? null : Number(category);
-  const features = useCategoryFeatures(categoryId);
-  // ONE queue: the bag the composer publishes from is the bag the grid draws.
-  const images = useUploadQueue({ max: GALLERY_MAX });
-
-  return (
-    <Flex vertical gap={16}>
-      <Alert
-        type="warning"
-        showIcon
-        data-testid="compose-location-gap"
-        message={t(STOREFRONT_I18N_KEYS.composeLocationTitle)}
-        description={t(STOREFRONT_I18N_KEYS.composeLocationBody)}
-      />
-      <ListingComposerPage
-        features={features.data ?? []}
-        featuresLoading={features.isFetching}
-        featuresError={features.error}
-        category={category}
-        onCategoryChange={setCategory}
-        renderCategoryPicker={({ value, setCategory: choose }) => (
-          <CategoryPickerField
-            value={value === "" ? null : Number(value)}
-            onChange={(id) => choose(id === null ? "" : String(id))}
-          />
-        )}
-        gallerySlot={<MediaGalleryField bag={images} />}
-        images={{ refs: images.refs, settled: images.settled }}
-      />
-    </Flex>
-  );
-}
-'''
-
-
-def render_listing_compose_page_tsx() -> str:
+def render_listing_compose_page_tsx(pairs: tuple = ()) -> str:
     """``src/pages/ListingComposePage.tsx`` — the composer with its cross-pair
-    slots filled from the pairs the container installed."""
-    return LISTING_COMPOSE_PAGE_TSX.replace("{{GALLERY_MAX}}", str(LISTING_GALLERY_MAX))
+    slots filled from the pairs the container actually installed.
+
+    Assembled rather than templated, because the file's IMPORTS change with
+    the selection: a container without `@stapel/geo-react` must not import it,
+    and a container WITH it must not go on importing the `Alert` and the
+    `useT` that only the missing-picker notice used (`noUnusedLocals` is on in
+    the generated tsconfig, so a leftover import is a failed build, not a
+    warning).
+    """
+    spec = COMPOSITE_PAGES["listings.compose"]
+    has = {key: key in pairs for key in spec["optional"]}
+    geo, currencies = has["geo"], has["currencies"]
+
+    doc_wired = [
+        " *   features/renderCategoryPicker  <- categories-react (`useCategoryFeatures`,",
+        " *                                     `<CategoryPickerField/>`)",
+        " *   gallerySlot/images             <- cdn-react (ONE `useUploadQueue` bag,",
+        " *                                     drawn by `<MediaGalleryField bag={…}/>`;",
+        " *                                     two queues would publish an empty",
+        " *                                     `images_draft` while photos sat on screen)",
+    ]
+    if geo:
+        doc_wired += [
+            " *   locationPicker                 <- geo-react (`<LocationField/>`: the",
+            " *                                     permission pre-prompt, the IP centre,",
+            " *                                     the map, the movable pin and the",
+            " *                                     address that followed it — never a",
+            " *                                     latitude box)",
+        ]
+    if currencies:
+        doc_wired += [
+            " *   renderCurrencyPicker           <- currencies-react (`useCurrencies` for",
+            " *                                     the catalogue, `<CurrencyPicker/>` for",
+            " *                                     the choice)",
+        ]
+    doc_gap = (
+        [
+            " *",
+            " * What is NOT, and says so: `locationPicker`. Omitted, the composer asks",
+            " * for a raw lat/lon pair — the only question it can ask on its own, and",
+            " * one no seller can answer. `@stapel/geo-react` fills the slot; this",
+            " * container did not select it, so the gap is NAMED on the page instead",
+            " * of being papered over.",
+        ]
+        if not geo
+        else []
+    )
+
+    imports = [
+        'import { useState } from "react";',
+        'import type { ReactElement } from "react";',
+        'import { Alert, Flex } from "antd";' if not geo else 'import { Flex } from "antd";',
+    ]
+    if not geo:
+        imports.append('import { useT } from "@stapel/core";')
+    imports += [
+        'import { useCategoryFeatures } from "@stapel/categories-react";',
+        'import { CategoryPickerField } from "@stapel/categories-react/default";',
+        'import { useUploadQueue } from "@stapel/cdn-react";',
+        'import { MediaGalleryField } from "@stapel/cdn-react/default";',
+    ]
+    if currencies:
+        imports.append('import { useCurrencies } from "@stapel/currencies-react";')
+        imports.append(
+            'import { CurrencyPicker } from "@stapel/currencies-react/default";'
+        )
+    if geo:
+        imports.append('import { LocationField } from "@stapel/geo-react/default";')
+    imports.append('import { ListingComposerPage } from "@stapel/listings-react/default";')
+    if geo:
+        imports.append(
+            "import type { ComposerLocationPickerProps } "
+            'from "@stapel/listings-react/default";'
+        )
+    if not geo:
+        imports.append('import { STOREFRONT_I18N_KEYS } from "../i18n/keys.js";')
+
+    body: list[str] = []
+    if geo:
+        # HOISTED, and that is the whole point: `locationPicker` is a
+        # ComponentType, not a render prop, so an arrow written inline in the
+        # JSX below is a NEW component identity on every render — React
+        # unmounts and remounts the field, and the map closes under the
+        # person's finger the first time the draft autosaves. The composer's
+        # own two render props (`renderCategoryPicker`,
+        # `renderCurrencyPicker`) are functions returning nodes and are
+        # inline for exactly the opposite reason.
+        body += [
+            "function ComposerLocationField({",
+            "  value,",
+            "  onChange,",
+            "}: ComposerLocationPickerProps): ReactElement {",
+            "  return (",
+            "    <LocationField",
+            "      {...(value.lat !== null && value.lon !== null",
+            "        ? {",
+            "            value: {",
+            "              point: { lat: value.lat, lon: value.lon },",
+            "              ...(value.address !== undefined",
+            "                ? { address: value.address }",
+            "                : {}),",
+            "            },",
+            "          }",
+            "        : {})}",
+            "      onChange={(picked) => {",
+            "        // Numbers in, numbers out: the composer writes the wire's",
+            "        // decimal STRINGS itself, at its own seam.",
+            "        onChange({",
+            "          lat: picked.point.lat,",
+            "          lon: picked.point.lon,",
+            "          ...(picked.address !== null ? { address: picked.address } : {}),",
+            "        });",
+            "      }}",
+            "    />",
+            "  );",
+            "}",
+            "",
+        ]
+    body += [
+        "export function ListingComposePage(): ReactElement {",
+    ]
+    if not geo:
+        body.append("  const t = useT();")
+    body += [
+        "  // The container owns the chosen category because the same id keys the",
+        "  // feature read; the composer reports every change through onCategoryChange.",
+        '  const [category, setCategory] = useState("");',
+        '  const categoryId = category === "" ? null : Number(category);',
+        "  const features = useCategoryFeatures(categoryId);",
+        "  // ONE queue: the bag the composer publishes from is the bag the grid draws.",
+        "  const images = useUploadQueue({ max: GALLERY_MAX });",
+    ]
+    if currencies:
+        body += [
+            "  // The catalogue the picker draws its four load states from. The CHOICE",
+            "  // itself belongs to the draft, so the slot's own value/setCurrency are",
+            "  // what the control is bound to — never this pair's display preference.",
+            "  const currencies = useCurrencies();",
+        ]
+    body += [
+        "",
+        "  return (",
+        "    <Flex vertical gap={16}>",
+    ]
+    if not geo:
+        body += [
+            "      <Alert",
+            '        type="warning"',
+            "        showIcon",
+            '        data-testid="compose-location-gap"',
+            "        title={t(STOREFRONT_I18N_KEYS.composeLocationTitle)}",
+            "        description={t(STOREFRONT_I18N_KEYS.composeLocationBody)}",
+            "      />",
+        ]
+    body += [
+        "      <ListingComposerPage",
+        "        features={features.data ?? []}",
+        "        featuresLoading={features.isFetching}",
+        "        featuresError={features.error}",
+        "        category={category}",
+        "        onCategoryChange={setCategory}",
+        "        renderCategoryPicker={({ value, setCategory: choose }) => (",
+        "          <CategoryPickerField",
+        '            value={value === "" ? null : Number(value)}',
+        '            onChange={(id) => choose(id === null ? "" : String(id))}',
+        "          />",
+        "        )}",
+    ]
+    if currencies:
+        body += [
+            "        renderCurrencyPicker={({ value, setCurrency }) => (",
+            "          <CurrencyPicker",
+            "            value={value}",
+            "            onChange={setCurrency}",
+            "            options={currencies.state}",
+            "            onRetry={currencies.refetch}",
+            "            compact",
+            "          />",
+            "        )}",
+        ]
+    if geo:
+        body.append("        locationPicker={ComposerLocationField}")
+    body += [
+        "        gallerySlot={<MediaGalleryField bag={images} />}",
+        "        images={{ refs: images.refs, settled: images.settled }}",
+        "      />",
+        "    </Flex>",
+        "  );",
+        "}",
+    ]
+
+    header = [
+        "/**",
+        " * GENERATED — the listing composer, wired.",
+        " *",
+        " * This is the fleet's one cross-pair screen: `@stapel/listings-react` owns the",
+        " * draft, but the category schema lives in `@stapel/categories-react` and the",
+        " * photo queue in `@stapel/cdn-react`, and an L2 pair may not import another L2",
+        " * pair. So the CONTAINER holds them together — that is the whole reason this",
+        " * file exists rather than the composer being mounted directly.",
+        " *",
+        " * What is wired here:",
+        *doc_wired,
+        *doc_gap,
+        " */",
+    ]
+    lines = [
+        *header,
+        *imports,
+        "",
+        "/** The storefront's photo count — see LISTING_GALLERY_MAX in stapel-tools. */",
+        f"const GALLERY_MAX = {LISTING_GALLERY_MAX};",
+        "",
+        *body,
+    ]
+    return "\n".join(lines) + "\n"
 
 
 def composite_gaps(entry_id: str, pairs: tuple) -> tuple:
@@ -2711,7 +3070,7 @@ def public_mount_plan(
                 elements[entry["id"]] = _placeholder_jsx(entry, gaps)
                 continue
             name = spec["page"]
-            pages[f"src/pages/{name}.tsx"] = render_listing_compose_page_tsx()
+            pages[f"src/pages/{name}.tsx"] = render_listing_compose_page_tsx(pairs)
             line = f'import {{ {name} }} from "./pages/{name}.js";'
             if line not in wrapper_imports:
                 wrapper_imports.append(line)
@@ -2874,46 +3233,65 @@ def render_public_routes_tsx(
     return "\n".join(lines)
 
 
-STOREFRONT_SHELL_TSX_TEMPLATE = '''\
-/**
- * GENERATED — the storefront's chrome.
- *
- * `<PublicShell/>` reads no session, exactly like `<AppShell/>`: the mandate
- * is supplied by the container, and the container is also what decides WHICH
- * nav tree the shell was handed. That decision is here, and it is one line
- * with a reason:
- *
- *   a settled member  -> the member tree.
- *   anyone else       -> the public tree.
- *
- * "Anyone else" includes an unsettled mandate (`useMandatePrincipal()`
- * answers `null` while the session bootstraps or when the answer could not be
- * obtained), and showing the PUBLIC tree there is the safe direction: it is
- * the smaller menu, so no door is drawn that would refuse the person who
- * clicks it. The waiting and the outage themselves are rendered by
- * `<MemberGate/>` on the routes that need a verdict — a menu is not the place
- * to explain an outage.
- *
- * The slots (`brand`, `searchSlot`, `categorySlot`, `accountSlot`, `footer`)
- * are deliberately unset: they are the wiring step's closed list (spec §6.2
- * item 3), and every one of them is product knowledge — a logo, what the
- * header search field searches, which categories are "top". Left unset,
- * `PublicShell` still renders its own sign-in CTA, so the entry point is
- * never missing while this file waits to be filled in.
- */
-import type { ReactElement } from "react";
-import { useMandatePrincipal } from "@stapel/core";
-import { PublicShell } from "@stapel/shell-react/default";
-import { RESOLVED_NAV_MEMBER, RESOLVED_NAV_PUBLIC } from "./nav.generated.js";
-
-export function StorefrontShell(): ReactElement {
-  const principal = useMandatePrincipal();
-  const nav = principal === "member" ? RESOLVED_NAV_MEMBER : RESOLVED_NAV_PUBLIC;
-  return <PublicShell nav={nav}{{SHELL_PROPS}} />;
+# Runtime counts for nav destinations — the `navBadges` channel
+# (`@stapel/shell-react` 0.11.0+), keyed by the nav id the pair's own manifest
+# already gave the entry. The shell deliberately fetches nothing: how many of
+# anything is waiting is a fact each module's pair owns, and a shell that read
+# it would depend on modules it must not. So the CONTAINER joins the two —
+# which is the same job it does for the vocabulary seam and the composer's
+# slots, and the same reason it is declared here rather than hand-written into
+# every storefront.
+#
+# One source today, and that is honest rather than thin: `useUnreadCount()` is
+# the only count the published pairs expose as a count (chat-react publishes a
+# conversation list, moderation-react a queue bag — neither is a number, and a
+# generator that derived one by fetching a page and calling `.length` would be
+# inventing a metric). A pair that ships one joins this table and every
+# generated container starts marking the destination.
+#
+# The hook is session-gated inside its own pair (`useActiveSessionReady`), so
+# it is safe on a PUBLIC shell an anonymous visitor sees: no request is made
+# and the badge simply never appears.
+NAV_BADGE_SOURCES: dict[str, dict] = {
+    "notifications.feed": {
+        "pair": "notifications",
+        "package": "@stapel/notifications-react",
+        "hook": "useUnreadCount",
+        "var": "unreadNotifications",
+    },
 }
-'''
 
-def render_storefront_shell_tsx() -> str:
+
+def nav_badge_sources(nav_ids) -> list[dict]:
+    """The badge sources whose destination this container actually mounts, in
+    table order. An id nothing routes gets no hook call: a count fetched for a
+    screen that does not exist is a request nobody can act on."""
+    present = set(nav_ids)
+    return [
+        {"id": nav_id, **spec}
+        for nav_id, spec in NAV_BADGE_SOURCES.items()
+        if nav_id in present
+    ]
+
+
+def _nav_badges_lines(sources: list[dict], indent: str) -> list[str]:
+    """The `navBadges={{…}}` prop, spread one source per line. `LoadState`
+    answers `ready` or it does not; a loading or failed count contributes
+    NOTHING rather than a zero, because a zero badge is a mark that says
+    nothing is happening."""
+    lines = [f"{indent}navBadges={{{{"]
+    for src in sources:
+        var = src["var"]
+        lines.append(
+            f'{indent}  ...({var}.status === "ready" && {var}.data > 0'
+        )
+        lines.append(f'{indent}    ? {{ {json.dumps(src["id"])}: {var}.data }}')
+        lines.append(f"{indent}    : {{}}),")
+    lines.append(f"{indent}}}}}")
+    return lines
+
+
+def render_storefront_shell_tsx(nav_ids=()) -> str:
     """``src/StorefrontShell.tsx`` — the chrome, speaking the PINNED shell's
     contract.
 
@@ -2924,11 +3302,110 @@ def render_storefront_shell_tsx() -> str:
     published `PublicShellProps` REQUIRES `mode`, and a container that omitted
     it would not typecheck — so the pin decides, and the emission moves in the
     same commit the pin does.
-    """
-    from .create_project import shell_self_themes
 
-    props = "" if shell_self_themes() else ' mode="light"'
-    return STOREFRONT_SHELL_TSX_TEMPLATE.replace("{{SHELL_PROPS}}", props)
+    Two more props move with the pin from
+    `FRONTEND_SHELL_PHONE_CHROME_FLOOR`: `phoneChrome="dock"` and `navBadges`.
+    """
+    from .create_project import (
+        shell_has_phone_chrome,
+        shell_has_theme_control,
+        shell_self_themes,
+    )
+
+    sources = nav_badge_sources(nav_ids) if shell_has_phone_chrome() else []
+    header = [
+        "/**",
+        " * GENERATED — the storefront's chrome.",
+        " *",
+        " * `<PublicShell/>` reads no session, exactly like `<AppShell/>`: the mandate",
+        " * is supplied by the container, and the container is also what decides WHICH",
+        " * nav tree the shell was handed. That decision is here, and it is one line",
+        " * with a reason:",
+        " *",
+        " *   a settled member  -> the member tree.",
+        " *   anyone else       -> the public tree.",
+        " *",
+        ' * "Anyone else" includes an unsettled mandate (`useMandatePrincipal()`',
+        " * answers `null` while the session bootstraps or when the answer could not be",
+        " * obtained), and showing the PUBLIC tree there is the safe direction: it is",
+        " * the smaller menu, so no door is drawn that would refuse the person who",
+        " * clicks it. The waiting and the outage themselves are rendered by",
+        " * `<MemberGate/>` on the routes that need a verdict — a menu is not the place",
+        " * to explain an outage.",
+        " *",
+        " * The slots (`brand`, `searchSlot`, `categorySlot`, `accountSlot`, `footer`)",
+        " * are deliberately unset: they are the wiring step's closed list (spec §6.2",
+        " * item 3), and every one of them is product knowledge — a logo, what the",
+        ' * header search field searches, which categories are "top". Left unset,',
+        " * `PublicShell` still renders its own sign-in CTA, so the entry point is",
+        " * never missing while this file waits to be filled in — and `brand`/`footer`",
+        " * fill THEMSELVES from core's site seam once a `<SiteProvider/>` is above",
+        " * this component, which `modules.tsx` emits when auth is installed.",
+    ]
+    if shell_has_phone_chrome():
+        header += [
+            " *",
+            ' * `phoneChrome="dock"` is the one chrome decision this generator DOES',
+            " * make. A storefront's phone traffic is the majority of it, and a",
+            " * hamburger is a menu a thumb has to go looking for: the dock puts the",
+            " * destinations on screen, permanently, where the thumb already is. The",
+            " * sticky single-row header keeps search and account reachable beside it.",
+            " * A product that wants the drawer back changes one prop here.",
+        ]
+    if sources:
+        header += [
+            " *",
+            " * `navBadges` is the runtime channel over the static nav manifest: the",
+            " * manifest says which destinations exist, this says how many things are",
+            " * waiting at one. The count comes from the pair that OWNS it — the shell",
+            " * fetches nothing.",
+        ]
+    if shell_has_theme_control():
+        header += [
+            " *",
+            " * The theme switch is the shell's own (`themeControl` defaults to ON),",
+            " * which is why this file pins no `mode`: a pinned mode is a switch that",
+            " * cannot switch anything.",
+        ]
+    header.append(" */")
+
+    imports = [
+        'import type { ReactElement } from "react";',
+        'import { useMandatePrincipal } from "@stapel/core";',
+        'import { PublicShell } from "@stapel/shell-react/default";',
+    ]
+    for src in sources:
+        imports.append(
+            f'import {{ {src["hook"]} }} from "{src["package"]}";'
+        )
+    imports.append(
+        'import { RESOLVED_NAV_MEMBER, RESOLVED_NAV_PUBLIC } from "./nav.generated.js";'
+    )
+
+    body = [
+        "export function StorefrontShell(): ReactElement {",
+        "  const principal = useMandatePrincipal();",
+        '  const nav = principal === "member" ? RESOLVED_NAV_MEMBER : RESOLVED_NAV_PUBLIC;',
+    ]
+    for src in sources:
+        body.append(f'  const {src["var"]} = {src["hook"]}();')
+
+    props: list[str] = ["      nav={nav}"]
+    if not shell_self_themes():
+        props.append('      mode="light"')
+    if shell_has_phone_chrome():
+        props.append('      phoneChrome="dock"')
+    if sources:
+        props.extend(_nav_badges_lines(sources, "      "))
+
+    body.append("  return (")
+    body.append("    <PublicShell")
+    body.extend(props)
+    body.append("    />")
+    body.append("  );")
+    body.append("}")
+
+    return "\n".join([*header, *imports, "", *body]) + "\n"
 
 
 STOREFRONT_HOME_TSX = '''\
@@ -2954,7 +3431,7 @@ export function StorefrontHome(): ReactElement {
       type="info"
       showIcon
       data-testid="storefront-home"
-      message={t(STOREFRONT_I18N_KEYS.homeTitle)}
+      title={t(STOREFRONT_I18N_KEYS.homeTitle)}
       description={
         <Typography.Paragraph>
           {t(STOREFRONT_I18N_KEYS.homeBody)}
@@ -2986,7 +3463,7 @@ export function AccountHome(): ReactElement {
       type="info"
       showIcon
       data-testid="account-home"
-      message={t(STOREFRONT_I18N_KEYS.accountTitle)}
+      title={t(STOREFRONT_I18N_KEYS.accountTitle)}
       description={
         <Typography.Paragraph>
           {t(STOREFRONT_I18N_KEYS.accountBody)}
@@ -3024,7 +3501,7 @@ export function AdminHome(): ReactElement {
       type="info"
       showIcon
       data-testid="admin-home"
-      message={t(STOREFRONT_I18N_KEYS.adminTitle)}
+      title={t(STOREFRONT_I18N_KEYS.adminTitle)}
       description={
         <Typography.Paragraph>
           {t(STOREFRONT_I18N_KEYS.adminBody)}
@@ -3068,7 +3545,7 @@ export function AdminGate(): ReactElement {
       type="warning"
       showIcon
       data-testid="admin-gate-refusal"
-      message={t(STOREFRONT_I18N_KEYS.adminRefusedTitle)}
+      title={t(STOREFRONT_I18N_KEYS.adminRefusedTitle)}
       description={
         <Typography.Paragraph>
           {t(STOREFRONT_I18N_KEYS.adminRefusedBody)}
@@ -3210,6 +3687,14 @@ def render_public_modules_tsx(
     # provider, and hand-wiring it is what every storefront was doing.
     seams = seam_pairs(entries)
     seam_imports = _seam_import_names(seams)
+    # The site/brand seam. `GET <auth-base>site/` is core's own view, mounted
+    # by stapel-auth's `urls_v1` (`get_site_urls()`), always on and `AllowAny`
+    # — so the ADDRESS is identical in every fleet and the only thing a
+    # container needs is the auth client. Which is also why this is gated on
+    # the auth PAIR: without it there is no client whose baseUrl carries the
+    # route, and a SiteProvider pointed at a module that does not serve `site/`
+    # would 404 on every load.
+    site_wired = any(e["key"] == "auth" for e in runtime_entries)
 
     lines: list[str] = [
         "/**",
@@ -3220,7 +3705,13 @@ def render_public_modules_tsx(
         " * file's shape.",
         " */",
         'import type { ReactElement, ReactNode } from "react";',
-        'import { createI18n, createStapelQueryClient, MandateProvider, StapelProvider } from "@stapel/core";',
+        (
+            "import { createI18n, createStapelQueryClient, MandateProvider, "
+            'SiteProvider, StapelProvider } from "@stapel/core";'
+            if site_wired
+            else "import { createI18n, createStapelQueryClient, MandateProvider, "
+            'StapelProvider } from "@stapel/core";'
+        ),
         'import { registerShellI18n } from "@stapel/shell-react";',
     ]
     for e in entries:
@@ -3242,7 +3733,7 @@ def render_public_modules_tsx(
         key = e["key"]
         if key == "chat" and not realtime:
             lines.append(f"const {key}Runtime = {e['create_runtime']}({{")
-            lines.append(f'  baseUrl: "/{key}/api/v1/",')
+            lines.append(f'  baseUrl: {json.dumps(pair_base_url(e))},')
             lines.append("  // Sockets OFF, stated rather than discovered: a WSGI")
             lines.append("  // deployment mounts no websocket route, and the pair's own")
             lines.append("  // default would otherwise derive a socket base and let")
@@ -3253,7 +3744,8 @@ def render_public_modules_tsx(
             lines.append("});")
         else:
             lines.append(
-                f'const {key}Runtime = {e["create_runtime"]}({{ baseUrl: "/{key}/api/v1/" }});'
+                f'const {key}Runtime = {e["create_runtime"]}'
+                f'({{ baseUrl: {json.dumps(pair_base_url(e))} }});'
             )
     if seams:
         lines.append("")
@@ -3289,6 +3781,28 @@ def render_public_modules_tsx(
         lines.append("// They contribute a catalogue above and are used directly by the")
         lines.append("// pairs that render their editors — nothing to mount here.")
         lines.append("")
+    if site_wired:
+        lines.append("/**")
+        lines.append(" * The FIRST FRAME's answer about this site, and the one kept if the")
+        lines.append(" * bootstrap never lands. `<SiteProvider/>` requires a fallback")
+        lines.append(" * because a brand that flickers in is worse than one that arrives:")
+        lines.append(" * the shell reads `useOptionalSite()` and draws its own sign-in")
+        lines.append(" * chrome with no brand until there is one.")
+        lines.append(" *")
+        lines.append(" * `brand: null` is the honest floor — a generator does not know a")
+        lines.append(" * product's name, and inventing one puts a wrong wordmark on every")
+        lines.append(" * page until the fetch corrects it. `matched: false` says exactly")
+        lines.append(" * that: no registry row has answered for this host yet.")
+        lines.append(" */")
+        lines.append("const SITE_FALLBACK = {")
+        lines.append('  host: typeof window === "undefined" ? "" : window.location.host,')
+        lines.append("  matched: false,")
+        lines.append("  primary: true,")
+        lines.append(f"  locale: {json.dumps(locale)},")
+        lines.append("  brand: null,")
+        lines.append('  seo: { index: true, canonical_host: "" },')
+        lines.append("} as const;")
+        lines.append("")
     lines.append("/**")
     lines.append(" * The mandate seam. Inside `<StapelProvider>` because the derivation")
     lines.append(" * reads the active session manager the auth runtime registers, and")
@@ -3319,7 +3833,20 @@ def render_public_modules_tsx(
     for e in seams:
         lines.append(f'{indent}<{e["seam"]["provider"]} value={{{e["key"]}Client}}>')
         indent += "  "
+    if site_wired:
+        # Above the shell and above every screen: the brand names the page in
+        # the header, in the legal footer and in `<html data-brand>`, and two
+        # answers to "which site is this" is how a multibrand fleet ends up
+        # showing one brand's footer under another brand's header.
+        lines.append(
+            f"{indent}<SiteProvider "
+            f'client={{{primary["key"]}Runtime.client}} fallback={{SITE_FALLBACK}}>'
+        )
+        indent += "  "
     lines.append(f"{indent}<MandateGateway>{{children}}</MandateGateway>")
+    if site_wired:
+        indent = indent[:-2]
+        lines.append(f"{indent}</SiteProvider>")
     for e in reversed(seams):
         indent = indent[:-2]
         lines.append(f'{indent}</{e["seam"]["provider"]}>')

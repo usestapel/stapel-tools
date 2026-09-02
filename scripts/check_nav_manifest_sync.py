@@ -20,8 +20,8 @@ what lets CI check against a checkout that is not literally a sibling of
 this repo, and what makes this script testable against a fixture tree
 instead of the developer's own machine.
 
-One skip and three failures — the distinction is the point
-----------------------------------------------------------
+One skip, one warning and three failures — the distinction is the point
+-----------------------------------------------------------------------
 The gate walks EVERY key of ``FRONTEND_REACT_LIBS``, not only the ones that
 already carry a mirror. That is the whole shape of the defect it was blind
 to until now: it iterated the MIRRORS and asked whether each matched a real
@@ -43,8 +43,17 @@ guards is worse than no gate, because it is believed.
 * A pair whose real ``nav-manifest.json`` HAS entries while the registry
   carries no mirror (or an empty one) → **FAILURE**. Those screens exist and
   no scaffolded container mounts them.
-* A pair whose mirror differs from the real file (entries or version) →
-  **FAILURE**.
+* A pair whose checkout is bumped AHEAD of the registry pin while the
+  entries are byte-identical → **UNPUBLISHED BUMP**, printed on every run,
+  exit 0. The registry pins the version npm SERVES (a pin npm does not serve
+  is a 404 on `npm install` for every generated project — see
+  ``scripts/e2e_npm_pins.py``), so during the window between a workspace bump
+  and its publish the checkout is simply not a valid stand-in for the
+  registry. Nothing a container mounts differs, and the mirror is as correct
+  as it is allowed to be. The line stays loud because the discrepancy is real
+  and somebody closes it by publishing.
+* A pair whose mirror differs from the real file (entries — always; version,
+  unless it is the unpublished-bump case above) → **FAILURE**.
 * A pair that DOES carry a ``"nav"`` mirror but whose real
   ``nav-manifest.json`` is missing or empty → **FAILURE** (spec §3.8). This
   used to be a silent skip too: the mirror claims a nav surface that the
@@ -99,6 +108,21 @@ def _load_real_manifest(packages: Path, key: str, package: str) -> dict | None:
     return data
 
 
+def _parts(text: str | None) -> tuple:
+    """A version as comparable integers. Anything unparsable sorts lowest, so
+    a garbled version can never be mistaken for "ahead"."""
+    out: list[int] = []
+    for chunk in (text or "").split("."):
+        digits = "".join(c for c in chunk if c.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
+
+
+def _is_ahead(checkout: str | None, mirrored: str) -> bool:
+    """Is the sibling checkout STRICTLY newer than what the registry pins?"""
+    return _parts(checkout) > _parts(mirrored)
+
+
 def check(root: Path | None = None) -> int:
     packages = packages_root(root)
     if not packages.is_dir():
@@ -114,6 +138,7 @@ def check(root: Path | None = None) -> int:
     from stapel_tools.create_project import FRONTEND_REACT_LIBS
 
     mismatches: list[str] = []
+    ahead: list[str] = []
     checked = 0
     for key, info in FRONTEND_REACT_LIBS.items():
         mirrored_entries = info.get("nav")
@@ -147,12 +172,40 @@ def check(root: Path | None = None) -> int:
             )
             continue
         checked += 1
+        real_entries = real.get("entries", [])
         if real.get("version") != info["version"]:
+            # ONE case is not drift: the checkout has been bumped ahead of npm
+            # and the ENTRIES are byte-identical. The registry pin may not
+            # follow yet — pinning a version npm does not serve is a 404 on
+            # `npm install` for every generated project, which is the defect
+            # `scripts/e2e_npm_pins.py` exists for — so the mirror is as
+            # correct as it is allowed to be, and this checkout is simply not
+            # a valid stand-in for the registry for that one pair yet.
+            #
+            # It stays LOUD (a printed line, every run) rather than silent,
+            # because it is a real open discrepancy someone has to close by
+            # publishing. What it must not do is say "the mirror is stale,
+            # update it" about a mirror that is right.
+            #
+            # A version difference in the OTHER direction, or one with any
+            # difference in the entries, is drift and still fails: then the
+            # checkout and the registry disagree about what a container
+            # mounts, and only a person can say which is correct.
+            if _is_ahead(real.get("version"), info["version"]) and (
+                mirrored_entries == real_entries
+            ):
+                ahead.append(
+                    f"{key}: checkout is at {real.get('version')!r} while the "
+                    f"registry pins {info['version']!r} — the published "
+                    "version. Entries are identical, so no container mounts "
+                    "anything different; the pin moves when the pair is "
+                    "published."
+                )
+                continue
             mismatches.append(
                 f"{key}: mirrored version {info['version']!r} != real "
                 f"nav-manifest.json version {real.get('version')!r}"
             )
-        real_entries = real.get("entries", [])
         if mirrored_entries != real_entries:
             mismatches.append(
                 f"{key}: mirrored \"nav\" entries differ from the real "
@@ -160,6 +213,9 @@ def check(root: Path | None = None) -> int:
                 f"  mirror: {json.dumps(mirrored_entries, indent=2, sort_keys=True)}\n"
                 f"  real:   {json.dumps(real_entries, indent=2, sort_keys=True)}"
             )
+
+    for line in ahead:
+        print(f"check_nav_manifest_sync: UNPUBLISHED BUMP — {line}")
 
     if mismatches:
         print("check_nav_manifest_sync: FRONTEND_REACT_LIBS nav mirror drift found:\n")
