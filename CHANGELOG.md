@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.62.2 — 2026-09-06
+
+### The storefront's Vite dev proxy forgot stapel-video has a websocket
+
+`npm run dev` in front of a live backend proxies each installed module's
+`api`/`swagger`/`schema.json`/`admin` sub-surfaces — but stapel-video's own
+socket (`/ws/video`) and its LiveKit signalling channel (`/rtc`) live
+outside that pattern entirely, and neither `vite.config.ts` nor
+`reserved-paths.json` ever generated them. A real storefront had both
+hand-added to `reserved-paths.json` only — `vite.config.ts` never learned
+about them, so the SPA fallback silently swallowed both in dev (production
+is unaffected; the fleet's own nginx is the boundary there).
+
+`reserved_paths._MODULE_EXTRA_SURFACES` is the one declaration now: a
+module registers its own websocket prefix(es) and any other upstream path
+with no module-prefix relationship (LiveKit's `/rtc`, mounted at the fleet
+root by its own protocol) alongside the generic sub-surfaces, and both
+`reserved-paths.json` (via `reserved_prefixes_for`) and the Vite proxy (via
+the new `proxy_targets_for`, which additionally carries the `ws`/`exact`
+flags a flat prefix array cannot) read off it — one place to add a module's
+websocket surface from here on, not two that can drift apart again. A
+`--surface public` storefront that installs `video` now proxies
+`/video/api`, `/video/swagger`, `/video/schema.json`, `/video/admin`,
+`/ws/video` (`ws: true`) and `/rtc` (`ws: true`, no trailing slash — a
+single endpoint, not a subtree); a storefront without `video` carries none
+of it.
+
 ## 0.62.1 — 2026-09-02
 
 ### catalog_fixtures: a vocabulary term row may carry an explicit sort rank

@@ -5,7 +5,13 @@ no-reserved-backend-route rule — see reserved_paths.py's module docstring).
 import json
 
 from stapel_tools.create_project import create_project
-from stapel_tools.reserved_paths import main, modules_from_existing, regenerate
+from stapel_tools.reserved_paths import (
+    main,
+    modules_from_existing,
+    proxy_targets_for,
+    regenerate,
+    reserved_prefixes_for,
+)
 
 
 def _create(tmp_path, modules):
@@ -48,6 +54,41 @@ class TestRegenerate:
             "/admin", "/staticfiles", "/media",
             "/ghost/api", "/ghost/swagger", "/ghost/schema.json", "/ghost/admin",
         ]
+
+
+class TestVideoExtraSurfaces:
+    """stapel-video declares a websocket surface (`/ws/video`) and a
+    module-prefix-free extra path (LiveKit's `/rtc`) alongside its generic
+    api/swagger/schema.json/admin sub-surfaces — see
+    reserved_paths._MODULE_EXTRA_SURFACES."""
+
+    def test_reserved_prefixes_include_the_extras(self):
+        prefixes = reserved_prefixes_for(["video"])
+        assert prefixes == [
+            "/admin", "/staticfiles", "/media",
+            "/video/api", "/video/swagger", "/video/schema.json", "/video/admin",
+            "/ws/video", "/rtc",
+        ]
+
+    def test_proxy_targets_mark_the_sockets(self):
+        targets = {t["path"]: t for t in proxy_targets_for(["video"])}
+        assert targets["/video/api"]["ws"] is False
+        assert targets["/ws/video"]["ws"] is True
+        assert targets["/ws/video"]["exact"] is False
+        assert targets["/rtc"]["ws"] is True
+        assert targets["/rtc"]["exact"] is True
+
+    def test_module_without_extras_carries_none(self):
+        prefixes = reserved_prefixes_for(["calendar"])
+        assert "/ws/video" not in prefixes and "/rtc" not in prefixes
+
+    def test_regenerate_recovers_video_and_its_extras_without_inventing_modules(self):
+        """A committed file that already has `/ws/video`/`/rtc` must not
+        make `modules_from_existing` invent bogus `ws`/`rtc` modules — those
+        would explode into their own (wrong) sub-surfaces on regenerate."""
+        before = reserved_prefixes_for(["video"])
+        assert modules_from_existing(before) == ["video"]
+        assert regenerate(before) == before
 
 
 class TestMainCli:

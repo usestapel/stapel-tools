@@ -566,6 +566,44 @@ class TestProjectFiles:
         ]
         assert '"/geo/api/"' in plan["files"]["vite.config.ts"]
 
+    def test_video_ws_and_rtc_surfaces_reach_both_tables(self):
+        """stapel-video's surface is not just `/video/api` et al: its own
+        websocket (`/ws/video`) and the LiveKit signalling channel (`/rtc`)
+        are never under `/video/` at all, and a storefront that forgets them
+        has `npm run dev` swallow both into the SPA fallback. One
+        declaration (`reserved_paths._MODULE_EXTRA_SURFACES["video"]`) feeds
+        reserved-paths.json AND the Vite proxy, `ws: true` included."""
+        plan = _plan(pairs=[*STOREFRONT_PAIRS, "video"])
+        reserved = json.loads(plan["files"]["reserved-paths.json"])["reservedPathPrefixes"]
+        for entry in (
+            "/video/api", "/video/swagger", "/video/schema.json", "/video/admin",
+            "/ws/video", "/rtc",
+        ):
+            assert entry in reserved, entry
+
+        vite = plan["files"]["vite.config.ts"]
+        assert '"/video/api/": { target: backendTarget, changeOrigin: true },' in vite
+        assert '"/video/swagger/": { target: backendTarget, changeOrigin: true },' in vite
+        assert '"/video/schema.json": { target: backendTarget, changeOrigin: true },' in vite
+        assert '"/video/admin/": { target: backendTarget, changeOrigin: true },' in vite
+        assert (
+            '"/ws/video/": { target: backendTarget, changeOrigin: true, ws: true },'
+            in vite
+        )
+        assert '"/rtc": { target: backendTarget, changeOrigin: true, ws: true },' in vite
+
+    def test_video_absent_means_no_ws_or_rtc_leakage(self):
+        """A storefront that never installs the video pair must not carry
+        video's proxy surfaces (or any `ws: true` rule at all — nothing else
+        registers a websocket target)."""
+        plan = _plan()
+        vite = plan["files"]["vite.config.ts"]
+        reserved = json.loads(plan["files"]["reserved-paths.json"])["reservedPathPrefixes"]
+        assert "video" not in vite
+        assert "ws: true" not in vite
+        assert "/ws/video" not in reserved
+        assert "/rtc" not in reserved
+
     def test_eslint_points_both_data_driven_rules_at_data(self):
         """A gate that cannot fail reads exactly like one that passes."""
         src = _plan()["files"]["eslint.config.js"]

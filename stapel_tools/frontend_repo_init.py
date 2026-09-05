@@ -200,7 +200,7 @@ def public_source_plan(
         FRONTEND_ROUTER_DEPS,
         FRONTEND_SHELL_REACT_VERSION,
     )
-    from .reserved_paths import reserved_prefixes_for
+    from .reserved_paths import proxy_targets_for, reserved_prefixes_for
 
     unknown = [key for key in pairs if key not in FRONTEND_REACT_LIBS]
     if unknown:
@@ -234,9 +234,16 @@ def public_source_plan(
         if key not in modules:
             modules.append(key)
     reserved = reserved_prefixes_for(modules)
-    # The Vite table proxies the same surfaces, plus the two framework-wide
-    # static roots the reserved list carries for the lint rule.
-    proxy_prefixes = [p for p in reserved]
+    # The Vite table proxies the SAME surfaces reserved-paths.json carries —
+    # one declaration (reserved_paths._MODULE_EXTRA_SURFACES) covers a
+    # module's websocket endpoint(s) and any other extra upstream path
+    # (stapel-video's `/ws/video` and LiveKit signalling channel `/rtc`)
+    # alongside its generic api/swagger/schema.json/admin sub-surfaces, so
+    # the two tables cannot drift the way they did on a real storefront that
+    # had `/ws/video`/`/rtc` hand-added to reserved-paths.json but never to
+    # vite.config.ts. proxy_targets_for carries the extra ws/exact flags a
+    # flat reservedPathPrefixes array cannot.
+    proxy_targets = proxy_targets_for(modules)
 
     files: dict[str, str] = {
         "package.json": F.render_public_package_json(
@@ -251,7 +258,7 @@ def public_source_plan(
         ),
         "tsconfig.json": F.TSCONFIG_JSON_WITH_JSON_MODULE,
         "tsconfig.node.json": F.TSCONFIG_NODE_JSON,
-        "vite.config.ts": F.render_public_vite_config_ts(proxy_prefixes),
+        "vite.config.ts": F.render_public_vite_config_ts(proxy_targets),
         "index.html": F.render_public_index_html(title),
         "eslint.config.js": F.render_public_eslint_config_js(),
         ".gitignore": F.GITIGNORE,

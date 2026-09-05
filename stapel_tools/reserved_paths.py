@@ -52,18 +52,88 @@ _FIXED = ("/admin", "/staticfiles", "/media")
 # import-time side effects this standalone CLI doesn't want to pull in).
 _MODULE_SUB_SURFACES = ("api", "swagger", "schema.json", "admin")
 
+# A module whose backend surface is NOT fully described by the generic
+# `/<mod>/<sub>` pattern above registers the rest here, once, and both
+# consumers below (the flat `reservedPathPrefixes` array and the Vite dev
+# proxy, which additionally needs to know which entries want `ws: true`)
+# read off the same declaration instead of drifting apart the way
+# `/video/api` and a hand-added `/ws/video` did on a real storefront
+# (stapel-video, LiveKit-backed, 2026-09-06).
+#
+# ``ws_prefixes``: this module's OWN websocket endpoint(s), mounted outside
+# its `/<mod>/` namespace under the fleet's `/ws/<mod>` ASGI convention.
+# ``extra_paths``: upstream paths with no module-prefix relationship at all
+# — entries are either a bare string (a directory-style surface, trailing
+# slash appended same as a sub-surface) or a ``{"path", "ws", "exact"}``
+# dict. `"exact": True` suppresses the trailing slash (a single endpoint,
+# not a subtree) and `"ws": True` marks it as a websocket target for the
+# Vite proxy. stapel-video's LiveKit signalling channel is mounted at the
+# fleet root (LiveKit's own protocol expects `/rtc` exactly, not a
+# subtree) and is itself a websocket handshake.
+_MODULE_EXTRA_SURFACES: dict[str, dict] = {
+    "video": {
+        "ws_prefixes": ["ws/video"],
+        "extra_paths": [{"path": "rtc", "ws": True, "exact": True}],
+    },
+}
+
+
+def _module_extra_entries(mod: str) -> list[dict]:
+    """*mod*'s extra surfaces (see ``_MODULE_EXTRA_SURFACES``) normalized to
+    ``{"path", "ws", "exact"}`` dicts, in declaration order."""
+    extra = _MODULE_EXTRA_SURFACES.get(mod)
+    if not extra:
+        return []
+    entries = [
+        {"path": p, "ws": True, "exact": False} for p in extra.get("ws_prefixes", ())
+    ]
+    for item in extra.get("extra_paths", ()):
+        if isinstance(item, str):
+            entries.append({"path": item, "ws": False, "exact": False})
+        else:
+            entries.append(
+                {
+                    "path": item["path"],
+                    "ws": bool(item.get("ws", False)),
+                    "exact": bool(item.get("exact", False)),
+                }
+            )
+    return entries
+
+
+# Reverse lookup: an extra surface's own path -> the module that declared it,
+# so `modules_from_existing` attributes a committed `/ws/video` or `/rtc`
+# back to `video` instead of inventing bogus modules `ws`/`rtc` that would
+# then explode into their own (wrong) api/swagger/schema.json/admin
+# sub-surfaces on the next regenerate.
+_EXTRA_SURFACE_OWNER: dict[str, str] = {
+    entry["path"]: mod
+    for mod in _MODULE_EXTRA_SURFACES
+    for entry in _module_extra_entries(mod)
+}
+
 
 def modules_from_existing(prefixes: list[str]) -> list[str]:
     """The module first-segments already reserved in a committed
     ``reservedPathPrefixes`` list (fixed entries excluded), in first-seen
     order. This is the recovery step — see the module docstring for why it
     reads the committed file rather than re-deriving a project's lib
-    selection from scratch."""
+    selection from scratch.
+
+    A path a module registered as an EXTRA surface (``/ws/video``, ``/rtc``)
+    is attributed to that module rather than treated as a first-segment
+    module of its own — see ``_EXTRA_SURFACE_OWNER``."""
     mods: list[str] = []
     for p in prefixes:
         if p in _FIXED:
             continue
-        mod = p.lstrip("/").split("/", 1)[0]
+        stripped = p.lstrip("/")
+        owner = _EXTRA_SURFACE_OWNER.get(stripped)
+        if owner:
+            if owner not in mods:
+                mods.append(owner)
+            continue
+        mod = stripped.split("/", 1)[0]
         if mod and mod not in mods:
             mods.append(mod)
     return mods
@@ -71,19 +141,40 @@ def modules_from_existing(prefixes: list[str]) -> list[str]:
 
 def reserved_prefixes_for(modules: list[str]) -> list[str]:
     """``reservedPathPrefixes`` for a module set: the framework-wide fixed
-    entries plus each module's named sub-surfaces, in order, deduplicated.
+    entries plus each module's named sub-surfaces (and any extra surfaces it
+    declares — see ``_MODULE_EXTRA_SURFACES``), in order, deduplicated.
 
     The ONE place that shape is spelled outside ``create_project`` (which
-    renders nginx and the Vite proxy off the same sub-surface list). A bare
-    module root is never emitted — roots belong to the frontend SPA by canon,
+    renders nginx off its own STAPEL_LIBS-driven manifest). A bare module
+    root is never emitted — roots belong to the frontend SPA by canon,
     which is what makes ``/listings/12345`` a listing page instead of a JSON
     document from the backend."""
-    out = list(_FIXED)
+    return [e["path"] for e in proxy_targets_for(modules)]
+
+
+def proxy_targets_for(modules: list[str]) -> list[dict]:
+    """Same module set as ``reserved_prefixes_for``, but keeps the
+    per-entry ``ws``/``exact`` flags a flat ``reservedPathPrefixes`` array
+    cannot carry — what the Vite dev proxy needs to render ``ws: true`` and
+    to know which surfaces are a single endpoint rather than a subtree.
+    Every entry's ``"path"`` is ``/``-leading and never trailing-slashed
+    (the renderer decides that); ``reserved_prefixes_for`` is this list with
+    only the ``"path"`` kept."""
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def add(path: str, *, ws: bool = False, exact: bool = False) -> None:
+        if path not in seen:
+            seen.add(path)
+            out.append({"path": path, "ws": ws, "exact": exact})
+
+    for f in _FIXED:
+        add(f)
     for mod in modules:
         for sub in _MODULE_SUB_SURFACES:
-            entry = f"/{mod}/{sub}"
-            if entry not in out:
-                out.append(entry)
+            add(f"/{mod}/{sub}", exact=sub.endswith(".json"))
+        for entry in _module_extra_entries(mod):
+            add(f"/{entry['path']}", ws=entry["ws"], exact=entry["exact"])
     return out
 
 

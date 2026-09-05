@@ -3943,7 +3943,7 @@ def render_public_package_json(
     return json.dumps(pkg, indent=2) + "\n"
 
 
-def render_public_vite_config_ts(prefixes: list[str]) -> str:
+def render_public_vite_config_ts(targets: list[dict] | list[str]) -> str:
     """``vite.config.ts`` — the dev proxy table for the fleet's backend
     prefixes.
 
@@ -3955,11 +3955,29 @@ def render_public_vite_config_ts(prefixes: list[str]) -> str:
     router; the same list is written to `reserved-paths.json`, where
     `stapel/no-reserved-backend-route` checks the routes this app defines
     against it statically.
+
+    *targets* is ``reserved_paths.proxy_targets_for``'s output — a list of
+    ``{"path", "ws", "exact"}`` dicts (a plain string is still accepted, for
+    a caller with nothing but a prefix list, and treated as
+    ``{"path": s, "ws": False, "exact": s.endswith(".json")}``). A module
+    that owns a websocket surface outside its own sub-surface set — stapel-
+    video's `/ws/video` and its LiveKit signalling channel `/rtc`, both
+    declared once in `reserved_paths._MODULE_EXTRA_SURFACES` — renders with
+    `ws: true` so `npm run dev` upgrades the connection instead of the SPA
+    fallback swallowing it. `exact: true` (the dotted `schema.json` surface,
+    or a single endpoint like `/rtc`) suppresses the trailing slash a
+    directory-style sub-surface gets.
     """
     rules = []
-    for prefix in prefixes:
-        key = prefix if prefix.endswith(".json") else f"{prefix}/"
-        rules.append(f'        "{key}": {{ target: backendTarget, changeOrigin: true }},')
+    for target in targets:
+        if isinstance(target, str):
+            target = {"path": target, "ws": False, "exact": target.endswith(".json")}
+        path = target["path"]
+        key = path if target.get("exact") else f"{path}/"
+        opts = "target: backendTarget, changeOrigin: true"
+        if target.get("ws"):
+            opts += ", ws: true"
+        rules.append(f'        "{key}": {{ {opts} }},')
     proxy = "\n".join(rules)
     return f'''\
 import {{ defineConfig, loadEnv }} from "vite";
