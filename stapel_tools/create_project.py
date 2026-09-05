@@ -1714,18 +1714,20 @@ FRONTEND_REACT_CORE_DEPS = {
 # only those stays antd-free.
 FRONTEND_REACT_ANTD_DEPS = {
     "antd": "6.6.2",
-    # 0.11.0, not 0.8.1: `@stapel/calendar-react` 0.8.1 peers
-    # `">=0.11.0"`, and 0.8.1 is therefore an ERESOLVE for any project that
-    # selects calendar — which is what failed the 0.61.0 publish, in the
-    # release-gating e2e and not in anybody's laptop. `npm view
-    # @stapel/tokens-antd version` -> 0.11.0 (2026-09-01); the pin is that
-    # command's output. The reasons the pin existed at all still hold
-    # underneath: 0.8.0 is the floor `@stapel/chat-react` 0.6.1 and
-    # `@stapel/vocabularies-react` 0.1.0 peer, 0.7.0 is the release whose
-    # bridge reads the neutral colour-role dictionary the generated
-    # `stapel.theme.json` emits, and 0.5.0 was an ERESOLVE against all 17
-    # pairs.
-    "@stapel/tokens-antd": "0.11.0",
+    # 0.17.3, not 0.11.0: `@stapel/workspaces-react` 0.19.1 peers
+    # `">=0.16.0"`, and 0.11.0 is therefore an ERESOLVE for any project that
+    # selects workspaces — the 0.62.2 release-gating e2e, not anybody's
+    # laptop (`check_npm_peer_graph.py`, which asks the registry rather than
+    # a copy typed here). `npm view @stapel/tokens-antd version` -> 0.17.3
+    # (2026-09-05); the pin is that command's output, and its own peer range
+    # (`antd ">=6.0.0 <7"`) still holds against the `antd` pin above. The
+    # reasons earlier floors existed still hold underneath: 0.11.0 was
+    # `@stapel/calendar-react` 0.8.1's own floor, 0.8.0 is `@stapel/chat-
+    # react` 0.6.1 and `@stapel/vocabularies-react` 0.1.0's, 0.7.0 is the
+    # release whose bridge reads the neutral colour-role dictionary the
+    # generated `stapel.theme.json` emits, and 0.5.0 was an ERESOLVE against
+    # all 17 pairs.
+    "@stapel/tokens-antd": "0.17.3",
 }
 
 # Scripted-fullstack navigation (P1) — router deps for the generated

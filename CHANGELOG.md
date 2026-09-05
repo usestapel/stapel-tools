@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.62.3 — 2026-09-06
+
+### `@stapel/tokens-antd` 0.11.0 vs `@stapel/workspaces-react` 0.19.1's own floor
+
+`check_npm_peer_graph.py` had been red on `main` for days (found while
+getting 0.62.2's tag through the release-gating CI, not by a dedicated
+audit): `@stapel/workspaces-react@0.19.1` peers `@stapel/tokens-antd@">=
+0.16.0"`, and `FRONTEND_REACT_ANTD_DEPS` still pinned `0.11.0` — the floor
+from before workspaces raised its own, in another repo, with no commit
+here. `npm view @stapel/tokens-antd version` -> `0.17.3`; its own peer
+range (`antd ">=6.0.0 <7"`) still holds against this scaffold's `antd`
+pin. `@stapel/tokens` moves with it, `^0.6.0` -> `^0.8.0` (both the
+storefront's `PUBLIC_DEV_DEPS` and the monolith frontend's own
+`PACKAGE_JSON`), because 0.17.3 depends on `^0.8.0` directly and a
+container pinning an older range installs two copies of the token
+vocabulary side by side.
+
 ## 0.62.2 — 2026-09-06
 
 ### The storefront's Vite dev proxy forgot stapel-video has a websocket

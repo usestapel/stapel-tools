@@ -57,7 +57,7 @@ PACKAGE_JSON = """\
   },
   "devDependencies": {
     "@stapel/eslint-plugin": "^0.12.1",
-    "@stapel/tokens": "^0.6.0",
+    "@stapel/tokens": "^0.8.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
@@ -3873,15 +3873,15 @@ def render_public_modules_tsx(
 # there); both tables are now checked by `scripts/check_npm_peer_graph.py`,
 # which reads THESE constants rather than a copy.
 #
-# `@stapel/tokens` moves to ^0.6.0 with the `@stapel/tokens-antd` 0.8.1 pin,
-# not on its own: 0.8.1 DEPENDS on `"@stapel/tokens": "^0.6.0"` (a real
-# dependency, not a peer), so a container holding ^0.5.1 installs two copies
-# of the token vocabulary — the bridge themed off one, the container's own
-# `cssVar` calls reading the other.
+# `@stapel/tokens` moves to ^0.8.0 with the `@stapel/tokens-antd` 0.17.3
+# pin, not on its own: 0.17.3 DEPENDS on `"@stapel/tokens": "^0.8.0"` (a
+# real dependency, not a peer), so a container holding an older range
+# installs two copies of the token vocabulary — the bridge themed off one,
+# the container's own `cssVar` calls reading the other.
 PUBLIC_DEV_DEPS = {
     "@eslint/js": "^9.30.0",
     "@stapel/eslint-plugin": "^0.12.1",
-    "@stapel/tokens": "^0.6.0",
+    "@stapel/tokens": "^0.8.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
