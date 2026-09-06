@@ -200,6 +200,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
+from . import escape
+
 SKIP_DIRS = {
     "__pycache__",
     ".git",
@@ -485,21 +487,8 @@ def _call_name(node: ast.Call) -> str:
 
 
 def _noqa_rules(line: str) -> Optional[set]:
-    if "# noqa" not in line:
-        return None
-    if "# noqa:" not in line:
-        return set()
-    tail = line.split("# noqa:", 1)[1]
-    # The FIRST token of each comma-separated part, so a written reason on the
-    # same line ("# noqa: AUTHZ001 - storefront login, not an admin view")
-    # still suppresses. Every one of these rules asks for a reason; a parser
-    # that then refused to read the line would be arguing with its own advice.
-    rules = set()
-    for chunk in tail.replace(";", ",").split(","):
-        token = chunk.strip().split()[:1]
-        if token:
-            rules.add(token[0])
-    return rules
+    """The shared ``# noqa: RULE`` grammar — see ``stapel_tools.escape``."""
+    return escape.parse_noqa(line)
 
 
 def _functions(tree: ast.Module):

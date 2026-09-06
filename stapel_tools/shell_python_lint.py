@@ -49,6 +49,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import escape
+
 SHELL_SUFFIXES = {".sh", ".bash", ".zsh"}
 
 SKIP_DIRS = {
@@ -252,7 +254,7 @@ def lint_script(path: Path, root: Path, index: dict[str, list[Path]]) -> list[Vi
         for dotted, offset in _imported_modules(payload.body):
             line_no = payload.body_line + offset - 1
             source = lines[line_no - 1] if 0 < line_no <= len(lines) else ""
-            if "noqa" in source:
+            if escape.line_suppressed(source, "SH001"):
                 continue
             if resolves(dotted, index) is False:
                 violations.append(Violation(
@@ -264,7 +266,7 @@ def lint_script(path: Path, root: Path, index: dict[str, list[Path]]) -> list[Vi
                 ))
         if not payload.guarded:
             source = lines[payload.line - 1] if 0 < payload.line <= len(lines) else ""
-            if "noqa" in source:
+            if escape.line_suppressed(source, "SH002"):
                 continue
             violations.append(Violation(
                 rel, payload.line, "SH002",

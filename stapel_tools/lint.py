@@ -44,6 +44,8 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Iterator
 
+from . import escape
+
 SKIP_DIRS = {
     "migrations",
     "__pycache__",
@@ -108,16 +110,12 @@ def _extend_schema_view_keys(class_node: ast.ClassDef) -> set[str]:
 
 
 def _noqa(lines: list[str], lineno: int, rule: str) -> bool:
+    """The shared ``# noqa: RULE`` grammar (``stapel_tools.escape``), applied
+    to one already-split line list. See that module for the grammar itself.
+    """
     if lineno < 1 or lineno > len(lines):
         return False
-    comment = lines[lineno - 1]
-    if "# noqa" not in comment:
-        return False
-    if "# noqa:" not in comment:
-        return True
-    after = comment.split("# noqa:")[1]
-    listed = [r.strip() for r in after.split(",")]
-    return rule in listed
+    return escape.line_suppressed(lines[lineno - 1], rule)
 
 
 # ---------------------------------------------------------------------------

@@ -754,6 +754,53 @@ publishing module and to the consuming package. Composed into `stapel-verify`.
 Silent, with a note, in an environment whose installed modules ship no
 `docs/capabilities.json` yet.
 
+Suppress SUR001-SUR003 with `# noqa: SUR00N` on the reported line, the shared
+grammar (below) — a bare `# noqa` suppresses all of them. SUR004 reports
+against the consuming package's `package.json`, which has no comment token to
+put a noqa in; record that decision as a test pinning the choice instead.
+Until 0.64.0 this linter read no noqa comment at all: a client fleet's
+host carried `# noqa: SUR002` on a `permission_classes` line for two years,
+and the marker suppressed nothing.
+
+### The shared `# noqa` grammar, and `stapel-escape-lint` — is this escape doing anything?
+
+Every linter above that reads a `# noqa` comment (R/AUTHZ/SIB/CFG/MIG/SWAP/DOC/
+URL/SUR/NGX/EADDR/FED/SH — see each section's own "Suppress with" line) parses
+the SAME grammar now, from one module (`stapel_tools.escape`): `# noqa` alone
+is a blanket suppression; `# noqa: RULE[, RULE ...]` names one or more rule
+ids, comma- or semicolon-separated, case-insensitive, and a written reason
+after the first rule id of a chunk is read fine
+(`# noqa: AUTHZ001 - storefront login, not an admin view`). A handful of
+linters carry a SECOND, family-specific escape on top of this one —
+`# stapel: strict-authenticator` (AUTHZ007), `# stapel: env-address-ok`
+(env-address-lint), CFG007's rule that only a NAMED noqa counts, never a
+blanket one — and those are untouched: this is only the common grammar
+underneath.
+
+```bash
+stapel-escape-lint .              # ESC001 only (no arsenal to cross-check against)
+stapel-escape-lint . --json       # machine output
+```
+
+Before 0.64.0 that shared grammar did not exist: every linter that read noqa
+carried its own copy of the same dozen lines, and `stapel-surface-lint` (SUR)
+read no noqa comment AT ALL — so a marker naming a SUR rule was silently
+inert, and looked exactly like one that worked. A client fleet's host
+(`svc-agent`) carried `# noqa: SUR002` for two years on that shape.
+
+| rule | level | what it holds |
+|---|---|---|
+| ESC001 | error | a `# noqa: <RULE>` names a rule id no linter in this stapel-tools version knows at all (typo, retired rule, or a foreign code like ruff's own `F401` — never touched, since this only looks at markers already shaped like a stapel rule id), OR names a rule id a linter DOES know but never reads a noqa marker on that construct at all (most of ADO/API/IDX/PO/EXP, plus specific non-noqa rules inside otherwise-noqa-aware families — CFG002-CFG005, MIG001-MIG003/MIG005, SIB006, SUR004). Either way: this marker suppresses nothing |
+| ESC002 | warning | a `# noqa: <RULE>` names a rule that IS noqa-aware, but the rule did not fire on that exact line this run — checked by re-running the composed arsenal with the shared grammar disabled and diffing against the markers found. Either the code no longer trips the rule (drop the marker) or the marker sits on the wrong line (it never suppressed what its author thinks it does) |
+
+`stapel_tools.escape.RULE_REGISTRY` is the table both rules read: every rule
+id this version ships, which linter owns it, and whether that linter's own
+code actually reads a noqa marker there. ESC002 needs the REST of the
+composed arsenal's raw (pre-suppression) findings, so it only runs the full
+check inside `stapel-verify` — composed there LAST, since it closes over
+every other composed linter's callable; the standalone CLI above runs ESC001
+only and says so in a note.
+
 ### `stapel-swap-lint` — the anti-lock-in indirection gate
 
 ```bash

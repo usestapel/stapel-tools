@@ -127,6 +127,8 @@ from dataclasses import field as _dc_field
 from pathlib import Path
 from typing import Iterable, Optional
 
+from . import escape
+
 MARKER_CONTRACT_PHASE = "contract-phase"
 MARKER_CUTOVER_PHASE = "cutover-phase"
 MARKER_IRREVERSIBLE = "irreversible"
@@ -568,15 +570,10 @@ def _search_base_references(
 
 
 def _noqa(lines: list, lineno: int, rule: str) -> bool:
+    """The shared ``# noqa: RULE`` grammar — see ``stapel_tools.escape``."""
     if lineno < 1 or lineno > len(lines):
         return False
-    comment = lines[lineno - 1]
-    if "# noqa" not in comment:
-        return False
-    if "# noqa:" not in comment:
-        return True
-    listed = [r.strip() for r in comment.split("# noqa:")[1].split(",")]
-    return rule in listed
+    return escape.line_suppressed(lines[lineno - 1], rule)
 
 
 def _cutover_covered(migration: MigrationScan) -> set:

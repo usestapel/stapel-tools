@@ -61,6 +61,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
+from . import escape
+
 SKIP_DIRS = {
     "__pycache__",
     ".git",
@@ -194,12 +196,8 @@ def _has_max_length(node: ast.Call) -> bool:
 
 
 def _noqa_rules(line: str) -> Optional[set]:
-    if "# noqa" not in line:
-        return None
-    if "# noqa:" not in line:
-        return set()
-    tail = line.split("# noqa:", 1)[1]
-    return {r.strip() for r in tail.replace(";", ",").split(",") if r.strip()}
+    """The shared ``# noqa: RULE`` grammar — see ``stapel_tools.escape``."""
+    return escape.parse_noqa(line)
 
 
 # ---------------------------------------------------------------------------

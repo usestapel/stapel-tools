@@ -125,6 +125,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable, Optional
 
+from . import escape
+
 # ---------------------------------------------------------------------------
 # findings
 # ---------------------------------------------------------------------------
@@ -627,23 +629,14 @@ def resolve_cache(loc: Block) -> LocationCache:
 
 
 def _noqa_rules(line: str) -> Optional[set[str]]:
-    """None when no noqa; empty set = blanket noqa; else the listed rules."""
-    if "# noqa" not in line:
-        return None
-    if "# noqa:" not in line:
-        return set()
-    tail = line.split("# noqa:", 1)[1]
-    return {r.strip().upper() for r in tail.replace(";", ",").split(",") if r.strip()}
+    """The shared ``# noqa: RULE`` grammar — see ``stapel_tools.escape``."""
+    return escape.parse_noqa(line)
 
 
 def _suppressed(lines: list[str], rule: str, *line_numbers: int) -> bool:
-    for number in line_numbers:
-        if not (0 < number <= len(lines)):
-            continue
-        rules = _noqa_rules(lines[number - 1])
-        if rules is not None and (not rules or rule in rules):
-            return True
-    return False
+    """Shared with ``frontend_delivery_lint``, which imports this name
+    directly — see ``stapel_tools.escape.any_line_suppressed``."""
+    return escape.any_line_suppressed(lines, rule, *line_numbers)
 
 
 # ---------------------------------------------------------------------------

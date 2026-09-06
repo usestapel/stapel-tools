@@ -140,6 +140,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
+from . import escape
+
 SKIP_DIRS = {
     "__pycache__",
     ".git",
@@ -580,17 +582,8 @@ _MSG_006 = (
 
 
 def _noqa_rules(line: str) -> Optional[set]:
-    if "# noqa" not in line:
-        return None
-    if "# noqa:" not in line:
-        return set()
-    tail = line.split("# noqa:", 1)[1]
-    rules = set()
-    for chunk in tail.replace(";", ",").split(","):
-        token = chunk.strip().split()[:1]
-        if token:
-            rules.add(token[0])
-    return rules
+    """The shared ``# noqa: RULE`` grammar — see ``stapel_tools.escape``."""
+    return escape.parse_noqa(line)
 
 
 def _suppress(violations: list, source_of: dict) -> list:

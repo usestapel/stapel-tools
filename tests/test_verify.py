@@ -231,6 +231,7 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
         "stapel-frontend-delivery-lint",
         "stapel-po-lint",
         "stapel-exposure-lint",
+        "stapel-escape-lint",
     }
 
     assert by_name["stapel-exposure-lint"].errors >= 1
@@ -338,7 +339,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 17 linters." in out
+    assert "All clean across 18 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -348,7 +349,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     assert code == 1
     assert payload["ok"] is False
     assert payload["errors"] == 12
-    assert len(payload["linters"]) == 17
+    assert len(payload["linters"]) == 18
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
@@ -368,6 +369,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
         "stapel-frontend-delivery-lint",
         "stapel-po-lint",
         "stapel-exposure-lint",
+        "stapel-escape-lint",
     }
     for entry in payload["linters"]:
         assert "errors" in entry
@@ -424,3 +426,81 @@ def test_cli_forwards_workspace_flag_to_adoption_lint(tmp_path, capsys):
     out_with = capsys.readouterr().out
     assert code_with == 1
     assert "ADO001" in out_with
+
+
+# ---------------------------------------------------------------------------
+# stapel-escape-lint — composed last, audits every OTHER linter's markers
+# ---------------------------------------------------------------------------
+
+
+def test_verify_composes_escape_lint_end_to_end(tmp_path):
+    """ESC001 (unknown rule, known-but-not-noqa-aware rule) and ESC002 (a
+    noqa-aware rule that never fired here) both wired through
+    ``verify_project`` — not just the standalone module."""
+    proj = make_clean_project(tmp_path)
+    (proj / "app").mkdir()
+    (proj / "app" / "__init__.py").write_text("")
+    (proj / "app" / "notes.py").write_text(
+        "# a decision to keep, once made\n"
+        "UNKNOWN = 1  # noqa: SUR099\n"
+        "NEVER_READ = 2  # noqa: ADO001\n"
+        "STALE = 3  # noqa: SUR002\n"
+    )
+    reports = verify_project(proj)
+    by_name = {r.name: r for r in reports}
+    esc = by_name["stapel-escape-lint"]
+    by_line = {f["line"]: f for f in esc.findings}
+
+    assert by_line[2]["rule"] == "ESC001"
+    assert by_line[2]["level"] == "error"
+    assert "SUR099" in by_line[2]["message"]
+    assert "suppresses nothing" in by_line[2]["message"]
+
+    assert by_line[3]["rule"] == "ESC001"
+    assert "ADO001" in by_line[3]["message"]
+    assert "stapel-adoption-lint" in by_line[3]["message"]
+
+    assert by_line[4]["rule"] == "ESC002"
+    assert by_line[4]["level"] == "warning"
+    assert "did not fire" in by_line[4]["message"]
+
+    assert esc.errors == 2
+    assert esc.warnings == 1
+
+
+def test_verify_escape_lint_quiet_when_a_real_suppression_happened(tmp_path):
+    """The other half of the incident fix: a noqa that DOES suppress a real,
+    currently-firing finding must not be reported as stale."""
+    core = tmp_path / "stapel-core"
+    (core / "docs").mkdir(parents=True)
+    (core / "docs" / "capabilities.json").write_text(json.dumps({
+        "module": "stapel-core",
+        "version": "1.0.0",
+        "provides": "fixture",
+        "axes": [],
+        "extension_points": [],
+        "requires": [],
+        "surface": [{
+            "name": "IsNotAnonymousUser",
+            "kind": "permission_class",
+            "path": "stapel_core.django.api.permissions.IsNotAnonymousUser",
+            "intent": "The write-gate for any endpoint that needs a real account.",
+        }],
+    }))
+    proj = tmp_path / "proj"
+    (proj / "config").mkdir(parents=True)
+    (proj / "config" / "__init__.py").write_text("")
+    (proj / "config" / "settings.py").write_text(
+        "ROOT_URLCONF = \"config.urls\"\nINSTALLED_APPS = []\n"
+    )
+    (proj / "config" / "urls.py").write_text("urlpatterns = []\n")
+    (proj / "permissions.py").write_text(
+        "from rest_framework import permissions\n\n\n"
+        "class IsNotAnonymousUser(permissions.BasePermission):  # noqa: SUR001\n"
+        "    def has_permission(self, request, view):\n"
+        "        return True\n"
+    )
+    reports = verify_project(proj)
+    by_name = {r.name: r for r in reports}
+    assert by_name["stapel-surface-lint"].errors == 0  # genuinely suppressed
+    assert by_name["stapel-escape-lint"].findings == []  # not stale, not inert

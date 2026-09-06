@@ -127,6 +127,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from . import escape
 from .config_lint import SKIP_DIRS
 from .nginx_cache_lint import (
     Directive,
@@ -171,22 +172,20 @@ class Finding:
 
 
 def _noqa_rules(line: str) -> Optional[set[str]]:
-    if "# noqa" not in line and "# stapel:" not in line:
-        return None
+    """The shared ``# noqa: RULE`` grammar (``stapel_tools.escape``), plus
+    this family's own second escape: ``# stapel: env-address-ok`` is a
+    blanket suppression on its line — the v1 idiom, predating the shared
+    grammar, kept for the deploy-class files that already carry it."""
     if "# stapel: env-address-ok" in line:
-        return set()  # blanket suppress on this line — the v1 idiom
-    if "# noqa:" not in line:
-        return set() if "# noqa" in line else None
-    tail = line.split("# noqa:", 1)[1]
-    return {r.strip().upper() for r in tail.replace(";", ",").split(",") if r.strip()}
+        return set()
+    return escape.parse_noqa(line)
 
 
 def _suppressed(lines: list[str], rule: str, *line_numbers: int) -> bool:
     for number in line_numbers:
         if not (0 < number <= len(lines)):
             continue
-        rules = _noqa_rules(lines[number - 1])
-        if rules is not None and (not rules or rule in rules):
+        if escape.is_suppressed(_noqa_rules(lines[number - 1]), rule):
             return True
     return False
 

@@ -1,5 +1,68 @@
 # Changelog
 
+## 0.64.0 — 2026-09-07
+
+### A shared `# noqa` grammar, and `stapel-escape-lint` (ESC001/ESC002) — an escape that suppresses nothing
+
+A client fleet, 2026-09-07: a host (`svc-agent`) carried `# noqa: SUR002` on a
+`permission_classes` line for two years. `stapel-surface-lint` has never
+read a noqa comment at all — the marker suppressed nothing, and nothing
+noticed, because every OTHER linter in this package that reads `# noqa`
+carried its own hand-rolled reimplementation of the same dozen lines of
+string-splitting, each with small drift (case folding, comma-vs-first-token
+matching, blanket handling). A marker naming a rule outside whatever set a
+given file happened to check was never a parse error — it was silently
+inert, indistinguishable from one that worked.
+
+**One shared grammar.** `stapel_tools.escape` is now the single
+implementation of `# noqa` parsing — `parse_noqa`/`is_suppressed`/
+`line_suppressed`/`any_line_suppressed` — and every linter that reads noqa
+comments calls into it: `stapel-lint` (R-codes), `stapel-authz-lint`,
+`stapel-sibling-lint`, `stapel-config-lint`, `stapel-migration-lint`,
+`stapel-swap-lint`, `stapel-doc-lint`, `stapel-url-lint`,
+`stapel-nginx-cache-lint`, `stapel-env-address-lint`,
+`stapel-frontend-delivery-lint` (via nginx-cache-lint's shared helper) and
+`stapel-shell-python-lint` no longer keep a private copy. A handful of
+family-specific SECOND escapes are untouched (AUTHZ007's `# stapel:
+strict-authenticator`, env-address-lint's `# stapel: env-address-ok`,
+CFG007's rule that only a NAMED noqa counts) — this is only the common
+`# noqa: RULE[, RULE ...]` grammar underneath.
+
+**`stapel-surface-lint` now honours it.** SUR001-SUR003 read `# noqa: SUR00N`
+on the reported line for the first time; SUR004 reports against a
+`package.json`, which has no comment token, and is documented as such.
+
+**`stapel-escape-lint` (new) — ESC001/ESC002.** `stapel_tools.escape.
+RULE_REGISTRY` is the fleet's own table of every rule id this version ships,
+which linter owns it, and whether that linter's code actually reads a noqa
+marker on its construct (most of ADO/API/IDX/PO/EXP do not; several
+rules inside otherwise-noqa-aware families don't either — CFG002-CFG005,
+MIG001-MIG003/MIG005, SIB006, SUR004).
+
+* ESC001 (error) — a `# noqa: <RULE>` naming a rule id no linter in this
+  version knows at all, or a real rule id whose linter never reads noqa on
+  that construct — either way, "this marker suppresses nothing".
+* ESC002 (warning) — a `# noqa: <RULE>` naming a noqa-aware rule that did
+  NOT fire on that exact line this run (a stale escape): the arsenal is
+  re-run with the shared grammar disabled (`escape_lint.collect_raw_findings`,
+  swapping `escape.parse_noqa` for a no-op) so a finding a marker would
+  otherwise have hidden becomes visible, then diffed against every marker
+  found.
+
+Composed into `stapel-verify` LAST — ESC002 needs every other composed
+linter's raw, pre-suppression findings, so its callable closes over the rest
+of the composition and only re-runs the linters this project's profile
+actually ran in `stapel` mode. The standalone `stapel-escape-lint` CLI runs
+ESC001 only (no arsenal to cross-check against) and says so in a note.
+
+Tests: a client fleet's svc-agent shape reproduced as a fixture
+(`test_client_fleet_svc_agent_incident_fixture_reproduces_the_two_year_no_op` —
+confirms SUR002 fires without the marker and is genuinely suppressed with
+it), an unknown rule id and a known-non-noqa-aware rule id both flagged
+ESC001, a stale marker flagged ESC002 and a genuinely-suppressing marker
+left quiet, plus unit coverage of the shared grammar itself
+(`tests/test_escape.py`) and the audit (`tests/test_escape_lint.py`).
+
 ## 0.63.1 — 2026-09-07
 
 ### CONFIG.MD manifest — a third source: `settings`

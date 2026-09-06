@@ -115,6 +115,19 @@ Linters composed (in this order)
   above); EADDR003 catches an env-boundary proxy location with no fast
   ``proxy_connect_timeout``, which is half of why the original incident read
   as "server load" for a full day instead of "wrong address".
+* ``stapel_tools.escape_lint``     — ESC001/ESC002 (§ escape grammar
+  audit — a marker's own credibility). Every linter above that reads
+  ``# noqa`` shares ONE grammar now (``stapel_tools.escape``); ESC001 (error)
+  flags a ``# noqa: <RULE>`` naming a rule id no linter in this version
+  knows, OR a real rule id whose linter never reads noqa on that construct at
+  all — either way "this marker suppresses nothing". ESC002 (warning) flags a
+  noqa-aware rule's marker that did not fire on that line this run (a stale
+  escape), by re-running the arsenal above with the grammar disabled.
+  Composed LAST on purpose: it needs every other composed linter's callable
+  to run its own raw pass. Prototype: a client fleet's host carried ``# noqa:
+  SUR002`` on a ``permission_classes`` line for two years — SUR-codes read no
+  noqa comment at all before 2026-09-07, so the marker suppressed nothing and
+  looked exactly like one that worked.
 
 Per-project profile (legacy projects)
 -------------------------------------
@@ -167,6 +180,7 @@ from . import (
     config_lint,
     doc_lint,
     env_address_lint,
+    escape_lint,
     exposure_lint,
     frontend_delivery_lint,
     index_lint,
@@ -335,6 +349,13 @@ def run_po_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-po-lint", errors, warnings, _to_dicts(findings), notes)
 
 
+def run_escape_lint(project: Path, raw_callables: list) -> LinterReport:
+    notes: list[str] = []
+    findings = escape_lint.lint_project(project, composed=raw_callables, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-escape-lint", errors, warnings, _to_dicts(findings), notes)
+
+
 def run_frontend_delivery_lint(project: Path) -> LinterReport:
     notes: list[str] = []
     findings = frontend_delivery_lint.lint_project(project, notes=notes)
@@ -376,6 +397,7 @@ COMPOSED_LINTERS: tuple[str, ...] = (
     "stapel-frontend-delivery-lint",
     "stapel-po-lint",
     "stapel-exposure-lint",
+    "stapel-escape-lint",
 )
 
 
@@ -492,6 +514,21 @@ def verify_project(
         ("stapel-po-lint", lambda: run_po_lint(project)),
         ("stapel-exposure-lint", lambda: run_exposure_lint(project)),
     ]
+    # stapel-escape-lint's ESC002 (stale escape) needs the REST of the
+    # arsenal's raw, pre-suppression findings — closes over `composed`
+    # itself (already fully built by the time this callable actually runs,
+    # inside the loop below) and excludes its own entry so it never calls
+    # itself. Only the linters this profile actually runs in `stapel` mode
+    # are included — a surface the profile turned `off`/`native` is not
+    # this project's stapel contract to re-audit.
+    composed.append((
+        "stapel-escape-lint",
+        lambda: run_escape_lint(project, [
+            call for name, call in composed
+            if name != "stapel-escape-lint"
+            and prof.for_linter(name).mode == MODE_STAPEL
+        ]),
+    ))
     if [n for n, _ in composed] != list(COMPOSED_LINTERS):  # pragma: no cover
         raise LintProfileError(
             "verify_project's composition drifted from COMPOSED_LINTERS — the "

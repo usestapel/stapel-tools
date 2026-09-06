@@ -129,6 +129,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
+from . import escape
 from .config_manifest import CONFIG_MD, ConfigEntry, parse_config_md
 
 SKIP_DIRS = {
@@ -254,13 +255,8 @@ def _reads_in_subscript(node: ast.Subscript) -> Optional[str]:
 
 
 def _noqa_rules(line: str) -> Optional[set[str]]:
-    """None when no noqa; empty set = blanket noqa; else the listed rules."""
-    if "# noqa" not in line:
-        return None
-    if "# noqa:" not in line:
-        return set()
-    tail = line.split("# noqa:", 1)[1]
-    return {r.strip() for r in tail.replace(";", ",").split(",") if r.strip()}
+    """The shared ``# noqa: RULE`` grammar — see ``stapel_tools.escape``."""
+    return escape.parse_noqa(line)
 
 
 def _callee_name(func: ast.AST) -> str:

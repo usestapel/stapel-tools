@@ -43,6 +43,17 @@ SUR004 (error) **publisher-without-consumer.** A ``capability_field`` declares
     present in ``schema.json``, present in the generated ``schema.ts``, and read
     by exactly nothing, so the screen says "code sent" when nothing was sent.
 
+Suppress SUR001-SUR003 with ``# noqa: SUR00N`` on the reported line, same
+grammar as every other stapel linter (``stapel_tools.escape``); a bare
+``# noqa`` suppresses all of them. SUR004 reports against the consuming
+``-react`` package's ``package.json``, which carries no comment token to put
+a noqa in — record that decision as a test that pins the choice instead (a
+displaced-symbol/SUR002 decision is best recorded the same way: a test
+asserting the permission list, not a comment the linter cannot see reasoning
+behind). Until 2026-09-07 this linter read no noqa comment at all — a marker
+naming any SUR rule looked like it worked and suppressed nothing; a client
+fleet's host carried exactly that shape on a SUR002 finding for two years.
+
 Where the surface index comes from
 ----------------------------------
 The same two sources ``stapel-catalog`` uses, unioned, installed first:
@@ -88,6 +99,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Optional
 
+from . import escape
 from .adoption_lint import SKIP_DIRS, canon_dist, module_short
 
 #: Directories inside a ``-react`` package whose content is machine-generated
@@ -731,6 +743,40 @@ def check_publisher_without_consumer(
 
 
 # ---------------------------------------------------------------------------
+# noqa
+# ---------------------------------------------------------------------------
+
+
+def _filter_noqa(findings: list[Finding]) -> list[Finding]:
+    """Drop a finding whose reported line carries a ``# noqa`` (blanket or
+    naming its rule) — the shared grammar, ``stapel_tools.escape``.
+
+    Added 2026-09-07: a client fleet's host carried ``# noqa: SUR002`` on a
+    ``permission_classes`` line for two years while this linter read no noqa
+    comment at all — the marker suppressed nothing and this gate reported it
+    anyway, which is the honest failure mode, but the marker itself looked
+    exactly like a working one. This is what makes it actually work.
+    """
+    kept: list[Finding] = []
+    cache: dict[str, list[str]] = {}
+    for finding in findings:
+        if finding.path not in cache:
+            try:
+                cache[finding.path] = Path(finding.path).read_text(
+                    encoding="utf-8", errors="replace"
+                ).splitlines()
+            except OSError:
+                cache[finding.path] = []
+        lines = cache[finding.path]
+        if 0 < finding.line <= len(lines) and escape.line_suppressed(
+            lines[finding.line - 1], finding.rule
+        ):
+            continue
+        kept.append(finding)
+    return kept
+
+
+# ---------------------------------------------------------------------------
 # driver
 # ---------------------------------------------------------------------------
 
@@ -765,7 +811,7 @@ def lint_project(
     findings += check_publisher_without_consumer(
         project, index, search_roots=search_roots, notes=notes
     )
-    return findings
+    return _filter_noqa(findings)
 
 
 def main(argv: Optional[list] = None) -> int:

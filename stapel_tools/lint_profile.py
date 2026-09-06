@@ -120,6 +120,7 @@ LINTER_SURFACES: dict[str, str] = {
     "stapel-exposure-lint": "deploy",
     "stapel-frontend-delivery-lint": "frontend",
     "stapel-po-lint": "i18n",
+    "stapel-escape-lint": "python",
 }
 
 

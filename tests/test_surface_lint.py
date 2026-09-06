@@ -150,6 +150,18 @@ def test_sur001_quiet_inside_a_vendored_checkout(workspace):
     assert run(proj, workspace) == []
 
 
+def test_sur001_noqa_suppresses(workspace):
+    proj = workspace / "proj"
+    proj.mkdir()
+    (proj / "permissions.py").write_text(
+        "from rest_framework import permissions\n\n\n"
+        "class IsNotAnonymousUser(permissions.BasePermission):  # noqa: SUR001\n"
+        "    def has_permission(self, request, view):\n"
+        "        return not getattr(request.user, 'is_anonymous', False)\n"
+    )
+    assert run(proj, workspace) == []
+
+
 def test_sur001_quiet_for_the_publishing_module_itself(tmp_path):
     """Linting stapel-core must not report stapel-core's own surface."""
     core = make_module(tmp_path, "stapel-core", CORE_SURFACE)
@@ -197,6 +209,34 @@ def test_sur002_fires_on_both_import_idioms(workspace, source):
     findings = run(proj, workspace)
     assert codes(findings) == ["SUR002"]
     assert "IsNotAnonymousUser" in findings[0].message
+
+
+def test_sur002_noqa_suppresses(workspace):
+    """A client fleet, 2026-09-07: a ``# noqa: SUR002`` sat on a
+    ``permission_classes`` line for two years and suppressed nothing, because
+    this linter read no noqa comment at all. It reads the shared grammar
+    (``stapel_tools.escape``) now."""
+    proj = workspace / "proj"
+    proj.mkdir()
+    (proj / "views.py").write_text(
+        "from rest_framework import permissions\n"
+        "from rest_framework.views import APIView\n\n\n"
+        "class MyView(APIView):\n"
+        "    permission_classes = [permissions.IsAuthenticated]  # noqa: SUR002\n"
+    )
+    assert run(proj, workspace) == []
+
+
+def test_sur002_noqa_for_a_different_rule_does_not_suppress_it(workspace):
+    proj = workspace / "proj"
+    proj.mkdir()
+    (proj / "views.py").write_text(
+        "from rest_framework import permissions\n"
+        "from rest_framework.views import APIView\n\n\n"
+        "class MyView(APIView):\n"
+        "    permission_classes = [permissions.IsAuthenticated]  # noqa: SUR003\n"
+    )
+    assert codes(run(proj, workspace)) == ["SUR002"]
 
 
 def test_sur002_quiet_when_the_project_uses_the_replacement(workspace):
@@ -297,6 +337,73 @@ def test_sur002_reports_once_per_displaced_symbol(workspace):
 
 
 # ---------------------------------------------------------------------------
+# client-fleet svc-agent incident (2026-09-07) — the fixture ESC001/ESC002
+# were written to close: a noqa marker naming SUR002 on a real
+# permission_classes line, live on the fleet for two years, suppressing
+# nothing.
+# ---------------------------------------------------------------------------
+
+#: The two workspace-mandate permission classes stapel-core actually
+#: publishes as replacements for IsNotAnonymousUser — verbatim shape of
+#: stapel-authz-lint's own README section on this incident.
+FLEET_CORE_SURFACE = [
+    {
+        "name": "IsNotAnonymousUser",
+        "kind": "permission_class",
+        "path": "stapel_core.django.api.permissions.IsNotAnonymousUser",
+        "intent": "The write-gate for any endpoint that needs a REAL account.",
+    },
+    {
+        "name": "HasWorkspaceMandate",
+        "kind": "permission_class",
+        "path": "stapel_core.django.api.permissions.HasWorkspaceMandate",
+        "intent": "A caller must belong to a workspace, not merely be logged in.",
+        "instead_of": ["stapel_core.django.api.permissions.IsNotAnonymousUser"],
+    },
+    {
+        "name": "HasWorkspaceMandateIfScoped",
+        "kind": "permission_class",
+        "path": "stapel_core.django.api.permissions.HasWorkspaceMandateIfScoped",
+        "intent": "HasWorkspaceMandate, degrading to a plain account gate when "
+                  "no workspace service is mounted.",
+        "instead_of": ["stapel_core.django.api.permissions.IsNotAnonymousUser"],
+    },
+]
+
+FLEET_VIEW = (
+    "from stapel_core.django.api.permissions import IsNotAnonymousUser\n"
+    "from rest_framework.views import APIView\n\n\n"
+    "class ListingDraftVisionView(APIView):\n"
+    "    permission_classes = [IsNotAnonymousUser]  # noqa: SUR002\n"
+)
+
+
+def test_client_fleet_svc_agent_incident_fixture_reproduces_the_two_year_no_op(tmp_path):
+    """A client fleet's svc-agent, live 2026-09-07: this exact file carried
+    this exact comment for two years. Before 0.64.0 stapel-surface-lint read
+    no noqa comment at all, so SUR002 fired anyway (the honest failure — a
+    finding was still reported) but the marker itself was a silent no-op
+    indistinguishable from a working one. Confirm both halves: the shape
+    genuinely trips SUR002 without the marker, and the marker now genuinely
+    suppresses it."""
+    workspace = tmp_path
+    make_module(workspace, "stapel-core", FLEET_CORE_SURFACE)
+    proj = workspace / "proj"
+    proj.mkdir()
+
+    # Without the marker, this shape is a real SUR002 finding: the project
+    # uses IsNotAnonymousUser and has never heard of either replacement.
+    (proj / "views.py").write_text(FLEET_VIEW.replace("  # noqa: SUR002", ""))
+    findings = run(proj, workspace)
+    assert codes(findings) == ["SUR002"]
+    assert "IsNotAnonymousUser" in findings[0].message
+
+    # With the marker (the fleet's actual, two-year state), it is suppressed.
+    (proj / "views.py").write_text(FLEET_VIEW)
+    assert run(proj, workspace) == []
+
+
+# ---------------------------------------------------------------------------
 # SUR003 — imported-but-never-called
 # ---------------------------------------------------------------------------
 
@@ -316,6 +423,17 @@ def test_sur003_fires_on_the_incident(workspace):
     assert codes(findings) == ["SUR003"]
     assert "redaction_gate" in findings[0].message
     assert findings[0].line == 1
+
+
+def test_sur003_noqa_suppresses(workspace):
+    proj = workspace / "proj"
+    proj.mkdir()
+    (proj / "mic_stage.py").write_text(
+        "from stapel_agent.safety.redaction import RedactionError, redaction_gate  "
+        "# noqa: SUR003\n"
+        "\n\ndef write(text):\n    return open('a', 'w').write(text)\n"
+    )
+    assert run(proj, workspace) == []
 
 
 def test_sur003_quiet_when_called(workspace):
