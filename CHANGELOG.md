@@ -1,5 +1,125 @@
 # Changelog
 
+## 0.63.0 — 2026-09-07
+
+### AUTHZ007 — the authenticator that answers 401 for the permission layer
+
+Every other rule in this family is about a check that is missing. This one is
+about a check that happens too early and too widely, and it is the first
+`stapel-verify` rule paid for by a CLIENT deployment rather than by a fleet
+library.
+
+meettoday, MR !16. `accounts/auth.py` was the deployment's only
+`REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"]` entry:
+
+```python
+def authenticate(self, request):
+    token = get_request_token(request)          # the httponly stapel_jwt cookie FIRST
+    if token is None:
+        return None
+    payload = decode_token(token, expected_type="access")   # raises on expired/invalid
+    ...
+```
+
+DRF runs a default authenticator on **every** request, before permissions.
+`GET /auth/api/v1/token/refresh/` is `AllowAny` — its whole job is to be
+reachable with a dead access token — so a raising authenticator answered 401
+before stapel-auth's view could read the refresh cookie. The one call that
+repairs an expired session was the one call an expired session could not make.
+
+And the window is guaranteed, not rare: the browser keeps sending the access
+cookie for seconds after the token inside it dies, because the cookie's
+`Max-Age` is counted from when the BROWSER received it and the token's `exp`
+from when the SERVER minted it. In the logged incident (sandbox, 2026-09-06
+20:34:09 UTC) the QR login minted at 19:34:08 and the desktop received the
+`Set-Cookie` at 19:34:12 — a four-second gap; refresh 401'd at 20:34:09 and
+20:34:10 (x3), and answered 200 at 20:34:12, the moment the browser dropped the
+cookie. Every continuously signed-in user was thrown to the login screen once
+an hour and let back in three seconds later, and only got out because the
+credential rotted.
+
+**The contract, stated so it can be detected:** an authenticator returns `None`
+for a credential it cannot use. DRF's own convention leaves room for both
+answers — `None` for no credential of this kind, a raise for one that is
+present and invalid — and that room is safe for an `Authorization` header,
+which a caller attaches deliberately. It is not safe for a **cookie**, which
+the browser attaches to every request whether the caller meant to assert
+anything or not, and it is never safe for a class in the **default** list,
+which runs on views its author has never seen. stapel-core's own
+`JWTCookieAuthentication` returns `None` — "no opinion, ask the next
+authenticator, then ask the permissions" — on a blacklisted, expired or invalid
+token; that is the contract this rule enforces, and it is why departing from it
+broke views the class had never heard of. Nothing is loosened by returning `None`: an unusable token granted
+nothing either way, and a protected view still answers 401 through
+`IsAuthenticated` plus `authenticate_header()` instead of through an exception.
+
+Three conditions, all required:
+
+1. **The class is the fleet-wide default** — named in
+   `REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"]`, in any of the three
+   shapes the fleet writes it (the literal `REST_FRAMEWORK` dict, a layered
+   `REST_FRAMEWORK[...] = [...]`, a bare `DEFAULT_AUTHENTICATION_CLASSES`), as
+   a dotted string or as the class itself (DRF's `perform_import` takes both).
+   A per-view `authentication_classes` is deliberately not read: it is scoped
+   to views whose permissions the same author wrote.
+2. **The HOST owns it.** A `stapel_*` or vendor (`rest_framework*`, `django`,
+   `knox`, `allauth`, …) dotted path never enters the index, so the class that
+   *defines* the contract is never scanned against it — and neither is a
+   same-named class the host happens to also carry.
+3. **`authenticate()` ends the request** — a `raise` of
+   `AuthenticationFailed`/`NotAuthenticated`/`PermissionDenied`/simplejwt's
+   `InvalidToken`/`TokenError`, or a call to a same-module helper that raises
+   one and is not caught. That hop is the whole point: the shipped defect had
+   NO literal raise on the expired-token path. It called `decode_token()`, a
+   module-level function that raises and is perfectly good for its direct
+   callers.
+
+**What silences it is the catch, because that is what the fix was.** MR !16
+kept `decode_token()` raising and wrapped the call: `try/except
+AuthenticationFailed` → log the reason → `return None`. A rule that read that
+as "calls something that raises" would have called the repair the defect, which
+is how a security linter gets switched off. A handler that re-raises is not a
+guard, and `except User.DoesNotExist` around it guards nothing this rule is
+about. For an authenticator that is *meant* to be a verdict there is a
+class-scoped allow-list marker — `# stapel: strict-authenticator`, with the
+reason next to it — beside the usual `# noqa: AUTHZ007`.
+
+**A runtime half, because the static half has a floor.** No rule in this family
+resolves a base class, so an inherited `authenticate()` and a raise out of an
+imported helper are both invisible. `stapel-authz-lint --probe` hands every
+configured authenticator a request carrying a garbage `stapel_jwt` cookie
+(`--cookie-name` for a deployment that renamed it) and asserts `authenticate()`
+returns `None`. Four outcomes, two of which fail: `ok`; `raised` (AUTHZ007
+observed rather than inferred); `returned` — authenticated *somebody* off a
+garbage token, worse than the rule it was written for; and `inconclusive` (the
+class would not build, or blew up on something that is not an authentication
+verdict), which is never counted as a pass and never as a failure. It is
+opt-in, needs `DJANGO_SETTINGS_MODULE`, and is **not** composed into
+`stapel-verify` — that gate is static and boots nothing.
+
+**Inversion control**, run against the real meettoday tree at both commits:
+
+| tree | AUTHZ007 | exit |
+| --- | --- | --- |
+| `0365f73^` (pre-fix) | `accounts/auth.py:116` (the helper hop), `:125` (the literal raise) — 2 errors | 1 |
+| `0365f73` (MR !16) | none | 0 |
+
+**Fleet sweep** — every `stapel-*` repo, `ironmemo-backend`, `marketplace-backend`,
+both storefronts and `studio-slice`: **zero** hits; the fleet's libraries all go
+through core's own authenticator. The two hits are meettoday's working branch,
+which still carries the defect (MR !16 is not merged into it) — found by
+pointing the new rule at the tree that paid for it, not by inspection.
+
+28 new tests: the pre-fix/post-fix pair as a project-level control, the
+must-not-fire cases (the fleet class that defines the contract, a vendor class,
+an undeclared authenticator, a same-named class in another app, an inherited
+`authenticate`), the near-misses (a handler that re-raises, an `except` that
+catches something else, a settings path that resolves to no file), and the
+probe's four outcomes plus its two CLI exits — and one that runs the whole
+thing through `stapel-verify`, because AUTHZ007 is the only rule here whose
+evidence lives in another file and it only fires if the project index is built
+on the way in.
+
 ## 0.62.3 — 2026-09-06
 
 ### `@stapel/tokens-antd` 0.11.0 vs `@stapel/workspaces-react` 0.19.1's own floor

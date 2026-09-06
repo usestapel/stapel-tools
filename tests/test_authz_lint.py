@@ -1,4 +1,4 @@
-"""stapel-authz-lint tests — AUTHZ001-005.
+"""stapel-authz-lint tests — AUTHZ001-007.
 
 Every rule carries three kinds of case, because a security linter that cries
 wolf is turned off and is then strictly worse than no linter at all:
@@ -13,12 +13,25 @@ The whole-tree control lives at the bottom: the pre-fix ``login_views.py``
 verbatim must trip AUTHZ001 *and* AUTHZ002, and the post-fix one must trip
 neither. A rule that does not survive that pair is inverted.
 """
+import json
 from pathlib import Path
 
 import pytest
 
-from stapel_tools import lint_profile, verify
-from stapel_tools.authz_lint import lint_file, lint_paths, lint_project, main
+from stapel_tools import authz_lint, lint_profile, verify
+from stapel_tools.authz_lint import (
+    GARBAGE_TOKEN,
+    ProbeError,
+    ProbeRequest,
+    ProbeResult,
+    import_authenticator,
+    lint_file,
+    lint_paths,
+    lint_project,
+    main,
+    probe_authenticator,
+    probe_default_authenticators,
+)
 
 
 def _write(tmp_path: Path, name: str, content: str) -> Path:
@@ -1074,6 +1087,395 @@ def test_the_post_fix_tree_is_clean(tmp_path):
 
 
 # ===========================================================================
+# AUTHZ007 — a default authenticator that answers 401 for the permission layer
+# ===========================================================================
+
+
+#: The declaration that makes a class run before EVERY view, including an
+#: AllowAny one. meettoday's own, verbatim.
+SETTINGS_PY = """\
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "accounts.auth.JWTAuthentication",
+    ],
+}
+"""
+
+#: meettoday's ``accounts/auth.py`` before MR !16, in shape: ``authenticate()``
+#: has ONE literal raise (the user-is-gone path) and reaches the expired-token
+#: raise through ``decode_token``, a module-level helper that is perfectly good
+#: for its direct callers.
+PRE_FIX_AUTHENTICATOR = """\
+import logging
+
+from rest_framework.authentication import BaseAuthentication
+from rest_framework.exceptions import AuthenticationFailed
+from stapel_core.django.jwt.provider import jwt_provider
+
+logger = logging.getLogger(__name__)
+
+
+def decode_token(token, *, expected_type=None):
+    payload = jwt_provider.handler.decode_token(token, verify=True)
+    if payload is None:
+        raise AuthenticationFailed("Invalid or expired token")
+    if jwt_provider.is_blacklisted(token):
+        raise AuthenticationFailed("Token revoked")
+    return payload
+
+
+def get_request_token(request):
+    return request.COOKIES.get("stapel_jwt")
+
+
+class JWTAuthentication(BaseAuthentication):
+    def authenticate(self, request):
+        token = get_request_token(request)
+        if token is None:
+            return None
+
+        payload = decode_token(token, expected_type="access")
+
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+
+        try:
+            user = User.objects.get(id=payload["user_id"], is_active=True)
+        except User.DoesNotExist:
+            raise AuthenticationFailed("User not found")
+
+        return (user, payload)
+
+    def authenticate_header(self, request):
+        return "Bearer"
+"""
+
+#: The shape MR !16 shipped: the helper still raises for its direct callers,
+#: ``authenticate`` catches it, logs the reason and returns None.
+POST_FIX_AUTHENTICATOR = PRE_FIX_AUTHENTICATOR.replace(
+    """
+        payload = decode_token(token, expected_type="access")
+""",
+    """
+        try:
+            payload = decode_token(token, expected_type="access")
+        except AuthenticationFailed as exc:
+            logger.info("JWT auth: unusable access token on %s (%s)", request.path, exc)
+            return None
+""",
+).replace(
+    """        except User.DoesNotExist:
+            raise AuthenticationFailed("User not found")
+""",
+    """        except User.DoesNotExist:
+            logger.info("JWT auth: token names no active user on %s", request.path)
+            return None
+""",
+)
+
+
+def _host(tmp_path, auth_py, settings_py=SETTINGS_PY):
+    _write(tmp_path, "config/settings/base.py", settings_py)
+    return _write(tmp_path, "accounts/auth.py", auth_py)
+
+
+class TestAuthz007:
+    def test_the_shipped_defect_is_flagged(self, tmp_path):
+        """meettoday 2026-09-07: both ends of the same contract break — the
+        raise reached through the helper, and the literal one."""
+        path = _host(tmp_path, PRE_FIX_AUTHENTICATOR)
+        hits = [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"]
+        assert len(hits) == 2
+        source = path.read_text().splitlines()
+        assert "decode_token(token" in source[hits[0].line - 1]
+        assert "raise AuthenticationFailed" in source[hits[1].line - 1]
+        assert "returns None" in hits[0].message
+
+    def test_the_shipped_fix_is_clean(self, tmp_path):
+        """The control that proves the rule is not inverted. The fix KEEPS the
+        raising helper and catches it — a rule that read that as 'calls
+        something that raises' would call the repair the defect."""
+        _host(tmp_path, POST_FIX_AUTHENTICATOR)
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"] == []
+
+    def test_the_strict_marker_allows_it(self, tmp_path):
+        _host(tmp_path, PRE_FIX_AUTHENTICATOR.replace(
+            "class JWTAuthentication(BaseAuthentication):\n",
+            "class JWTAuthentication(BaseAuthentication):\n"
+            "    # stapel: strict-authenticator - service-only deployment, no "
+            "AllowAny view is mounted\n",
+        ))
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"] == []
+
+    def test_the_fleet_class_that_defines_the_contract_is_not_scanned(self, tmp_path):
+        """A ``stapel_*`` dotted path never enters the index, so a same-named
+        class the host happens to carry is not judged against it either."""
+        _host(
+            tmp_path,
+            PRE_FIX_AUTHENTICATOR.replace("JWTAuthentication", "JWTCookieAuthentication"),
+            settings_py=SETTINGS_PY.replace(
+                '"accounts.auth.JWTAuthentication"',
+                '"stapel_core.django.jwt.authentication.JWTCookieAuthentication"',
+            ),
+        )
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"] == []
+
+    def test_a_vendor_class_is_not_scanned(self, tmp_path):
+        _host(
+            tmp_path,
+            PRE_FIX_AUTHENTICATOR.replace("JWTAuthentication", "JWTStatelessUserAuthentication"),
+            settings_py=SETTINGS_PY.replace(
+                '"accounts.auth.JWTAuthentication"',
+                '"rest_framework_simplejwt.authentication.JWTStatelessUserAuthentication"',
+            ),
+        )
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"] == []
+
+    def test_an_undeclared_authenticator_is_not_scanned(self, tmp_path):
+        """A per-view authenticator is scoped to views whose permissions the
+        same author wrote. Only the DEFAULT list is the fleet-wide contract."""
+        _write(tmp_path, "accounts/auth.py", PRE_FIX_AUTHENTICATOR)
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"] == []
+
+    def test_a_same_named_class_in_another_app_is_not_judged(self, tmp_path):
+        """The declaration carries a module path, so the class it names is the
+        one that gets read — not every class in the tree with that name."""
+        _host(tmp_path, POST_FIX_AUTHENTICATOR)
+        _write(tmp_path, "billing/auth.py", PRE_FIX_AUTHENTICATOR)
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"] == []
+
+    def test_an_unresolvable_module_path_widens_to_the_bare_name(self, tmp_path):
+        """A settings string is rooted at a sys.path entry the linter cannot
+        know. When nothing on disk matches it, the bare name is what is left —
+        silently not running is the worse failure."""
+        _host(
+            tmp_path,
+            PRE_FIX_AUTHENTICATOR,
+            settings_py=SETTINGS_PY.replace(
+                '"accounts.auth.JWTAuthentication"',
+                '"apps.identity.backends.JWTAuthentication"',
+            ),
+        )
+        assert len([v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"]) == 2
+
+    def test_a_bare_class_reference_in_the_settings_is_read(self, tmp_path):
+        """DRF's perform_import takes the class itself, and settings modules
+        that import their own authenticator do exactly that."""
+        _host(tmp_path, PRE_FIX_AUTHENTICATOR, settings_py="""\
+from accounts.auth import JWTAuthentication
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [JWTAuthentication],
+}
+""")
+        assert len([v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"]) == 2
+
+    def test_an_imported_fleet_class_is_still_not_scanned(self, tmp_path):
+        _host(tmp_path, PRE_FIX_AUTHENTICATOR, settings_py="""\
+from stapel_core.django.jwt.authentication import JWTAuthentication
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [JWTAuthentication],
+}
+""")
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"] == []
+
+    def test_a_layered_settings_module_declares_it_by_subscript(self, tmp_path):
+        _host(tmp_path, PRE_FIX_AUTHENTICATOR, settings_py="""\
+from .base import REST_FRAMEWORK
+
+REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"] = [
+    "accounts.auth.JWTAuthentication",
+]
+""")
+        assert len([v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"]) == 2
+
+    def test_a_handler_that_re_raises_is_still_flagged(self, tmp_path):
+        """Catching the exception and throwing it again is the defect wearing
+        a try block."""
+        _host(tmp_path, PRE_FIX_AUTHENTICATOR.replace(
+            """
+        payload = decode_token(token, expected_type="access")
+""",
+            """
+        try:
+            payload = decode_token(token, expected_type="access")
+        except AuthenticationFailed:
+            raise AuthenticationFailed("Unusable access token")
+""",
+        ))
+        hits = [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"]
+        assert len(hits) == 3
+
+    def test_an_unrelated_except_does_not_guard(self, tmp_path):
+        """``except User.DoesNotExist`` around a call that raises
+        AuthenticationFailed catches nothing this rule is about."""
+        _host(tmp_path, PRE_FIX_AUTHENTICATOR.replace(
+            """
+        payload = decode_token(token, expected_type="access")
+""",
+            """
+        try:
+            payload = decode_token(token, expected_type="access")
+        except KeyError:
+            return None
+""",
+        ))
+        assert len([v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"]) == 2
+
+    def test_an_inherited_authenticate_is_not_guessed_at(self, tmp_path):
+        """No base-class resolution anywhere in this family. The probe is that
+        half of the rule, and the message says so."""
+        _host(tmp_path, """\
+from stapel_core.django.jwt.authentication import JWTCookieAuthentication
+
+
+class JWTAuthentication(JWTCookieAuthentication):
+    def authenticate_header(self, request):
+        return "Bearer"
+""")
+        assert [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"] == []
+
+    def test_noqa_suppresses_it(self, tmp_path):
+        _host(tmp_path, PRE_FIX_AUTHENTICATOR.replace(
+            'raise AuthenticationFailed("User not found")',
+            'raise AuthenticationFailed("User not found")  # noqa: AUTHZ007 - see ADR-12',
+        ))
+        hits = [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"]
+        assert len(hits) == 1
+        assert "decode_token" in hits[0].message
+
+
+# ===========================================================================
+# AUTHZ007's runtime half — the probe
+# ===========================================================================
+
+
+class RaisingCookieAuth:
+    """The defect, as a live object.
+
+    Named in a ``DEFAULT_AUTHENTICATION_CLASSES`` dict literal below, so
+    AUTHZ007 reads THIS file as a settings module and is right to: the class is
+    the defect, deliberately, as the probe's input.
+    """
+
+    def authenticate(self, request):
+        from rest_framework.exceptions import AuthenticationFailed
+
+        if request.COOKIES.get("stapel_jwt"):
+            raise AuthenticationFailed("Invalid or expired token")  # noqa: AUTHZ007 - this IS the defect, as probe input
+        return None
+
+
+class QuietCookieAuth:
+    """The contract."""
+
+    def authenticate(self, request):
+        return None
+
+
+class CredulousCookieAuth:
+    """Worse than the rule this probe was written for."""
+
+    def authenticate(self, request):
+        return ("somebody", request.COOKIES.get("stapel_jwt"))
+
+
+class BrokenCookieAuth:
+    def authenticate(self, request):
+        raise RuntimeError("no jwt provider configured")
+
+
+class TestAuthz007Probe:
+    def test_a_raising_authenticator_is_caught(self):
+        result = probe_authenticator(RaisingCookieAuth)
+        assert result.outcome == "raised"
+        assert result.failed
+        assert "AuthenticationFailed" in result.detail
+
+    def test_returning_none_is_the_contract(self):
+        result = probe_authenticator(QuietCookieAuth)
+        assert result.outcome == "ok"
+        assert not result.failed
+
+    def test_authenticating_from_garbage_is_a_failure_too(self):
+        result = probe_authenticator(CredulousCookieAuth)
+        assert result.outcome == "returned"
+        assert result.failed
+
+    def test_an_unrelated_explosion_is_inconclusive_not_a_pass(self):
+        """'The gate could not run' and 'the gate ran and passed' are
+        different sentences."""
+        result = probe_authenticator(BrokenCookieAuth)
+        assert result.outcome == "inconclusive"
+        assert not result.failed
+
+    def test_the_probe_carries_a_garbage_cookie_under_the_configured_name(self):
+        """A deployment that renamed JWT_COOKIE_NAME is probed under ITS name:
+        the same class raises for `stapel_jwt` and has no opinion without it."""
+        assert probe_authenticator(RaisingCookieAuth).outcome == "raised"
+        renamed = ProbeRequest(cookie_name="meettoday_jwt")
+        assert renamed.COOKIES == {"meettoday_jwt": GARBAGE_TOKEN}
+        assert probe_authenticator(RaisingCookieAuth, renamed).outcome == "ok"
+
+    def test_the_whole_declared_chain_is_probed(self):
+        results = probe_default_authenticators(
+            rest_framework={
+                "DEFAULT_AUTHENTICATION_CLASSES": [QuietCookieAuth, RaisingCookieAuth],
+            }
+        )
+        assert [r.outcome for r in results] == ["ok", "raised"]
+
+    def test_a_dotted_path_is_imported(self):
+        assert import_authenticator(
+            "stapel_tools.authz_lint.ProbeRequest"
+        ) is ProbeRequest
+
+    def test_a_path_that_does_not_import_is_an_environment_error(self):
+        with pytest.raises(ProbeError):
+            import_authenticator("accounts.nope.NoSuchAuth")
+
+    def test_an_empty_default_list_is_an_environment_error(self):
+        """Nothing runs before the view, so there is no contract to measure —
+        that is not a pass."""
+        with pytest.raises(ProbeError):
+            probe_default_authenticators(rest_framework={})
+
+    def test_the_cli_reports_a_failing_probe(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(
+            authz_lint, "probe_default_authenticators",
+            lambda **kwargs: [ProbeResult("accounts.auth.JWTAuthentication", "raised", "x")],
+        )
+        _write(tmp_path, "clean.py", "x = 1\n")
+        assert main([str(tmp_path), "--probe"]) == 1
+        out = capsys.readouterr().out
+        assert "AUTHZ007 probe" in out and "raised" in out
+
+    def test_the_cli_cannot_pretend_a_probe_it_could_not_run(self, tmp_path, capsys, monkeypatch):
+        def boom(**kwargs):
+            raise ProbeError("no Django settings")
+
+        monkeypatch.setattr(authz_lint, "probe_default_authenticators", boom)
+        _write(tmp_path, "clean.py", "x = 1\n")
+        assert main([str(tmp_path), "--probe"]) == 2
+        assert "no Django settings" in capsys.readouterr().err
+
+    def test_the_cli_probe_is_reported_in_json(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.setattr(
+            authz_lint, "probe_default_authenticators",
+            lambda **kwargs: [ProbeResult("accounts.auth.JWTAuthentication", "ok")],
+        )
+        _write(tmp_path, "clean.py", "x = 1\n")
+        assert main([str(tmp_path), "--probe", "--json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["probe"] == [
+            {"name": "accounts.auth.JWTAuthentication", "outcome": "ok", "detail": ""}
+        ]
+
+
+
+# ===========================================================================
 # driver, CLI and wiring
 # ===========================================================================
 
@@ -1124,6 +1526,14 @@ def test_it_is_actually_wired_into_the_gate():
     and ADO002 sat unexercised while a migration shipped green."""
     assert "stapel-authz-lint" in verify.COMPOSED_LINTERS
     assert lint_profile.LINTER_SURFACES["stapel-authz-lint"] == "python"
+
+
+def test_verify_reports_authz007_through_the_project_index(tmp_path):
+    """AUTHZ007 is the one rule here whose evidence is in ANOTHER file, so the
+    gate only sees it if the whole-project index is built on the way in."""
+    _host(tmp_path, PRE_FIX_AUTHENTICATOR)
+    reports = {r.name: r for r in verify.verify_project(tmp_path)}
+    assert "AUTHZ007" in {f["rule"] for f in reports["stapel-authz-lint"].findings}
 
 
 def test_verify_reports_the_findings(tmp_path):

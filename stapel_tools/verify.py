@@ -39,7 +39,15 @@ Linters composed (in this order)
   stapel-listings' ``GET /{pk}/status/`` was ``AllowAny`` over
   ``Listing.all_objects`` and returned ``owner_id`` and ``moderation_status``,
   so an anonymous walk of the sequential ids harvested owners and moderation
-  verdicts for every listing in the deployment.)
+  verdicts for every listing in the deployment. AUTHZ007 joined in 0.63.0 for
+  the family's INVERTED member — authentication answering *for* authorization:
+  a host authentication class in ``DEFAULT_AUTHENTICATION_CLASSES`` that
+  RAISES on an unusable credential answers 401 before an ``AllowAny`` view
+  ever runs, and meettoday's refresh endpoint — the one call that repairs an
+  expired session — was locked out by the expired access cookie it exists to
+  replace, once an hour, for every continuously signed-in user. Its runtime
+  half, ``stapel-authz-lint --probe``, is deliberately NOT composed here:
+  stapel-verify is static and boots no Django.)
 * ``stapel_tools.api_lint``        — API001-003 + SCHEMA001 (HTTP surface
                                      versioning: a breaking OpenAPI diff must
                                      carry a bump, an UPGRADE.json record and a

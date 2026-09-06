@@ -443,6 +443,8 @@ as the baseline ref.
 stapel-authz-lint .                          # lint the project in .
 stapel-authz-lint . --json                   # machine output
 stapel-authz-lint . --strict                 # AUTHZ003 (warning) becomes an error
+stapel-authz-lint . --probe                  # AUTHZ007's runtime half (needs DJANGO_SETTINGS_MODULE)
+stapel-authz-lint . --probe --cookie-name meettoday_jwt
 ```
 
 On 2026-08-24 stapel-core shipped five security releases (0.38.0-0.43.0) for
@@ -470,9 +472,12 @@ absence.
 | AUTHZ004 | error | a `get_user()` **method** override returning `objects.get()` needs an `is_active`/`user_can_authenticate` check. `get_user` resolves `request.user` on every request after the one that authenticated, so dropping it lets a deactivated account keep a live session for the life of the session cookie |
 | AUTHZ005 | error | a revocation/blacklist entry read or written through `django.core.cache.cache`. Django builds the real key from *this deployment's* `KEY_PREFIX`, so `auth` wrote `auth:1:jwt_blacklist:<jti>` while `profiles` read `stapel_profiles:1:jwt_blacklist:<jti>` — use `stapel_core.core.revocation_store.revocation_cache()` |
 | AUTHZ006 | error | a view or `@action` reachable **without authentication** (`AllowAny`, an empty `permission_classes`, `IsAuthenticatedOrReadOnly` on a read) that reads a **filter-bypassing manager** (`all_objects`, `_base_manager`, `with_deleted()`, `all_with_deleted()`, `only_deleted()`) and answers with **identity or moderation state** (`owner`/`owner_id`/`user_id`/`created_by`, `moderation_*`, or the `status` of a row the default filter hides). Each half is ordinary; together they are an enumeration oracle |
+| AUTHZ007 | error | a **host-defined** authentication class listed in `REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"]` whose `authenticate()` **raises** an authentication failure — directly, or through a same-module helper it does not catch. A default authenticator runs before EVERY view, including an `AllowAny` one, so a raise is a 401 no permission class gets to override. Return `None` for a credential you cannot use (stapel-core's own `JWTCookieAuthentication` does) and log the reason |
 
 Suppress with `# noqa: AUTHZ00N` on the reported line; a written reason after
-the code on the same line is read fine, and is the point.
+the code on the same line is read fine, and is the point. AUTHZ007 has a second,
+class-scoped escape — `# stapel: strict-authenticator` in the class body — for
+an authenticator that is meant to be a verdict; write the reason next to it.
 
 **AUTHZ006 — the second defect this family was paid for.** On 2026-08-28
 `stapel-listings` shipped 0.8.0 for a hole none of AUTHZ001-005 could see,
@@ -509,6 +514,68 @@ one boolean for everyone else — a signed-in stranger included, or the oracle
 costs an attacker one free account. A branch on ownership or permission in the
 handler (or a named predicate in the same module) is what silences the rule,
 because that branch *is* the fix.
+
+**AUTHZ007 — the inverted member: authentication answering *for*
+authorization.** Every other rule in this family is about a check that is
+missing. This one is about a check that happens too early and too widely. On
+2026-09-07 meettoday (MR !16) had, in `accounts/auth.py`, a class wired as the
+deployment's only `DEFAULT_AUTHENTICATION_CLASSES` entry:
+
+```python
+def authenticate(self, request):
+    token = get_request_token(request)          # the httponly stapel_jwt cookie FIRST
+    if token is None:
+        return None
+    payload = decode_token(token, expected_type="access")   # raises on expired/invalid
+    ...
+```
+
+DRF runs a default authenticator on **every** request, before permissions.
+`GET /auth/api/v1/token/refresh/` is `AllowAny` — its whole job is to be
+reachable with a dead access token — but a raising authenticator answers 401
+before any view runs, so the one call that repairs an expired session was the
+one call an expired session could not make. And the window is guaranteed, not
+rare: the browser keeps sending the access cookie for seconds after the token
+inside it dies, because the cookie's `Max-Age` is counted from when the
+*browser* received it and the token's `exp` from when the *server* minted it.
+Every continuously signed-in user was thrown to the login screen once an hour
+and let back in three seconds later, when the credential rotted enough for the
+browser to drop the cookie.
+
+DRF's own convention leaves room for both — return `None` when the request
+carries no credential of this kind, raise when it carries one that is invalid —
+and that room is safe for an `Authorization` header, which a caller attaches
+deliberately. It is not safe for a **cookie**, which the browser attaches to
+every request whether the caller meant to assert anything or not, and it is
+never safe for a class in the **default** list, which runs on views its author
+has never seen. So stapel-core's `JWTCookieAuthentication` returns `None` — "no
+opinion, ask the next authenticator, then ask the permissions" — for a
+blacklisted, expired or invalid token, and that is the contract this rule
+holds. **Nothing is loosened by returning `None`:** an unusable token granted
+nothing either way, and a protected view still answers 401, through
+`IsAuthenticated` plus `authenticate_header()` instead of through an
+exception.
+
+So the rule reads the *settings* for which classes are the fleet-wide default,
+keeps only the ones the **host** defines (a `stapel_*` or vendor dotted path
+never enters the index — the class that *defines* the contract is never scanned
+against it), and reads `authenticate()` for a raise. Keeping the raising helper
+is fine and is what the fix did: `try/except AuthenticationFailed` → log →
+`return None` silences the rule, because that shape *is* the repair.
+
+```bash
+stapel-authz-lint backend --probe    # DJANGO_SETTINGS_MODULE=config.settings.local
+```
+
+`--probe` is the runtime half, and it exists because the static half cannot
+resolve a base class: it hands every configured authenticator a request
+carrying a garbage `stapel_jwt` cookie and asserts `authenticate()` returns
+`None`. Four outcomes, and only two of them fail: `ok`, `raised` (AUTHZ007
+observed rather than inferred), `returned` (authenticated *somebody* off a
+garbage token — worse than the rule it was written for) and `inconclusive`
+(the class could not be built, or blew up on something that is not an
+authentication verdict — never counted as a pass). It is opt-in and is **not**
+composed into `stapel-verify`, which stays static and boots nothing.
 
 **What these rules cannot catch, stated plainly** — a rule that pretends to
 cover more than it does is worse than one whose edge is written down:
@@ -563,6 +630,17 @@ cover more than it does is worse than one whose edge is written down:
   that branches on `owner_id` and then returns the full serializer from *both*
   arms passes. Source-order and branch-reachability are outside every rule in
   this family.
+- AUTHZ007 reads the class the settings *name*. An `authenticate()` **inherited
+  from a base class** is not resolved (no base-class resolution anywhere in this
+  family), a raise out of a helper in **another module** is invisible, and a
+  per-view `authentication_classes` is deliberately not read — it is scoped to
+  views whose permissions the same author wrote. `--probe` is what covers the
+  first two, against a booted deployment.
+- AUTHZ007 matches a declaration to a class by dotted **module path**, so two
+  same-named authenticators in different apps stay distinct. A settings string
+  rooted at a `sys.path` entry the linter cannot see resolves to no file, and
+  then the declaration widens to the bare class name — a wider match rather
+  than a rule that silently does not run.
 
 Composed into `stapel-verify` (surface `python`), so a project picks the gate
 up on its next stapel-tools upgrade with nothing to regenerate.

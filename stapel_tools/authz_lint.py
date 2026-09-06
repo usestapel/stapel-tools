@@ -110,6 +110,51 @@ AUTHZ006  (error) A DRF view or ``@action`` that is reachable **without
           predicate in the same module) silences the rule, because that is
           precisely the fix — see ``_MSG_006``.
 
+AUTHZ007  (error) A DRF authentication class the HOST defines and lists in
+          ``REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"]`` whose
+          ``authenticate()`` **raises** an authentication failure
+          (``AuthenticationFailed``, ``NotAuthenticated``, ``PermissionDenied``,
+          simplejwt's ``InvalidToken``/``TokenError``) — directly, or by
+          calling a same-module helper that raises one and not catching it.
+          The family's first *inverted* member: here authentication does not
+          skip authorization, it **answers for** it.
+
+          DRF runs every default authenticator before the view, on EVERY
+          request, including a request to an ``AllowAny`` view. An authenticator
+          that raises therefore turns a global "this credential is unusable"
+          into a per-request 401 that no permission class ever gets to
+          override. DRF's own convention leaves room for both answers — return
+          ``None`` for no credential of this kind, raise for one that is
+          present and invalid — and that room is safe for an ``Authorization``
+          header, which a caller attaches deliberately. It is not safe for a
+          COOKIE, which the browser attaches to every request whether the
+          caller meant to assert anything or not, and it is never safe for a
+          class in the DEFAULT list, which runs on views its author has never
+          seen. So stapel-core's ``JWTCookieAuthentication`` returns ``None``
+          — "no opinion, ask the next authenticator, then ask the permissions"
+          — for a blacklisted, expired or invalid token, and a host
+          authenticator that departs from that while sitting in the default
+          list breaks views it never heard of.
+
+          meettoday, 2026-09-07 (MR !16), verbatim: ``accounts.auth
+          .JWTAuthentication`` read the httponly ``stapel_jwt`` access cookie
+          before the ``Authorization`` header and raised on a token it could
+          not use. ``GET /auth/api/v1/token/refresh/`` is ``AllowAny`` — the
+          one call that repairs an expired session — and it answered 401
+          before stapel-auth's view could read the refresh cookie. The browser
+          keeps sending the access cookie for a few seconds after the token in
+          it dies (the cookie's ``Max-Age`` is counted from when the BROWSER
+          received it, the token's ``exp`` from when the SERVER minted it), so
+          every continuously signed-in user was thrown to the login screen
+          once an hour, and only got back in when the credential rotted enough
+          for the browser to drop it.
+
+          The fix, and what silences the rule: ``return None`` and log the
+          reason. A deliberately strict authenticator declares itself with a
+          ``# stapel: strict-authenticator`` marker in the class body (write
+          the reason next to it) — the allow-list, so that the decision is
+          typed out rather than argued from silence.
+
 Suppression
 -----------
 ``# noqa: AUTHZ00N`` on the reported line, same escape as every other stapel
@@ -128,6 +173,18 @@ anyone does and a rule that punished it would be turned off within a week).
 The honest consequence — an authorization helper *imported from another
 module* is invisible to this linter and reads as absence — is stated in each
 rule's section of the README, not hidden.
+
+The runtime probe (``--probe``)
+--------------------------------
+AUTHZ007 is the one rule in this family with a *runtime* half, because its
+contract is a one-line experiment: hand every configured default authenticator
+a request carrying a garbage ``stapel_jwt`` cookie and assert ``authenticate()``
+returns ``None`` rather than raising. ``stapel-authz-lint --probe`` does
+exactly that against a booted Django (``DJANGO_SETTINGS_MODULE``), so it sees
+what the static rule structurally cannot: an authenticator inherited from a
+base class, one that raises out of an imported helper, and the whole chain **as
+this deployment actually configured it**. It is opt-in and is NOT composed into
+``stapel-verify``, which stays static and boots nothing.
 
 Exit codes: 0 clean, 1 errors present (``--strict`` promotes AUTHZ003 to an
 error), 2 usage/environment errors.
@@ -308,6 +365,58 @@ GATE_CALLS = frozenset({
     "has_object_permission",
     "check_object_permissions",
 }) | AUTHZ_CALLS
+
+# --- AUTHZ007 vocabulary ---------------------------------------------------
+
+#: The settings key that makes an authentication class run on EVERY request,
+#: including a request to an ``AllowAny`` view. A per-view
+#: ``authentication_classes`` is deliberately not read: it is scoped to views
+#: whose permissions the same author wrote, which is the case the contract is
+#: relaxed for.
+DEFAULT_AUTHENTICATION_KEY = "DEFAULT_AUTHENTICATION_CLASSES"
+
+#: Exceptions whose whole purpose is to end the request with a 401/403 before
+#: the view runs. Raising any of them out of ``authenticate()`` is the defect;
+#: an ``ImproperlyConfigured`` or a ``ValueError`` is a bug of another kind and
+#: is not this rule's business. ``InvalidToken``/``TokenError`` are simplejwt's
+#: (``InvalidToken`` subclasses ``AuthenticationFailed``), kept by NAME because
+#: nothing here resolves a base class.
+AUTH_FAILURE_EXCEPTIONS = frozenset({
+    "AuthenticationFailed",
+    "NotAuthenticated",
+    "PermissionDenied",
+    "InvalidToken",
+    "TokenError",
+})
+
+#: Handler names that make a ``try`` block a REAL guard — the shape of the
+#: meettoday fix (``except AuthenticationFailed: ... return None``). A handler
+#: catching something else (``except User.DoesNotExist``) guards nothing here.
+GUARDING_EXCEPTIONS = AUTH_FAILURE_EXCEPTIONS | frozenset({
+    "Exception", "BaseException", "APIException",
+})
+
+#: Distributions whose authentication classes are NOT the host's to fix. A
+#: dotted path rooted here is dropped before the index is built, so
+#: ``stapel_core.django.jwt.authentication.JWTCookieAuthentication`` — the
+#: class that DEFINES the contract — is never scanned, and neither is a
+#: same-named class the host happens to also carry.
+VENDOR_AUTH_PACKAGES = frozenset({
+    "rest_framework",
+    "rest_framework_simplejwt",
+    "django",
+    "drf_spectacular",
+    "oauth2_provider",
+    "knox",
+    "allauth",
+    "dj_rest_auth",
+    "mozilla_django_oidc",
+    "social_django",
+})
+
+#: The in-code allow-list for a deliberately strict authenticator. Anywhere in
+#: the class's own source range; write the reason next to it.
+STRICT_MARKER = "stapel: strict-authenticator"
 
 
 @dataclass
@@ -1121,6 +1230,308 @@ def _check_authz006(tree: ast.Module, index: dict) -> list:
 
 
 # ---------------------------------------------------------------------------
+# AUTHZ007 — a default authenticator that answers 401 for the permission layer
+# ---------------------------------------------------------------------------
+
+
+def _is_host_owned(dotted: str) -> bool:
+    """Is this dotted path the HOST's code, as opposed to the fleet's or a
+    vendor's? The top-level package decides, because that is the only part of
+    a settings string that is reliably a distribution name."""
+    top = dotted.split(".", 1)[0]
+    return not (top.startswith("stapel_") or top in VENDOR_AUTH_PACKAGES)
+
+
+def _import_sources(tree: ast.Module) -> dict:
+    """``{locally bound name: module it came from}`` for ``from x import Y``.
+
+    Only needed for the shape where settings list the CLASS rather than its
+    dotted path (DRF accepts both), since then the string carries no package
+    and the import is the only thing that says whose class it is.
+    """
+    sources: dict = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            for alias in node.names:
+                sources[alias.asname or alias.name] = node.module
+    return sources
+
+
+def _default_authenticator_declarations(tree: ast.Module) -> list:
+    """``[(class name, module path or "")]`` declared as DRF's default
+    authenticators in this file, host-owned only.
+
+    Three declaration shapes, because all three are in the fleet:
+
+    * the literal ``REST_FRAMEWORK = {"DEFAULT_AUTHENTICATION_CLASSES": [...]}``;
+    * ``REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"] = [...]``, how a
+      settings module layers onto a base one;
+    * a bare ``DEFAULT_AUTHENTICATION_CLASSES = [...]`` spliced in later.
+
+    Entries may be dotted strings or the classes themselves — DRF's
+    ``perform_import`` takes either.
+    """
+    sources = _import_sources(tree)
+    found: list = []
+
+    def collect(value: ast.AST) -> None:
+        if not isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+            return
+        for element in value.elts:
+            if isinstance(element, ast.Constant) and isinstance(element.value, str):
+                dotted = element.value
+                if "." not in dotted or not _is_host_owned(dotted):
+                    continue
+                module, _, name = dotted.rpartition(".")
+                found.append((name, module))
+            elif isinstance(element, (ast.Name, ast.Attribute)):
+                name = _final_name(element)
+                origin = sources.get(name, "")
+                if origin and not _is_host_owned(origin):
+                    continue
+                found.append((name, ""))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if (
+                    isinstance(key, ast.Constant)
+                    and key.value == DEFAULT_AUTHENTICATION_KEY
+                ):
+                    collect(value)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == DEFAULT_AUTHENTICATION_KEY:
+                    collect(node.value)
+                elif isinstance(target, ast.Subscript) and isinstance(
+                    target.slice, ast.Constant
+                ) and target.slice.value == DEFAULT_AUTHENTICATION_KEY:
+                    collect(node.value)
+    return found
+
+
+def _module_suffixes(module: str) -> tuple:
+    """Path endings a dotted module could have on disk."""
+    as_path = module.replace(".", "/")
+    return (f"{as_path}.py", f"{as_path}/__init__.py")
+
+
+def _declared_here(cls_name: str, path: Path, index: dict) -> bool:
+    """Is ``cls_name``, defined in ``path``, one of the declared defaults?
+
+    The settings string carries a dotted module, so the file has to match it —
+    otherwise a same-named class in another app would be judged against
+    somebody else's declaration. An empty module in the index means "the
+    declaration named no path this tree resolves" (a bare class reference, or
+    a layout the suffix match cannot see), and then the bare name is the only
+    thing left to key on.
+    """
+    modules = index.get(cls_name)
+    if not modules:
+        return False
+    if "" in modules:
+        return True
+    normalized = str(path).replace(os.sep, "/")
+    for module in modules:
+        for suffix in _module_suffixes(module):
+            if normalized == suffix or normalized.endswith("/" + suffix):
+                return True
+    return False
+
+
+def _class_source(cls: ast.ClassDef, lines: list) -> str:
+    """The class's own source text, decorators included, for the marker scan."""
+    start = min(
+        [cls.lineno] + [d.lineno for d in getattr(cls, "decorator_list", [])]
+    ) - 1
+    end = getattr(cls, "end_lineno", cls.lineno)
+    return "\n".join(lines[max(start, 0):end])
+
+
+def _raised_name(node: ast.Raise) -> str:
+    """Name of the exception a ``raise`` raises (``raise X`` or ``raise X()``)."""
+    exc = node.exc
+    if exc is None:
+        return ""
+    if isinstance(exc, ast.Call):
+        return _call_name(exc)
+    return _final_name(exc)
+
+
+def _raising_helpers(tree: ast.Module) -> frozenset:
+    """Same-module functions that raise an authentication failure.
+
+    The meettoday defect is exactly this hop: ``authenticate()`` had no
+    ``raise`` of its own on the expired-token path — it called the module's
+    ``decode_token()``, which raises ``AuthenticationFailed`` and is a
+    perfectly good function for its DIRECT callers. One fixed-point layer, as
+    AUTHZ001/002 already do; a helper imported from another module is
+    invisible, and the README says so.
+    """
+    names = set()
+    bodies: dict = {}
+    for func, _cls in _functions(tree):
+        bodies.setdefault(func.name, []).append(func)
+        if any(
+            isinstance(sub, ast.Raise)
+            and sub.exc is not None
+            and _raised_name(sub) in AUTH_FAILURE_EXCEPTIONS
+            for sub in ast.walk(func)
+        ):
+            names.add(func.name)
+    for _ in range(3):
+        grew = False
+        for name, funcs in bodies.items():
+            if name in names:
+                continue
+            for func in funcs:
+                if any(
+                    isinstance(sub, ast.Call) and _call_name(sub) in names
+                    for sub in ast.walk(func)
+                ):
+                    names.add(name)
+                    grew = True
+                    break
+        if not grew:
+            break
+    return frozenset(names)
+
+
+def _handler_catches(handler: ast.ExceptHandler) -> bool:
+    if handler.type is None:
+        return True
+    types = (
+        handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
+    )
+    return any(_final_name(t) in GUARDING_EXCEPTIONS for t in types)
+
+
+def _guarded_nodes(func: ast.AST) -> set:
+    """Ids of nodes inside a ``try`` whose handler both CATCHES an
+    authentication failure and does not re-raise one.
+
+    This is what keeps the rule from flagging its own remedy: the fix wraps
+    ``decode_token(...)`` in ``try/except AuthenticationFailed: return None``,
+    and a rule that read that as "calls a raising helper" would call the
+    repair the defect.
+    """
+    guarded: set = set()
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Try):
+            continue
+        real_guard = False
+        for handler in node.handlers:
+            if not _handler_catches(handler):
+                continue
+            reraises = any(
+                isinstance(sub, ast.Raise)
+                and (sub.exc is None or _raised_name(sub) in AUTH_FAILURE_EXCEPTIONS)
+                for sub in ast.walk(handler)
+            )
+            if not reraises:
+                real_guard = True
+        if not real_guard:
+            continue
+        for stmt in node.body:
+            for sub in ast.walk(stmt):
+                guarded.add(id(sub))
+    return guarded
+
+
+def _authenticate_raises(func: ast.AST, helpers: frozenset) -> list:
+    """``[(lineno, what)]`` — every way this ``authenticate()`` ends the
+    request instead of declining to have an opinion."""
+    guarded = _guarded_nodes(func)
+    hits: list = []
+    for sub in ast.walk(func):
+        if id(sub) in guarded:
+            continue
+        if isinstance(sub, ast.Raise):
+            name = _raised_name(sub)
+            if name in AUTH_FAILURE_EXCEPTIONS:
+                hits.append((sub.lineno, f"raise {name}"))
+        elif isinstance(sub, ast.Call) and _call_name(sub) in helpers:
+            hits.append((sub.lineno, f"{_call_name(sub)}() raises"))
+    return sorted(set(hits))
+
+
+def _check_authz007(tree: ast.Module, path: Path, index: dict, lines: list) -> list:
+    if not index:
+        return []
+    helpers = _raising_helpers(tree)
+    found: list = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        if not _declared_here(node.name, path, index):
+            continue
+        if STRICT_MARKER in _class_source(node, lines):
+            continue
+        authenticate = next(
+            (
+                b for b in node.body
+                if isinstance(b, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and b.name == "authenticate"
+            ),
+            None,
+        )
+        if authenticate is None:
+            # Inherited. Nothing here resolves a base class, so this is the
+            # probe's half of the rule, not the static half.
+            continue
+        # A helper that IS this method must not count as a hop into itself.
+        for line, what in _authenticate_raises(authenticate, helpers - {"authenticate"}):
+            found.append((line, node.name, what))
+    return found
+
+
+def build_default_authenticator_index(root: Path) -> dict:
+    """``{class name: {module paths}}`` for the host's own default
+    authenticators, across a whole tree.
+
+    AUTHZ007 needs it because the declaration is a STRING in ``settings.py``
+    and the class is three directories away. A module path that resolves to no
+    file in this tree degrades to ``""`` — "match this class name wherever it
+    is defined" — so an unusual layout (a settings string rooted at a sys.path
+    entry the linter cannot know) reads as a wider match rather than as no
+    match at all.
+    """
+    index: dict = {}
+    files: list = []
+    for py in _walk_py(root):
+        files.append(str(py).replace(os.sep, "/"))
+        _src, tree = _parse(py)
+        if tree is None:
+            continue
+        for name, module in _default_authenticator_declarations(tree):
+            index.setdefault(name, set()).add(module)
+    _degrade_unresolvable(index, files)
+    return index
+
+
+def _degrade_unresolvable(index: dict, files: list) -> None:
+    """Widen a declaration whose module path matches no file that was scanned.
+
+    A settings string is rooted at a ``sys.path`` entry, not at the tree the
+    linter was pointed at (``backend/`` on the command line, ``accounts.auth``
+    in the string, and a deployment that adds ``backend/`` to the path). When
+    the path resolves, it is the precise key; when it resolves to nothing, the
+    bare class name is better than silence — the alternative is a rule that
+    quietly does not run on exactly the layouts it was written for.
+    """
+    for modules in index.values():
+        if "" in modules:
+            continue
+        resolvable = any(
+            any(f == suffix or f.endswith("/" + suffix) for f in files)
+            for module in modules
+            for suffix in _module_suffixes(module)
+        )
+        if not resolvable:
+            modules.add("")
+
+
+# ---------------------------------------------------------------------------
 # messages
 # ---------------------------------------------------------------------------
 
@@ -1200,6 +1611,39 @@ _MSG_006 = (
     "the reason"
 )
 
+_MSG_007 = (
+    "{cls}.authenticate() is in REST_FRAMEWORK['DEFAULT_AUTHENTICATION_CLASSES'] "
+    "and ends the request here ({what}). THE CONTRACT: return None for a "
+    "credential you cannot use. DRF's convention does allow a raise for a "
+    "credential that is present and invalid, and that is safe for an "
+    "Authorization header a caller attached deliberately — never for a cookie "
+    "the browser attaches to every request, and never for a class in the "
+    "DEFAULT list, which runs before EVERY view including an AllowAny one. A "
+    "raise here is a 401 no permission class ever gets to override: "
+    "authentication answers FOR authorization. stapel-core's own "
+    "JWTCookieAuthentication returns None on a blacklisted, expired or invalid "
+    "token, which is why departing from it breaks views this class never heard "
+    "of. This is meettoday 2026-09-07 "
+    "verbatim: the class read the httponly stapel_jwt access cookie before the "
+    "Authorization header and raised on a token it could not use, so GET "
+    "/auth/api/v1/token/refresh/ — AllowAny, and the one call that repairs an "
+    "expired session — answered 401 before the view could read the refresh "
+    "cookie. The browser keeps sending the access cookie for seconds after the "
+    "token in it dies (Max-Age is counted from when the BROWSER received it, exp "
+    "from when the SERVER minted it), so every continuously signed-in user was "
+    "thrown to the login screen once an hour. THE FIX: return None and log the "
+    "reason; a protected view still answers 401 through IsAuthenticated plus "
+    "authenticate_header(), and nothing is loosened — an unusable token granted "
+    "nothing either way. Keep a helper that raises for its direct callers and "
+    "catch it here (try/except AuthenticationFailed -> log -> return None); that "
+    "shape silences the rule, because it IS the fix. A DELIBERATELY strict "
+    "authenticator declares itself: put '# stapel: strict-authenticator' in the "
+    "class body with the reason. WHAT THIS RULE CANNOT SEE: an authenticate() "
+    "inherited from a base class, a raise out of a helper in ANOTHER module, and "
+    "a per-view authentication_classes — run 'stapel-authz-lint --probe' against "
+    "a booted deployment for those. Suppress one line with '# noqa: AUTHZ007'"
+)
+
 
 # ---------------------------------------------------------------------------
 # lint driver
@@ -1234,12 +1678,26 @@ def build_serializer_index(root: Path) -> dict:
     return index
 
 
-def lint_file(path: Path, serializer_index: Optional[dict] = None) -> list:
+def lint_file(
+    path: Path,
+    serializer_index: Optional[dict] = None,
+    authenticator_index: Optional[dict] = None,
+) -> list:
     src, tree = _parse(path)
     if tree is None:
         return []
     if serializer_index is None:
         serializer_index = _serializer_disclosures(tree)
+    if authenticator_index is None:
+        # A file linted alone is judged against its OWN declarations, the same
+        # fallback the serializer index takes. A settings module three
+        # directories away is invisible to a single-file run, by construction.
+        authenticator_index = {}
+        for name, module in _default_authenticator_declarations(tree):
+            authenticator_index.setdefault(name, set()).add(module)
+        _degrade_unresolvable(
+            authenticator_index, [str(path).replace(os.sep, "/")]
+        )
 
     lines = src.splitlines()
     helpers = _authz_helpers(tree)
@@ -1265,6 +1723,10 @@ def lint_file(path: Path, serializer_index: Optional[dict] = None) -> list:
                 func=func_name, perm=perm, mgr=mgr, fields=", ".join(fields),
             ),
         ))
+    for line, cls_name, what in _check_authz007(tree, path, authenticator_index, lines):
+        raw.append(Violation(
+            str(path), line, "AUTHZ007", _MSG_007.format(cls=cls_name, what=what),
+        ))
 
     violations = []
     for violation in raw:
@@ -1281,9 +1743,10 @@ def lint_project(project: Path, notes: Optional[list] = None) -> list:
     violations: list = []
     scanned = 0
     index = build_serializer_index(project)
+    authenticators = build_default_authenticator_index(project)
     for py in _walk_py(project):
         scanned += 1
-        violations.extend(lint_file(py, index))
+        violations.extend(lint_file(py, index, authenticators))
     if notes is not None:
         notes.append(f"stapel-authz-lint: {scanned} python file(s) scanned")
     violations.sort(key=lambda v: (v.path, v.line, v.rule))
@@ -1300,14 +1763,204 @@ def lint_paths(paths: Iterable) -> list:
             # AUTHZ006 needs the serializers that live NEXT TO the view, so a
             # single-file run indexes the file's own directory. Wider than the
             # module, narrower than the repo, and it makes `stapel-authz-lint
-            # views.py` behave the way the caller expects.
-            violations.extend(
-                lint_file(root, build_serializer_index(root.parent))
-            )
+            # views.py` behave the way the caller expects. AUTHZ007's index is
+            # built the same way, and finds a settings module only if it is in
+            # that same directory — a whole-project run is what that rule wants.
+            violations.extend(lint_file(
+                root,
+                build_serializer_index(root.parent),
+                build_default_authenticator_index(root.parent),
+            ))
         else:
             violations.extend(lint_project(root))
     violations.sort(key=lambda v: (v.path, v.line, v.rule))
     return violations
+
+
+
+# ---------------------------------------------------------------------------
+# AUTHZ007's runtime half — the one-line experiment
+# ---------------------------------------------------------------------------
+
+#: A syntactically valid JWS that no key of ours ever signed. "Unusable
+#: credential" in its most ordinary live form: a rotated secret, a truncated
+#: cookie value, or — the incident — a token whose ``exp`` has passed while the
+#: browser is still sending the cookie that carries it.
+GARBAGE_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjF9.not-a-signature"
+
+#: The cookie stapel's own JWT pair uses. Overridable, because a deployment may
+#: have renamed it (``JWT_COOKIE_NAME``).
+PROBE_COOKIE_NAME = "stapel_jwt"
+
+#: The endpoint the incident was about — a real path, so an authenticator that
+#: logs or branches on ``request.path`` behaves the way it does live.
+PROBE_PATH = "/auth/api/v1/token/refresh/"
+
+
+class ProbeError(RuntimeError):
+    """The probe could not be run at all (no Django, no settings, no classes).
+
+    Distinct from a finding on purpose: "the gate could not run" and "the gate
+    ran and passed" are different sentences, and a probe that conflated them
+    would be a green light nobody had earned.
+    """
+
+
+class ProbeRequest:
+    """A request carrying one garbage access cookie and nothing else.
+
+    Duck-typed rather than a real ``rest_framework.test.APIRequestFactory``
+    request, so the probe needs no Django settings of its own and cannot be
+    made to pass by a test harness's own middleware. It carries every attribute
+    a cookie/header authenticator in this fleet reads: ``COOKIES``, ``headers``,
+    ``META``, ``path``, ``method``.
+    """
+
+    def __init__(
+        self,
+        cookie_name: str = PROBE_COOKIE_NAME,
+        token: str = GARBAGE_TOKEN,
+        path: str = PROBE_PATH,
+    ) -> None:
+        self.COOKIES = {cookie_name: token}
+        self.headers = {"user-agent": "stapel-authz-probe"}
+        self.META = {
+            "REMOTE_ADDR": "127.0.0.1",
+            "HTTP_USER_AGENT": "stapel-authz-probe",
+            "HTTP_COOKIE": f"{cookie_name}={token}",
+        }
+        self.path = path
+        self.method = "POST"
+        self.GET = {}
+        self.POST = {}
+        self.data = {}
+        self.query_params = {}
+
+
+@dataclass
+class ProbeResult:
+    """One authenticator's answer to the garbage cookie.
+
+    ``outcome`` is one of:
+
+    * ``ok`` — returned ``None``. The contract.
+    * ``raised`` — ended the request. AUTHZ007, observed rather than inferred.
+    * ``returned`` — authenticated SOMEBODY off an unusable credential. Not the
+      rule this probe was written for, and far worse than it.
+    * ``inconclusive`` — the class could not be built or blew up on something
+      that is not an authentication verdict. Reported, never counted as a pass
+      and never counted as a failure.
+    """
+
+    name: str
+    outcome: str
+    detail: str = ""
+
+    @property
+    def failed(self) -> bool:
+        return self.outcome in ("raised", "returned")
+
+    def __str__(self) -> str:
+        return f"{self.name}: {self.outcome}" + (f" ({self.detail})" if self.detail else "")
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "outcome": self.outcome, "detail": self.detail}
+
+
+def _is_auth_failure(exc: BaseException) -> bool:
+    if type(exc).__name__ in AUTH_FAILURE_EXCEPTIONS:
+        return True
+    try:
+        from rest_framework.exceptions import APIException
+    except Exception:
+        return False
+    return isinstance(exc, APIException)
+
+
+def probe_authenticator(cls, request: Optional[ProbeRequest] = None) -> ProbeResult:
+    """Call ``cls().authenticate(request)`` with a garbage cookie and judge it."""
+    name = f"{getattr(cls, '__module__', '?')}.{getattr(cls, '__name__', cls)}"
+    if request is None:
+        request = ProbeRequest()
+    try:
+        instance = cls()
+    except Exception as exc:  # noqa: BLE001 - any construction failure is inconclusive
+        return ProbeResult(name, "inconclusive", f"could not instantiate: {exc!r}")
+    try:
+        result = instance.authenticate(request)
+    except Exception as exc:  # noqa: BLE001 - the outcome is what is being measured
+        if _is_auth_failure(exc):
+            return ProbeResult(name, "raised", f"{type(exc).__name__}: {exc}")
+        return ProbeResult(name, "inconclusive", f"{type(exc).__name__}: {exc}")
+    if result is None:
+        return ProbeResult(name, "ok")
+    return ProbeResult(name, "returned", f"authenticated {result!r} from a garbage token")
+
+
+def import_authenticator(dotted: str):
+    """Import ``package.module.Class`` the way DRF's ``perform_import`` does."""
+    import importlib
+
+    module_path, _, name = dotted.rpartition(".")
+    if not module_path:
+        raise ProbeError(f"{dotted!r} is not a dotted path to a class")
+    try:
+        return getattr(importlib.import_module(module_path), name)
+    except (ImportError, AttributeError) as exc:
+        raise ProbeError(f"could not import {dotted}: {exc}") from exc
+
+
+def resolve_default_authenticators(rest_framework: Optional[dict] = None) -> list:
+    """The classes THIS deployment actually runs before every view.
+
+    ``rest_framework=None`` reads Django's own settings, booting the app
+    registry if ``DJANGO_SETTINGS_MODULE`` says how. Passing the dict makes the
+    resolution testable without a Django at all.
+    """
+    if rest_framework is None:
+        try:
+            import django
+            from django.conf import settings
+        except ImportError as exc:  # pragma: no cover - django is a test dep here
+            raise ProbeError(f"django is not importable: {exc}") from exc
+        if not settings.configured:
+            raise ProbeError(
+                "no Django settings — set DJANGO_SETTINGS_MODULE (the probe "
+                "measures a CONFIGURED deployment, and there is nothing to "
+                "measure without one)"
+            )
+        try:
+            django.setup()
+        except Exception as exc:  # noqa: BLE001 - a boot failure is an environment error
+            raise ProbeError(f"django.setup() failed: {exc}") from exc
+        rest_framework = getattr(settings, "REST_FRAMEWORK", None) or {}
+    declared = rest_framework.get(DEFAULT_AUTHENTICATION_KEY) or []
+    if not declared:
+        raise ProbeError(
+            f"REST_FRAMEWORK[{DEFAULT_AUTHENTICATION_KEY!r}] is empty — nothing "
+            "runs before the view, so there is no contract to probe"
+        )
+    return [
+        import_authenticator(entry) if isinstance(entry, str) else entry
+        for entry in declared
+    ]
+
+
+def probe_default_authenticators(
+    rest_framework: Optional[dict] = None,
+    cookie_name: str = PROBE_COOKIE_NAME,
+) -> list:
+    """Every configured default authenticator, against one garbage cookie.
+
+    Fleet classes are probed too, not skipped: the assertion is a contract, the
+    fleet's own class is the one that defines it, and a chain is only as
+    correct as its worst member.
+    """
+    request = ProbeRequest(cookie_name=cookie_name)
+    return [
+        probe_authenticator(cls, request)
+        for cls in resolve_default_authenticators(rest_framework)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -1330,7 +1983,27 @@ def main(argv: Optional[list] = None) -> int:
         "--strict", action="store_true",
         help="Promote AUTHZ003 (explicit re-mint from token claims) to an error",
     )
+    parser.add_argument(
+        "--probe", action="store_true",
+        help=(
+            "AUTHZ007's runtime half: hand every configured default "
+            "authenticator a garbage access cookie and assert authenticate() "
+            "returns None. Needs DJANGO_SETTINGS_MODULE"
+        ),
+    )
+    parser.add_argument(
+        "--cookie-name", default=PROBE_COOKIE_NAME,
+        help=f"Cookie the probe puts the garbage token in (default: {PROBE_COOKIE_NAME})",
+    )
     args = parser.parse_args(argv)
+
+    probe_results: list = []
+    if args.probe:
+        try:
+            probe_results = probe_default_authenticators(cookie_name=args.cookie_name)
+        except ProbeError as exc:
+            print(f"stapel-authz-lint --probe: {exc}", file=sys.stderr)
+            return 2
 
     violations = lint_paths(args.paths)
     errors = [
@@ -1339,16 +2012,18 @@ def main(argv: Optional[list] = None) -> int:
     ]
     warnings = [v for v in violations if v not in errors]
 
+    probe_failures = [r for r in probe_results if r.failed]
+
     if args.json:
-        print(json.dumps(
-            {
-                "ok": not errors,
-                "errors": len(errors),
-                "warnings": len(warnings),
-                "violations": [v.to_dict() for v in violations],
-            },
-            indent=2, sort_keys=True, ensure_ascii=False,
-        ))
+        payload = {
+            "ok": not errors and not probe_failures,
+            "errors": len(errors),
+            "warnings": len(warnings),
+            "violations": [v.to_dict() for v in violations],
+        }
+        if args.probe:
+            payload["probe"] = [r.to_dict() for r in probe_results]
+        print(json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False))
     else:
         for violation in violations:
             print(violation)
@@ -1356,8 +2031,18 @@ def main(argv: Optional[list] = None) -> int:
             print(f"\n{len(errors)} error(s), {len(warnings)} warning(s) found.")
         else:
             print("No violations found.")
+        if args.probe:
+            print(f"\nAUTHZ007 probe ({args.cookie_name}=<garbage>):")
+            for result in probe_results:
+                print(f"  {result}")
+            if probe_failures:
+                print(
+                    f"\n{len(probe_failures)} authenticator(s) do not honour the "
+                    "contract: an unusable credential must be answered with None, "
+                    "not with a verdict."
+                )
 
-    return 1 if errors else 0
+    return 1 if errors or probe_failures else 0
 
 
 if __name__ == "__main__":
