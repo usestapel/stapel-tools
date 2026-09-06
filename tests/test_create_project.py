@@ -25,8 +25,13 @@ def _pip_entry(key: str) -> str:
 # stapel-gdpr declares DATA_OWNERS required (docs/capabilities.json
 # required_settings) and generation is refused without it: an app installed
 # with no data-owner inventory cannot pass its own boot check.
+# Owner NAMES, as the libraries declare them (stapel_core.gdpr.register_gdpr_owner
+# / OWNER / GDPRProvider.section) — not app labels. `profiles` and `cdn` are app
+# labels no library has ever answered to; the owners are `profile` and `media`,
+# and a host that lists the label instead is stapel-gdpr's gdpr.E009: the store
+# is inferred remote, never asked, and waits out OWNER_TIMEOUT_HOURS.
 GDPR_CONFIG = {"gdpr": {
-    "DATA_OWNERS": ["auth", "profiles"],
+    "DATA_OWNERS": {"auth": ["account"], "profile": ["account"]},
     "DATA_OWNERS_VERSION": "2026-01-01.1",
 }}
 
@@ -652,9 +657,12 @@ class TestModuleConfig:
             # A real axis from stapel-gdpr's capabilities.json — the module
             # gained one (2026-07-19), so unknown keys now fail the seam.
             "gdpr": {
-                "REMOTE_DELETION_SERVICES": ["profiles"],
+                # Folded into DATA_OWNERS as a `remote` owner claiming
+                # `account`, so it is an owner NAME too — a store in another
+                # deployment, never a local library's app label.
+                "REMOTE_DELETION_SERVICES": ["warehouse"],
                 # Required by the module (capabilities.json required_settings).
-                "DATA_OWNERS": ["auth", "profiles"],
+                "DATA_OWNERS": {"auth": ["account"], "profile": ["account"]},
                 "DATA_OWNERS_VERSION": "2026-01-01.1",
             },
             "auth": {"AUTH_PASSWORD_LOGIN": True},

@@ -281,12 +281,74 @@ def test_rule3_response_code_removed():
     assert "401" in changes[0].detail
 
 
-def test_rule4_auth_contract_changed():
+def test_rule4_auth_contract_narrowed_by_swapping_the_scheme():
+    """cookie -> bearer: the alternative a caller holds is gone, so it breaks."""
     after = json.loads(json.dumps(BASE))
     after["paths"]["/auth/api/v1/login"]["post"]["security"] = [{"bearerAuth": []}]
     changes = api_lint.classify_schema_diff(BASE, after)
     assert kinds(changes) == ["security"]
     assert "cookieAuth -> bearerAuth" in changes[0].detail
+    assert "is now refused" in changes[0].detail
+
+
+def test_rule4_an_alternative_credential_added_is_additive():
+    """stapel-gdpr 0.5.5's shape: the closure endpoints kept the cookie and
+    gained the X-Closure-Token header beside it, because the closure revokes
+    the session that made the call. Nothing that worked stopped working, so
+    demanding a v2 and an UPGRADE.json record for it is the gate crying wolf."""
+    after = json.loads(json.dumps(BASE))
+    after["paths"]["/auth/api/v1/login"]["post"]["security"] = [
+        {"cookieAuth": []}, {"closureToken": []},
+    ]
+    assert api_lint.classify_schema_diff(BASE, after) == []
+
+
+def test_rule4_anonymous_added_beside_a_credential_is_additive():
+    """The literal 0.5.5 diff drf-spectacular emits: `JWTCookieAuth` ->
+    `anonymous | JWTCookieAuth`, the empty alternative first."""
+    after = json.loads(json.dumps(BASE))
+    after["paths"]["/auth/api/v1/login"]["post"]["security"] = [
+        {}, {"cookieAuth": []},
+    ]
+    assert api_lint.classify_schema_diff(BASE, after) == []
+
+
+def test_rule4_dropping_one_of_two_alternatives_is_breaking():
+    """The other direction of the same edit — and the one the equality check
+    would have gone on catching, which is why this pair is asserted together."""
+    before = json.loads(json.dumps(BASE))
+    before["paths"]["/auth/api/v1/login"]["post"]["security"] = [
+        {"cookieAuth": []}, {"closureToken": []},
+    ]
+    after = json.loads(json.dumps(BASE))
+    after["paths"]["/auth/api/v1/login"]["post"]["security"] = [{"cookieAuth": []}]
+    changes = api_lint.classify_schema_diff(before, after)
+    assert kinds(changes) == ["security"]
+    assert "closureToken" in changes[0].detail
+
+
+def test_rule4_adding_a_second_required_scheme_to_an_alternative_is_breaking():
+    """Widening the LIST widens; widening one ALTERNATIVE narrows it — the
+    schemes inside an entry are AND-ed, so a caller with only the cookie can
+    no longer satisfy it."""
+    after = json.loads(json.dumps(BASE))
+    after["paths"]["/auth/api/v1/login"]["post"]["security"] = [
+        {"cookieAuth": [], "mfaAuth": []},
+    ]
+    changes = api_lint.classify_schema_diff(BASE, after)
+    assert kinds(changes) == ["security"]
+
+
+def test_rule4_dropping_anonymous_access_is_breaking():
+    before = json.loads(json.dumps(BASE))
+    before["paths"]["/auth/api/v1/login"]["post"]["security"] = [
+        {}, {"cookieAuth": []},
+    ]
+    after = json.loads(json.dumps(BASE))
+    after["paths"]["/auth/api/v1/login"]["post"]["security"] = [{"cookieAuth": []}]
+    changes = api_lint.classify_schema_diff(before, after)
+    assert kinds(changes) == ["security"]
+    assert "anonymous" in changes[0].detail
 
 
 def test_rule5_enum_value_removed_is_always_breaking():

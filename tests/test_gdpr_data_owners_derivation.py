@@ -10,26 +10,37 @@ task stopped: it calls ``assemble_scaffold(..., config=None)`` and has no map
 to hand over.
 
 The map was never the caller's to supply. Every participating library
-publishes its own owner name and subject types, in two shapes that are both
-read here — the erasure-request contract (ADO005's detection, imported, not
-forked) and the in-process ``GDPRProvider``. What cannot be read is a hard
+publishes its own owner name and subject types, in the three shapes
+:mod:`stapel_gdpr.declarations` reads — the canonical
+``register_gdpr_owner``, the in-process ``GDPRProvider.section``, and the
+static ``OWNER``/``SUBJECT_TYPES`` constants. What cannot be read is a hard
 failure naming the library: a guessed owner is a store nobody asks and nobody
 waits for, which is silent retention with a receipt that says DELETED.
+
+And the last class here is the one that decides whether any of the above is
+true: a generated project is booted and graded by stapel-gdpr's OWN
+``gdpr.E009``/``gdpr.E010``, the checks written for the 2026-09-07 fleet
+incident. Reading "the same seams" is a claim about two files; running the
+checks over the emitted map is the only thing that can refute it.
 """
 import json
 import re
+import subprocess
+import sys
 from datetime import date
 
 import pytest
 from siblings import requires
 
 from stapel_tools._gdpr_owners import (
+    _seams,
     data_owners_version,
     derivation_table,
     derive_data_owners,
     inject_derived_data_owners,
     owner_declarations,
     read_owner_declaration,
+    read_owner_declarations,
 )
 from stapel_tools._module_config import render_settings_block
 from stapel_tools.adoption_lint import read_gdpr_owner
@@ -38,6 +49,11 @@ from stapel_tools.create_project import create_project
 from stapel_tools.new_service import scaffold_service
 
 ERASURE_SCHEMA = json.dumps({"type": "object"})
+
+#: The seam vocabulary the generator reads WITH — stapel-gdpr's own when it is
+#: installed. Asserting `via` against this rather than against a string of this
+#: suite's own is the point: the label is the library's, not ours.
+SEAMS = _seams()
 
 
 def _lib(root, name):
@@ -110,18 +126,92 @@ class TestOneLibrary:
     def test_the_erasure_contract_carries_the_name_and_the_subjects(self, workspace):
         decl = read_owner_declaration("vaults", workspace)
         assert (decl.owner, decl.subject_types) == ("vaults", ("account", "vault"))
-        assert decl.via == "erasure protocol"
+        assert decl.via == SEAMS.constant
 
     def test_an_in_process_provider_owns_the_account(self, workspace):
         """A registered GDPRProvider predates entity subjects — it erases the
         account, and gdpr.E002 fires if it is absent from the map."""
         decl = read_owner_declaration("ledger", workspace)
         assert (decl.owner, decl.subject_types) == ("ledger", ("account",))
-        assert decl.via == "in-process provider"
+        assert decl.via == SEAMS.provider
 
     def test_the_owner_name_is_the_library_s_own_not_the_package_name(self, workspace):
         assert read_owner_declaration("blobstore", workspace).owner == "blobs"
         assert read_owner_declaration("atlas", workspace).owner == "cartography"
+
+    def test_all_three_seams_of_one_library_are_one_owner(self, workspace):
+        """A modern library is sighted three times over — canonical
+        registration, provider, constants — and that is agreement. The seam
+        recorded is the most authoritative one; the subject types come from
+        whichever sighting carries them."""
+        d = _lib(workspace, "beacon")
+        (d / "erasure.py").write_text(
+            "OWNER = 'beacon'\nSUBJECT_TYPES = ('account', 'signal')\n"
+        )
+        (d / "gdpr.py").write_text(
+            "from stapel_core.gdpr import GDPRProvider\n\n\n"
+            "class BeaconGDPRProvider(GDPRProvider):\n    section = 'beacon'\n"
+        )
+        (d / "apps.py").write_text(
+            "from stapel_core.gdpr import gdpr_registry, register_gdpr_owner\n"
+            "from .erasure import OWNER, SUBJECT_TYPES, erase_subject\n"
+            "from .gdpr import BeaconGDPRProvider\n"
+            "gdpr_registry.register(BeaconGDPRProvider())\n"
+            "register_gdpr_owner(OWNER, SUBJECT_TYPES, erase_subject)\n"
+        )
+        declarations = read_owner_declarations("beacon", workspace)
+        assert [d.owner for d in declarations] == ["beacon"]
+        assert declarations[0].subject_types == ("account", "signal")
+        assert declarations[0].via == SEAMS.registration
+
+    def test_the_static_constants_are_read_without_the_consume_contract(
+        self, workspace
+    ):
+        """stapel_gdpr.declarations reads OWNER/SUBJECT_TYPES off the installed
+        package whether or not it also ships
+        schemas/consumes/gdpr.erasure.requested.json. This reader used to
+        require that file first, so a library without it kept its name (from
+        the provider) and silently lost its subject types — gdpr.W012, emitted
+        by the generator."""
+        d = _lib(workspace, "sonar")
+        (d / "erasure.py").write_text(
+            "GDPR_OWNER = 'sonar'\nGDPR_SUBJECT_TYPES = ('account', 'ping')\n"
+        )
+        assert not (d / "schemas").exists()
+        decl = read_owner_declaration("sonar", workspace)
+        assert (decl.owner, decl.subject_types) == ("sonar", ("account", "ping"))
+        assert decl.via == SEAMS.constant
+
+    def test_a_library_whose_seams_name_two_owners_declares_both(self, workspace):
+        """What the boot checks see is what must be listed: an unlisted second
+        name is gdpr.E010, a store nothing is ever asked to erase."""
+        d = _lib(workspace, "janus")
+        (d / "erasure.py").write_text("OWNER = 'janus'\nSUBJECT_TYPES = ('account',)\n")
+        (d / "gdpr.py").write_text(
+            "from stapel_core.gdpr import GDPRProvider\n\n\n"
+            "class JanusGDPRProvider(GDPRProvider):\n    section = 'janus_legacy'\n"
+        )
+        (d / "apps.py").write_text(
+            "from stapel_core.gdpr import gdpr_registry\n"
+            "from .gdpr import JanusGDPRProvider\n"
+            "gdpr_registry.register(JanusGDPRProvider())\n"
+        )
+        assert [x.owner for x in read_owner_declarations("janus", workspace)] == [
+            "janus", "janus_legacy",
+        ]
+
+    def test_the_canonical_registration_alone_is_participation(self, workspace):
+        """A library on `register_gdpr_owner` with literal arguments and no
+        constants at all: invisible to a reader that only knew the older two
+        seams, which is gdpr.E010 in the generated project."""
+        d = _lib(workspace, "pulsar")
+        (d / "apps.py").write_text(
+            "from stapel_core.gdpr import register_gdpr_owner\n"
+            "register_gdpr_owner('pulsar', ('account', 'beam'), erase_subject)\n"
+        )
+        decl = read_owner_declaration("pulsar", workspace)
+        assert (decl.owner, decl.subject_types) == ("pulsar", ("account", "beam"))
+        assert decl.via == SEAMS.registration
 
     def test_a_library_that_holds_no_personal_data_is_not_an_owner(self, workspace):
         assert read_owner_declaration("widgets", workspace) is None
@@ -214,7 +304,7 @@ class TestDerivedMap:
     def test_the_derivation_table_says_where_every_name_came_from(self, workspace):
         table = derivation_table(owner_declarations(["vaults", "ledger"], workspace))
         assert "vaults" in table and "stapel-vaults/erasure.py" in table
-        assert "ledger" in table and "in-process provider" in table
+        assert "ledger" in table and SEAMS.provider in table
 
 
 class TestInjection:
@@ -354,3 +444,103 @@ class TestAgainstTheRealFleet:
         assert "'auth': ['account']" in settings
         assert "'chat': ['account']" in settings
         assert "'profile'" not in settings, "stapel_profiles is not in this service"
+
+
+# ---------------------------------------------------------------------------
+# ...and stapel-gdpr's own checks grade the result
+# ---------------------------------------------------------------------------
+
+#: Booted inside the generated project. Reads the map the generator emitted and
+#: runs the two errors that fire on an inventory the installed libraries
+#: disagree with — `gdpr.E009` (a name nothing declares) and `gdpr.E010` (a
+#: declared owner the host never lists). Both were written for the 2026-09-07
+#: fleet incident and neither existed when this derivation did.
+_GRADE_THE_INVENTORY = """
+import json, os, sys
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+import django
+django.setup()
+from django.conf import settings
+from stapel_gdpr.checks import check_data_owner_names
+from stapel_gdpr.declarations import installed_owner_declarations
+
+payload = {
+    "map": settings.STAPEL_GDPR["DATA_OWNERS"],
+    "declared": sorted(installed_owner_declarations()),
+    "problems": [[p.id, p.msg] for p in check_data_owner_names(None)],
+}
+sys.stdout.write("PARITY " + json.dumps(payload))
+"""
+
+#: The same, with the map replaced by the shape the fleet was actually
+#: deployed with — app labels in a flat list. If this does NOT produce
+#: gdpr.E009, the check is not running and the assertion above proves nothing.
+_GRADE_THE_OLD_SHAPE = _GRADE_THE_INVENTORY.replace(
+    "from stapel_gdpr.checks import check_data_owner_names",
+    'settings.STAPEL_GDPR["DATA_OWNERS"] = ["auth", "profiles"]\n'
+    "from stapel_gdpr.checks import check_data_owner_names",
+)
+
+
+def _grade(project_dir, script):
+    """Boot the generated project and return its check report."""
+    import os as _os
+
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=project_dir, capture_output=True, text=True,
+        env={**_os.environ, "DJANGO_SETTINGS_MODULE": "config.settings"},
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    marker = "PARITY "
+    assert marker in result.stdout, result.stdout + result.stderr
+    return json.loads(result.stdout.split(marker, 1)[1])
+
+
+class TestTheLibrariesGradeTheGeneratedInventory:
+    """The parity gate: the generator's map, judged by the checks that read
+    the installed libraries at boot.
+
+    Not a skipif — every sibling here is declared in the `test` extra, and
+    `stapel-gdpr>=0.5.4` is the floor that carries `stapel_gdpr.declarations`
+    and these two check ids. On a runner without them the subprocess fails
+    loudly rather than the test passing quietly.
+    """
+
+    @requires("stapel_core", "stapel_gdpr", "stapel_auth", "stapel_profiles",
+              "stapel_cdn", "stapel_chat")
+    def test_the_generated_map_raises_no_e009_and_no_e010(self, tmp_path):
+        result = assemble_scaffold(
+            "graded", libs=FLEET_LIBS, output_dir=tmp_path, verify=False
+        )
+        report = _grade(result.project_dir, _GRADE_THE_INVENTORY)
+        assert [p[0] for p in report["problems"]] == [], report["problems"]
+        # …and the grading was real: every library that declares an owner is
+        # visible to the checks, and the emitted map is exactly that set.
+        assert report["declared"], "no owner library visible — nothing was graded"
+        assert sorted(report["map"]) == report["declared"]
+
+    @requires("stapel_core", "stapel_gdpr", "stapel_auth", "stapel_profiles",
+              "stapel_cdn", "stapel_chat")
+    def test_the_shape_this_replaces_still_fails_the_same_checks(self, tmp_path):
+        """The gate has to bite. `["auth", "profiles"]` is what the fleet ran:
+        an app label nothing declares (gdpr.E009 -> "profile") and two stores
+        the inventory never names at all (gdpr.E010)."""
+        result = assemble_scaffold(
+            "ungraded", libs=FLEET_LIBS, output_dir=tmp_path, verify=False
+        )
+        report = _grade(result.project_dir, _GRADE_THE_OLD_SHAPE)
+        ids = {p[0] for p in report["problems"]}
+        assert "gdpr.E009" in ids and "gdpr.E010" in ids, report["problems"]
+        e009 = next(msg for pid, msg in report["problems"] if pid == "gdpr.E009")
+        assert '"profiles" -> "profile"' in e009
+
+    @requires("stapel_core", "stapel_gdpr", "stapel_auth", "stapel_profiles",
+              "stapel_cdn", "stapel_chat")
+    def test_every_name_the_generator_emits_is_one_a_library_declares(self):
+        """Names, straight from the two readers, with no project in between —
+        `_gdpr_owners` reads the source tree, `stapel_gdpr.declarations` reads
+        the seam vocabulary. The app labels are what must NOT appear."""
+        derived = derive_data_owners(FLEET_LIBS)
+        assert {"profiles", "cdn"}.isdisjoint(derived), derived
+        assert {"profile", "media", "auth", "chat"} <= set(derived), derived

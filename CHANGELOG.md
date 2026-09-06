@@ -1,5 +1,100 @@
 # Changelog
 
+## 0.64.1 — 2026-09-07
+
+### The generated `DATA_OWNERS` map is read from the seams stapel-gdpr reads
+
+stapel-gdpr 0.5.4 added `stapel_gdpr.declarations` and two checks —
+`gdpr.E009` (the host names a data owner no installed library declares) and
+`gdpr.E010` (a library declares an owner the host never lists) — written for
+a fleet deployment found listing `profiles` and `cdn`, app labels no library
+has ever answered to (the owners are `profile` and `media`), and omitting
+`video` and `agent` outright. The two typo'd names were inferred *remote*,
+waited out `OWNER_TIMEOUT_HOURS` and timed out; the omitted two got no
+receipt slot at all, so the request had nothing left to wait for and reported
+itself complete. Every erasure in that deployment was wrong the same way for
+months, and only an external audit ever said so.
+
+`stapel_tools/_gdpr_owners.py` derives the map a generated project boots
+with, so it is graded by exactly those checks — and it kept a reader of its
+own. It now reads the same three seams, in stapel-gdpr's order of authority,
+and takes the seam *vocabulary* (which submodules carry a declaration, under
+which constant names, in which order of specificity) from
+`stapel_gdpr.declarations` itself when stapel-gdpr is installed, falling back
+to a copy pinned at the 0.5.4 floor when it is not (a project that selected
+no gdpr host, where no map is emitted anyway).
+
+Three concrete gaps closed, each of them a finding the generator would have
+emitted into the project it generated:
+
+* **`register_gdpr_owner` was not read at all.** The canonical seam — the one
+  `stapel_gdpr.declarations` reads first — was invisible here, so a library
+  that declares itself only in `AppConfig.ready()` was left out of the map:
+  `gdpr.E010`, a store nothing is ever asked to erase.
+* **The static constants were gated on the erasure consume-contract.** This
+  reader demanded `schemas/consumes/gdpr.erasure.requested.json` before
+  reading `OWNER`/`SUBJECT_TYPES`; stapel-gdpr reads them off the installed
+  package regardless. A library carrying the constants without that file kept
+  its name (from its provider) and silently lost its real subject types:
+  `gdpr.W012`, subjects the owner can erase and the host never asks about.
+* **A provider's `subject_types` were discarded**, and the constant-name
+  precedence was reversed (`OWNER` before `GDPR_OWNER`, where stapel-gdpr
+  orders `GDPR_OWNER` first) — a library declaring both would have been named
+  one way by the generator and another by the check that grades it.
+
+Seams are merged the way stapel-gdpr merges them: the first sighting names
+the owner and its seam, subject types fill in from whichever sighting carries
+them. Three sightings of one owner is the normal shape of a modern library,
+not a conflict. New `read_owner_declarations()` (plural) returns every owner
+a library declares, because a library whose provider `section` and `OWNER`
+constant disagree really does declare two, and listing one of them is
+`gdpr.E010`. `OwnerDeclaration.via` now carries stapel-gdpr's own seam labels
+(`register_gdpr_owner` / `GDPRProvider.section` / `module constant`) rather
+than this package's private names, and the derivation table prints them.
+
+**The parity gate.** `TestTheLibrariesGradeTheGeneratedInventory` generates a
+project for the fleet-like selection, boots it, and runs stapel-gdpr's own
+`check_data_owner_names` over the map the generator emitted: no `gdpr.E009`,
+no `gdpr.E010`, and the emitted names are exactly the set the installed
+libraries declare. Its twin re-runs the same check with the shape the fleet
+actually deployed (`["auth", "profiles"]`) and asserts it still produces
+`gdpr.E009` (`"profiles" -> "profile"`) and `gdpr.E010` — a parity assertion
+whose check does not fire is a parity assertion that proves nothing. Fixtures
+and goldens across the suite that hand-supplied `DATA_OWNERS` moved off the
+app labels to the names the libraries declare.
+
+Floor raised: `stapel-gdpr>=0.5.4` in the `test` extra, the version that
+carries `stapel_gdpr.declarations` and the two check ids.
+
+### `stapel-api-lint` rule 4 gains a direction — an added credential is not a break
+
+`classify_schema_diff` compared an operation's `security` list for plain
+equality. But the entries of that list are ALTERNATIVES (OR-ed), so the
+change has a direction, exactly as rule 2 already has one for a
+required-status flip:
+
+* an alternative **removed** breaks — a caller holding that credential is now
+  refused;
+* an alternative **added** is additive — one more way in, none taken away.
+
+stapel-gdpr 0.5.5 is the case that surfaced it. Closing an account revokes
+the session that made the call, so the grace-period status and cancel
+endpoints grew an *alternative* credential beside the cookie (an
+`X-Closure-Token` header): `JWTCookieAuth` -> `anonymous | JWTCookieAuth`.
+Nothing that worked stopped working, and api-lint reported two breaking
+changes with the API001/API002 remedy — a v2 mounted beside the frozen v1 and
+an `UPGRADE.json` codemod record — for a strict widening. A gate that demands
+a version story for a widening is a gate that gets routed around, and the
+narrowings then go through with it.
+
+The finding now reads "auth contract narrowed" and names the alternative a
+caller can no longer satisfy. Still breaking, and tested in both directions:
+swapping the scheme (cookie -> bearer), dropping one of two alternatives,
+dropping anonymous access, and adding a second AND-ed scheme *inside* an
+alternative (which widens the entry and therefore narrows the alternative).
+Verified against `stapel-gdpr` v0.5.4 -> v0.5.5: two API001 findings plus
+API002 before, clean after, with the SIB/SWAP/SUR baseline unchanged.
+
 ## 0.64.0 — 2026-09-07
 
 ### A shared `# noqa` grammar, and `stapel-escape-lint` (ESC001/ESC002) — an escape that suppresses nothing

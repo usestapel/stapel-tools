@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.64.0"
+version = "0.64.1"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -52,7 +52,11 @@ test = [
     # interpreter imports the libs the project selected. No AST here can see
     # that, hence the suppression and this reason.
     "stapel-auth>=0.28.0,<1",   # noqa: SIB005 - imported by the generated project under test
-    "stapel-gdpr>=0.5.0,<1",    # noqa: SIB005 - imported by the generated project under test
+    # 0.5.4 is the floor, not a preference: it adds `stapel_gdpr.declarations`
+    # (the seam vocabulary `_gdpr_owners` reads WITH, rather than keeping a
+    # second copy of) and the two checks that grade the emitted inventory,
+    # `gdpr.E009`/`gdpr.E010`. Below it the parity test has nothing to run.
+    "stapel-gdpr>=0.5.4,<1",    # noqa: SIB005 - imported by the generated project under test
     "stapel-profiles>=0.16.0,<1",
     # The gdpr derivation's fleet test covers BOTH participation shapes, and
     # chat is the only in-process `GDPRProvider` in the selection. Undeclared,

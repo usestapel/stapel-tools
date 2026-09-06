@@ -23,27 +23,46 @@ still on disk. Silent retention, with a receipt saying otherwise. That is why
 an unreadable declaration is a hard generation failure below, and never a
 guessed name or an example placeholder.
 
-Two ways a library participates, both read from the library itself
+The three seams, and why they are read from stapel-gdpr's own list
 ------------------------------------------------------------------
-1. The erasure-request protocol (0.5.0+): the library ships
-   ``schemas/consumes/gdpr.erasure.requested.json`` and declares
-   ``OWNER``/``SUBJECT_TYPES`` (or ``GDPR_OWNER``/``GDPR_SUBJECT_TYPES``) in
-   its ``erasure.py``/``gdpr.py``. This is exactly ADO005's detection, and it
-   is IMPORTED from :mod:`stapel_tools.adoption_lint` rather than reimplemented
-   — one reader, so the linter and the generator can never disagree about who
-   an owner is.
-2. The in-process ``GDPRProvider`` (the older half, still live in most libs):
-   the library's ``apps.py`` calls ``gdpr_registry.register(XGDPRProvider())``
-   and the class carries a ``section``. stapel-gdpr's own ``gdpr.E002`` fires
-   on a registered provider that is absent from ``DATA_OWNERS``, so leaving
-   these out would produce a project that fails ``manage.py check`` just as
-   surely as an empty map — the second half of "dead on arrival", in a
-   different check id. A provider registers ``account`` data by construction,
-   so its subject list is ``["account"]`` unless (1) says otherwise.
+A generated project's map is graded by the very checks that read the
+libraries at boot — ``gdpr.E009`` (the host names an owner nothing declares),
+``gdpr.E010`` (a library declares an owner the host never lists), ``gdpr.W012``
+(a subject the owner erases and the host never names). So this module reads
+exactly what :mod:`stapel_gdpr.declarations` reads, in the same order of
+authority, and takes the *vocabulary* of the seams — which submodules carry a
+declaration, under which constant names — from that module when stapel-gdpr is
+installed (see :func:`_seams`). A reader with a list of its own is a reader
+that drifts, and the 2026-09-07 fleet incident is what drift costs: a
+deployment listing ``profiles`` and ``cdn`` (no library has ever declared
+either; the names are ``profile`` and ``media``) and omitting ``video`` and
+``agent`` outright, every erasure wrong the same way for months.
 
-Where both apply, (1) wins: it carries the real subject types, and the two
-declarations agree on the name by design (``stapel-cdn`` answers to ``media``
-in both, ``stapel-profiles`` to ``profile``).
+1. ``stapel_core.gdpr.register_gdpr_owner(OWNER, SUBJECT_TYPES, erase)`` in the
+   library's ``AppConfig.ready()`` — the canonical seam, the only one that
+   carries the name AND the subject types AND proof the erasure path is
+   subscribed.
+2. ``GDPRProvider.section`` registered into ``gdpr_registry`` from ``apps.py``
+   — a name, and subject types only when the class spells them out.
+   stapel-gdpr's ``gdpr.E002`` fires on a registered provider absent from
+   ``DATA_OWNERS``, so omitting these produces a project that fails
+   ``manage.py check`` just as surely as an empty map. A bare provider erases
+   the account by construction, so its subject list is ``["account"]``.
+3. Module constants ``OWNER``/``GDPR_OWNER`` and
+   ``SUBJECT_TYPES``/``GDPR_SUBJECT_TYPES`` in ``erasure.py``/``gdpr.py`` — a
+   static fact of the package, true whether or not ``ready()`` ran. Read
+   UNGATED, exactly as stapel-gdpr reads it: before 0.64.1 this reader first
+   demanded ``schemas/consumes/gdpr.erasure.requested.json`` (ADO005's
+   detection), so a library carrying the constants without that contract fell
+   through to seam 2 and lost its real subject types — ``gdpr.W012``, from
+   the generator.
+
+Seams are merged the way stapel-gdpr merges them (:func:`_merge_declaration`):
+the first sighting names the owner and its seam, and subject types are filled
+in from whichever sighting actually carries them. Three sightings of one owner
+is the normal case for a modern library, not a conflict — and a library whose
+seams name two DIFFERENT owners really does declare two, which is what the
+boot checks see, so both are listed.
 """
 from __future__ import annotations
 
@@ -56,9 +75,9 @@ from .adoption_lint import (
     GDPR_CONSUMES_ERASURE,
     GDPR_DECL_FILES,
     _resolve_str,
+    _resolve_str_seq,
     _string_env,
     locate_module_dir,
-    read_gdpr_owner,
 )
 
 #: The module that HOSTS the registry — it declares no store of its own, and
@@ -73,12 +92,68 @@ GDPR_REGISTRY_NAME = "gdpr_registry"
 #: subject that existed before the erasure protocol grew entity types.
 SUBJECT_ACCOUNT = "account"
 
+#: The canonical registration call, read out of a library's ``apps.py``.
+REGISTER_OWNER_FUNC = "register_gdpr_owner"
+
+
+@dataclass(frozen=True)
+class _Seams:
+    """The seam vocabulary — stapel-gdpr's when it is installed, else a copy.
+
+    Every field mirrors a module-level constant of
+    :mod:`stapel_gdpr.declarations`. Two readers with two hand-maintained
+    copies of this list is exactly how a host inventory and the libraries it
+    certifies drift apart, so the copy below exists only for the case
+    stapel-gdpr is NOT installed — a project that selected no gdpr host, where
+    no ``DATA_OWNERS`` is emitted at all — and is pinned to what
+    ``stapel-gdpr>=0.5.4`` declares.
+    """
+
+    #: ``via`` labels, and the strings ``derivation_table`` prints.
+    registration: str = "register_gdpr_owner"
+    provider: str = "GDPRProvider.section"
+    constant: str = "module constant"
+    #: Owner-name constants, most specific first.
+    owner_attrs: tuple[str, ...] = ("GDPR_OWNER", "OWNER")
+    #: Subject-type constants, most specific first.
+    subject_attrs: tuple[str, ...] = ("GDPR_SUBJECT_TYPES", "SUBJECT_TYPES")
+    #: Submodules that may carry the static declaration, as file names.
+    decl_files: tuple[str, ...] = GDPR_DECL_FILES
+    #: True when the vocabulary came from the installed stapel-gdpr.
+    from_library: bool = False
+
+
+def _seams() -> _Seams:
+    """stapel-gdpr's own seam vocabulary, or the pinned fallback.
+
+    Imported, never re-derived: ``_OWNER_ATTRS``/``_SUBJECT_ATTRS`` are ordered
+    by specificity (``GDPR_OWNER`` beats ``OWNER``) and a reader that reversed
+    that order would name a library differently from the check that grades it.
+    """
+    try:
+        from stapel_gdpr import declarations as gdpr_declarations
+    except Exception:  # stapel-gdpr absent: no host, so no map to emit anyway
+        return _Seams()
+    try:
+        return _Seams(
+            registration=gdpr_declarations.SEAM_REGISTRATION,
+            provider=gdpr_declarations.SEAM_PROVIDER,
+            constant=gdpr_declarations.SEAM_CONSTANT,
+            owner_attrs=tuple(gdpr_declarations._OWNER_ATTRS),
+            subject_attrs=tuple(gdpr_declarations._SUBJECT_ATTRS),
+            decl_files=tuple(f"{name}.py" for name in gdpr_declarations._ERASURE_MODULES),
+            from_library=True,
+        )
+    except AttributeError:  # an older stapel-gdpr than the declared floor
+        return _Seams()
+
 
 @dataclass(frozen=True)
 class OwnerDeclaration:
     """One selected library's answer to "what do you own, and under what name".
 
-    ``via`` records WHICH declaration was read, so the derivation table the
+    ``via`` records WHICH seam was read — the same label
+    :mod:`stapel_gdpr.declarations` uses — so the derivation table the
     generator prints can be checked against the library by hand.
     """
 
@@ -111,36 +186,121 @@ def _module_dir(module: str, workspace_root: Path | None) -> Path | None:
     )
 
 
-def _decl_trees(mod_dir: Path) -> dict[str, ast.AST]:
-    """Parsed ``erasure.py``/``gdpr.py`` — the two files a declaration lives in."""
+def _parse(path: Path) -> ast.AST | None:
+    """Parsed source, or None when the file is absent or unreadable."""
+    if not path.is_file():
+        return None
+    try:
+        return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return None
+
+
+def _decl_trees(mod_dir: Path, seams: _Seams) -> dict[str, ast.AST]:
+    """Parsed ``erasure.py``/``gdpr.py`` — the submodules stapel-gdpr imports
+    when it looks for the static declaration, in the same order."""
     trees: dict[str, ast.AST] = {}
-    for fname in GDPR_DECL_FILES:
-        path = mod_dir / fname
-        if not path.is_file():
-            continue
-        try:
-            trees[fname] = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except (OSError, SyntaxError, UnicodeDecodeError):
-            continue
+    for fname in seams.decl_files:
+        tree = _parse(mod_dir / fname)
+        if tree is not None:
+            trees[fname] = tree
     return trees
 
 
-def _registered_provider_classes(mod_dir: Path) -> set[str]:
+def _string_environment(trees: list[ast.AST]) -> tuple[dict[str, str], dict[str, str]]:
+    """Module constants and class attributes across *trees*, first binding wins.
+
+    Enough to resolve the indirections real owner libraries use:
+    ``OWNER = AgentGDPRProvider.section`` (agent, billing) and
+    ``register_gdpr_owner(OWNER, SUBJECT_TYPES, ...)`` in ``apps.py``, whose
+    two names are imported from ``erasure.py`` next door.
+    """
+    consts: dict[str, str] = {}
+    attrs: dict[str, str] = {}
+    for tree in trees:
+        tree_consts, tree_attrs = _string_env(tree)
+        for key, value in tree_consts.items():
+            consts.setdefault(key, value)
+        for key, value in tree_attrs.items():
+            attrs.setdefault(key, value)
+    return consts, attrs
+
+
+def _merge_declaration(found: dict[str, OwnerDeclaration], decl: OwnerDeclaration) -> None:
+    """stapel-gdpr's ``declarations._merge``, on the static reading.
+
+    The first sighting names the owner and the seam it is on; subject types
+    and the source file are filled in from whichever sighting carries them. A
+    modern library is seen three times over — canonical registration, provider,
+    constants — and that is agreement, not conflict.
+    """
+    existing = found.get(decl.owner)
+    if existing is None:
+        found[decl.owner] = decl
+        return
+    found[decl.owner] = OwnerDeclaration(
+        module=existing.module,
+        owner=existing.owner,
+        subject_types=existing.subject_types or decl.subject_types,
+        via=existing.via,
+        decl=existing.decl or decl.decl,
+    )
+
+
+def _from_registration(
+    module: str,
+    apps_tree: ast.AST | None,
+    seams: _Seams,
+    consts: dict[str, str],
+    attrs: dict[str, str],
+    found: dict[str, OwnerDeclaration],
+) -> bool:
+    """Seam 1 — ``register_gdpr_owner(OWNER, SUBJECT_TYPES, erase)``.
+
+    Returns whether the call is there AT ALL, which is the difference between
+    "this library does not use the canonical seam" and "it does, and the name
+    it passes cannot be read here" — the second is a refusal, never a guess.
+    """
+    if apps_tree is None:
+        return False
+    called = False
+    for node in ast.walk(apps_tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        func = node.func
+        if isinstance(func, ast.Attribute):
+            name = func.attr
+        elif isinstance(func, ast.Name):
+            name = func.id
+        else:
+            continue
+        if name != REGISTER_OWNER_FUNC:
+            continue
+        called = True
+        owner = _resolve_str(node.args[0], consts, attrs)
+        if not owner:
+            continue
+        subjects = (
+            _resolve_str_seq(node.args[1], consts, attrs) if len(node.args) > 1 else ()
+        )
+        _merge_declaration(found, OwnerDeclaration(
+            module=module, owner=owner, subject_types=subjects,
+            via=seams.registration, decl="apps.py",
+        ))
+    return called
+
+
+def _registered_provider_classes(mod_dir: Path, apps_tree: ast.AST | None) -> set[str]:
     """Class names this library registers into the in-process gdpr registry.
 
     Only a name the library itself defines counts. ``stapel_gdpr`` registers
     ``provider_cls()`` — a variable holding whatever ``GDPR_PROVIDERS`` named —
     which resolves to no class here, which is correct: the host owns no store.
     """
-    path = mod_dir / "apps.py"
-    if not path.is_file():
-        return set()
-    try:
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    except (OSError, SyntaxError, UnicodeDecodeError):
+    if apps_tree is None:
         return set()
     names: set[str] = set()
-    for node in ast.walk(tree):
+    for node in ast.walk(apps_tree):
         if not isinstance(node, ast.Call) or not node.args:
             continue
         func = node.func
@@ -159,88 +319,160 @@ def _registered_provider_classes(mod_dir: Path) -> set[str]:
     return names
 
 
-def _provider_section(
-    mod_dir: Path, class_names: set[str]
-) -> tuple[str | None, str | None, bool]:
-    """``(section, file, class_found)`` for a registered provider class.
+def _from_providers(
+    module: str,
+    trees: dict[str, ast.AST],
+    class_names: set[str],
+    seams: _Seams,
+    consts: dict[str, str],
+    attrs: dict[str, str],
+    found: dict[str, OwnerDeclaration],
+) -> bool:
+    """Seam 2 — ``GDPRProvider.section``, plus ``subject_types`` when spelled out.
 
-    ``class_found`` separates "this library registers no class of its own"
-    (not a participant) from "it does, and its ``section`` is unreadable"
-    (a hard failure — an owner nobody can name cannot be listed).
+    Returns whether a registered name is a class this library DEFINES, which
+    separates "registers something it does not own" (not a participant) from
+    "owns a store whose name is unreadable" (a refusal).
     """
-    trees = _decl_trees(mod_dir)
-    consts: dict[str, str] = {}
-    attrs: dict[str, str] = {}
-    for tree in trees.values():
-        tree_consts, tree_attrs = _string_env(tree)
-        consts.update(tree_consts)
-        attrs.update(tree_attrs)
-    found = False
+    class_found = False
     for fname, tree in trees.items():
         for node in getattr(tree, "body", []):
             if not isinstance(node, ast.ClassDef) or node.name not in class_names:
                 continue
-            found = True
+            class_found = True
+            assigned: dict[str, ast.AST] = {}
             for stmt in node.body:
                 if not isinstance(stmt, ast.Assign):
                     continue
-                if not any(
-                    isinstance(t, ast.Name) and t.id == "section" for t in stmt.targets
-                ):
-                    continue
-                section = _resolve_str(stmt.value, consts, attrs)
-                if section:
-                    return section, fname, True
-    return None, None, found
+                for target in stmt.targets:
+                    if isinstance(target, ast.Name):
+                        assigned.setdefault(target.id, stmt.value)
+            section = _resolve_str(assigned.get("section"), consts, attrs)
+            if not section:
+                continue
+            # stapel_gdpr.declarations reads `provider.subject_types` off the
+            # live object; here it is only visible when the class states it.
+            subjects = _resolve_str_seq(assigned.get("subject_types"), consts, attrs)
+            _merge_declaration(found, OwnerDeclaration(
+                module=module, owner=section, subject_types=subjects,
+                via=seams.provider, decl=fname,
+            ))
+    return class_found
 
 
-def read_owner_declaration(
+def _from_constants(
+    module: str,
+    trees: dict[str, ast.AST],
+    seams: _Seams,
+    consts: dict[str, str],
+    attrs: dict[str, str],
+    found: dict[str, OwnerDeclaration],
+) -> None:
+    """Seam 3 — ``OWNER``/``GDPR_OWNER`` + ``SUBJECT_TYPES``/``GDPR_SUBJECT_TYPES``.
+
+    Ungated: stapel-gdpr reads these constants off the installed package with
+    no regard for whether it also ships the erasure consume-contract, so a
+    reader that demanded the contract first (as this one did before 0.64.1)
+    reports fewer subject types than the check that grades the result.
+    """
+    for fname, tree in trees.items():
+        assigned: dict[str, ast.AST] = {}
+        for node in getattr(tree, "body", []):
+            if not isinstance(node, ast.Assign):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    assigned.setdefault(target.id, node.value)
+        owner = None
+        for attr in seams.owner_attrs:
+            if attr in assigned:
+                owner = _resolve_str(assigned[attr], consts, attrs)
+                if owner:
+                    break
+        if not owner:
+            continue
+        subjects: tuple[str, ...] = ()
+        for attr in seams.subject_attrs:
+            if attr in assigned:
+                subjects = _resolve_str_seq(assigned[attr], consts, attrs)
+                if subjects:
+                    break
+        _merge_declaration(found, OwnerDeclaration(
+            module=module, owner=owner, subject_types=subjects,
+            via=seams.constant, decl=fname,
+        ))
+
+
+def read_owner_declarations(
     module: str, workspace_root: Path | None = None
-) -> OwnerDeclaration | None:
-    """This library's owner declaration, or ``None`` when it owns no store.
+) -> list[OwnerDeclaration]:
+    """Every owner this library declares, by name, across all three seams.
+
+    A list rather than one entry because that is what the boot checks see: a
+    library whose provider ``section`` and ``OWNER`` constant disagree really
+    does declare two owners, and listing only one of them is ``gdpr.E010`` in
+    the generated project.
 
     Raises ``SystemExit`` when the library plainly PARTICIPATES (it ships the
-    erasure consume-contract, or registers a provider class of its own) but
-    the constant that names it cannot be read. There is no safe fallback: a
-    guessed name is a store the orchestrator never asks and never waits for.
+    erasure consume-contract, calls ``register_gdpr_owner``, or registers a
+    provider class of its own) but no seam yields a readable name. There is no
+    safe fallback: a guessed name is a store the orchestrator never asks and
+    never waits for.
     """
     if module == GDPR_HOST:
-        return None
+        return []
     mod_dir = _module_dir(module, workspace_root)
     if mod_dir is None:
-        return None
+        return []
 
-    search_roots = [mod_dir.parent]
-    erasure = read_gdpr_owner(_package_name(module), search_roots)
-    if erasure is not None:
-        if not erasure.owner or not erasure.subject_types:
-            raise SystemExit(
-                f"Error: stapel-{module} is a gdpr data owner (it ships "
-                f"{'/'.join(GDPR_CONSUMES_ERASURE)}) "
-                f"but its OWNER/SUBJECT_TYPES constants in {mod_dir} could not be "
-                f"read, so this generator cannot name it in "
-                f'STAPEL_GDPR["DATA_OWNERS"]. An owner missing from that map is '
-                f"never asked to erase and never waited for — the closure reports "
-                f"DELETED while the data is still there. Fix the declaration in "
-                f"stapel-{module}, or pass the map explicitly via --module-config."
+    seams = _seams()
+    trees = _decl_trees(mod_dir, seams)
+    apps_tree = _parse(mod_dir / "apps.py")
+    consts, attrs = _string_environment(
+        list(trees.values()) + ([apps_tree] if apps_tree is not None else [])
+    )
+
+    found: dict[str, OwnerDeclaration] = {}
+    registers = _from_registration(module, apps_tree, seams, consts, attrs, found)
+    classes = _registered_provider_classes(mod_dir, apps_tree)
+    class_found = _from_providers(module, trees, classes, seams, consts, attrs, found)
+    _from_constants(module, trees, seams, consts, attrs, found)
+
+    if found:
+        # An owner whose seam carried no subject types still needs one: a
+        # DATA_OWNERS entry with an empty list is a store nothing is ever
+        # asked to erase for, and stapel-gdpr reads a bare name as ["account"].
+        return [
+            decl if decl.subject_types
+            else OwnerDeclaration(
+                module=decl.module, owner=decl.owner,
+                subject_types=(SUBJECT_ACCOUNT,), via=decl.via, decl=decl.decl,
             )
-        return OwnerDeclaration(
-            module=module,
-            owner=erasure.owner,
-            subject_types=tuple(erasure.subject_types),
-            via="erasure protocol",
-            decl=erasure.decl or "",
-        )
+            for _, decl in sorted(found.items())
+        ]
 
-    classes = _registered_provider_classes(mod_dir)
-    if not classes:
-        return None
-    section, fname, class_found = _provider_section(mod_dir, classes)
-    if not class_found:
-        # Registers something it does not define (the host's GDPR_PROVIDERS
-        # indirection) — not a store of its own.
-        return None
-    if not section:
+    if mod_dir.joinpath(*GDPR_CONSUMES_ERASURE).is_file():
+        raise SystemExit(
+            f"Error: stapel-{module} is a gdpr data owner (it ships "
+            f"{'/'.join(GDPR_CONSUMES_ERASURE)}) "
+            f"but its OWNER/SUBJECT_TYPES constants in {mod_dir} could not be "
+            f"read, so this generator cannot name it in "
+            f'STAPEL_GDPR["DATA_OWNERS"]. An owner missing from that map is '
+            f"never asked to erase and never waited for — the closure reports "
+            f"DELETED while the data is still there. Fix the declaration in "
+            f"stapel-{module}, or pass the map explicitly via --module-config."
+        )
+    if registers:
+        raise SystemExit(
+            f"Error: stapel-{module} calls {REGISTER_OWNER_FUNC}() in its "
+            f"apps.py but the owner name it passes in {mod_dir} could not be "
+            f"read, so this generator cannot name it in "
+            f'STAPEL_GDPR["DATA_OWNERS"]. An owner missing from that map is '
+            f"never asked to erase and never waited for — the closure reports "
+            f"DELETED while the data is still there. Fix the declaration in "
+            f"stapel-{module}, or pass the map explicitly via --module-config."
+        )
+    if class_found:
         raise SystemExit(
             f"Error: stapel-{module} registers an in-process GDPRProvider "
             f"({', '.join(sorted(classes))}) but its `section` in {mod_dir} could "
@@ -250,13 +482,17 @@ def read_owner_declaration(
             f"the inventory is silent retention. Fix the declaration in "
             f"stapel-{module}, or pass the map explicitly via --module-config."
         )
-    return OwnerDeclaration(
-        module=module,
-        owner=section,
-        subject_types=(SUBJECT_ACCOUNT,),
-        via="in-process provider",
-        decl=fname or "",
-    )
+    return []
+
+
+def read_owner_declaration(
+    module: str, workspace_root: Path | None = None
+) -> OwnerDeclaration | None:
+    """The library's declaration when it names exactly one owner (the normal
+    case), the first by name when it names several, ``None`` when it owns no
+    store. See :func:`read_owner_declarations` for the refusals."""
+    declarations = read_owner_declarations(module, workspace_root)
+    return declarations[0] if declarations else None
 
 
 def owner_declarations(
@@ -265,14 +501,12 @@ def owner_declarations(
     """Every selected library that owns personal data, in owner-name order."""
     found: dict[str, OwnerDeclaration] = {}
     for module in selected:
-        decl = read_owner_declaration(module, workspace_root)
-        if decl is None:
-            continue
-        # One name is one owner (stapel_core.gdpr.register_gdpr_owner enforces
-        # the same rule at runtime); the richer declaration wins.
-        current = found.get(decl.owner)
-        if current is None or len(decl.subject_types) > len(current.subject_types):
-            found[decl.owner] = decl
+        for decl in read_owner_declarations(module, workspace_root):
+            # One name is one owner (stapel_core.gdpr.register_gdpr_owner
+            # enforces the same rule at runtime); the richer declaration wins.
+            current = found.get(decl.owner)
+            if current is None or len(decl.subject_types) > len(current.subject_types):
+                found[decl.owner] = decl
     return [found[name] for name in sorted(found)]
 
 

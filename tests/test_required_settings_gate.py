@@ -39,7 +39,9 @@ GDPR_REQUIRED = [
     {
         "key": "DATA_OWNERS",
         "kind": "list",
-        "example": ["auth", "profiles"],
+        # Owner NAMES as the libraries declare them. The app labels
+        # (`profiles`, `cdn`) are what gdpr.E009 exists to reject.
+        "example": ["auth", "profile"],
         "why": "Every store that holds personal data; an empty list certifies nothing.",
         "unset_check": "gdpr.E001",
     },
@@ -109,7 +111,7 @@ def test_required_keys_are_accepted_by_the_validator(workspace):
 def test_the_declaration_carries_shape_for_a_placeholder(workspace):
     block = render_required_placeholder_block("gdpr", required_settings("gdpr"))
     assert "STAPEL_GDPR = {" in block
-    assert '"DATA_OWNERS": [\'auth\', \'profiles\'],' in block
+    assert '"DATA_OWNERS": [\'auth\', \'profile\'],' in block
     assert '"DATA_OWNERS_VERSION": \'2026-01-01.1\',' in block
     assert "# Every store that holds personal data" in block
 
@@ -187,11 +189,11 @@ def test_generating_with_the_config_supplied_succeeds(workspace, tmp_path):
     result = assemble_scaffold(
         "alive", libs=["gdpr"],
         config={"gdpr": {
-            "DATA_OWNERS": ["auth", "profiles"],
+            "DATA_OWNERS": ["auth", "profile"],
             "DATA_OWNERS_VERSION": "2026-01-01.1",
         }},
         output_dir=tmp_path, verify=False,
     )
     settings = (result.project_dir / "config" / "settings.py").read_text()
     assert "STAPEL_GDPR = {" in settings
-    assert '"DATA_OWNERS": [\'auth\', \'profiles\'],' in settings
+    assert '"DATA_OWNERS": [\'auth\', \'profile\'],' in settings

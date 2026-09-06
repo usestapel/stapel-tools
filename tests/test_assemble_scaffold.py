@@ -25,8 +25,13 @@ PROOF_LIBS = ["auth", "notifications", "gdpr", "profiles"]
 # stapel-gdpr declares DATA_OWNERS required (docs/capabilities.json
 # required_settings); generating without it is refused, because a project
 # that installs the app and never names its data owners cannot boot.
+# Owner NAMES, as the libraries declare them (stapel_core.gdpr.register_gdpr_owner
+# / OWNER / GDPRProvider.section) — not app labels. `profiles` and `cdn` are app
+# labels no library has ever answered to; the owners are `profile` and `media`,
+# and a host that lists the label instead is stapel-gdpr's gdpr.E009: the store
+# is inferred remote, never asked, and waits out OWNER_TIMEOUT_HOURS.
 GDPR_CONFIG = {"gdpr": {
-    "DATA_OWNERS": ["auth", "profiles"],
+    "DATA_OWNERS": {"auth": ["account"], "profile": ["account"]},
     "DATA_OWNERS_VERSION": "2026-01-01.1",
 }}
 

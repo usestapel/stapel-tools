@@ -47,7 +47,12 @@ API001  (error) The schema diff against the baseline contains at least one
              strengthening and stays additive;
           3. a response status code disappears from an existing operation
              (the error semantics of a case that used to be reachable);
-          4. an operation's auth contract changes (security requirements);
+          4. an operation's auth contract NARROWS — one of the alternatives
+             in its ``security`` list is gone, so a caller holding that
+             credential is now refused. Adding an alternative (a second
+             accepted credential, or anonymous access) is additive and
+             silent, the same direction rule 2 applies to a required-status
+             flip: nothing a caller could do before stopped working;
           5. an enum value is removed — always breaking, regardless of the
              open/closed policy — or added to an enum explicitly marked
              ``x-stapel-closed-enum``.
@@ -344,7 +349,25 @@ def _security_of(op: dict, doc: dict):
     """Normalised auth contract of one operation: the sorted set of scheme
     names of each alternative. Only the scheme identity matters here — a
     scope list changing is a scope change the schema cannot judge, the
-    *scheme* changing (cookie -> header) is the §3 case."""
+    *scheme* changing (cookie -> header) is the §3 case.
+
+    The entries of ``security`` are ALTERNATIVES (OR); the schemes inside one
+    entry are all required (AND). ``()`` — an empty entry — is the anonymous
+    alternative. That structure is why rule 4 has a direction, exactly as
+    rule 2 does for a required-status flip:
+
+      an alternative REMOVED    breaks (a caller holding it is now refused)
+      an alternative ADDED      is additive (one more way in, none taken away)
+
+    Read as plain inequality it cried wolf on a widening. stapel-gdpr 0.5.5 is
+    the case: closing an account revokes the session that closed it, so the
+    grace-period status and cancel endpoints grew an ALTERNATIVE credential
+    (the ``X-Closure-Token`` header) beside the cookie — ``JWTCookieAuth`` ->
+    ``anonymous | JWTCookieAuth``. Nothing that worked stopped working, and
+    api-lint demanded a v2 and an UPGRADE.json record for it. A gate that
+    demands a version story for a strict widening is a gate that gets routed
+    around, and then the narrowings go through with it.
+    """
     sec = op.get("security")
     if sec is None:
         sec = doc.get("security")
@@ -423,13 +446,18 @@ def classify_schema_diff(old: dict, new: dict) -> list[Change]:
                 f"explicitly no longer exists",
             ))
 
-        # 4. auth contract change
+        # 4. auth contract NARROWED — see _security_of for why this has a
+        #    direction and plain inequality does not.
         old_sec, new_sec = _security_of(old_op, old), _security_of(new_op, new)
-        if old_sec is not None and new_sec is not None and old_sec != new_sec:
-            changes.append(Change(
-                "security", where,
-                f"auth contract changed: {_fmt_sec(old_sec)} -> {_fmt_sec(new_sec)}",
-            ))
+        if old_sec is not None and new_sec is not None:
+            lost = tuple(alt for alt in old_sec if alt not in set(new_sec))
+            if lost:
+                changes.append(Change(
+                    "security", where,
+                    f"auth contract narrowed: {_fmt_sec(old_sec)} -> "
+                    f"{_fmt_sec(new_sec)} — a caller holding "
+                    f"{_fmt_sec(lost)} is now refused",
+                ))
 
         # 2 + 5. field and enum shape, per body
         old_bodies, new_bodies = _bodies(old_op, old), _bodies(new_op, new)
