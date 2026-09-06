@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from stapel_tools.config_lint import lint_project
+from stapel_tools.config_manifest import CONFIG_MD as CONFIG_MD_FILENAME
 from stapel_tools.config_manifest import (
     ConfigManifestError,
     aggregate_config_md,
@@ -342,6 +343,58 @@ def test_parse_owner_and_fields():
 def test_parse_bad_source_raises():
     with pytest.raises(ConfigManifestError):
         parse_config_md("| Key | Source |\n|--|--|\n| X | redis |\n")
+
+
+# --- `source = settings` (declared constant, not a secret) -----------------
+
+
+def test_settings_source_accepted_on_plain_key():
+    text = "| Key | Source | Purpose | Required | Default |\n|--|--|--|--|--|\n| EMBEDDING_PRICES | settings | rate card | no | {} |\n"
+    entries = {e.key: e for e in parse_config_md(text)}
+    assert entries["EMBEDDING_PRICES"].source == "settings"
+    assert entries["EMBEDDING_PRICES"].is_secret is False
+
+
+def test_settings_source_rejected_on_secret_looking_key_name():
+    text = "| Key | Source | Purpose | Required | Default |\n|--|--|--|--|--|\n| ANTHROPIC_API_KEY | settings | key | no | |\n"
+    with pytest.raises(ConfigManifestError, match="secret"):
+        parse_config_md(text)
+
+
+def test_settings_source_rejected_on_explicit_secret_flag():
+    text = (
+        "| Key | Source | Purpose | Required | Default | Secret |\n"
+        "|--|--|--|--|--|--|\n"
+        "| PLAIN_LOOKING_NAME | settings | not actually plain | no | | true |\n"
+    )
+    with pytest.raises(ConfigManifestError, match="secret"):
+        parse_config_md(text)
+
+
+def test_env_and_vault_sources_unaffected_by_secret_looking_names():
+    # The new grammar must not touch existing env/vault semantics — a
+    # secret-looking key stays legal under env or vault, as it always was.
+    text = (
+        "| Key | Source | Purpose | Required | Default |\n|--|--|--|--|--|\n"
+        "| ANTHROPIC_API_KEY | vault | key | no | |\n"
+        "| REDIS_GEO_KEY | env | redis key name | no | stapel:geo |\n"
+    )
+    entries = {e.key: e for e in parse_config_md(text)}
+    assert entries["ANTHROPIC_API_KEY"].source == "vault"
+    assert entries["REDIS_GEO_KEY"].source == "env"
+
+
+def test_stapel_agent_config_md_fixture_parses_clean():
+    """The exact case that motivated this: stapel-agent's real CONFIG.MD
+    declares EMBEDDING_PRICES (a rate card) as `source = settings` — a
+    declared constant, not a secret — and the manifest parser must admit it."""
+    workspace_root = Path(__file__).resolve().parents[2]
+    agent_config_md = workspace_root / "stapel-agent" / CONFIG_MD_FILENAME
+    if not agent_config_md.is_file():
+        pytest.skip("stapel-agent not checked out as a workspace sibling")
+    entries = {e.key: e for e in parse_config_md(agent_config_md)}
+    assert entries["EMBEDDING_PRICES"].source == "settings"
+    assert entries["EMBEDDING_PRICES"].is_secret is False
 
 
 def test_render_round_trips_and_escapes_pipes():

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.63.1 — 2026-09-07
+
+### CONFIG.MD manifest — a third source: `settings`
+
+`config_manifest.parse_config_md` only ever admitted `source = env` or
+`source = vault`. stapel-agent's `CONFIG.MD` declares `EMBEDDING_PRICES` (a
+per-model rate card — a declared constant, not a secret) as `source =
+settings`, on the grounds that a claim about money belongs in settings.py
+where a reviewer sees it diffed, not folded into an env file. The parser
+rejected it outright, which is why
+`TestInstalledAppsOrderSecondWave::test_apps_emitted_in_registry_order_not_request_order`
+went red the moment it aggregated stapel-agent's real `CONFIG.MD`.
+
+`settings` is now a legal source — but only for a key that is not itself a
+secret/credential. A key is refused under `settings` when its name reads as
+one (`_looks_secret`: any underscore-separated word in `{SECRET, PASSWORD,
+PASSWD, CREDENTIAL, CREDENTIALS, TOKEN, KEY, APIKEY, PRIVATE, CERT,
+CERTIFICATE}`) or when an optional `Secret` column marks the row `secret =
+true` explicitly — either way `ConfigManifestError` names the row and says
+to declare it `vault` (or `env` if genuinely non-sensitive) instead. `env`
+and `vault` semantics are unchanged; a secret-looking key stays legal under
+either, exactly as before.
+
+`ConfigEntry` gains a `secret: bool` field (parsed from the optional `Secret`
+column, default `False`) and an `is_secret` property (`secret or
+_looks_secret(key)`).
+
 ## 0.63.0 — 2026-09-07
 
 ### AUTHZ007 — the authenticator that answers 401 for the permission layer

@@ -19,6 +19,16 @@ per ``## <owner>`` section:
     |-----|--------|---------|----------|---------|
     | SECRET_KEY | vault | Django secret | yes | |
 
+Source is one of three: ``env`` (process environment), ``vault`` (the
+``stapel_core.secrets`` provider seam — for secrets), or ``settings`` (a
+declared, non-secret constant that belongs in code — e.g. a rate card such as
+stapel-agent's ``EMBEDDING_PRICES``: a reviewer should see it diffed in
+settings.py, not folded into an env file). ``settings`` is refused on a key
+that reads as a secret/credential (by name, or an explicit ``secret = true``
+in an optional ``Secret`` column) — see ``_looks_secret`` / ``ConfigEntry.
+is_secret``; declare those ``vault`` (or ``env`` if genuinely non-sensitive)
+instead.
+
 This module keeps its own parser (stapel-tools carries no runtime deps and must
 install without stapel-core); the two parsers agree on the format by contract.
 
@@ -39,14 +49,32 @@ from typing import Iterable, Optional
 CONFIG_MD = "CONFIG.MD"
 SOURCE_ENV = "env"
 SOURCE_VAULT = "vault"
-_SOURCES = (SOURCE_ENV, SOURCE_VAULT)
+SOURCE_SETTINGS = "settings"
+_SOURCES = (SOURCE_ENV, SOURCE_VAULT, SOURCE_SETTINGS)
 
 _TRUTHY = {"yes", "y", "true", "1", "да", "required", "req"}
 _NO_DEFAULT = {"", "-", "—", "–", "none", "n/a", "нет"}
 
+# `source = settings` (a declared constant that belongs in code, e.g. a rate
+# card — see EMBEDDING_PRICES) is refused when the key itself reads as a
+# secret/credential: a name whose underscore-separated words hit this set.
+# Whole-word match only ("SECRET" matches SECRET_KEY, not ASSEMBLYAI which
+# has no such word) — deliberately broad (KEY, TOKEN) because the cost of a
+# false positive is "declare it vault/env instead", not a leaked credential.
+_SENSITIVE_NAME_WORDS = {
+    "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "CREDENTIALS",
+    "TOKEN", "KEY", "APIKEY", "PRIVATE", "CERT", "CERTIFICATE",
+}
+
+
+def _looks_secret(key: str) -> bool:
+    """True when ``key``'s underscore-separated words name a credential."""
+    return bool(_SENSITIVE_NAME_WORDS & set(key.upper().split("_")))
+
 
 class ConfigManifestError(Exception):
-    """A CONFIG.MD row is malformed (unknown source, …)."""
+    """A CONFIG.MD row is malformed (unknown source, a secret-looking key
+    declared ``source = settings``, …)."""
 
 
 @dataclass
@@ -58,12 +86,18 @@ class ConfigEntry:
     default: Optional[str] = None
     owner: Optional[str] = None
     line: int = 0
+    secret: bool = False
 
     @property
     def library_owned(self) -> bool:
         """A key owned by a stapel lib (read inside the lib) — exempt from the
         CFG003 'declared but never read in the project' rule."""
         return bool(self.owner) and self.owner.lower().startswith("stapel-")
+
+    @property
+    def is_secret(self) -> bool:
+        """Explicit ``secret = true`` wins; otherwise the name heuristic."""
+        return self.secret or _looks_secret(self.key)
 
 
 # --- parsing ----------------------------------------------------------------
@@ -159,6 +193,14 @@ def parse_config_md(source: str | Path, *, path_label: str | None = None) -> lis
                 f"{label}:{lineno}: config key {key!r} has source {source_val!r}; "
                 f"expected one of {', '.join(_SOURCES)}."
             )
+        secret_val = _parse_bool(_get("secret"))
+        if source_val == SOURCE_SETTINGS and (secret_val or _looks_secret(key)):
+            reason = "is marked `secret = true`" if secret_val else "looks like a secret/credential by name"
+            raise ConfigManifestError(
+                f"{label}:{lineno}: config key {key!r} declares source "
+                f"'settings' but {reason} — a secret cannot live in settings.py; "
+                "declare it 'vault' (or 'env' for a non-sensitive override)."
+            )
         entries.append(ConfigEntry(
             key=key,
             source=source_val,
@@ -167,6 +209,7 @@ def parse_config_md(source: str | Path, *, path_label: str | None = None) -> lis
             default=_parse_default(_get("default")),
             owner=owner,
             line=lineno,
+            secret=secret_val,
         ))
     return entries
 
@@ -233,9 +276,10 @@ def render_config_md(entries: Iterable[ConfigEntry], *, title: str = "CONFIG.MD"
         "",
         "Generated config registry (static-scaffold-and-config.md §2): one row",
         "per key, its source (`env` = process environment; `vault` = the",
-        "`stapel_core.secrets` provider seam), purpose, whether it is required,",
-        "and its default. `get_config(key)` routes reads here; the `config-lint`",
-        "gate (CFG000-CFG007) keeps this file and the settings in sync.",
+        "`stapel_core.secrets` provider seam; `settings` = a declared, non-secret",
+        "constant that belongs in code, e.g. a rate card), purpose, whether it is",
+        "required, and its default. `get_config(key)` routes reads here; the",
+        "`config-lint` gate (CFG000-CFG007) keeps this file and the settings in sync.",
         "",
     ]
     order: list[str] = []
