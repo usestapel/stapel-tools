@@ -23,6 +23,10 @@ EXP002  (error) a private name appears in the message of a commit that is
         not yet on any remote — ``--commits`` only; the local pre-push hook
         passes it. A published commit message cannot be un-published without
         rewriting history, which is why this runs BEFORE the push.
+EXP000  (error, CI-default) the private-names list resolved to zero names —
+        the run above checked nothing, and a green EXP001/EXP002 out of zero
+        names is not a pass, it is an unconfigured gate. See "The list"
+        below for when this fires.
 
 The list
 --------
@@ -33,10 +37,30 @@ longer token that merely contains a private name but is not one — a
 dictionary word in another language, an option code from a public dataset
 (``!acme-widget`` for a name ``acme``). A hit is dropped only when every
 occurrence on the line sits inside an excepted token, and the exception lives
-in the same owner-held file, never in a repository. With no list the lint
-emits a note and no findings: a CI runner without the file cannot check, and
-must not pretend it did. The owner's machine, where every push originates,
-has the file.
+in the same owner-held file, never in a repository.
+
+With no list — the file absent, or present and empty — the lint always
+prints a one-line note (``checked 0 private names ... — nothing verified``)
+and reports zero EXP001/EXP002 findings, because there is nothing to check
+them against. What happens to the EXIT CODE from that state depends on
+where it runs, because "zero names checked" and "zero names found" look
+identical on a terminal, and a CI runner silently missing its secret must
+not read as a clean bill of health the way a developer's empty scratch list
+does:
+
+* Locally (no ``CI``/``GITHUB_ACTIONS``): exit 0. A developer without the
+  owner's list is not blocked from using the rest of the tool.
+* In CI (``CI=true`` or ``GITHUB_ACTIONS=true``): exit non-zero with
+  ``EXP000`` by default. A CI runner missing ``STAPEL_PRIVATE_NAMES`` was,
+  until this rule existed, the exact scenario that made the gate check zero
+  names and report success — every OSS repo, every run, forever green,
+  verifying nothing.
+* ``--require-names`` forces the CI behaviour even outside CI (to exercise
+  the gate locally, or from a script that sets neither env var).
+* ``--allow-empty`` forces the local behaviour even inside CI — an explicit,
+  visible opt-out, never the default.
+
+The owner's machine, where every push originates, has the file.
 
 Scope
 -----
@@ -79,6 +103,25 @@ from typing import Iterable, Optional
 
 DEFAULT_LIST = Path.home() / ".stapel" / "private-names"
 LIST_ENV = "STAPEL_PRIVATE_NAMES_FILE"
+
+# A gate whose input is "whatever the environment handed it" must not read as
+# green when that input is empty. CI unset the secret (STAPEL_PRIVATE_NAMES,
+# translated by the workflow into $STAPEL_PRIVATE_NAMES_FILE) is exactly that
+# case: zero names checked, zero findings, historically a silent pass.
+_CI_ENV_VARS = ("CI", "GITHUB_ACTIONS")
+
+
+def _ci_active() -> bool:
+    return any(os.environ.get(v) == "true" for v in _CI_ENV_VARS)
+
+
+def _empty_names_note() -> str:
+    """The one-line, always-printed summary for a zero-name resolution."""
+    if os.environ.get(LIST_ENV):
+        detail = f"list at {list_path()} is empty"
+    else:
+        detail = "STAPEL_PRIVATE_NAMES unset"
+    return f"stapel-exposure-lint: checked 0 private names ({detail}) — nothing verified"
 
 _SKIP_DIRS = frozenset({
     ".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
@@ -448,12 +491,9 @@ def lint_pushed(
     project = project.resolve()
     if names is None:
         names = load_private_names()
-    if names is None:
+    if not names:
         if notes is not None:
-            notes.append(
-                f"stapel-exposure-lint: no private-names list at {list_path()} "
-                f"(or ${LIST_ENV}) — nothing checked"
-            )
+            notes.append(_empty_names_note())
         return []
     paths = _tree_paths(project, local_sha)
     if not is_public_tree(project, local_sha, paths):
@@ -486,12 +526,9 @@ def lint_project(
     project = project.resolve()
     if names is None:
         names = load_private_names()
-    if names is None:
+    if not names:
         if notes is not None:
-            notes.append(
-                f"stapel-exposure-lint: no private-names list at {list_path()} "
-                f"(or ${LIST_ENV}) — nothing checked"
-            )
+            notes.append(_empty_names_note())
         return []
     if not is_public_project(project):
         if notes is not None:
@@ -537,12 +574,27 @@ def main(argv: Optional[list] = None) -> int:
              "sha (a new branch) means 'whatever no remote holds'.",
     )
     parser.add_argument("--json", action="store_true", help="Machine output")
+    parser.add_argument(
+        "--require-names", action="store_true",
+        help="Exit non-zero (EXP000) when the private-names list resolves to "
+             "zero names — the CI default already does this; use this flag "
+             "to get the same behaviour outside CI (e.g. to test the gate, "
+             "or in a workflow that sets neither $CI nor $GITHUB_ACTIONS).",
+    )
+    parser.add_argument(
+        "--allow-empty", action="store_true",
+        help="Exit 0 with a warning when the private-names list resolves to "
+             "zero names, even in CI. An explicit opt-out of the CI default "
+             "— never pass this to silence a secret you simply haven't set.",
+    )
     args = parser.parse_args(argv)
 
     if args.remote and not args.pushed:
         parser.error("--remote requires --pushed")
     if args.commits and args.pushed:
         parser.error("--commits is the working-tree mode; --pushed covers EXP002")
+    if args.require_names and args.allow_empty:
+        parser.error("--require-names and --allow-empty are mutually exclusive")
 
     project = Path(args.project_dir)
     if not project.is_dir():
@@ -550,6 +602,7 @@ def main(argv: Optional[list] = None) -> int:
         return 2
 
     notes: list[str] = []
+    names = load_private_names()
     if args.pushed:
         if _git(project, ["rev-parse", "--verify", "--quiet",
                           f"{args.pushed}^{{commit}}"]) is None:
@@ -557,9 +610,19 @@ def main(argv: Optional[list] = None) -> int:
             print(f"Error: not a commit in {project}: {args.pushed}",
                   file=sys.stderr)
             return 2
-        findings = lint_pushed(project, args.pushed, args.remote, notes=notes)
+        findings = lint_pushed(project, args.pushed, args.remote, notes=notes, names=names)
     else:
-        findings = lint_project(project, commits=args.commits, notes=notes)
+        findings = lint_project(project, commits=args.commits, notes=notes, names=names)
+
+    if not names and not args.allow_empty and (args.require_names or _ci_active()):
+        findings = [
+            *findings,
+            Finding(
+                "<config>", 0, "EXP000",
+                "no private names configured — the gate verified nothing",
+            ),
+        ]
+
     if args.json:
         print(json.dumps(
             {

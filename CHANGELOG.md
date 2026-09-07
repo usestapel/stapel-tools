@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.64.2 — 2026-09-07
+
+### EXP000 — a gate fed zero private names now fails closed in CI
+
+Every OSS repository's `stapel-exposure-lint` step ran with
+`STAPEL_PRIVATE_NAMES` unset (the workflow secret was never created), and
+that step's own shell script short-circuited: `if [ -z
+"$STAPEL_PRIVATE_NAMES" ]; then echo a warning; exit 0; fi` — the linter was
+never even invoked. Every push, every repo, forever green, verifying
+nothing. The linter itself had the identical shape one layer down:
+`load_private_names()` returning `None` (no file) already produced a note
+and zero findings, and a **present-but-empty** list file did the same
+silently, with no note at all — `lint_project`/`lint_pushed` only checked
+`names is None`, not `not names`.
+
+`stapel_tools/exposure_lint.py` now treats "resolved to zero names" as one
+condition, checked in one place:
+
+* `lint_project`/`lint_pushed` fire the same note — `checked 0 private
+  names (STAPEL_PRIVATE_NAMES unset) — nothing verified` — whether the list
+  file is absent or present-and-empty, where before only the absent case
+  was noted.
+* The CLI adds **EXP000**: when the resolved list is empty, `main()` now
+  exits non-zero by default whenever `CI=true` or `GITHUB_ACTIONS=true` is
+  set, reporting `no private names configured — the gate verified nothing`.
+  Locally (neither var set) it still exits 0 with the warning, so a
+  developer without the owner's list is not blocked from using the rest of
+  the tool.
+* `--require-names` forces the CI behaviour even outside CI; `--allow-empty`
+  is the explicit, visible opt-out of the CI default — never the default
+  itself.
+
+`.github/workflows/ci.yml` and `.github/workflows/publish.yml` drop the
+shell-level `exit 0` short-circuit and instead always invoke
+`stapel-exposure-lint . --require-names`, so the Python gate — not a bash
+`if` — is what decides. **This turns the `test` job's exposure-lint step
+red on every run until the `STAPEL_PRIVATE_NAMES` repository secret is set
+— intended:** a red gate that says exactly why is the fix; the green tick
+it replaces was never earned.
+
+(The task that filed this named a `registry` job as the one running
+exposure-lint; the actual step lives in the `test` job of both workflow
+files. `registry` is a same-file job that runs `stapel-registry-check`, an
+unrelated tag/PyPI-release gate — left untouched.)
+
 ## 0.64.1 — 2026-09-07
 
 ### The generated `DATA_OWNERS` map is read from the seams stapel-gdpr reads

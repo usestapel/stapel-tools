@@ -43,11 +43,74 @@ class TestTheList:
         monkeypatch.setenv(LIST_ENV, str(tmp_path / "absent"))
         notes = []
         assert lint_project(_lib(tmp_path, body="acme\n"), notes=notes) == []
-        assert any("no private-names list" in n for n in notes)
+        assert any("checked 0 private names" in n for n in notes)
+
+    def test_empty_list_file_is_the_same_note_as_missing(self, tmp_path, monkeypatch):
+        """A present-but-empty file must not silently 'pass' either."""
+        empty = tmp_path / "private-names"
+        empty.write_text("# nothing configured yet\n", encoding="utf-8")
+        monkeypatch.setenv(LIST_ENV, str(empty))
+        notes = []
+        assert lint_project(_lib(tmp_path, body="acme\n"), notes=notes) == []
+        assert any("checked 0 private names" in n for n in notes)
 
     def test_list_is_lowercased_commented_deduped(self, tmp_path):
         p = _names_file(tmp_path, "Acme", "acme  # again", "acme.example")
         assert load_private_names(p) == ["acme", "acme.example"]
+
+
+class TestExp000EmptyGate:
+    """A gate fed nothing must not report success — EXP000, the defect fixed
+    2026-09-07: CI ran with $STAPEL_PRIVATE_NAMES unset, checked zero names,
+    and every OSS repo went green having verified nothing."""
+
+    def test_locally_empty_list_stays_exit_zero(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        monkeypatch.setenv(LIST_ENV, str(tmp_path / "absent"))
+        root = _lib(tmp_path, body="acme\n")
+        assert main([str(root)]) == 0
+
+    def test_ci_true_with_empty_list_is_exp000_and_nonzero(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv("CI", "true")
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        monkeypatch.setenv(LIST_ENV, str(tmp_path / "absent"))
+        root = _lib(tmp_path, body="acme\n")
+        assert main([str(root)]) == 1
+        out = capsys.readouterr()
+        assert "EXP000" in out.out
+        assert "gate verified nothing" in out.out
+
+    def test_github_actions_true_with_empty_list_is_exp000(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.setenv("GITHUB_ACTIONS", "true")
+        monkeypatch.setenv(LIST_ENV, str(tmp_path / "absent"))
+        root = _lib(tmp_path, body="acme\n")
+        assert main([str(root)]) == 1
+
+    def test_require_names_forces_it_outside_ci(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        monkeypatch.setenv(LIST_ENV, str(tmp_path / "absent"))
+        root = _lib(tmp_path, body="acme\n")
+        assert main([str(root), "--require-names"]) == 1
+
+    def test_allow_empty_overrides_ci_default(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("CI", "true")
+        monkeypatch.setenv(LIST_ENV, str(tmp_path / "absent"))
+        root = _lib(tmp_path, body="acme\n")
+        assert main([str(root), "--allow-empty"]) == 0
+
+    def test_require_names_and_allow_empty_are_mutually_exclusive(self, tmp_path):
+        with pytest.raises(SystemExit):
+            main([str(tmp_path), "--require-names", "--allow-empty"])
+
+    def test_a_real_list_is_unaffected_by_ci(self, tmp_path, monkeypatch):
+        """EXP000 only fires on zero names — a configured gate stays itself."""
+        monkeypatch.setenv("CI", "true")
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        assert main([str(_lib(tmp_path, name="stapel-clean"))]) == 0
+        assert main([str(_lib(tmp_path, body="acme\n"))]) == 1
 
 
 class TestScope:
