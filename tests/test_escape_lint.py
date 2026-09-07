@@ -57,6 +57,17 @@ def test_scan_markers_ignores_a_ruff_style_code(tmp_path):
     assert scan_markers(tmp_path) == []
 
 
+def test_scan_markers_keeps_a_ruff_code_that_matches_the_shape(tmp_path):
+    """`BLE001` (ruff's blind-except code) DOES match `_ID_RE`'s shape —
+    letters then three digits — same as a real stapel id. `scan_markers`
+    keeps it (shape is all it checks); `check_inert` is what must then tell
+    it apart from a stapel rule, by family."""
+    _write(tmp_path, "app/views.py", "except Exception:  # noqa: BLE001\n")
+    markers = scan_markers(tmp_path)
+    assert len(markers) == 1
+    assert markers[0].rules == frozenset({"BLE001"})
+
+
 def test_scan_markers_only_scans_known_suffixes(tmp_path):
     _write(tmp_path, "README.md", "See `# noqa: SUR002` in the docs.\n")
     assert scan_markers(tmp_path) == []
@@ -96,6 +107,42 @@ def test_esc001_one_finding_per_offending_rule_on_a_multi_rule_marker():
     assert codes(findings) == ["ESC001", "ESC001"]
     rules_named = {f.message.split("'# noqa: ")[1].split("'")[0] for f in findings}
     assert rules_named == {"SUR099", "ADO001"}
+
+
+def test_esc001_ignores_a_foreign_id_alone():
+    """`BLE001` is ruff's blind-except code, never a stapel rule family —
+    ESC001 must have no opinion on it at all, this is the exact 2026-09-07
+    `svc-agent` false positive."""
+    marker = Marker("app/views.py", 3, frozenset({"BLE001"}))
+    assert check_inert([marker]) == []
+
+
+def test_esc001_judges_only_the_stapel_id_on_a_mixed_marker():
+    """`# noqa: BLE001, SUR002` mixes a foreign id with a real, noqa-aware
+    stapel one — only ours is in scope, and SUR002 here is fine (noqa-aware),
+    so nothing should fire at all."""
+    marker = Marker("app/views.py", 3, frozenset({"BLE001", "SUR002"}))
+    assert check_inert([marker]) == []
+
+
+def test_esc001_judges_only_the_broken_stapel_id_on_a_mixed_marker():
+    """Same mix, but the stapel side is actually broken (unknown SUR id) —
+    that one must still fire; the foreign id must not."""
+    marker = Marker("app/views.py", 3, frozenset({"BLE001", "SUR099"}))
+    findings = check_inert([marker])
+    assert codes(findings) == ["ESC001"]
+    assert "SUR099" in findings[0].message
+    assert "BLE001" not in findings[0].message
+
+
+def test_esc001_flags_an_unknown_id_inside_a_stapel_family():
+    """`SUR999` is unknown, but `SUR` IS a stapel family (SUR001-004 are
+    registered) — this must still be caught, family-scoping must not turn
+    into "any unknown id in a family that has some members is fine"."""
+    marker = Marker("app/views.py", 3, frozenset({"SUR999"}))
+    findings = check_inert([marker])
+    assert codes(findings) == ["ESC001"]
+    assert "SUR999" in findings[0].message
 
 
 def test_esc001_distinguishes_noqa_aware_rules_within_one_family():
@@ -249,6 +296,19 @@ def test_lint_project_notes_esc002_skipped_when_a_noqa_aware_marker_exists_but_n
     findings = lint_project(tmp_path, notes=notes)
     assert findings == []  # SUR002 is noqa-aware — not ESC001's business
     assert any("ESC002" in n and "skipped" in n for n in notes)
+
+
+def test_lint_project_quiet_for_a_lone_foreign_noqa(tmp_path):
+    """End-to-end reproduction of the 2026-09-07 `svc-agent` false positive:
+    a bare `# noqa: BLE001` (ruff's blind-except code) must produce nothing
+    at all, not an ESC001."""
+    _write(tmp_path, "app/feature_descent.py", (
+        "try:\n    risky()\nexcept Exception:  # noqa: BLE001\n    pass\n"
+    ))
+    notes: list = []
+    findings = lint_project(tmp_path, notes=notes)
+    assert findings == []
+    assert notes == []
 
 
 def test_lint_project_no_note_when_nothing_noqa_aware_is_present(tmp_path):

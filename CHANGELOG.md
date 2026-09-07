@@ -2,6 +2,28 @@
 
 ## 0.64.2 — 2026-09-07
 
+### ESC001 no longer flags a foreign linter's own `# noqa` id
+
+A client fleet's CI (`svc-agent/apps/agent/feature_descent.py:1105`) got a
+false positive: `# noqa: BLE001` — ruff's blind-except code — was reported
+as `'# noqa: BLE001' names a rule id no linter in this stapel-tools version
+knows`. `# noqa` is a grammar stapel-tools shares with ruff, flake8 and
+pyflakes; their ids (`BLE001`, `E501`, `F401`, `PLR0913`, `ANN401`, `SIM108`,
+...) are never ours to judge, but several of them happen to match
+`escape_lint._ID_RE`'s shape (letters, then three digits) exactly as well as
+a real stapel id does — shape alone was never enough to tell them apart.
+
+`check_inert` (ESC001) now also checks rule FAMILY: an unknown id is only
+flagged when its alphabetic prefix (`escape_lint._rule_family`) is one of
+the families `stapel_tools.escape.RULE_REGISTRY` actually registers
+(`_STAPEL_FAMILIES`, derived from the registry itself — never hand-listed).
+An id whose family we don't own at all (`BLE001`) is silently ignored; an
+id inside one of our families that the registry still doesn't recognise
+(`SUR999`) is still exactly the inert-escape case ESC001 exists to catch. A
+marker mixing both (`# noqa: BLE001, SUR002`) is judged only on the id(s)
+that are ours. ESC002 (stale escape) was never affected — it already only
+ever considers ids the registry marks noqa-aware.
+
 ### EXP000 — a gate fed zero private names now fails closed in CI
 
 Every OSS repository's `stapel-exposure-lint` step ran with

@@ -136,9 +136,12 @@ class RuleInfo:
 #: absent from this dict is, by definition, unknown to every linter this
 #: version ships — exactly the ESC001 "this marker suppresses nothing" case
 #: for an id that is misspelled, retired, or was never a stapel rule at all
-#: (a ruff/flake8 code like ``F401`` is deliberately never registered here —
-#: :mod:`stapel_tools.escape_lint` only ever looks at markers shaped like a
-#: stapel rule id, see its own module docstring).
+#: (a ruff/flake8/pyflakes code like ``F401`` or ``BLE001`` is deliberately
+#: never registered here — :mod:`stapel_tools.escape_lint`'s ESC001 flags an
+#: unknown id only when its alphabetic FAMILY, e.g. ``SUR`` or ``AUTHZ``, is
+#: one this registry owns; a foreign linter's own id is never ours to judge
+#: just because it happens to share the letters-then-digits shape, see its
+#: own module docstring).
 RULE_REGISTRY: dict[str, RuleInfo] = {}
 
 

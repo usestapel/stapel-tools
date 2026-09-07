@@ -22,13 +22,30 @@ family-specific second escapes each linter documents (AUTHZ007's
 env-address-ok``, ...) are a different, deliberate grammar and are not this
 module's business.
 
+2026-09-07, again, a client fleet: ``svc-agent/apps/agent/feature_descent.py``
+carried ``# noqa: BLE001`` — ruff's blind-except code — and ESC001 flagged it
+as an unknown stapel rule id. ``# noqa`` is a grammar every one of ruff,
+flake8 and pyflakes shares with us; their ids (``BLE001``, ``E501``,
+``F401``, ``S101``, ``PLR0913``, ...) sit right alongside ours on the same
+comment, and several of them (``BLE001``, ``ANN401``, ``SIM108``, ...)
+happen to match ``_ID_RE``'s letters-then-three-digits shape exactly as well
+as a stapel id does. Matching the shape was never enough to prove a marker
+is even claiming to be OURS. ESC001 now also checks rule FAMILY (the
+alphabetic prefix) against the set of families ``RULE_REGISTRY`` actually
+registers — an unknown id outside every stapel family is a foreign linter's
+business and is silently ignored; an unknown id INSIDE one of our families
+(``SUR999``) is still exactly the inert-escape case this rule exists to
+catch. A marker mixing ids from both worlds (``# noqa: BLE001, SUR002``) is
+judged only on the ones that are ours.
+
 ESC001 (error) — INERT ESCAPE. A ``# noqa: <RULE>`` names:
 
-* a rule id no linter in this stapel-tools version knows at all (a typo, a
-  retired rule, or a foreign code like ruff's ``F401`` that was never a
-  stapel rule id to begin with — this scan only ever looks at markers naming
-  something already shaped like a stapel rule id, see ``ID_RE`` below, so an
-  ordinary ruff/flake8 suppression is never touched), or
+* a rule id whose alphabetic family belongs to this fleet but that no linter
+  in this stapel-tools version actually knows (a typo, a retired rule, or an
+  id that never existed — see ``_rule_family``/``_STAPEL_FAMILIES`` below;
+  an id whose family is foreign to us entirely, a genuine ruff/flake8/
+  pyflakes code, is never this rule's business no matter how closely its
+  shape resembles ours), or
 * a rule id a linter in this version DOES know, but that linter's own code
   never reads a noqa marker on that construct at all (``stapel_tools.escape.
   RULE_REGISTRY[rule].honors_noqa`` is ``False`` — most of ADO/API/IDX/PO/EXP,
@@ -73,15 +90,37 @@ from .adoption_lint import SKIP_DIRS
 SCAN_SUFFIXES = (".py", ".conf", ".yml", ".yaml", ".toml", ".sh", ".bash", ".zsh")
 
 #: What a marker's rule token has to look like to be in scope at all — a
-#: leading letter block, then digits (`SUR002`, `R001`, `EADDR001`). A ruff
-#: code (`F401`, `E402`) matches this shape too and IS in scope: if someone
-#: names `F401` in a noqa marker, stapel-escape-lint correctly has no
-#: opinion, because `F401` is genuinely not in `RULE_REGISTRY` — that is the
-#: intended "unknown to any stapel linter" path, and ruff never asked this
-#: module to leave its own codes alone. What is NOT in scope is a bare
+#: leading letter block, then digits (`SUR002`, `R001`, `EADDR001`). Matching
+#: this shape is necessary but not sufficient: ruff's own catalogue skews
+#: toward the exact same SHOUTY-prefix-plus-digits shape (`BLE001`, `ANN401`,
+#: `SIM108`, ...), so shape alone cannot tell a broken stapel rule id from an
+#: entirely foreign one. `check_inert` narrows further, by rule FAMILY (the
+#: token's alphabetic prefix) against the families `RULE_REGISTRY` actually
+#: owns — see `_rule_family`/`_STAPEL_FAMILIES` below. What is NOT in scope
+#: at the token-shape level, before family is even considered, is a bare
 #: blanket marker (no rule named) and a chunk that parses to no token at
 #: all.
 _ID_RE = re.compile(r"^[A-Z]{2,10}\d{3}$")
+
+
+def _rule_family(rule_id: str) -> str:
+    """The alphabetic prefix of a rule id (`SUR002` -> `SUR`, `EADDR001` ->
+    `EADDR`) — the unit ESC001 checks an UNKNOWN id against, instead of the
+    id itself, so a foreign linter's own code that happens to match
+    `_ID_RE`'s shape is never mistaken for a broken stapel rule."""
+    match = re.match(r"^[A-Z]+", rule_id)
+    return match.group() if match else rule_id
+
+
+#: Every rule family this version of stapel-tools actually owns, derived
+#: from `RULE_REGISTRY` itself — never hand-listed. A ruff/flake8/pyflakes
+#: id (`BLE001`, `S101`, `PLR0913`, ...) rides the same shared noqa grammar
+#: without being a stapel rule at all, and its family is never one of these;
+#: an id in one of OUR families that `RULE_REGISTRY` nonetheless doesn't
+#: recognise (a typo or a retired id, `SUR999`) still is ours to flag.
+#: Registering a new family in `escape.py` puts it in scope here
+#: automatically.
+_STAPEL_FAMILIES = frozenset(_rule_family(rule_id) for rule_id in escape.RULE_REGISTRY)
 
 
 @dataclass(frozen=True)
@@ -164,6 +203,11 @@ def check_inert(markers: list[Marker]) -> list[Finding]:
         for rule_id in sorted(marker.rules):
             info = escape.RULE_REGISTRY.get(rule_id)
             if info is None:
+                if _rule_family(rule_id) not in _STAPEL_FAMILIES:
+                    # A foreign linter's own id (ruff's BLE001, flake8's
+                    # F401, ...) — not a stapel rule family at all, so this
+                    # marker is none of ESC001's business either way.
+                    continue
                 findings.append(Finding(
                     marker.path, marker.line, "ESC001",
                     f"'# noqa: {rule_id}' names a rule id no linter in this "
