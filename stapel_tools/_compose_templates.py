@@ -82,7 +82,7 @@ server {
     # above this line (each under its own reserved /<slug>/ prefix).
 
     # ─── SPA cache canon (owner directive, 2026-07-26) ──────────────────────
-    # Live incident that made this a canon (app.ironmemo.com stand): the entry
+    # Live incident that made this a canon (a client stand): the entry
     # document was served with BOTH `expires 1d` AND
     # `add_header Cache-Control "public, must-revalidate"`. nginx emits BOTH
     # headers and the browser takes max-age=86400 — a freshly deployed
@@ -307,7 +307,7 @@ jetstream {
 
 # stapel_core.comm's call() is request-reply, and the reply travels as one
 # message. The 1MiB default cap gets hit by real structured replies sooner
-# than expected (measured on ironmemo 2026-08-06: reply rejected, caller
+# than expected (measured on a client backend 2026-08-06: reply rejected, caller
 # heard nothing and timed out even though the work had finished). 8MB is the
 # headroom NATS itself treats as reasonable; past that, a reply should be a
 # link, not a bigger message.
@@ -323,8 +323,8 @@ NATS_SERVICE_BLOCK = """\
     # ONLY as a config setting: there is no `--max_payload` flag, and the
     # server responds with "flag provided but not defined", prints usage,
     # and exits — the container restart-loops and anything connecting to it
-    # gets "Name or service not known". Exactly this happened on the
-    # ironmemo stand (2026-08-07) from an edit that was never run. Same
+    # gets "Name or service not known". Exactly this happened on a
+    # client stand (2026-08-07) from an edit that was never run. Same
     # reason for the gate: e2e brings this service up live.
     command: ["-c", "/etc/nats/nats.conf"]
     volumes:
@@ -429,7 +429,7 @@ def render_compose_base(
 # `frontend-build` populating a volume, with nginx gated on
 # `service_completed_successfully` — and the microservice template carried
 # NOTHING: its nginx mounted only `./service-configs/nginx`. The canon did not
-# travel. Live consequence on ironmemo: nginx served `root /frontend-react`, a
+# travel. Live consequence on a client fleet: nginx served `root /frontend-react`, a
 # bind onto a host directory that both the deploy script and CI explicitly
 # EXCLUDED from rsync, so no build ever landed there. For months that read as
 # "the frontend does not update" and was repeatedly misdiagnosed as caching.
@@ -461,7 +461,7 @@ class Frontend:
       BACKEND repo holds the pin, so "which frontend goes with this backend"
       is answerable from one repo's history.
     * ``host`` — a plain bind mount from ``host_path``. Legacy/escape hatch,
-      and the shape ironmemo is in today. Permitted, but it proves nothing
+      and the shape one client fleet is in today. Permitted, but it proves nothing
       about delivery, which is exactly why FED001 (stapel-frontend-delivery-
       lint) demands a writer for it.
 

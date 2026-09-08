@@ -98,6 +98,19 @@ is run by a person, and no generated CI job pushes), so an automated context
 reaching it is unexpected — exactly where "this gate verified nothing" must
 not read as a pass. A hook that smothered EXP000 now fails the new test.
 
+### Two client names left the tree
+
+The owner's private-names list grew by two client products, and this repo's own
+EXP001 gate then reported 151 findings in 28 tracked files: incident prose in
+docstrings and this changelog, two lint messages (FED005 and NGX003), a `--probe
+--cookie-name` example in the README, and test fixtures named after the stands
+they were copied from. Every one is reworded, not suppressed — no `# noqa:
+EXP001`, no exception entry, no `--allow-empty`. The sentences keep saying what
+happened and on what shape ("a client stand", "a client backend", "a meeting
+app"); the fixtures keep their bytes and answer to neutral names
+(`INCIDENT_*`/`STAND_BROKEN`). History is untouched: the names are already in
+published wheels, and this stops the next one, not the last.
+
 ## 0.64.2 — 2026-09-07 — never released
 
 No `v0.64.2` tag was ever cut and no 0.64.2 wheel exists on PyPI; the version
@@ -364,7 +377,7 @@ about a check that happens too early and too widely, and it is the first
 `stapel-verify` rule paid for by a CLIENT deployment rather than by a fleet
 library.
 
-meettoday, MR !16. `accounts/auth.py` was the deployment's only
+A client backend, MR !16. `accounts/auth.py` was the deployment's only
 `REST_FRAMEWORK["DEFAULT_AUTHENTICATION_CLASSES"]` entry:
 
 ```python
@@ -452,16 +465,16 @@ verdict), which is never counted as a pass and never as a failure. It is
 opt-in, needs `DJANGO_SETTINGS_MODULE`, and is **not** composed into
 `stapel-verify` — that gate is static and boots nothing.
 
-**Inversion control**, run against the real meettoday tree at both commits:
+**Inversion control**, run against the real client tree at both commits:
 
 | tree | AUTHZ007 | exit |
 | --- | --- | --- |
 | `0365f73^` (pre-fix) | `accounts/auth.py:116` (the helper hop), `:125` (the literal raise) — 2 errors | 1 |
 | `0365f73` (MR !16) | none | 0 |
 
-**Fleet sweep** — every `stapel-*` repo, `ironmemo-backend`, `marketplace-backend`,
+**Fleet sweep** — every `stapel-*` repo, both client backends, `marketplace-backend`,
 both storefronts and `studio-slice`: **zero** hits; the fleet's libraries all go
-through core's own authenticator. The two hits are meettoday's working branch,
+through core's own authenticator. The two hits are that client's working branch,
 which still carries the defect (MR !16 is not merged into it) — found by
 pointing the new rule at the tree that paid for it, not by inspection.
 
@@ -1287,7 +1300,7 @@ commits:
 | `4cb3e74` (pre-fix) | `views.py:161` — 1 error | 1 |
 | `4f1bd8d` (0.8.0) | none | 0 |
 
-**Fleet sweep** — every `stapel-*` repo, plus `ironmemo-backend` and
+**Fleet sweep** — every `stapel-*` repo, plus a client backend and
 both client fleets: **one** hit, `stapel-studio/.vendor/stapel-listings/views.py:161`
 — a build-time snapshot (gitignored, staged by `make vendor`) still pinned at
 listings 0.7.1, i.e. the studio image would ship the pre-fix probe until it is
@@ -2238,7 +2251,7 @@ own docstring says exactly that.
 `check_instead_of` silenced per displacing ENTRY (`entry["name"] in
 seen_names`), so a project that adopted the strict sibling and documented why
 it refused the scoped one was still reported for the same two displaced
-symbols, by the sibling it had correctly declined. Measured on meettoday: two
+symbols, by the sibling it had correctly declined. Measured on a client backend: two
 SUR002 errors on views that are right as written, whose only routes to green
 were a weaker gate or a silenced rule — the two outcomes the SUR family exists
 to avoid.
@@ -2459,7 +2472,7 @@ Both lints' `CONF_GLOBS` now include `*.inc` alongside `*.conf` and
 (`service-configs/nginx*/`, `nginx/`, and — frontend-delivery-lint only —
 `deploy/nginx/`). The overlapping portion of the two gates' globs, which had
 already drifted apart once (frontend-delivery-lint gained `deploy/nginx/`
-and cache-lint gained the bare `nginx/*.conf` meettoday fix, each without
+and cache-lint gained the bare `nginx/*.conf` client fix, each without
 the other), is now one constant: `frontend_delivery_lint.CONF_GLOBS` is
 `nginx_cache_lint.CONF_GLOBS` extended with the `deploy/nginx/` patterns,
 instead of a second hand-maintained copy.
@@ -2719,7 +2732,7 @@ second such sweep. `stapel-verify` composes the lint; the library template's
 
 ### A generated service states its identity-trust mode instead of inheriting it
 
-Two production outages on the same day (app.ironmemo.com, 2026-08-15..16; task
+Two production outages on the same day (a client fleet, 2026-08-15..16; task
 #349) were one defect: **stapel-core flipped two defaults in a minor release
 and no product had ever stated them**, so every service silently changed mode
 on a version bump.
@@ -3086,7 +3099,7 @@ looking translated, and dropped from the `.mo` all the same). Fuzzy is produced
 by changes as small as a format-flag flip — `python-format` to
 `python-brace-format`, with no edit to the msgid at all.
 
-Measured on meettoday's `backend/`: a bare run takes 100 live msgids to 64 per
+Measured on a client `backend/`: a bare run takes 100 live msgids to 64 per
 locale, 40 obsolete and 5 fuzzy, and the one string that flips to fuzzy is the
 passcode subject — after which `gettext("Your {company_name} verification code:
 {code}")` under `ru` returns the *library's* default instead of the product's
@@ -3486,16 +3499,15 @@ every case for the same reason.
 
 Composed into `stapel-verify`, so every consumer gets it on upgrade.
 
-**Measured across the whole fleet — 37 repos plus `ironmemo-backend` and the
-meettoday backend — before shipping: 34 raw hits, 3 after triage.** Each
+**Measured across the whole fleet — 37 repos plus both client backends — before shipping: 34 raw hits, 3 after triage.** Each
 exclusion was paid for by a class of hit that was not a defect: 11 ×
 `getattr(mod, "__version__")` on a statically imported optional dependency
-(`ironmemo-backend`); 5 × `apps.is_installed("django.contrib.*")`, which asks
+(a client backend); 5 × `apps.is_installed("django.contrib.*")`, which asks
 whether the host turned admin on — configuration, not topology (`stapel-core`,
 `stapel-recordings`); 4 × sibling repos checked into `stapel-studio/.vendor/`,
 linted as if they were that project's code; and everything the manifest pins
 (`pyvips` behind `stapel-cdn`'s `images` extra, `stapel_core.django.taskstore`
-from `stapel-recordings`, `meeteval==0.4.3` from `ironmemo-backend`). Two more
+from `stapel-recordings`, `meeteval==0.4.3` from a client backend). Two more
 classes need no exclusion because the design already makes them invisible, and
 both are pinned by tests: dotted paths inside stapel-tools' own code templates
 (generated source text, not resolution) and Django's settings strings
@@ -3544,7 +3556,7 @@ published version was 0.29.1. Their contents ship here.
 ### Changed — the scaffolded NATS gets headroom for a Function reply
 
 `--max_payload 8388608`. NATS caps a single message at 1 MiB by default, and a
-comm Function is request-reply over exactly that. Measured on ironmemo
+comm Function is request-reply over exactly that. Measured on a client backend
 (2026-08-06): an `llm.complete` reply over a meeting transcript exceeded the
 cap, the reply was refused inside the subscription callback, and the caller sat
 until its timeout while the work had already been done. stapel-core 0.19.0 makes
@@ -3558,7 +3570,7 @@ message.
 
 Measured live on BOTH stands while verifying the cache policy on request:
 
-    curl -I https://app.ironmemo.com/assets/nope-00000000.js
+    curl -I https://app.example.com/assets/nope-00000000.js
     -> HTTP 404 + Cache-Control: public, max-age=31536000, immutable
 
 The `always` flag on the hashed-asset location makes nginx emit that header on
@@ -3576,12 +3588,12 @@ Fixed in `NGINX_CONF` and the per-frontend block, and guarded by the new rule.
 
 ### Fixed — two blind spots that made this gate report success about files it never read
 
-* `discover_confs` looked only under `service-configs/nginx*/`. meettoday keeps
+* `discover_confs` looked only under `service-configs/nginx*/`. One client keeps
   its confs in a plain `nginx/` directory, so this gate had **never** checked
-  meettoday: it printed "no nginx conf found" and exited 0. Honest wording,
+  that project: it printed "no nginx conf found" and exited 0. Honest wording,
   zero coverage.
 * `serves_from_disk` required the location to declare its own `root`. nginx
-  INHERITS `root`, and meettoday's `location /assets/` declares none — so both
+  INHERITS `root`, and that project's `location /assets/` declares none — so both
   NGX002 and NGX005 skipped the exact block they exist to check.
 
 With both closed, the gate finds the real defect in both products.
@@ -3590,11 +3602,11 @@ With both closed, the gate finds the real defect in both products.
 
 ### Fixed — the generated pnpm image did not build
 
-Verified live by building `ironmemo-frontend`'s generated Dockerfile: `pnpm
+Verified live by building a client frontend's generated Dockerfile: `pnpm
 install --frozen-lockfile` exits 1 with `ERR_PNPM_IGNORED_BUILDS`. pnpm 10
 refuses to run dependencies' lifecycle scripts unless the repo lists them in
 `pnpm.onlyBuiltDependencies`, and a Docker build has no way to answer the
-interactive `pnpm approve-builds` prompt (ironmemo needs them for `esbuild`
+interactive `pnpm approve-builds` prompt (that repo needs them for `esbuild`
 and `@tailwindcss/oxide`). The build stage now sets
 `dangerouslyAllowAllBuilds` — those same scripts already run on every
 developer's machine (esbuild without its postinstall has no binary and the app
@@ -3618,7 +3630,7 @@ The §57 canon — a one-shot writer filling a volume, with nginx gated on
 The microservice template carried none of it: its nginx mounted only
 `./service-configs/nginx`. The canon did not travel, and nothing noticed.
 
-Live consequence on ironmemo: nginx served `root /frontend-react`, a bind onto a
+Live consequence on a client fleet: nginx served `root /frontend-react`, a bind onto a
 host directory that both `scripts/deploy_stand.sh` and `.gitlab-ci.yml`
 explicitly EXCLUDED from rsync. No build ever landed there. For months this read
 as "the frontend does not update" and was repeatedly diagnosed as caching.
@@ -3649,10 +3661,10 @@ unlink+symlink, so the window is sub-millisecond, not zero.
 "nginx root ↔ who writes to that path". FED001 resolves every disk-served
 frontend root to its mount and demands a provable writer, and separately checks
 that a bind source is not `--exclude`d by the deploy script or CI — that second
-half is what catches ironmemo. FED002 refuses a mutable image tag outside the
+half is what catches that defect. FED002 refuses a mutable image tag outside the
 local stack, FED003 an unpinned `FRONTEND_*` variable, FED004 a contract-digest
 mismatch, FED005 anything unparseable on the delivery path (error, never a
-silent skip — a conservative skip is how ironmemo went unnoticed), FED006 warns
+silent skip — a conservative skip is how it went unnoticed), FED006 warns
 on a bind nobody builds. Composed into `stapel-verify`, so it reaches the whole
 fleet through a `stapel-tools` upgrade.
 
@@ -4071,7 +4083,7 @@ emits that shape — but a template only helps a project generated after it, and
 the incident happened in a hand-maintained conf. This is the enforcement layer
 for projects that already exist.
 
-The incident it encodes (app.ironmemo.com): `location /` carried BOTH
+The incident it encodes (a client stand): `location /` carried BOTH
 `expires 1d` AND `add_header Cache-Control "public, must-revalidate"`. nginx
 emits its own `Cache-Control` for `expires` and appends yours on top, so the
 response carried two `Cache-Control` headers; a client combines them
@@ -4173,7 +4185,7 @@ monolith combined libs, or a microservice's slug diverged from its lib's key.
   lib's Django mount prefix, derived from `create_project.STAPEL_LIBS`
   (cross-checked lib-by-lib against each sibling checkout's actual urls.py/
   urls_v1.py, not merely trusted from the registry, and against the one
-  hand-wired working reference, meettoday's own `config/urls.py`, for auth/
+  hand-wired working reference, a client backend's own `config/urls.py`, for auth/
   workspaces/profiles/notifications/calendar/recordings/cdn). One documented
   outlier override (`stapel_translate`, whose own urls_v1.py hardcodes its
   full `"translate/api/v1/..."` prefix internally — mounts at the bare
@@ -4220,7 +4232,7 @@ categories'/listings' mount in every preset).
 
 ### Added — cdn auto-wiring
 
-Generalizes the hand-applied meettoday avatar fix (11 hand-edited files) into
+Generalizes a hand-applied client avatar fix (11 hand-edited files) into
 `stapel-create-project`'s monolith scaffold: selecting `cdn` in `--modules`
 now auto-wires the FULL stack instead of only installing `stapel_cdn` as a
 dependency — closing the "the cdn module exists, nothing serves it" gap
@@ -4260,7 +4272,7 @@ project without it is byte-identical to the pre-fix scaffold.
   `render_modules_tsx`'s `ModulesPanel`) whenever profiles-react is also
   wired. `render_modules_tsx` additionally registers a stopgap `cdn`-keyed
   client in the generated `<StapelProvider clients={{...}}>`, reusing the
-  primary pair's client — mirrors the hand-applied meettoday fix's
+  primary pair's client — mirrors the hand-applied client fix's
   `clients: { cdn: stapelClient }` — so core's `useStapelClient("cdn")` seam
   (called unconditionally by `ProfileSettings`' avatar-upload hook) never
   throws for want of a registered client.

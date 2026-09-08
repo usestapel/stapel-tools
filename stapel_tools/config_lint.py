@@ -89,7 +89,7 @@ CFG007  (error) **In a service checkout**, the project mounts Stapel JWT
         one is correct for a given service, and nothing but the service knows
         which.
 
-        Caught live (app.ironmemo.com, 2026-08-15..16): stapel-core flipped the
+        Caught live (a client fleet, 2026-08-15..16): stapel-core flipped the
         library default in a MINOR release (0.24, ``True`` -> ``False``) and
         every service that had never stated it changed identity mode on a
         version bump, with no boot-time signal. Seven of eight began answering

@@ -295,7 +295,7 @@ STAPEL_AUTH_SERVICE_PREFIX = os.getenv("STAPEL_AUTH_SERVICE_PREFIX", "")
 # never answered the question changed mode on a version bump with no boot-time
 # signal: seven of eight services began answering 401 to every new sign-up,
 # visible only as "JWT Auth Failed - User creation failed" once per request
-# (app.ironmemo.com, 2026-08-15..16). A service must say which it is, and keep
+# (a client fleet, 2026-08-15..16). A service must say which it is, and keep
 # saying it across core versions — stapel-config-lint CFG007 refuses one that
 # mounts Stapel JWT auth and leaves this line out.
 JWT_CREATE_USERS_FROM_TOKEN = {{JWT_CREATE_USERS_FROM_TOKEN}}

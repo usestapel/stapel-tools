@@ -16,8 +16,8 @@ table, so there is exactly one registry to keep in sync: a lib's own
 ``url_prefix`` field there already distinguishes the two mount shapes
 (cross-checked lib-by-lib against each sibling checkout's own urls.py /
 urls_v1.py, not merely trusted from the registry, and against the one
-hand-wired working reference, meettoday's own
-``.../eil meet/backend/config/urls.py``, for auth/workspaces/profiles/
+hand-wired working reference, a client backend's own
+``config/urls.py``, for auth/workspaces/profiles/
 notifications/calendar/recordings/cdn):
 
 * a lib whose own ``urls.py`` does NOT nest an ``api/`` segment (it starts

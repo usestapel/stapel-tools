@@ -9,7 +9,7 @@ it allowed to reuse a stale one". This gate answers the question NOBODY was
 asking, which is why it cost months: **is there a bundle on that disk at all,
 and who put it there.**
 
-The incident that made this machine-checkable (app.ironmemo.com stand):
+The incident that made this machine-checkable (a client stand):
 
 * ``service-configs/nginx/nginx.ssl.conf:83`` — ``location /`` serves
   ``root /frontend-react``.
@@ -47,7 +47,7 @@ FED001  (error) **nginx serves a frontend directory with no provable writer.**
           deploy scripts (``scripts/deploy_stand.sh``, ``deploy/*.sh``,
           ``scripts/deploy*.sh``) and in CI (``.gitlab-ci.yml``,
           ``.github/workflows/*.yml``). Without that second check a gate says
-          "a bind exists, therefore fine" and stays silent on ironmemo.
+          "a bind exists, therefore fine" and stays silent on that stand.
           An ABSOLUTE host path (``/var/www/...``) is also reported: nothing
           in the repository can prove what fills it.
         * **no mount at all** — the container serves whatever the image
@@ -100,7 +100,7 @@ FED005  (error) **Something on the delivery path could not be read, so no
         ``extends`` for a service this gate depends on.
 
         Why error and not a quiet skip: a conservative skip is a
-        false-negative machine, and it is precisely what let ironmemo run for
+        false-negative machine, and it is precisely what let a client fleet run for
         months — every isolated checker "passed" on the part it could see.
         A gate that cannot read the seam must SAY SO, loudly, in the same
         channel as a real defect. Suppress a genuinely irrelevant one with
@@ -623,7 +623,7 @@ def collect_frontend_roots(conf: Path, src: Optional[str] = None) -> tuple[list[
             name, 1, "FED005",
             f"nginx conf does not parse ({exc}) — the delivery gate cannot tell what "
             f"this file serves, so it makes NO claim about it. A silent skip here is "
-            f"the false-negative machine that hid the ironmemo frontend for months.",
+            f"the false-negative machine that hid a client's frontend for months.",
         ))
         return [], findings
 
@@ -975,7 +975,7 @@ def _check_root(model: _Model, root: StaticRoot) -> list[Finding]:
             f"that directory: {evidence}. nginx therefore serves a directory that no "
             f"deploy ever fills; a fresh frontend never reaches the stand, which looks "
             f"exactly like \"the frontend did not update\". This is the "
-            f"app.ironmemo.com defect (verdict tasks/fable/"
+            f"client-stand defect (verdict tasks/fable/"
             f"frontend-delivery-split-repo.md). Fix: publish the build as a dist image "
             f"and deliver it through a one-shot writer into a named volume (§57/C′), or "
             f"stop excluding the directory.",

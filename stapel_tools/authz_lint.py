@@ -136,7 +136,7 @@ AUTHZ007  (error) A DRF authentication class the HOST defines and lists in
           authenticator that departs from that while sitting in the default
           list breaks views it never heard of.
 
-          meettoday, 2026-09-07 (MR !16), verbatim: ``accounts.auth
+          A meeting app's backend, 2026-09-07 (MR !16), verbatim: ``accounts.auth
           .JWTAuthentication`` read the httponly ``stapel_jwt`` access cookie
           before the ``Authorization`` header and raised on a token it could
           not use. ``GET /auth/api/v1/token/refresh/`` is ``AllowAny`` — the
@@ -392,7 +392,7 @@ AUTH_FAILURE_EXCEPTIONS = frozenset({
 })
 
 #: Handler names that make a ``try`` block a REAL guard — the shape of the
-#: meettoday fix (``except AuthenticationFailed: ... return None``). A handler
+#: client fix (``except AuthenticationFailed: ... return None``). A handler
 #: catching something else (``except User.DoesNotExist``) guards nothing here.
 GUARDING_EXCEPTIONS = AUTH_FAILURE_EXCEPTIONS | frozenset({
     "Exception", "BaseException", "APIException",
@@ -1350,7 +1350,7 @@ def _raised_name(node: ast.Raise) -> str:
 def _raising_helpers(tree: ast.Module) -> frozenset:
     """Same-module functions that raise an authentication failure.
 
-    The meettoday defect is exactly this hop: ``authenticate()`` had no
+    The client defect is exactly this hop: ``authenticate()`` had no
     ``raise`` of its own on the expired-token path — it called the module's
     ``decode_token()``, which raises ``AuthenticationFailed`` and is a
     perfectly good function for its DIRECT callers. One fixed-point layer, as
@@ -1612,7 +1612,7 @@ _MSG_007 = (
     "authentication answers FOR authorization. stapel-core's own "
     "JWTCookieAuthentication returns None on a blacklisted, expired or invalid "
     "token, which is why departing from it breaks views this class never heard "
-    "of. This is meettoday 2026-09-07 "
+    "of. This is a meeting app's 2026-09-07 defect "
     "verbatim: the class read the httponly stapel_jwt access cookie before the "
     "Authorization header and raised on a token it could not use, so GET "
     "/auth/api/v1/token/refresh/ — AllowAny, and the one call that repairs an "

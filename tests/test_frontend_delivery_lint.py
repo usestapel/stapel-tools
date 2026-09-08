@@ -1,7 +1,7 @@
 """Frontend-delivery gate (owner directive, 2026-08-05) —
 stapel-frontend-delivery-lint.
 
-The fixtures are the ACTUAL shapes of the app.ironmemo.com stand, the defect
+The fixtures are the ACTUAL shapes of a client stand, the defect
 the fable verdict (`tasks/fable/frontend-delivery-split-repo.md`) diagnosed:
 `nginx.ssl.conf` serves `root /frontend-react`, `docker-compose.base.yml`
 mounts that path from the host directory `./frontend-react`, and BOTH
@@ -11,7 +11,7 @@ nginx serves a directory no deploy ever fills — for months, with a perfectly
 clean cache-canon gate above it, because every existing checker looked at one
 side of the seam and never at the join.
 
-The canon fixture is the §57 delivery shape taken from meettoday's
+The canon fixture is the §57 delivery shape taken from a client's
 `docker-compose.prod.yml`: a one-shot `frontend-builder` (`restart: "no"`)
 writes the `frontend_dist` volume, nginx mounts it read-only and starts on
 `service_completed_successfully`.
@@ -27,8 +27,8 @@ from stapel_tools import frontend_delivery_lint as fdl
 # verbatim fixtures
 # ---------------------------------------------------------------------------
 
-#: the served side — ironmemo `service-configs/nginx/nginx.ssl.conf`
-IRONMEMO_CONF = """\
+#: the served side — the stand's `service-configs/nginx/nginx.ssl.conf`
+INCIDENT_CONF = """\
 server {
   listen 443 ssl http2;
   server_name _;
@@ -61,8 +61,8 @@ server {
 }
 """
 
-#: the mounted side — ironmemo `docker-compose.base.yml`
-IRONMEMO_COMPOSE = """\
+#: the mounted side — the stand's `docker-compose.base.yml`
+INCIDENT_COMPOSE = """\
 version: "3.1"
 
 services:
@@ -80,8 +80,8 @@ volumes:
   static-content:
 """
 
-#: the deploy side — ironmemo `scripts/deploy_stand.sh`
-IRONMEMO_DEPLOY = """\
+#: the deploy side — the stand's `scripts/deploy_stand.sh`
+INCIDENT_DEPLOY = """\
 #!/usr/bin/env bash
 set -euo pipefail
 rsync_to_stand \\
@@ -94,7 +94,7 @@ rsync_to_stand \\
     ./ "$REMOTE:$REMOTE_DIR"
 """
 
-IRONMEMO_CI = """\
+INCIDENT_CI = """\
 deploy_dev:
   stage: deploy
   script:
@@ -106,7 +106,7 @@ deploy_dev:
         ./ ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/
 """
 
-#: the canon — meettoday `docker-compose.prod.yml`, §57 delivery shape
+#: the canon — a client's `docker-compose.prod.yml`, §57 delivery shape
 CANON_COMPOSE = """\
 services:
   frontend-builder:
@@ -134,7 +134,7 @@ volumes:
   frontend_dist:
 """
 
-#: the canon served side — meettoday `nginx/prod.conf` (root at SERVER level,
+#: the canon served side — a client's `nginx/prod.conf` (root at SERVER level,
 #: inherited by the SPA-fallback location; the resolver must walk ancestors)
 CANON_CONF = """\
 server {
@@ -180,15 +180,15 @@ def by_rule(findings, rule):
     return [f for f in findings if f.rule == rule]
 
 
-IRONMEMO_FILES = {
-    "service-configs/nginx/nginx.ssl.conf": IRONMEMO_CONF,
-    "docker-compose.base.yml": IRONMEMO_COMPOSE,
-    "scripts/deploy_stand.sh": IRONMEMO_DEPLOY,
-    ".gitlab-ci.yml": IRONMEMO_CI,
+INCIDENT_FILES = {
+    "service-configs/nginx/nginx.ssl.conf": INCIDENT_CONF,
+    "docker-compose.base.yml": INCIDENT_COMPOSE,
+    "scripts/deploy_stand.sh": INCIDENT_DEPLOY,
+    ".gitlab-ci.yml": INCIDENT_CI,
     "scripts/env.stand.template": "IMAGE_TAG_AUTH=iron-auth:local\n",
 }
 
-#: the same served/excluded entry location as IRONMEMO_CONF, but as
+#: the same served/excluded entry location as INCIDENT_CONF, but as
 #: a client fleet actually ships its route table: a bare `include`d fragment
 #: (`locations.inc`), never a `*.conf` of its own. Before CONF_GLOBS covered
 #: `*.inc` a project shaped like this reported "found no nginx conf" and
@@ -208,11 +208,11 @@ LOCATIONS_INC_ENTRY = """\
 # ---------------------------------------------------------------------------
 
 
-class TestIronmemoIncident:
+class TestExcludedBindIncident:
     def test_served_directory_excluded_from_the_deploy_is_an_error(self, tmp_path):
         """FED001 — the join nothing else looked at: nginx root ↔ rsync
         --exclude. This is the live bug."""
-        target = project(tmp_path, IRONMEMO_FILES, dirs=["frontend-react", "frontend-kmp"])
+        target = project(tmp_path, INCIDENT_FILES, dirs=["frontend-react", "frontend-kmp"])
         findings = by_rule(fdl.lint_project(target), "FED001")
 
         served = {f.message.split("serves `")[1].split("`")[0] for f in findings}
@@ -222,7 +222,7 @@ class TestIronmemoIncident:
     def test_the_message_names_both_the_mount_and_every_exclusion(self, tmp_path):
         """A finding that does not carry its evidence gets argued with, not
         fixed: the mount line AND each --exclude site must be in the text."""
-        target = project(tmp_path, IRONMEMO_FILES, dirs=["frontend-react", "frontend-kmp"])
+        target = project(tmp_path, INCIDENT_FILES, dirs=["frontend-react", "frontend-kmp"])
         react = [
             f for f in by_rule(fdl.lint_project(target), "FED001")
             if "/frontend-react" in f.message
@@ -236,7 +236,7 @@ class TestIronmemoIncident:
     def test_the_entry_document_and_the_hashed_assets_both_report(self, tmp_path):
         """Both halves of the SPA are undeliverable, and both say so: a fix
         that only re-points one is not a fix."""
-        target = project(tmp_path, IRONMEMO_FILES, dirs=["frontend-react", "frontend-kmp"])
+        target = project(tmp_path, INCIDENT_FILES, dirs=["frontend-react", "frontend-kmp"])
         react = [
             f for f in by_rule(fdl.lint_project(target), "FED001")
             if "/frontend-react" in f.message
@@ -248,7 +248,7 @@ class TestIronmemoIncident:
     def test_ci_alone_is_enough_to_fire(self, tmp_path):
         """Half the projects have no deploy script — the CI exclusion is the
         same defect and must be found on its own."""
-        files = dict(IRONMEMO_FILES)
+        files = dict(INCIDENT_FILES)
         del files["scripts/deploy_stand.sh"]
         target = project(tmp_path, files, dirs=["frontend-react", "frontend-kmp"])
         findings = by_rule(fdl.lint_project(target), "FED001")
@@ -261,9 +261,9 @@ class TestIronmemoIncident:
         nothing ran."""
         files = {
             "service-configs/nginx/locations.inc": LOCATIONS_INC_ENTRY,
-            "docker-compose.base.yml": IRONMEMO_COMPOSE,
-            "scripts/deploy_stand.sh": IRONMEMO_DEPLOY,
-            ".gitlab-ci.yml": IRONMEMO_CI,
+            "docker-compose.base.yml": INCIDENT_COMPOSE,
+            "scripts/deploy_stand.sh": INCIDENT_DEPLOY,
+            ".gitlab-ci.yml": INCIDENT_CI,
             "scripts/env.stand.template": "IMAGE_TAG_AUTH=iron-auth:local\n",
         }
         target = project(tmp_path, files, dirs=["frontend-react"])
@@ -419,7 +419,7 @@ class TestWriterProof:
         assert "ABSOLUTE host path" in findings[0].message
 
     def test_bind_source_missing_from_the_repo(self, tmp_path):
-        files = dict(IRONMEMO_FILES)
+        files = dict(INCIDENT_FILES)
         files["scripts/deploy_stand.sh"] = "#!/usr/bin/env bash\nrsync -az ./ $REMOTE\n"
         del files[".gitlab-ci.yml"]
         target = project(tmp_path, files)  # no frontend-react/ directory created
@@ -450,7 +450,7 @@ class TestWriterProof:
 
 class TestHostBindWarning:
     def test_bind_that_reaches_the_stand_is_a_warning_not_silence(self, tmp_path):
-        files = dict(IRONMEMO_FILES)
+        files = dict(INCIDENT_FILES)
         files["scripts/deploy_stand.sh"] = "#!/usr/bin/env bash\nrsync -az ./ $REMOTE\n"
         del files[".gitlab-ci.yml"]
         target = project(tmp_path, files, dirs=["frontend-react", "frontend-kmp"])
@@ -459,7 +459,7 @@ class TestHostBindWarning:
         assert all(f.level == "warning" for f in findings)
 
     def test_strict_fails_on_it(self, tmp_path, capsys):
-        files = dict(IRONMEMO_FILES)
+        files = dict(INCIDENT_FILES)
         files["scripts/deploy_stand.sh"] = "#!/usr/bin/env bash\nrsync -az ./ $REMOTE\n"
         del files[".gitlab-ci.yml"]
         target = project(tmp_path, files, dirs=["frontend-react", "frontend-kmp"])
@@ -495,19 +495,19 @@ def _tagged(tmp_path, image, *, file_name="docker-compose.prod.yml", env=""):
 
 class TestMutableTags:
     @pytest.mark.parametrize("image", [
-        "registry.example.com/ironmemo/frontend:latest",
-        "registry.example.com/ironmemo/frontend:dev",
-        "registry.example.com/ironmemo/frontend:main",
-        "registry.example.com/ironmemo/frontend",
+        "registry.example.com/client/frontend:latest",
+        "registry.example.com/client/frontend:dev",
+        "registry.example.com/client/frontend:main",
+        "registry.example.com/client/frontend",
     ])
     def test_mutable_tags_are_errors(self, tmp_path, image):
         target = _tagged(tmp_path, image)
         assert rules(fdl.lint_project(target)) == ["FED002"]
 
     @pytest.mark.parametrize("image", [
-        "registry.example.com/ironmemo/frontend:sha-9a34f21",
-        "registry.example.com/ironmemo/frontend@sha256:" + "a" * 64,
-        "registry.example.com/ironmemo/frontend:1.4.2",
+        "registry.example.com/client/frontend:sha-9a34f21",
+        "registry.example.com/client/frontend@sha256:" + "a" * 64,
+        "registry.example.com/client/frontend:1.4.2",
     ])
     def test_immutable_references_are_clean(self, tmp_path, image):
         assert fdl.lint_project(_tagged(tmp_path, image)) == []
@@ -600,7 +600,7 @@ class TestEnvTemplate:
     def test_declared_keys_are_clean(self, tmp_path):
         target = self._project(
             tmp_path,
-            "FRONTEND_REACT_IMAGE=registry.example.com/ironmemo/frontend\n"
+            "FRONTEND_REACT_IMAGE=registry.example.com/client/frontend\n"
             "FRONTEND_REACT_TAG=sha-9a34f21\n",
         )
         assert by_rule(fdl.lint_project(target), "FED003") == []
@@ -737,7 +737,7 @@ class TestUnreadableIsLoud:
 
     def test_include_inside_a_location_is_not_reported(self, tmp_path):
         """It can only add directives to a location we already see — it cannot
-        hide a root. meettoday's `/rtc` gate include is exactly this shape."""
+        hide a root. A client's `/rtc` gate include is exactly this shape."""
         conf = (
             "server {\n"
             "  root /usr/share/nginx/html;\n"
@@ -801,26 +801,26 @@ class TestUnreadableIsLoud:
 
 class TestNoqa:
     def test_noqa_on_the_location_line(self, tmp_path):
-        conf = IRONMEMO_CONF.replace("  location / {", "  location / {  # noqa: FED001")
+        conf = INCIDENT_CONF.replace("  location / {", "  location / {  # noqa: FED001")
         conf = conf.replace("  location /kmp {", "  location /kmp {  # noqa")
         conf = conf.replace(
             "  location ~* ^/(static|assets)/.*\\.(js|css|woff2)$ {",
             "  location ~* ^/(static|assets)/.*\\.(js|css|woff2)$ {  # noqa: FED001",
         )
-        files = dict(IRONMEMO_FILES)
+        files = dict(INCIDENT_FILES)
         files["service-configs/nginx/nginx.ssl.conf"] = conf
         target = project(tmp_path, files, dirs=["frontend-react", "frontend-kmp"])
         assert fdl.lint_project(target) == []
 
     def test_noqa_on_the_mount_line(self, tmp_path):
-        compose = IRONMEMO_COMPOSE.replace(
+        compose = INCIDENT_COMPOSE.replace(
             "      - ./frontend-react:/frontend-react",
             "      - ./frontend-react:/frontend-react  # noqa: FED001",
         ).replace(
             "      - ./frontend-kmp:/frontend-kmp",
             "      - ./frontend-kmp:/frontend-kmp  # noqa: FED001",
         )
-        files = dict(IRONMEMO_FILES)
+        files = dict(INCIDENT_FILES)
         files["docker-compose.base.yml"] = compose
         target = project(tmp_path, files, dirs=["frontend-react", "frontend-kmp"])
         assert fdl.lint_project(target) == []
@@ -861,7 +861,7 @@ class TestZeroInput:
 
 class TestCli:
     def test_json_output_and_exit_code(self, tmp_path, capsys):
-        target = project(tmp_path, IRONMEMO_FILES, dirs=["frontend-react", "frontend-kmp"])
+        target = project(tmp_path, INCIDENT_FILES, dirs=["frontend-react", "frontend-kmp"])
         assert fdl.main([str(target), "--json"]) == 1
         payload = json.loads(capsys.readouterr().out)
         assert payload["ok"] is False
@@ -958,7 +958,7 @@ class TestExcludeSemantics:
         assert fdl.excluded_by(source, pattern) is hit
 
     def test_exclusions_are_collected_from_scripts_and_ci(self, tmp_path):
-        target = project(tmp_path, IRONMEMO_FILES)
+        target = project(tmp_path, INCIDENT_FILES)
         patterns = {e.pattern for e in fdl.collect_exclusions(target)}
         assert {"frontend-react", "frontend-kmp"} <= patterns
         sources = {e.path.name for e in fdl.collect_exclusions(target)}

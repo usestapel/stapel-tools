@@ -1,6 +1,6 @@
 """Identity trust is DECLARED by the scaffold, not inherited from a library default.
 
-The incident (app.ironmemo.com, 2026-08-15..16, task #349). stapel-core 0.24
+The incident (a client fleet, 2026-08-15..16, task #349). stapel-core 0.24
 flipped two defaults in a MINOR release, and every product that had never
 stated them silently changed mode:
 
@@ -277,7 +277,7 @@ def _cfg007(root: Path):
 
 class TestCfg007FiresWhereTheIncidentWas:
     def test_star_import_without_declaration_is_an_error(self, tmp_path):
-        """The exact ironmemo shape: `from stapel_core.django.settings import *`
+        """The exact client shape: `from stapel_core.django.settings import *`
         pulls in REST_FRAMEWORK's DEFAULT_AUTHENTICATION_CLASSES =
         JWTCookieAuthentication. The service is on Stapel JWT auth without
         having typed a single JWT line — and answered for nothing."""

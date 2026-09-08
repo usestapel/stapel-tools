@@ -321,7 +321,7 @@ export default function App() {
 def render_cdn_lib_ts(slug: str) -> str:
     """``frontend/src/lib/cdn.ts`` — stapel-cdn URL resolution, written only
     when "cdn" is among the project's selected modules (cdn auto-wiring,
-    cdn-scaffold-autowire.md — generalizes the hand-applied meettoday avatar
+    cdn-scaffold-autowire.md — generalizes a hand-applied client avatar
     fix). A DOCUMENTED STOPGAP: no ``@stapel/cdn-react`` client pair exists
     yet (promoting this file's logic into one is a separate follow-up, not
     blocking here).
@@ -460,7 +460,7 @@ def render_modules_tsx(
       documents) wrapping one ``<XProvider runtime={...}>`` per selected
       pair, nested. ``has_cdn`` (cdn auto-wiring, cdn-scaffold-autowire.md)
       additionally registers a stopgap ``cdn`` client — the primary pair's
-      client reused verbatim, same as the hand-applied meettoday fix's
+      client reused verbatim, same as the hand-applied client fix's
       ``clients: { cdn: stapelClient }`` — so core's
       ``useStapelClient("cdn")`` seam (called unconditionally by
       ``ProfileSettings``' own avatar-upload hook) never throws for want of
@@ -606,7 +606,7 @@ def render_modules_tsx(
         if stopgap_cdn_client:
             # Stopgap for a project that selected the cdn BACKEND without the
             # @stapel/cdn-react pair: reuse the primary pair's client verbatim,
-            # same as the hand-applied meettoday fix's
+            # same as the hand-applied client fix's
             # `clients: { cdn: stapelClient }`, so core's
             # `useStapelClient("cdn")` seam never throws for want of one.
             lines.append(f'        cdn: {primary["key"]}Runtime.client,')
@@ -1792,7 +1792,7 @@ _INSTALL_STEPS = {
     # pnpm 10 refuses dependency lifecycle scripts unless the repo lists them
     # in `pnpm.onlyBuiltDependencies`, and a Docker build cannot answer the
     # interactive `pnpm approve-builds` prompt — the install just exits 1
-    # (ERR_PNPM_IGNORED_BUILDS; measured on ironmemo-frontend, where esbuild
+    # (ERR_PNPM_IGNORED_BUILDS; measured on a client frontend, where esbuild
     # and @tailwindcss/oxide both need theirs). Those same scripts already run
     # on every developer's machine — esbuild without its postinstall has no
     # binary and the app does not build at all — so allowing them in the build

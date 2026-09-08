@@ -13,7 +13,7 @@ The canon has exactly two halves, and they are opposites on purpose:
   content-addressed — a new deploy is a new URL — so they must be cached
   long and ``immutable``.
 
-The incident that made this machine-checkable (app.ironmemo.com stand): the
+The incident that made this machine-checkable (a client stand): the
 entry document was served with BOTH ``expires 1d`` AND
 ``add_header Cache-Control "public, must-revalidate"``. nginx emits its own
 ``Cache-Control`` for ``expires`` and appends yours on top, so the response
@@ -491,7 +491,7 @@ def serves_from_disk(loc: Block) -> bool:
 
     ``root`` is INHERITED in nginx: a location that declares none still serves
     from the ``root`` of its enclosing server/http block. Requiring the
-    location to own one was a blind spot with live consequences — meettoday's
+    location to own one was a blind spot with live consequences — a client's
     ``location /assets/ { expires off; add_header Cache-Control "…immutable"
     always; }`` declares no root of its own, so this returned False, and both
     NGX002 and NGX005 silently skipped the exact block they exist to check.
@@ -690,7 +690,7 @@ def lint_conf(path: Path, src: Optional[str] = None) -> list[Finding]:
                 f"{origin} AND an explicit `add_header Cache-Control` — nginx emits "
                 f"BOTH headers and a client combines them (RFC 9111 §5.2), so the "
                 f"response really means the UNION of the two, not the one written "
-                f"last. This is the app.ironmemo.com defect: `expires 1d` + "
+                f"last. This is the client-stand defect: `expires 1d` + "
                 f'"public, must-revalidate" cached the entry document for 24h. '
                 f"Use `expires off;` (nginx then adds nothing) and keep exactly one "
                 f"explicit add_header.",
@@ -765,7 +765,7 @@ def lint_conf(path: Path, src: Optional[str] = None) -> list[Finding]:
 
             # ------------------------------------------------------ NGX005
             # Measured live on BOTH stands (2026-08-05):
-            #   curl -I https://app.ironmemo.com/assets/nope-00000000.js
+            #   curl -I https://app.example.com/assets/nope-00000000.js
             #   -> HTTP 404 + Cache-Control: public, max-age=31536000, immutable
             # The `always` flag makes nginx stamp the header onto error
             # responses too, so a client caches "this chunk does not exist" for
@@ -809,9 +809,9 @@ CONF_GLOBS = (
     "service-configs/nginx*/*.conf",
     "service-configs/nginx*/*.conf.template",
     "service-configs/nginx*/*.inc",
-    # meettoday keeps its confs in a plain `nginx/` directory, not the
+    # One client keeps its confs in a plain `nginx/` directory, not the
     # scaffold's `service-configs/nginx/`. Until this line existed, this gate
-    # had NEVER checked meettoday: it reported "no nginx conf found" and the
+    # had NEVER checked that project: it reported "no nginx conf found" and the
     # run exited 0. Honest wording, useless coverage — the cache canon was
     # unguarded on a live stand for as long as the gate has existed.
     # (Found 2026-08-05 while confirming NGX005 on both products; the sibling

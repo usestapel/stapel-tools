@@ -1249,7 +1249,7 @@ class TestGeneratedCeleryWiring:
 
 class TestCdnFrontendAutoWiring:
     """cdn auto-wiring (cdn-scaffold-autowire.md) — the frontend half of the
-    4-point recipe generalized from the hand-applied meettoday avatar fix: a
+    4-point recipe generalized from a hand-applied client avatar fix: a
     stopgap `cdn`-keyed client registered in the generated
     `<StapelProvider clients={{...}}>` (no dedicated `@stapel/cdn-react`
     pair exists yet — promoting this into one is a separate follow-up), and
@@ -1401,7 +1401,7 @@ class TestSpaCacheCanon:
     unhashed file, so it must never be cached; hashed build artifacts are
     content-addressed, so they must be cached immutably for a year.
 
-    Live incident this encodes: on the app.ironmemo.com stand the entry
+    Live incident this encodes: on a client stand the entry
     document carried BOTH ``expires 1d`` and an explicit
     ``add_header Cache-Control "public, must-revalidate"`` — nginx emits both
     headers, the browser takes max-age=86400, and a freshly deployed frontend
@@ -1476,7 +1476,7 @@ class TestSpaCacheCanon:
                 assert not (has_cc and value != "off"), (
                     f"{header}: `expires {value};` next to an explicit "
                     "Cache-Control add_header — nginx emits BOTH headers "
-                    "(the app.ironmemo.com stale-bundle incident)"
+                    "(the client-stand stale-bundle incident)"
                 )
 
     def test_cache_headers_are_self_contained_per_location(self, tmp_path):
@@ -1510,7 +1510,7 @@ class TestSplitRepoFrontendDelivery:
 
     Its nginx mounted only `./service-configs/nginx` — no frontend volume, no
     writer, no gate. The canon lived in the monolith template and did not
-    travel. Measured live on ironmemo (2026-08-05): nginx served
+    travel. Measured live on a client fleet (2026-08-05): nginx served
     `root /frontend-react`, a bind onto a host directory that both
     `scripts/deploy_stand.sh` and `.gitlab-ci.yml` explicitly EXCLUDED from
     rsync, so no build ever landed there. For months that read as "the

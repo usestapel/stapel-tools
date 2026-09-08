@@ -905,7 +905,7 @@ class TestGeneratedMonolithPassesAdoptionLint:
 
 class TestCdnAutoWiring:
     """cdn auto-wiring (cdn-scaffold-autowire.md): generalizes the
-    hand-applied meettoday avatar fix — the exact 11-file recipe (backend
+    hand-applied client avatar fix — the exact 11-file recipe (backend
     settings/urls, libvips container, nginx, frontend stopgap client) — into
     the scaffold, gated on "cdn" being among the project's ``--modules``. A
     monolith without cdn selected must stay byte-identical to the pre-fix

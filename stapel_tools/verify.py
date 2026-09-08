@@ -43,7 +43,7 @@ Linters composed (in this order)
   the family's INVERTED member — authentication answering *for* authorization:
   a host authentication class in ``DEFAULT_AUTHENTICATION_CLASSES`` that
   RAISES on an unusable credential answers 401 before an ``AllowAny`` view
-  ever runs, and meettoday's refresh endpoint — the one call that repairs an
+  ever runs, and a client's refresh endpoint — the one call that repairs an
   expired session — was locked out by the expired access cookie it exists to
   replace, once an hour, for every continuously signed-in user. Its runtime
   half, ``stapel-authz-lint --probe``, is deliberately NOT composed here:

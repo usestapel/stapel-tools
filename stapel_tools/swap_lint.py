@@ -146,7 +146,7 @@ each exclusion paid for by a class of hit that was not a defect:
   ``.vendor/``/``vendored/`` — whole sibling repos checked in (4 hits,
   ``stapel-studio``), where "ours" is computed for the wrong distribution.
 * ``getattr(mod, "__dunder__")`` — a version probe on a statically imported
-  optional dependency (11 hits, ``ironmemo-backend``). A dunder is the module
+  optional dependency (11 hits, a client backend). A dunder is the module
   protocol, present on every module, never a private symbol of another
   package.
 * ``django`` and ``django.contrib.*`` (5 hits, ``stapel-core`` and
@@ -154,7 +154,7 @@ each exclusion paid for by a class of hit that was not a defect:
   whether the HOST turned admin on. Configuration, not topology.
 * Anything the manifest pins (``pyvips`` behind ``stapel-cdn``'s ``images``
   extra, ``stapel_core.django.taskstore`` from ``stapel-recordings``,
-  ``meeteval==0.4.3`` from ``ironmemo-backend``) — see above.
+  ``meeteval==0.4.3`` from a client backend) — see above.
 
 Two classes need no exclusion because the design already makes them
 invisible, and both are asserted in the tests so they stay that way: a dotted
@@ -613,7 +613,7 @@ def _manifest_files(project: Path):
 
     Walked, not globbed at the root: a monorepo backend
     (``<repo>/backend/pyproject.toml``) and a repo whose requirements live one
-    level down (``ironmemo-backend/iron-benchmark/requirements.txt``, which is
+    level down (``client-backend/benchmark/requirements.txt``, which is
     where its pinned ``meeteval==0.4.3`` is declared) are both normal, and a
     root-only glob reads them as declaring nothing at all — i.e. as reaching
     into a package they in fact pin.

@@ -11,8 +11,8 @@ into that repo. So the delivery canon only ever existed on the CONSUMING side:
 the backend declared a volume and a one-shot service, and the frontend repo had
 no idea it was supposed to publish anything into them.
 
-That gap is not hypothetical. Measured on ironmemo (2026-08-05):
-``ironmemo-frontend`` has no ``Dockerfile`` and no ``.gitlab-ci.yml`` at all —
+That gap is not hypothetical. Measured on a client fleet (2026-08-05): its
+frontend repo has no ``Dockerfile`` and no ``.gitlab-ci.yml`` at all —
 only a locally built ``dist/``. The backend's nginx served ``root
 /frontend-react``, a bind onto a host directory that both
 ``scripts/deploy_stand.sh`` and the backend's CI explicitly EXCLUDED from
@@ -471,7 +471,7 @@ def init_frontend_repo(repo: Path, *, ci: str = "gitlab", force: bool = False) -
     # The LOCKFILE decides the install step. `npm ci` in a pnpm repo does not
     # fail loudly — it resolves a DIFFERENT dependency tree than every
     # developer has, and the image you ship stops matching the app anyone
-    # tested. ironmemo-frontend is pnpm; the scaffold's own frontend is npm.
+    # tested. That client frontend is pnpm; the scaffold's own frontend is npm.
     pm = detect_package_manager(repo)
     out = [
         f"  package manager: {pm} (from the lockfile)",

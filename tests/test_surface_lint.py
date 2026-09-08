@@ -295,7 +295,7 @@ SIBLING_SURFACE = [
 def test_sur002_quiet_when_the_project_picked_a_SIBLING_replacement(tmp_path):
     """Two published classes displace the same symbol; adopting either is adoption.
 
-    Measured on meettoday: it runs ``[IsAuthenticated, HasWorkspaceMandate]``
+    Measured on a client backend: it runs ``[IsAuthenticated, HasWorkspaceMandate]``
     on the views that need a mandate and says in its own source why it did NOT
     take ``HasWorkspaceMandateIfScoped`` (that class is for library views; this
     is a product). Asking per-entry re-reported the never-imported sibling and

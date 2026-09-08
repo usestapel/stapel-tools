@@ -466,7 +466,7 @@ stapel-authz-lint .                          # lint the project in .
 stapel-authz-lint . --json                   # machine output
 stapel-authz-lint . --strict                 # AUTHZ003 (warning) becomes an error
 stapel-authz-lint . --probe                  # AUTHZ007's runtime half (needs DJANGO_SETTINGS_MODULE)
-stapel-authz-lint . --probe --cookie-name meettoday_jwt
+stapel-authz-lint . --probe --cookie-name app_jwt
 ```
 
 On 2026-08-24 stapel-core shipped five security releases (0.38.0-0.43.0) for
@@ -540,7 +540,7 @@ because that branch *is* the fix.
 **AUTHZ007 — the inverted member: authentication answering *for*
 authorization.** Every other rule in this family is about a check that is
 missing. This one is about a check that happens too early and too widely. On
-2026-09-07 meettoday (MR !16) had, in `accounts/auth.py`, a class wired as the
+2026-09-07 a client backend (MR !16) had, in `accounts/auth.py`, a class wired as the
 deployment's only `DEFAULT_AUTHENTICATION_CLASSES` entry:
 
 ```python

@@ -49,7 +49,7 @@ def make_dirty_project(tmp_path):
       contract-phase marker.
     - SUR001 (surface-lint): a local permission class re-declared under a name
       stapel_verifyfixture already publishes in its surface.
-    - NGX001 + NGX003 (nginx-cache-lint): the app.ironmemo.com SPA cache
+    - NGX001 + NGX003 (nginx-cache-lint): the client-stand SPA cache
       defect — an entry document carrying BOTH ``expires 1d`` AND an explicit
       ``add_header Cache-Control``.
     - SIB001 (sibling-lint): a test module importing ``stapel_verifyfixture``
@@ -291,7 +291,7 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
 
     # FED001: the fixture's nginx serves `/frontend-react` and the fixture has
     # no compose file at all — nothing describes what fills that directory.
-    # That is the ironmemo shape in miniature, and it is a real finding, not
+    # That is the client-stand shape in miniature, and it is a real finding, not
     # fixture noise.
     fed_rules = {f["rule"] for f in by_name["stapel-frontend-delivery-lint"].findings}
     assert fed_rules == {"FED001"}

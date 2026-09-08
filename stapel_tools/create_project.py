@@ -3105,7 +3105,7 @@ def _create_microservices(project_dir: Path, ctx: dict, broker: str, task_broker
     # ${FRONTEND_IMAGE}:${FRONTEND_TAG} in the env template. Declaring the
     # delivery here, at scaffold time, is the whole point: the shape this
     # replaces was a micro base whose nginx mounted no frontend at all, which
-    # on ironmemo meant a stand serving a directory nothing ever wrote to.
+    # on a client stand meant serving a directory nothing ever wrote to.
     frontends = [Frontend(delivery="image")]
     _write(project_dir / "docker-compose.base.yml", render_compose_base(MICRO_COMPOSE_BASE, broker, task_broker, frontends))
     _write(project_dir / "docker-compose.yml", render_frontend_delivery(MICRO_COMPOSE_PROD, frontends))
@@ -3242,7 +3242,7 @@ def _extras_for_lib(key: str, module_config: dict[str, dict] | None) -> list[str
 def _append_cdn_pip_requirement(reqs_path: Path):
     """Append ``stapel-cdn[images]`` (pyvips) to an already-written service
     ``requirements.txt`` — cdn auto-wiring (cdn-scaffold-autowire.md),
-    generalizing the meettoday hand fix. Same pin/ceiling convention as
+    generalizing a client's hand fix. Same pin/ceiling convention as
     ``_setup_pip_deps``'s own entries (current STAPEL_LIBS["cdn"] registry
     pin, next-minor exclusive ceiling); called unconditionally whenever
     "cdn" is selected for a monolith, independent of the submodule-vs-pip
@@ -3477,7 +3477,7 @@ def create_project(
     modules = ["core", *feature_only]
 
     # cdn auto-wiring (cdn-scaffold-autowire.md): self-documenting STAPEL_CDN/
-    # STAPEL_PROFILES defaults — generalizes the hand-applied meettoday
+    # STAPEL_PROFILES defaults — generalizes a hand-applied client
     # avatar fix. Both values below are already each module's OWN library
     # default (stapel-cdn's docs/capabilities.json ASSET_TYPES=["avatar"]/
     # ENABLED_SUBMODULES=["images"]; stapel-profiles' PROFILES_AVATAR_CHECK

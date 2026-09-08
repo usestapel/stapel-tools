@@ -3,7 +3,7 @@
 Nothing in this toolchain ever wrote into a split-repo frontend, so the canon
 only existed on the consuming side: the backend declared a volume and a
 one-shot service, and the frontend repo had no idea it was supposed to publish
-into them. Measured on ironmemo (2026-08-05): `ironmemo-frontend` carries no
+into them. Measured on a client fleet (2026-08-05): its frontend repo carries no
 Dockerfile and no CI at all — only a locally built `dist/`.
 """
 import pytest
@@ -73,7 +73,7 @@ def test_refuses_a_directory_that_is_not_a_frontend(tmp_path):
 def test_install_step_follows_the_lockfile(tmp_path):
     """`npm ci` in a pnpm repo does not fail loudly — it resolves a DIFFERENT
     dependency tree than every developer has, and the image you ship stops
-    matching the app anyone tested. ironmemo-frontend is pnpm."""
+    matching the app anyone tested. That client frontend is pnpm."""
     for lock, expect in (
         ("pnpm-lock.yaml", "pnpm install --frozen-lockfile"),
         ("yarn.lock", "yarn install --immutable"),

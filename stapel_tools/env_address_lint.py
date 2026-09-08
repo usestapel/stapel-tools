@@ -274,7 +274,7 @@ _ENDPOINT_MSG = (
 _GATEWAY_MSG = (
     "literal `{ip}` in {label} has the exact shape of a Docker bridge "
     "gateway (`172.16-31.x.1`) — THIS is the incident class that took down "
-    "meettoday's WebRTC signaling for a full day (read as \"load\") and then "
+    "a meeting app's WebRTC signaling for a full day (read as \"load\") and then "
     "the whole site (a fail-closed gate that believed the frozen number): "
     "`docker0`'s gateway is a daemon-level constant, NOT the gateway of the "
     "network this container actually runs in, and it is reassigned on every "

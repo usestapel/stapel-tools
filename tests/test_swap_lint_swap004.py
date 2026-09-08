@@ -26,7 +26,7 @@ dependencies = [{deps}]
 """
 
 
-def build(tmp_path, files, *, name="meettoday", package="rooms", deps=()):
+def build(tmp_path, files, *, name="meetapp", package="rooms", deps=()):
     root = tmp_path / f"proj{len(list(tmp_path.iterdir()))}"
     root.mkdir()
     (root / "pyproject.toml").write_text(

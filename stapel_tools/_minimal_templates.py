@@ -137,7 +137,7 @@ AUTH_USER_MODEL = "users.User"
 # a MINOR release (0.24: True -> False) and every service that had never
 # answered the question changed mode on a version bump with no boot-time
 # signal — seven of eight began answering 401 to every new sign-up
-# (app.ironmemo.com, 2026-08-15..16). stapel-config-lint CFG007 refuses a
+# (a client fleet, 2026-08-15..16). stapel-config-lint CFG007 refuses a
 # project that mounts Stapel JWT auth and leaves this line out.
 JWT_CREATE_USERS_FROM_TOKEN = {{JWT_CREATE_USERS_FROM_TOKEN}}
 

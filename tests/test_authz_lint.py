@@ -1092,7 +1092,7 @@ def test_the_post_fix_tree_is_clean(tmp_path):
 
 
 #: The declaration that makes a class run before EVERY view, including an
-#: AllowAny one. meettoday's own, verbatim.
+#: AllowAny one. A client backend's own, verbatim.
 SETTINGS_PY = """\
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
@@ -1101,7 +1101,7 @@ REST_FRAMEWORK = {
 }
 """
 
-#: meettoday's ``accounts/auth.py`` before MR !16, in shape: ``authenticate()``
+#: A client's ``accounts/auth.py`` before MR !16, in shape: ``authenticate()``
 #: has ONE literal raise (the user-is-gone path) and reaches the expired-token
 #: raise through ``decode_token``, a module-level helper that is perfectly good
 #: for its direct callers.
@@ -1182,7 +1182,7 @@ def _host(tmp_path, auth_py, settings_py=SETTINGS_PY):
 
 class TestAuthz007:
     def test_the_shipped_defect_is_flagged(self, tmp_path):
-        """meettoday 2026-09-07: both ends of the same contract break — the
+        """The client defect of 2026-09-07: both ends of the same contract break — the
         raise reached through the helper, and the literal one."""
         path = _host(tmp_path, PRE_FIX_AUTHENTICATOR)
         hits = [v for v in lint_project(tmp_path) if v.rule == "AUTHZ007"]
@@ -1415,8 +1415,8 @@ class TestAuthz007Probe:
         """A deployment that renamed JWT_COOKIE_NAME is probed under ITS name:
         the same class raises for `stapel_jwt` and has no opinion without it."""
         assert probe_authenticator(RaisingCookieAuth).outcome == "raised"
-        renamed = ProbeRequest(cookie_name="meettoday_jwt")
-        assert renamed.COOKIES == {"meettoday_jwt": GARBAGE_TOKEN}
+        renamed = ProbeRequest(cookie_name="app_jwt")
+        assert renamed.COOKIES == {"app_jwt": GARBAGE_TOKEN}
         assert probe_authenticator(RaisingCookieAuth, renamed).outcome == "ok"
 
     def test_the_whole_declared_chain_is_probed(self):

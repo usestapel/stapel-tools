@@ -267,7 +267,7 @@ def test_a_declared_dependency_is_not_a_hidden_import(tmp_path):
 
 
 def test_a_requirements_file_below_the_root_also_declares(tmp_path):
-    """``ironmemo-backend`` pins ``meeteval==0.4.3`` one directory down; a
+    """A client backend pins ``meeteval==0.4.3`` one directory down; a
     root-only glob reads the repo as declaring nothing and flags a lazy
     import of its own pinned dependency."""
     source = (

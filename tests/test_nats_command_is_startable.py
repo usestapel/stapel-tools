@@ -1,6 +1,6 @@
 """A generated infra line must be STARTABLE, not merely plausible.
 
-Incident (2026-08-07, ironmemo stand): the compose file carried
+Incident (2026-08-07, a client stand): the compose file carried
 ``command: ["-m", "8222", "--max_payload", "8388608"]``. It looks
 reasonable and passes both `docker compose config -q` and any YAML linter.
 But nats-server has NO ``--max_payload`` flag: it prints "flag provided but

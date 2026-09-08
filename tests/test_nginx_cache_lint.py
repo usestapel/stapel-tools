@@ -1,6 +1,6 @@
 """SPA cache canon gate (owner directive, 2026-07-26) — stapel-nginx-cache-lint.
 
-The fixtures below are the ACTUAL shapes involved in the app.ironmemo.com
+The fixtures below are the ACTUAL shapes involved in a client-stand
 incident, copied from that stand's `service-configs/nginx/nginx.ssl.conf`:
 the entry document carried BOTH `expires 1d` AND
 `add_header Cache-Control "public, must-revalidate"`, nginx emitted two
@@ -21,7 +21,7 @@ from stapel_tools import nginx_cache_lint as ncl
 # ---------------------------------------------------------------------------
 
 #: the defect, exactly as it was served in production
-IRONMEMO_BROKEN = """\
+STAND_BROKEN = """\
 server {
   listen 443 ssl http2;
   server_name _;
@@ -136,10 +136,10 @@ def _by_rule(findings, rule):
 # ---------------------------------------------------------------------------
 
 
-class TestIronmemoIncident:
+class TestDoubleCacheControlIncident:
     def test_entry_document_cacheable_is_an_error(self):
         """NGX001 — `expires 1d` on the SPA fallback: the deploy does not land."""
-        findings = _by_rule(_lint(IRONMEMO_BROKEN), "NGX001")
+        findings = _by_rule(_lint(STAND_BROKEN), "NGX001")
         assert len(findings) == 1, findings
         finding = findings[0]
         assert finding.level == "error"
@@ -149,7 +149,7 @@ class TestIronmemoIncident:
 
     def test_double_cache_control_header_is_an_error(self):
         """NGX003 — the actual mechanism: nginx emits two Cache-Control headers."""
-        findings = _by_rule(_lint(IRONMEMO_BROKEN), "NGX003")
+        findings = _by_rule(_lint(STAND_BROKEN), "NGX003")
         lines = sorted(f.line for f in findings)
         # entry document, the hashed-asset block, /staticfiles and /media all
         # combine `expires` with an explicit add_header Cache-Control.
@@ -158,24 +158,24 @@ class TestIronmemoIncident:
         assert "RFC 9111" in findings[0].message
 
     def test_hashed_asset_block_is_immutable_so_no_NGX002(self):
-        """The one thing ironmemo got right — 30d + immutable. Only the
+        """The one thing that stand got right — 30d + immutable. Only the
         double-header rule fires there, not the immutability rule."""
-        assets = [f for f in _lint(IRONMEMO_BROKEN) if f.line in (19, 20, 21)]
+        assets = [f for f in _lint(STAND_BROKEN) if f.line in (19, 20, 21)]
         assert _rules(assets) == ["NGX003"]
 
     def test_media_is_not_mistaken_for_a_hashed_asset(self):
         """/media is user uploads — never content-hashed. Demanding
         `immutable` there would be a false positive that gets the gate
         switched off."""
-        assert not [f for f in _by_rule(_lint(IRONMEMO_BROKEN), "NGX002")]
+        assert not [f for f in _by_rule(_lint(STAND_BROKEN), "NGX002")]
 
     def test_proxy_locations_are_untouched(self):
         """/auth proxies to an upstream: cache policy belongs to the upstream,
         and it has no entry document of its own."""
-        assert not [f for f in _lint(IRONMEMO_BROKEN) if f.line >= 40]
+        assert not [f for f in _lint(STAND_BROKEN) if f.line >= 40]
 
     def test_whole_conf_rule_set(self):
-        assert _rules(_lint(IRONMEMO_BROKEN)) == ["NGX001", "NGX003"]
+        assert _rules(_lint(STAND_BROKEN)) == ["NGX001", "NGX003"]
 
 
 # ---------------------------------------------------------------------------
@@ -522,14 +522,14 @@ def _write_project(tmp_path, conf_text, name="nginx.conf"):
 
 class TestProjectAndCLI:
     def test_discovers_service_configs_nginx(self, tmp_path):
-        _write_project(tmp_path, IRONMEMO_BROKEN)
+        _write_project(tmp_path, STAND_BROKEN)
         findings = ncl.lint_project(tmp_path)
         assert _rules(findings) == ["NGX001", "NGX003"]
 
     def test_discovers_local_conf_template(self, tmp_path):
         local = tmp_path / "service-configs" / "nginx-local"
         local.mkdir(parents=True)
-        (local / "default.conf.template").write_text(IRONMEMO_BROKEN)
+        (local / "default.conf.template").write_text(STAND_BROKEN)
         assert ncl.lint_project(tmp_path)
 
     def test_project_without_nginx_is_a_note_not_a_failure(self, tmp_path):
@@ -552,7 +552,7 @@ class TestProjectAndCLI:
         assert notes == []
 
     def test_cli_exit_1_on_the_defect(self, tmp_path, capsys):
-        _write_project(tmp_path, IRONMEMO_BROKEN)
+        _write_project(tmp_path, STAND_BROKEN)
         assert ncl.main([str(tmp_path)]) == 1
         assert "NGX001" in capsys.readouterr().out
 
@@ -561,7 +561,7 @@ class TestProjectAndCLI:
         assert ncl.main([str(tmp_path)]) == 0
 
     def test_cli_json(self, tmp_path, capsys):
-        _write_project(tmp_path, IRONMEMO_BROKEN)
+        _write_project(tmp_path, STAND_BROKEN)
         ncl.main([str(tmp_path), "--json"])
         payload = json.loads(capsys.readouterr().out)
         assert payload["ok"] is False
@@ -576,7 +576,7 @@ class TestProjectAndCLI:
 
     def test_cli_on_a_single_file(self, tmp_path):
         conf = tmp_path / "nginx.ssl.conf"
-        conf.write_text(IRONMEMO_BROKEN)
+        conf.write_text(STAND_BROKEN)
         assert ncl.main([str(conf)]) == 1
 
     def test_cli_missing_target_is_exit_2(self, tmp_path):
@@ -648,7 +648,7 @@ def _base(server):
 
 class TestLiveMode:
     def test_the_stand_as_it_actually_served_it(self, header_server):
-        """What app.ironmemo.com really put on the wire: TWO Cache-Control
+        """What the stand really put on the wire: TWO Cache-Control
         headers (nginx's own from `expires 1d`, plus the explicit one)."""
         _Handler.headers_by_path = {
             "/": [
@@ -731,7 +731,7 @@ class TestWiring:
         exist without regenerating them."""
         from stapel_tools import verify
 
-        _write_project(tmp_path, IRONMEMO_BROKEN)
+        _write_project(tmp_path, STAND_BROKEN)
         reports = verify.verify_project(tmp_path)
         by_name = {r.name: r for r in reports}
         assert "stapel-nginx-cache-lint" in by_name
@@ -742,7 +742,7 @@ class TestWiring:
     def test_stapel_verify_exit_code_carries_the_failure(self, tmp_path, capsys):
         from stapel_tools import verify
 
-        _write_project(tmp_path, IRONMEMO_BROKEN)
+        _write_project(tmp_path, STAND_BROKEN)
         assert verify.main([str(tmp_path)]) == 1
         assert "NGX001" in capsys.readouterr().out
 
@@ -759,7 +759,7 @@ class TestNGX005ImmutableOn404:
     """`always` on the hashed-asset location caches a MISSING chunk for a year.
 
     Measured live on both stands (2026-08-05):
-        curl -I https://app.ironmemo.com/assets/nope-00000000.js
+        curl -I https://app.example.com/assets/nope-00000000.js
         -> HTTP 404 + Cache-Control: public, max-age=31536000, immutable
 
     nginx's `always` flag adds the header to error responses too. Any deploy
@@ -813,7 +813,7 @@ class TestNGX005ImmutableOn404:
 class TestInheritedRootIsStillDisk:
     """A location with no `root` of its own still serves from the server's.
 
-    Blind spot with live consequences: meettoday's
+    Blind spot with live consequences: a client's
     `location /assets/ { expires off; add_header Cache-Control "…immutable"
     always; }` declares no root, so `serves_from_disk` said False and BOTH
     NGX002 and NGX005 skipped the exact block they exist to check. The gate
