@@ -2,6 +2,12 @@
 
 ## 0.65.0 — 2026-09-08
 
+**Upgrading from 0.64.1?** This is the next release you can install: 0.64.2
+was written but never tagged or published, so everything under its heading
+below — the shared `# noqa` grammar's ESC001 family check, and EXP000 itself
+— reaches PyPI for the first time here. Read 0.64.2's section as part of this
+one.
+
 ### R012 — a view that intercepts a refusal the fleet handler owns
 
 stapel-core 0.61.0 made twelve DRF refusal types answer the fleet's error
@@ -72,7 +78,32 @@ fleet envelope, and which warns `stapel_core.error_envelope.W001` on its first
 it. `stapel-example-minimal/config/settings.py:142` is the project generated
 from the old template and still has the hole.
 
-## 0.64.2 — 2026-09-07
+### The generated pre-push hook's empty-list behaviour is now pinned by a test
+
+No behaviour change — a decision made explicit. EXP000 (0.64.2, below) made
+`stapel-exposure-lint` exit non-zero on a zero-name list whenever `$CI` or
+`$GITHUB_ACTIONS` is set, and the generated `.githooks/pre-push` inherits that
+contract verbatim: it passes neither `--allow-empty` nor `--require-names`.
+The scaffold tests that exercise the hook's *worktree* rule were pointing
+`STAPEL_PRIVATE_NAMES_FILE` at an absent path — a way of keeping the owner's
+real list out of a test that predates EXP000, and that on a runner made the
+gate fail those tests for a reason they are not about. They now write a
+one-name list of their own, and the unconfigured state is judged where it
+belongs, in `TestPrePushGateWithNoNamesConfigured`: no list on a developer
+machine lets the push through, no list under `CI=true` refuses it with EXP000.
+
+The hook was not taught to ignore `$CI`. It is the last gate before a private
+name leaves a machine, and no generated workflow enables it (`setup-hooks.sh`
+is run by a person, and no generated CI job pushes), so an automated context
+reaching it is unexpected — exactly where "this gate verified nothing" must
+not read as a pass. A hook that smothered EXP000 now fails the new test.
+
+## 0.64.2 — 2026-09-07 — never released
+
+No `v0.64.2` tag was ever cut and no 0.64.2 wheel exists on PyPI; the version
+went from 0.64.1 straight to 0.65.0. The section is kept as written because
+these are real changes with real reasons — they simply ship in 0.65.0, and
+`pip install stapel-tools==0.64.2` will not find anything.
 
 ### ESC001 no longer flags a foreign linter's own `# noqa` id
 

@@ -215,6 +215,57 @@ def test_scaffolded_pyproject_ships_the_contract_documents_in_the_wheel():
 # ---------------------------------------------------------------------------
 
 
+def _git(root, *args):
+    return subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
+        cwd=root, capture_output=True, text=True,
+    )
+
+
+def _repo_with_hook(tmp_path):
+    """A scratch repo whose pre-push hook is the generated template, wired to
+    a local bare remote so a real `git push` runs it."""
+    from stapel_tools._library_templates import PRE_PUSH
+
+    remote = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
+    root = tmp_path / "work"
+    root.mkdir()
+    assert _git(root, "init", "-q", "-b", "main").returncode == 0
+    hooks = root / ".githooks"
+    hooks.mkdir()
+    hook = hooks / "pre-push"
+    hook.write_text(PRE_PUSH, encoding="utf-8")
+    hook.chmod(0o755)
+    _git(root, "config", "core.hooksPath", ".githooks")
+    _git(root, "remote", "add", "origin", str(remote))
+    return root
+
+
+def _configured_names(tmp_path, monkeypatch, *names):
+    """Point the hook's exposure gate at a list of our own.
+
+    Two reasons, and the second is why an absent path will not do: the
+    owner's real `~/.stapel/private-names` must never decide a test, and a
+    list that resolves to zero names makes the gate fail closed (EXP000) on
+    a runner, failing tests for a reason they are not about.
+    `TestPrePushGateWithNoNamesConfigured` is where that state belongs."""
+    path = tmp_path / "private-names"
+    path.write_text("".join(f"{n}\n" for n in names or ("acme",)),
+                    encoding="utf-8")
+    monkeypatch.setenv("STAPEL_PRIVATE_NAMES_FILE", str(path))
+    return path
+
+
+def _skip_unless_push_tools(*, exposure=False):
+    import pytest
+
+    needed = ["ruff", "git"] + (["stapel-exposure-lint"] if exposure else [])
+    missing = [n for n in needed if not shutil.which(n)]
+    if missing:
+        pytest.skip(f"{'/'.join(missing)} unavailable")
+
+
 class TestPrePushScansWhatIsPushed:
     """A shared worktree turned the old `ruff check .` / `stapel-exposure-lint
     . --commits` hook into a cross-session blocker: a peer's uncommitted files
@@ -231,91 +282,99 @@ class TestPrePushScansWhatIsPushed:
         assert "git archive" in PRE_PUSH
         assert "--pushed" in PRE_PUSH
 
-    def _git(self, root, *args):
-        return subprocess.run(
-            ["git", "-c", "user.email=t@t", "-c", "user.name=t", *args],
-            cwd=root, capture_output=True, text=True,
-        )
-
-    def _repo_with_hook(self, tmp_path):
-        from stapel_tools._library_templates import PRE_PUSH
-
-        remote = tmp_path / "remote.git"
-        subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True)
-        root = tmp_path / "work"
-        root.mkdir()
-        assert self._git(root, "init", "-q", "-b", "main").returncode == 0
-        hooks = root / ".githooks"
-        hooks.mkdir()
-        hook = hooks / "pre-push"
-        hook.write_text(PRE_PUSH, encoding="utf-8")
-        hook.chmod(0o755)
-        self._git(root, "config", "core.hooksPath", ".githooks")
-        self._git(root, "remote", "add", "origin", str(remote))
-        return root
-
     def test_dirty_worktree_does_not_fail_a_clean_push(self, tmp_path, monkeypatch):
-        if not (shutil.which("ruff") and shutil.which("git")):
-            import pytest
-            pytest.skip("ruff/git unavailable")
-        monkeypatch.setenv(
-            "STAPEL_PRIVATE_NAMES_FILE", str(tmp_path / "no-such-list")
-        )
-        root = self._repo_with_hook(tmp_path)
+        _skip_unless_push_tools()
+        _configured_names(tmp_path, monkeypatch)
+        root = _repo_with_hook(tmp_path)
         (root / "clean.py").write_text("VALUE = 1\n", encoding="utf-8")
-        self._git(root, "add", "clean.py")
-        self._git(root, "commit", "-q", "-m", "feat: a clean file")
+        _git(root, "add", "clean.py")
+        _git(root, "commit", "-q", "-m", "feat: a clean file")
         # a peer's uncommitted, untracked file with a real ruff error
         (root / "peer_wip.py").write_text(
             "import os\nimport sys\n", encoding="utf-8"
         )
 
-        pushed = self._git(root, "push", "-q", "origin", "main")
+        pushed = _git(root, "push", "-q", "origin", "main")
         assert pushed.returncode == 0, pushed.stdout + pushed.stderr
 
     def test_a_committed_ruff_error_still_fails_the_push(self, tmp_path, monkeypatch):
-        if not (shutil.which("ruff") and shutil.which("git")):
-            import pytest
-            pytest.skip("ruff/git unavailable")
-        monkeypatch.setenv(
-            "STAPEL_PRIVATE_NAMES_FILE", str(tmp_path / "no-such-list")
-        )
-        root = self._repo_with_hook(tmp_path)
+        _skip_unless_push_tools()
+        _configured_names(tmp_path, monkeypatch)
+        root = _repo_with_hook(tmp_path)
         (root / "broken.py").write_text("def f(:\n", encoding="utf-8")
-        self._git(root, "add", "broken.py")
-        self._git(root, "commit", "-q", "-m", "feat: a syntax error")
+        _git(root, "add", "broken.py")
+        _git(root, "commit", "-q", "-m", "feat: a syntax error")
 
-        pushed = self._git(root, "push", "-q", "origin", "main")
+        pushed = _git(root, "push", "-q", "origin", "main")
         assert pushed.returncode != 0
 
     def test_exposure_lint_judges_the_pushed_tree_only(self, tmp_path, monkeypatch):
         """EXP001 through the hook: committed hit blocks, uncommitted does not."""
-        import pytest
-        if not (shutil.which("ruff") and shutil.which("git")
-                and shutil.which("stapel-exposure-lint")):
-            pytest.skip("ruff/git/stapel-exposure-lint unavailable")
-        names = tmp_path / "private-names"
-        names.write_text("acme\n", encoding="utf-8")
-        monkeypatch.setenv("STAPEL_PRIVATE_NAMES_FILE", str(names))
+        _skip_unless_push_tools(exposure=True)
+        _configured_names(tmp_path, monkeypatch, "acme")
 
-        root = self._repo_with_hook(tmp_path)
+        root = _repo_with_hook(tmp_path)
         (root / "pyproject.toml").write_text(
             '[project]\nname = "stapel-thing"\nversion = "0.1.0"\n', encoding="utf-8"
         )
         (root / "clean.py").write_text("VALUE = 1\n", encoding="utf-8")
-        self._git(root, "add", "-A")
-        self._git(root, "commit", "-q", "-m", "feat: a clean file")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "feat: a clean file")
         # a peer's untracked note naming a client must not block this push
         (root / "peer_notes.md").write_text("acme.example\n", encoding="utf-8")
-        ok = self._git(root, "push", "-q", "origin", "main")
+        ok = _git(root, "push", "-q", "origin", "main")
         assert ok.returncode == 0, ok.stdout + ok.stderr
 
         # the same name, committed, does block it
         (root / "clean.py").write_text(
             "VALUE = 1  # seen on acme.example\n", encoding="utf-8"
         )
-        self._git(root, "add", "-A")
-        self._git(root, "commit", "-q", "-m", "chore: a note")
-        blocked = self._git(root, "push", "-q", "origin", "main")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "chore: a note")
+        blocked = _git(root, "push", "-q", "origin", "main")
         assert blocked.returncode != 0
         assert "EXP001" in blocked.stdout + blocked.stderr
+
+
+class TestPrePushGateWithNoNamesConfigured:
+    """What the generated hook does when the private-names list resolves to
+    zero names. The tests above configure a list precisely so that they judge
+    the worktree rule and nothing else; this is where the unconfigured state
+    is judged on purpose.
+
+    The hook shells out to `stapel-exposure-lint` passing neither
+    `--allow-empty` nor `--require-names`, so it inherits that tool's
+    empty-list contract verbatim: exit 0 for a developer without the owner's
+    list, EXP000 non-zero where `$CI`/`$GITHUB_ACTIONS` say the run is
+    automated. That inheritance is the choice being pinned — a hook that
+    smothered EXP000 would turn a gate verifying nothing into a pass."""
+
+    def test_no_list_on_a_developer_machine_lets_the_push_through(
+        self, tmp_path, monkeypatch
+    ):
+        _skip_unless_push_tools(exposure=True)
+        monkeypatch.setenv("STAPEL_PRIVATE_NAMES_FILE", str(tmp_path / "absent"))
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        root = _repo_with_hook(tmp_path)
+        (root / "clean.py").write_text("VALUE = 1\n", encoding="utf-8")
+        _git(root, "add", "clean.py")
+        _git(root, "commit", "-q", "-m", "feat: a clean file")
+
+        pushed = _git(root, "push", "-q", "origin", "main")
+        assert pushed.returncode == 0, pushed.stdout + pushed.stderr
+
+    def test_no_list_in_an_automated_context_refuses_the_push(
+        self, tmp_path, monkeypatch
+    ):
+        _skip_unless_push_tools(exposure=True)
+        monkeypatch.setenv("STAPEL_PRIVATE_NAMES_FILE", str(tmp_path / "absent"))
+        monkeypatch.setenv("CI", "true")
+        root = _repo_with_hook(tmp_path)
+        (root / "clean.py").write_text("VALUE = 1\n", encoding="utf-8")
+        _git(root, "add", "clean.py")
+        _git(root, "commit", "-q", "-m", "feat: a clean file")
+
+        blocked = _git(root, "push", "-q", "origin", "main")
+        assert blocked.returncode != 0
+        assert "EXP000" in blocked.stdout + blocked.stderr
