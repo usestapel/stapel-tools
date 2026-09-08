@@ -17,6 +17,8 @@ R008  get_or_create/update_or_create with a lifecycle or security flag in defaul
 R009  call('llm.transcribe'|...) — synchronous call to a long operation; make it a task (comm.start)
 R010  Cyrillic in a comment, a docstring or an identifier — source is English-only
 R011  One word carrying both Latin and Cyrillic letters — a homoglyph
+R012  handle_exception() branching on a rest_framework.exceptions type — that
+      refusal belongs to the fleet's EXCEPTION_HANDLER, not to one view
 R100  README must link both language docs when i18n artifacts exist (i18n-shipping.md §4) — WARNING
 
 Levels
@@ -31,6 +33,11 @@ Suppression
 -----------
 Add "# noqa: R001" (or the relevant rule ID) at the end of the offending line to silence it.
 Add "# noqa" to silence all rules on that line.
+
+R012 carries a second, method-scoped escape on top of that one:
+"# stapel: owns-refusal" anywhere in the handle_exception body declares that
+this view really does own the refusal it converts — write the reason next to
+it.
 """
 
 import argparse
@@ -638,6 +645,201 @@ def check_r011(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violat
             )
 
 
+# ---------------------------------------------------------------------------
+# R012 — a view intercepting a refusal the fleet's exception handler owns
+# ---------------------------------------------------------------------------
+#
+# stapel-core 0.61.0 made twelve DRF refusal types answer the fleet envelope
+# through one seam, REST_FRAMEWORK["EXCEPTION_HANDLER"]. A view that overrides
+# handle_exception and converts one of those types itself takes the refusal
+# away from that seam: the envelope, the localizable key and the params never
+# happen for it, and the two answers drift. stapel-cdn 0.20.0 was exactly
+# that — DescribeMediaView converted Throttled in the view and answered
+# `wait + 1`, one second more than the Retry-After header on the same
+# response, because DRF had already rounded the wait up once.
+#
+# The legitimate case is the module's OWN exception type: stapel-workspaces'
+# BillingSeamMixin turns its `entitlements.BillingUnavailable` into a 503 for
+# every method of the view. Nothing else in the process knows that type, so
+# nothing else can answer it — the rule never fires there, because the rule
+# only ever looks at names that resolve to `rest_framework.exceptions`.
+
+#: The method whose override takes a refusal out of the fleet handler's hands.
+R012_METHOD = "handle_exception"
+
+#: Method-scoped declaration for the view that genuinely owns a DRF refusal
+#: (AUTHZ007's `# stapel: strict-authenticator` grammar). Write the reason.
+R012_MARKER = "stapel: owns-refusal"
+
+#: Modules whose members ARE the fleet handler's business. `serializers` is
+#: here because `rest_framework.serializers.ValidationError` IS
+#: `rest_framework.exceptions.ValidationError` — the same class under the
+#: name most view code reaches it by.
+_R012_EXC_MODULES = {
+    "rest_framework.exceptions": None,
+    "rest_framework.serializers": frozenset({"ValidationError"}),
+}
+
+
+def _r012_drf_names(tree: ast.Module) -> tuple[dict, dict]:
+    """Module-level bindings that name a ``rest_framework`` exception.
+
+    Returns ``(symbols, modules)`` — local name → dotted exception, and local
+    name → the module it stands for (``rest_framework`` itself included, so a
+    fully qualified ``rest_framework.exceptions.Throttled`` resolves too).
+    """
+    symbols: dict[str, str] = {}
+    modules: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if module in _R012_EXC_MODULES:
+                    allowed = _R012_EXC_MODULES[module]
+                    if allowed is None or alias.name in allowed:
+                        symbols[local] = f"{module}.{alias.name}"
+                elif module == "rest_framework":
+                    full = f"rest_framework.{alias.name}"
+                    if full in _R012_EXC_MODULES:
+                        modules[local] = full
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name != "rest_framework" and not alias.name.startswith(
+                    "rest_framework."
+                ):
+                    continue
+                if alias.asname:
+                    modules[alias.asname] = alias.name
+                else:
+                    # `import a.b` binds `a`, not `a.b`.
+                    root = alias.name.split(".", 1)[0]
+                    modules[root] = root
+    return symbols, modules
+
+
+def _r012_resolve(node: ast.AST, symbols: dict, modules: dict):
+    """The dotted DRF exception *node* names, or ``None``."""
+    if isinstance(node, ast.Name):
+        return symbols.get(node.id)
+    if not isinstance(node, ast.Attribute):
+        return None
+    owner = _r012_dotted(node.value)
+    if owner is None:
+        return None
+    root, _, rest = owner.partition(".")
+    base = modules.get(root)
+    if base is None:
+        return None
+    module = f"{base}.{rest}" if rest else base
+    if module not in _R012_EXC_MODULES:
+        return None
+    allowed = _R012_EXC_MODULES[module]
+    if allowed is not None and node.attr not in allowed:
+        return None
+    return f"{module}.{node.attr}"
+
+
+def _r012_dotted(node: ast.AST):
+    """``a.b.c`` as a string, for a pure Name/Attribute chain."""
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        owner = _r012_dotted(node.value)
+        return None if owner is None else f"{owner}.{node.attr}"
+    return None
+
+
+def _r012_branch_subtrees(method: ast.AST):
+    """The parts of a method body that TEST a value, with the line to report.
+
+    Converting an exception is not the finding; *deciding on its type* is.
+    Raising a DRF exception, or naming one in a type annotation, leaves the
+    refusal with the fleet handler and is none of this rule's business.
+    """
+    for node in ast.walk(method):
+        if isinstance(node, ast.Call):
+            name = (
+                node.func.id if isinstance(node.func, ast.Name)
+                else getattr(node.func, "attr", "")
+            )
+            if name in ("isinstance", "issubclass") and len(node.args) > 1:
+                yield node.args[1], node.lineno
+        elif isinstance(node, ast.ExceptHandler) and node.type is not None:
+            yield node.type, node.lineno
+        elif isinstance(node, (ast.If, ast.IfExp)):
+            yield node.test, node.lineno
+        elif isinstance(node, ast.Compare):
+            yield node, node.lineno
+        elif isinstance(node, ast.match_case):
+            yield node.pattern, node.pattern.lineno
+
+
+def check_r012(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    """A ``handle_exception`` override that branches on a DRF exception type.
+
+    The refusal types stapel-core's ``stapel_exception_handler`` answers — 401,
+    403, 404, 405, 406, 415, 429, the 400 of an unparseable body — are the ones
+    no view raises: they come from authenticators, permission classes,
+    dispatch, throttles. A view that intercepts one of them converts it with
+    none of the handler's registry behind it, so that endpoint answers a shape
+    (and, in the live case, a number) the rest of the fleet does not.
+
+    A module converting its OWN exception type is untouched — that type is
+    unknown to every other layer, so nothing but this view can answer it.
+    """
+    symbols, modules = _r012_drf_names(tree)
+    if not symbols and not modules:
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        for item in node.body:
+            if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if item.name != R012_METHOD:
+                continue
+            if _r012_declared(lines, item):
+                continue
+            reported: set = set()
+            for subtree, lineno in _r012_branch_subtrees(item):
+                for inner in ast.walk(subtree):
+                    exception = _r012_resolve(inner, symbols, modules)
+                    if exception is None:
+                        continue
+                    short = exception.rsplit(".", 1)[1]
+                    if (lineno, short) in reported:
+                        continue
+                    reported.add((lineno, short))
+                    if _noqa(lines, lineno, "R012"):
+                        continue
+                    yield Violation(
+                        path, lineno, "R012",
+                        f"{node.name}.{R012_METHOD} branches on {short} "
+                        f"({exception}) — that refusal belongs to the fleet's "
+                        f"EXCEPTION_HANDLER (stapel_core.django.api.errors."
+                        f"stapel_exception_handler), which answers it with the "
+                        f"localizable envelope and the headers DRF set. "
+                        f"Converting it here gives this one endpoint a "
+                        f"different body, and a second computation of the same "
+                        f"numbers. Let it raise through. Converting the "
+                        f"module's OWN exception type here is fine and is not "
+                        f"reported; if this view genuinely owns the DRF "
+                        f"refusal, say so with '# {R012_MARKER}' in the method "
+                        f"(and the reason next to it)",
+                    )
+
+
+def _r012_declared(lines: list[str], method: ast.AST) -> bool:
+    """Is ``# stapel: owns-refusal`` written inside the method?"""
+    start = getattr(method, "lineno", 1)
+    end = getattr(method, "end_lineno", start) or start
+    for lineno in range(start, min(end, len(lines)) + 1):
+        if R012_MARKER in lines[lineno - 1]:
+            return True
+    return False
+
+
 def rules_for_file(path: str):
     basename = os.path.basename(path)
     is_view = "views" in basename
@@ -662,6 +864,12 @@ def rules_for_file(path: str):
     # R010/R011 are about the language of the source, so they apply to
     # every file regardless of layer.
     checkers += [check_r010, check_r011]
+    # R012 is not routed by layer either: handle_exception is overridden on a
+    # view, but just as often on a mixin that lives in mixins.py/base.py — the
+    # stapel-workspaces case is `BillingSeamMixin` in views.py and the
+    # stapel-cdn one was a view class in the same file, and a rule that only
+    # read views.py would miss the first module that extracts its mixin.
+    checkers += [check_r012]
     return checkers
 
 

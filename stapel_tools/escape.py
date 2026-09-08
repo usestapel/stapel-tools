@@ -41,9 +41,9 @@ rule id in this fleet is canonically upper case, and a linter should not
 care that someone typed ``sur002``.
 
 A handful of linters carry a SECOND, family-specific escape on top of this
-one — ``# stapel: strict-authenticator`` (AUTHZ007, class-scoped), ``#
-stapel: env-address-ok`` (env-address-lint), the CFG007-only-a-NAMED-noqa-
-counts rule in config-lint. Those stay exactly as each linter already
+one — ``# stapel: strict-authenticator`` (AUTHZ007, class-scoped), ``# stapel:
+owns-refusal`` (R012, method-scoped), ``# stapel: env-address-ok``
+(env-address-lint), the CFG007-only-a-NAMED-noqa-counts rule in config-lint. Those stay exactly as each linter already
 implements them; this module is only the common ``# noqa: RULE`` grammar
 underneath, and none of those markers are read by :mod:`escape_lint` — a
 marker outside the ``# noqa: RULE`` grammar is not this module's claim to
@@ -153,7 +153,7 @@ def _register(linter: str, honors_noqa: bool, construct: str, *ids: str) -> None
 _register(
     "stapel-lint", True, "the reported line",
     "R001", "R002", "R003", "R004", "R005", "R006", "R007", "R008",
-    "R009", "R010", "R011",
+    "R009", "R010", "R011", "R012",
 )
 # R100 is a repo-level README check (i18n-shipping.md §4) with nothing to
 # annotate a single line of — deliberately unregistered, so a noqa marker

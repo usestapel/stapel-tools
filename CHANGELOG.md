@@ -1,5 +1,77 @@
 # Changelog
 
+## 0.65.0 — 2026-09-08
+
+### R012 — a view that intercepts a refusal the fleet handler owns
+
+stapel-core 0.61.0 made twelve DRF refusal types answer the fleet's error
+envelope, and every one of them reaches it through a single seam:
+`REST_FRAMEWORK["EXCEPTION_HANDLER"]`. A view that overrides
+`handle_exception` and converts one of those types **itself** takes the
+refusal away from that seam — no registered key, no `localizable_error`, no
+`params`, and a second computation of numbers DRF has already computed.
+
+stapel-cdn 0.20.0 was exactly that. `DescribeMediaView.handle_exception`
+converted `Throttled` in the view and answered `int(exc.wait) + 1`, while
+DRF's own `Retry-After` on the same response carried `math.ceil(exc.wait)` —
+the wait was rounded up twice, so `POST /describe/` told a client to wait one
+second longer than the header beside it, and one second longer than the same
+refusal reports everywhere else on the fleet. That one file is fixed; nothing
+stopped the next one.
+
+**R012** (error, `stapel-lint`) reports a class whose `handle_exception`
+override *branches on* a `rest_framework.exceptions` type — in an
+`isinstance`/`issubclass` call, an `except` clause, an `if`/conditional test,
+a comparison, or a `match` pattern. Every import shape resolves: `from
+rest_framework.exceptions import Throttled`, `from rest_framework import
+exceptions` → `exceptions.Throttled`, `import rest_framework` →
+`rest_framework.exceptions.Throttled`, and `serializers.ValidationError`
+(which IS `exceptions.ValidationError` under the name most view code reaches
+it by).
+
+**What it must never fire on, and does not: a module converting its OWN
+exception type.** stapel-workspaces' `BillingSeamMixin` (`views.py:168`) turns
+`entitlements.BillingUnavailable` into a 503 for every method of the view, and
+that is correct — nothing else in the process knows that type, so nothing else
+can answer it. The rule only ever resolves names that reach
+`rest_framework.exceptions`, so the legitimate case is not a suppression, it
+is simply not a finding.
+
+Not routed by layer: `handle_exception` is overridden on a view as often as on
+a mixin in `mixins.py`/`base.py`, and a rule that read only `views.py` would go
+blind the first time a module extracts the mixin.
+
+Escapes: `# noqa: R012` on the reported line (the shared grammar; registered in
+`stapel_tools.escape.RULE_REGISTRY`, so `ESC001`/`ESC002` police it like every
+other id), and the method-scoped `# stapel: owns-refusal` for a view that
+genuinely owns a DRF refusal — write the reason next to it, the same shape
+AUTHZ007's `# stapel: strict-authenticator` uses.
+
+Does **not** catch: `django.http.Http404` or `django.core.exceptions.
+PermissionDenied`, which DRF's handler also owns — deliberately out of scope,
+so the rule's subject stays one namespace a reader can check; a refusal
+intercepted in `dispatch()` or a middleware rather than in `handle_exception`;
+and a handler wrapper configured in settings (that half is
+`stapel_core.error_envelope.W001`, stapel-core 0.61.1, which reads the running
+deployment's effective `EXCEPTION_HANDLER` from inside the process).
+
+**Fleet sweep before release:** every repo under `/Users/apple/Projects` —
+one hit, `stapel-studio/.vendor/stapel-cdn/views.py:1232`, a vendored snapshot
+of stapel-cdn taken before 0.20.0 that still carries the defect verbatim.
+Zero defects in the live trees, and the one legitimate case
+(stapel-workspaces) correctly silent.
+
+### The minimal-project template wires the exception handler
+
+`_minimal_templates.py` emitted `REST_FRAMEWORK = {"DEFAULT_SCHEMA_CLASS":
+...}` — a dict that REPLACES core's, dropping `EXCEPTION_HANDLER` with it. So
+`stapel-create-project` (minimal preset) produced a project whose every
+authentication, permission, routing and throttle refusal answered outside the
+fleet envelope, and which warns `stapel_core.error_envelope.W001` on its first
+`manage.py check`. The template now carries the key, with the reason next to
+it. `stapel-example-minimal/config/settings.py:142` is the project generated
+from the old template and still has the hole.
+
 ## 0.64.2 — 2026-09-07
 
 ### ESC001 no longer flags a foreign linter's own `# noqa` id

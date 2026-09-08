@@ -345,9 +345,31 @@ stapel-lint --ignore R002          # skip a rule
 ```
 
 Rules: R001 bare `Response()`, R002 `serializers.ValidationError`, R003 undocumented `@action`,
-R004 `@dataclass` without docstring, R005 hardcoded error string, R006 `StapelResponse(dict)`.
+R004 `@dataclass` without docstring, R005 hardcoded error string, R006 `StapelResponse(dict)`,
+R007 documented endpoint without `@flow_step`, R008 (warning) lifecycle/security flag in
+`get_or_create(defaults=…)`, R009 synchronous `call()` of a long-running operation,
+R010/R011 Cyrillic and mixed-script identifiers, R012 `handle_exception` branching on a
+`rest_framework.exceptions` type.
 
-Suppress per-line: `# noqa: R001`
+**R012** — that refusal belongs to the fleet's `EXCEPTION_HANDLER`
+(`stapel_core.django.api.errors.stapel_exception_handler`, which since core
+0.61.0 answers 401/403/404/405/406/415/429 with the localizable envelope and
+the headers DRF set). A view that converts one of those types itself gives one
+endpoint a different body and recomputes numbers DRF already computed —
+stapel-cdn 0.20.0 answered a throttle wait one second past the `Retry-After`
+on its own response. Converting the module's **own** exception type there is
+correct and is never reported (stapel-workspaces' `BillingSeamMixin` →
+`BillingUnavailable` → 503): the rule only resolves names that reach
+`rest_framework.exceptions`. It does not read `django.http.Http404` or
+Django's `PermissionDenied`, and it does not see a refusal intercepted in
+`dispatch()` or a middleware. The settings half of the same closure —
+a deployment whose effective `EXCEPTION_HANDLER` is not core's — is
+`stapel_core.error_envelope.W001` (stapel-core 0.61.1), a Django system check,
+because only a booted process knows the effective value.
+
+Suppress per-line: `# noqa: R001`. R012 also takes a method-scoped
+`# stapel: owns-refusal` for a view that genuinely owns a DRF refusal — write
+the reason next to it.
 
 ### `stapel-migration-lint` — expand/contract gate for Django migrations
 

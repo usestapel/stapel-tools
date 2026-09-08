@@ -204,6 +204,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    # The seam every DRF refusal reaches the fleet's error envelope through.
+    # This dict REPLACES core's, so a project that omits the key answers 401,
+    # 403, 404, 405 and 429 in DRF's bare {"detail": ...} shape while every
+    # other service answers the envelope (stapel_core.error_envelope.W001).
+    "EXCEPTION_HANDLER": "stapel_core.django.api.errors.stapel_exception_handler",
 }
 
 SPECTACULAR_SETTINGS = {
