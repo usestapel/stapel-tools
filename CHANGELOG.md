@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.65.1 — 2026-09-11
+
+### The fixture schema mirror learns columns 6 and 7
+
+`stapel-fixture-lint`'s VOC001 validates against a local copy of
+`stapel-vocabularies/docs/vocabulary-fixture.schema.json`, and that copy had
+gone stale at **five** columns — two releases behind the loader that actually
+reads these files. So the gate refused rows the stand accepts: `popularity`
+(the curated band, stapel-vocabularies 0.2.0) and now `extra` (the source
+catalogue's own per-term bag, 0.4.0 — `{"hue": "#1a1a1a"}` on a colour term,
+which is what lets a facet draw a swatch).
+
+A gate that refuses valid data is worse than no gate: a client fleet's
+catalogue importer emits 78 colour rows that would have failed this lint on
+the way to a stand that loads them fine.
+
+- `terms` rows widened to 7 columns, matching the library.
+- `sort` and `popularity` accept `null` — unstated, exactly as omitting the
+  column is (stapel-vocabularies 0.4.1). An importer crossing `popularity` to
+  reach `extra` writes `null` there and never `0`, which would DEMOTE the term
+  and erase a band pushed from observed listing counts.
+
 ## 0.65.0 — 2026-09-08
 
 **Upgrading from 0.64.1?** This is the next release you can install: 0.64.2

@@ -58,7 +58,7 @@
       "items": {
         "type": "array",
         "minItems": 4,
-        "maxItems": 5,
+        "maxItems": 7,
         "prefixItems": [
           {
             "type": "string",
@@ -84,9 +84,18 @@
             "maxLength": 64
           },
           {
-            "type": "integer",
+            "type": ["integer", "null"],
             "minimum": 0,
-            "description": "Optional explicit sort rank within the level. The loader (stapel-vocabularies >= 0.1.4) prefers it over fixture row order; row order itself stays canonical (level index, code) for reviewability (VOC004). Omitted = row order, the historical behavior."
+            "description": "Optional explicit sort rank within the level. The loader (stapel-vocabularies >= 0.1.4) prefers it over fixture row order; row order itself stays canonical (level index, code) for reviewability (VOC004). Omitted = row order, the historical behavior; `null` says the same thing, for a writer that has to cross this column to reach a later one (>= 0.4.1)."
+          },
+          {
+            "type": ["integer", "null"],
+            "minimum": 0,
+            "description": "Optional curated popularity (stapel-vocabularies >= 0.2.0): > 0 puts the term in the level's popular band, highest first; 0 leaves it in the alphabet under the band. Distinct from sort, which ranks WITHIN a band. A row that OMITS this column — or states `null` — leaves whatever the live term holds rather than demoting it, so a catalogue re-import does not erase a band pushed from observed listing counts. An importer crossing this column to reach the next one writes `null`, never 0."
+          },
+          {
+            "type": "object",
+            "description": "Optional free-form attributes the SOURCE CATALOGUE owns (stapel-vocabularies >= 0.4.0), e.g. {\"hue\": \"#1a1a1a\"} on a colour term so a facet can draw a swatch. Never part of identity — that stays (vocabulary, level, code) — and never a second place for a label. MERGED into the live term's bag on load, key by key."
           }
         ],
         "items": false

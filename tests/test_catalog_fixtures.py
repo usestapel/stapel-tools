@@ -162,6 +162,32 @@ def test_a_term_row_may_carry_an_explicit_sort_rank():
     assert _rules(validate.validate_vocabulary(junk)) == ["VOC001"]
 
 
+def test_a_term_row_may_carry_the_sources_own_bag():
+    """The optional 7th column (stapel-vocabularies >= 0.4.0).
+
+    A bag of attributes the SOURCE catalogue owns — `{"hue": "#1a1a1a"}` on a
+    colour term, so a facet can draw a swatch. The columns are positional, so
+    a writer that only knows a hue has to cross `sort` and `popularity` to get
+    there; `null` in those states nothing, exactly as omitting them does, and
+    is the ONLY correct value to cross with — a literal 0 popularity demotes
+    the term and wipes a band pushed from observed counts.
+    """
+    hued = _fixture(terms=[
+        ["Vendor", "alpha", "Alpha", None, None, None, {"hue": "#1a1a1a"}],
+        ["Model", "one", "One", None, 2, 7, {"hue": "#ffffff"}],
+        ["Model", "two", "Two", "42"],
+    ])
+    assert validate.validate_vocabulary(hued) == []
+    # It is a bag of named attributes, not a bare value.
+    bare = _fixture(terms=[["Vendor", "alpha", "Alpha", None, None, None, "#1a1a1a"]],
+                    edges=[])
+    assert _rules(validate.validate_vocabulary(bare)) == ["VOC001"]
+    # And there is no eighth column.
+    surplus = _fixture(terms=[["Vendor", "alpha", "Alpha", None, None, None, {}, 1]],
+                       edges=[])
+    assert _rules(validate.validate_vocabulary(surplus)) == ["VOC001"]
+
+
 def test_VOC001_an_unknown_key_and_a_missing_one():
     assert _rules(validate.validate_vocabulary(_fixture(colour="red"))) == ["VOC001"]
     broken = _fixture()
