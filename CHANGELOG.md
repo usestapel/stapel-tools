@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.67.0 — 2026-09-13
+
+### IMG004 — a declaration older than the base it is installed on
+
+`stapel-image-lint` gains a fourth rule, at **warning** level, and it is the
+one that names the failure the base images exist to stop repeating.
+
+A service whose `requirements.txt` says `Django>=5.1,<6.0` on top of a base
+image carrying Django 6.0.8 **does not fail**. It downgrades Django inside its
+own image, re-resolving the exact closure the shared layer was built to hold,
+and ships a service running an older framework than the estate believes it
+runs. IMG004 reports that, and the same for a final `FROM python:3.12-slim`
+against a Python 3.14 base.
+
+The reason it is worth a rule rather than a note: a stale cap propagates
+upward. When a base image is built by resolving against its consumers, one
+service's unrevisited declaration becomes the ceiling for all seventeen —
+which is how `stapel-images/requirements-base.txt` came to pin Django 5.2.17
+on 2026-09-13 after its own first build had resolved 6.0.8.
+
+What the base ships is stated in `image_lint.BASE_PYTHON` / `BASE_DJANGO`
+(3.14 / 6.0 today), tracking `stapel-images`; moving the base is two edits.
+
+Warning and not error: lifting a cap is a release of whatever library carries
+it, so a service can be correct and still trip this between the base moving
+and its own bump landing. `--strict` promotes it, as for the other warnings.
+
 ## 0.66.0 — 2026-09-13
 
 ### `stapel-image-lint` — IMG001/IMG002/IMG003

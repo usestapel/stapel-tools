@@ -244,8 +244,10 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
         "stapel-escape-lint",
     }
 
-    assert {f["rule"] for f in by_name["stapel-image-lint"].findings} == {"IMG001"}
-    assert by_name["stapel-image-lint"].warnings == 1
+    # IMG001 (builds its own base) and IMG004 (on a Python older than the
+    # base's 3.14) — the fixture is a pre-migration service, so it trips both.
+    assert {f["rule"] for f in by_name["stapel-image-lint"].findings} == {"IMG001", "IMG004"}
+    assert by_name["stapel-image-lint"].warnings == 2
     assert by_name["stapel-image-lint"].errors == 0  # warning while the fleets migrate
 
     assert by_name["stapel-exposure-lint"].errors >= 1

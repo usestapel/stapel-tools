@@ -53,6 +53,34 @@ IMG003  (warning) A stapel base image referenced by its MOVING tag (the bare
         a service pinned to it is a service whose base can change between two
         builds of the same commit.
 
+IMG004  (warning) The service DECLARES a Django or Python major the base image
+        does not ship — and declares it *lower*. This is the rule for the
+        failure the base images were built to stop repeating.
+
+        The base is not a suggestion: a service whose ``requirements.txt``
+        says ``Django>=5.1,<6.0`` on top of a base carrying Django 6.0.8 does
+        not fail. It **downgrades Django inside its own image**, re-resolving
+        and re-installing the exact closure the shared layer exists to hold,
+        and ships a service running an older framework than the estate
+        believes it runs. The same for a final ``FROM python:3.12-slim``
+        against a 3.14 base.
+
+        Worse, it propagates upward. When a base image is built by resolving
+        against its consumers, one service's stale cap becomes the ceiling
+        for all seventeen — which is exactly how this repo's own
+        ``requirements-base.txt`` came to pin Django 5.2.17 on 2026-09-13
+        after its first build had resolved 6.0.8 on its own. A declaration
+        nobody has revisited outranks a fact nobody rechecked.
+
+        Warning and not error: lifting a cap is a release of the library that
+        carries it, so a service can be correct today and still trip this
+        between the base moving and its own bump landing. It is the finding
+        that makes those windows visible instead of permanent.
+
+        The majors the base ships are :data:`BASE_PYTHON` and
+        :data:`BASE_DJANGO` below; they track stapel-images/VERSIONS.md and
+        are updated when the base moves.
+
 How a service's needs are worked out
 -------------------------------------
 Two ways, and the first wins:
@@ -169,6 +197,16 @@ NEED_RANK: dict[str, int] = {
 }
 
 RANK_BASE: dict[int, str] = {v: k for k, v in BASE_RANK.items()}
+
+#: What the CURRENT stapel base images ship, as (major, minor). These are the
+#: two facts IMG004 grades a service's own declarations against, and they are
+#: stated here rather than discovered because this linter never pulls an
+#: image: it reads Dockerfiles. They track stapel-images — `python-base`'s
+#: `FROM python:<x.y>-slim-trixie` and the `Django==` pin in
+#: `images/python-base/requirements-base.txt` — and moving the base is
+#: therefore two edits, the image and this pair.
+BASE_PYTHON: tuple[int, int] = (3, 14)
+BASE_DJANGO: tuple[int, int] = (6, 0)
 
 #: Requirement markers that RAISE a service's need. Narrow on purpose: each
 #: entry is a package that is the reason one of the heavier images exists.
@@ -405,6 +443,80 @@ def _need_from_requirements(text: str) -> str:
     return need
 
 
+_PY_IMAGE_RE = re.compile(r"(?:^|/)python:(?P<ver>\d+\.\d+)(?![\d.])")
+_DJANGO_REQ_RE = re.compile(r"^django\s*(?P<spec>[<>=!~][^;]*)?$", re.IGNORECASE)
+
+
+def _parse_version(raw: str) -> Optional[tuple[int, int]]:
+    """``"6.0.8"`` -> ``(6, 0)``. A version with no minor reads as ``.0``."""
+    match = re.match(r"^\s*(\d+)(?:\.(\d+))?", raw)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2) or 0)
+
+
+def _allows(spec: str, version: tuple[int, int]) -> bool:
+    """Does this requirement specifier admit ``version``?
+
+    A deliberately small subset of PEP 440 — ``<``, ``<=``, ``>``, ``>=``,
+    ``==``, ``!=``, ``~=`` compared on (major, minor) only. stapel-tools is
+    dependency-free on purpose (it is installed by every library's CI to run
+    the drift gates), so `packaging` is not available to import; and the
+    question here only ever concerns a framework MAJOR, where the exotic
+    corners of the grammar do not arise. Anything unparseable is treated as
+    permissive, because a linter that guesses a cap into existence is worse
+    than one that misses it.
+    """
+    for clause in spec.split(","):
+        clause = clause.strip()
+        if not clause:
+            continue
+        match = re.match(r"^(<=|>=|==|!=|~=|<|>)\s*(.+)$", clause)
+        if not match:
+            continue
+        op, raw = match.group(1), match.group(2).strip()
+        # `==6.0.*` and `==6.*` compare on the digits they actually give.
+        wildcard = raw.endswith(".*")
+        other = _parse_version(raw.rstrip("*").rstrip("."))
+        if other is None:
+            continue
+        # A bound written with no minor (`<7`) is about the MAJOR: `<7` must
+        # admit 6.0, and comparing (6,0) < (7,0) does that correctly, while a
+        # bare `==6` has to mean "any 6.x".
+        bare_major = re.fullmatch(r"\d+", raw) is not None
+        if op == "<" and not version < other:
+            return False
+        if op == "<=" and not version <= other:
+            return False
+        if op == ">" and not version > other:
+            return False
+        if op == ">=" and not version >= other:
+            return False
+        if op == "==":
+            if (bare_major or wildcard) and len(raw.rstrip("*").rstrip(".").split(".")) == 1:
+                if version[0] != other[0]:
+                    return False
+            elif version != other:
+                return False
+        if op == "!=" and version == other:
+            return False
+        if op == "~=" and (version[0] != other[0] or version < other):
+            return False
+    return True
+
+
+def _declared_django_cap(text: str) -> Optional[str]:
+    """The Django specifier a requirements file declares, if it declares one."""
+    for entry in _requirement_names(text):
+        entry = entry.split(";", 1)[0].strip()
+        name = re.split(r"[<>=!~\s\[]", entry, maxsplit=1)[0]
+        if name != "django":
+            continue
+        spec = entry[len(name):].strip()
+        return spec or None
+    return None
+
+
 def _read_toml(path: Path) -> dict:
     if tomllib is None:  # pragma: no cover - 3.10 and below
         return {}
@@ -513,6 +625,33 @@ def lint_dockerfile(path: Path) -> list:
     violations: list = []
     base = stapel_base_name(image)
 
+    def django_findings() -> list:
+        """IMG004's requirements half — graded the same whether or not the
+        service has migrated, because the cap is what will hold either way."""
+        out: list = []
+        if muted("IMG004"):
+            return out
+        for req in _requirements_for(path, text):
+            try:
+                spec = _declared_django_cap(req.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
+            if not spec or _allows(spec, BASE_DJANGO):
+                continue
+            shipped = ".".join(str(n) for n in BASE_DJANGO)
+            out.append(Violation(
+                str(path), final.line, "IMG004",
+                f"{req.name} declares `Django{spec}`, which excludes the "
+                f"Django {shipped}.x the stapel base image ships. On that "
+                f"base this does not fail — it DOWNGRADES Django inside this "
+                f"image and re-resolves the closure the shared layer already "
+                f"holds. Lift the cap where it is declared (the service, and "
+                f"any library that caps Django transitively), then rebuild; "
+                f"see stapel-images/VERSIONS.md for what the base carries",
+                level="warning",
+            ))
+        return out
+
     if base is None:
         if muted("IMG001"):
             return []
@@ -533,6 +672,28 @@ def lint_dockerfile(path: Path) -> list:
                 f"and what each image contains"
             )
         violations.append(Violation(str(path), final.line, "IMG001", message, level="warning"))
+
+        # The Python half of IMG004 only has something to say HERE: a service
+        # still on a bare upstream `python:X.Y` names its own interpreter, and
+        # naming one older than the base's is the same stale declaration as a
+        # Django cap. Once migrated, the base IS the interpreter and there is
+        # nothing left to disagree with.
+        py_match = _PY_IMAGE_RE.search(image or "")
+        if py_match and not muted("IMG004"):
+            named = _parse_version(py_match.group("ver"))
+            if named is not None and named < BASE_PYTHON:
+                shipped = ".".join(str(n) for n in BASE_PYTHON)
+                named_s = ".".join(str(n) for n in named)
+                violations.append(Violation(
+                    str(path), final.line, "IMG004",
+                    f"builds on python:{named_s}, older than the Python "
+                    f"{shipped} the stapel base images ship. Moving the FROM "
+                    f"to a stapel base (IMG001) also moves the interpreter; "
+                    f"check the service's own compiled wheels have cp"
+                    f"{''.join(str(n) for n in BASE_PYTHON)} builds first",
+                    level="warning",
+                ))
+        violations.extend(django_findings())
         return violations
 
     # On a stapel base. Now the two questions that only make sense here.
@@ -557,6 +718,8 @@ def lint_dockerfile(path: Path) -> list:
             f"means. Newest tags: stapel-images/VERSIONS.md",
             level="warning",
         ))
+
+    violations.extend(django_findings())
 
     return violations
 

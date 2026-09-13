@@ -47,7 +47,8 @@ class TestIMG001:
             CMD ["gunicorn", "config.wsgi:application"]
         """, "stapel-core[nats,prometheus]==0.65.0\n")
         findings = il.lint_dockerfile(path)
-        assert _rules(findings) == {"IMG001"}
+        # IMG004 rides along: python:3.12 is also behind the base's 3.14.
+        assert _rules(findings) == {"IMG001", "IMG004"}
         assert findings[0].level == "warning", (
             "IMG001 stays a warning until the fleets are migrated — see the "
             "module docstring"
@@ -137,7 +138,8 @@ class TestScope:
             CMD ["gunicorn", "config.wsgi:application"]
         """, "stapel-core==0.65.0\n")
         findings = il.lint_dockerfile(path)
-        assert _rules(findings) == {"IMG001"}
+        # Followed back to python:3.12, so IMG004's interpreter half applies.
+        assert _rules(findings) == {"IMG001", "IMG004"}
         assert findings[0].line == 1, "the actionable line is the real FROM, not the alias"
 
 
@@ -285,7 +287,8 @@ class TestArgSubstitution:
             FROM ${PYTHON_BASE}
             RUN pip install -r requirements.txt
         """, "stapel-core==0.67.0\n")
-        assert _rules(il.lint_dockerfile(path)) == {"IMG001"}
+        # The ARG default substitutes to python:3.12, which IMG004 also grades.
+        assert _rules(il.lint_dockerfile(path)) == {"IMG001", "IMG004"}
 
     def test_arg_with_no_default_is_unresolvable_not_guessed(self, tmp_path):
         """A linter that guesses here is a linter that certifies a base image
@@ -376,3 +379,140 @@ class TestDriver:
         assert payload["ok"] is False
         assert payload["errors"] == 1
         assert payload["violations"][0]["rule"] == "IMG002"
+
+
+# ---------------------------------------------------------------------------
+# IMG004 — a declaration older than the base it will be installed on
+# ---------------------------------------------------------------------------
+
+
+class TestImg004Django:
+    """The requirements half: a cap that EXCLUDES the base's Django.
+
+    This is the shape that does not fail. The service builds, pip quietly
+    downgrades the framework inside the image, and the estate believes it runs
+    something it does not — which is why the finding has to come from a
+    linter rather than from a build.
+    """
+
+    def _rules(self, violations):
+        return [(v.rule, v.level) for v in violations]
+
+    def test_cap_below_the_base_is_reported(self, tmp_path):
+        path = _write(tmp_path, f"""
+            FROM {BASE}/python-base:{PINNED}
+            RUN pip install -r requirements.txt
+        """, "stapel-core==0.65.0\nDjango>=5.1,<6.0\n")
+        found = [v for v in il.lint_dockerfile(path) if v.rule == "IMG004"]
+        assert len(found) == 1
+        assert found[0].level == "warning"
+        assert "Django>=5.1,<6.0" in found[0].message
+
+    def test_a_cap_that_admits_the_base_is_silent(self, tmp_path):
+        path = _write(tmp_path, f"""
+            FROM {BASE}/python-base:{PINNED}
+            RUN pip install -r requirements.txt
+        """, "stapel-core==0.68.0\nDjango>=6.0,<7\n")
+        assert [v for v in il.lint_dockerfile(path) if v.rule == "IMG004"] == []
+
+    def test_the_retired_core_cap_admits_the_base(self, tmp_path):
+        """`<6.1` was stapel-core's bound until 0.68.0. It contains 6.0.x, so
+        it was never what kept the estate off Django 6 — the fleet's own
+        `<6.0` was. The rule has to tell those two apart."""
+        path = _write(tmp_path, f"""
+            FROM {BASE}/python-base:{PINNED}
+            RUN pip install -r requirements.txt
+        """, "Django>=5.1,<6.1\n")
+        assert [v for v in il.lint_dockerfile(path) if v.rule == "IMG004"] == []
+
+    def test_an_exact_old_pin_is_reported(self, tmp_path):
+        path = _write(tmp_path, f"""
+            FROM {BASE}/python-base:{PINNED}
+            RUN pip install -r requirements.txt
+        """, "Django==5.2.17\n")
+        found = [v for v in il.lint_dockerfile(path) if v.rule == "IMG004"]
+        assert len(found) == 1
+
+    def test_no_django_declared_is_silent(self, tmp_path):
+        """Most services let stapel-core carry Django. Nothing to grade."""
+        path = _write(tmp_path, f"""
+            FROM {BASE}/python-base:{PINNED}
+            RUN pip install -r requirements.txt
+        """, "stapel-core==0.68.0\n")
+        assert [v for v in il.lint_dockerfile(path) if v.rule == "IMG004"] == []
+
+    def test_noqa_suppresses_it(self, tmp_path):
+        path = _write(tmp_path, f"""
+            FROM {BASE}/python-base:{PINNED}  # noqa: IMG004
+            RUN pip install -r requirements.txt
+        """, "Django>=5.1,<6.0\n")
+        assert [v for v in il.lint_dockerfile(path) if v.rule == "IMG004"] == []
+
+    def test_it_is_a_warning_so_a_clean_tree_still_exits_zero(self, tmp_path):
+        _write(tmp_path, f"""
+            FROM {BASE}/python-base:{PINNED}
+            RUN pip install -r requirements.txt
+        """, "Django>=5.1,<6.0\n")
+        assert il.main([str(tmp_path)]) == 0
+        assert il.main([str(tmp_path), "--strict"]) == 1
+
+
+class TestImg004Python:
+    """The Dockerfile half: an interpreter older than the base's."""
+
+    def test_an_older_python_image_is_reported(self, tmp_path):
+        path = _write(tmp_path, """
+            FROM python:3.12-slim
+            RUN pip install -r requirements.txt
+        """, "stapel-core==0.68.0\n")
+        found = [v for v in il.lint_dockerfile(path) if v.rule == "IMG004"]
+        assert len(found) == 1
+        assert "python:3.12" in found[0].message
+
+    def test_the_bases_own_python_is_silent(self, tmp_path):
+        path = _write(tmp_path, """
+            FROM python:3.14-slim-trixie
+            RUN pip install -r requirements.txt
+        """, "stapel-core==0.68.0\n")
+        assert [v for v in il.lint_dockerfile(path) if v.rule == "IMG004"] == []
+
+    def test_a_newer_python_is_not_reported(self, tmp_path):
+        """The rule is about falling BEHIND the base, not about differing."""
+        path = _write(tmp_path, """
+            FROM python:3.15-slim
+            RUN pip install -r requirements.txt
+        """, "stapel-core==0.68.0\n")
+        assert [v for v in il.lint_dockerfile(path) if v.rule == "IMG004"] == []
+
+    def test_a_builder_stage_on_an_old_python_is_not_graded(self, tmp_path):
+        """Only the final stage ships. Compiling a wheel on 3.12 is fine."""
+        path = _write(tmp_path, f"""
+            FROM python:3.12-slim AS builder
+            RUN pip wheel --wheel-dir /wheels pyvips
+
+            FROM {BASE}/media-base:{PINNED}
+            COPY --from=builder /wheels /wheels
+            RUN pip install -r requirements.txt
+        """, "stapel-core==0.68.0\nDjango>=6.0,<7\n")
+        assert [v for v in il.lint_dockerfile(path) if v.rule == "IMG004"] == []
+
+
+class TestAllowsSpecifier:
+    """The PEP 440 subset IMG004 leans on, at the majors it actually sees."""
+
+    def test_the_shapes_the_estate_declares(self):
+        base = il.BASE_DJANGO
+        assert il._allows(">=6.0,<7", base) is True
+        assert il._allows(">=5.2,<7.0", base) is True
+        assert il._allows(">=5.1,<6.1", base) is True
+        assert il._allows(">=5.1,<6.0", base) is False
+        assert il._allows("==5.2.17", base) is False
+        assert il._allows("==6.0.8", base) is True
+        assert il._allows(">=5.1", base) is True
+        assert il._allows("~=5.2", base) is False
+        assert il._allows("==6.*", base) is True
+
+    def test_an_unparseable_specifier_is_permissive(self):
+        """A linter that guesses a cap into existence is worse than one that
+        misses it."""
+        assert il._allows("@ https://example.invalid/django.whl", il.BASE_DJANGO) is True

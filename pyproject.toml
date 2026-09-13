@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.66.0"
+version = "0.67.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -38,8 +38,9 @@ test = [
     "pytest-django",
     "pytest-cov",
     "pyyaml",
-    "django<6.1",
-    "djangorestframework",
+    "django<7.0",
+    # DRF 3.18.0 dropped the `cc_delim_re` import Django 6.1 removed.
+    "djangorestframework>=3.18",
     "drf-spectacular",
     "stapel-core>=0.45.0,<1",
     # `stapel-fixture-lint`'s VOC001 goes through the shipped JSON Schema when

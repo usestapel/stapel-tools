@@ -812,6 +812,7 @@ than at build time.
 | IMG001 | warning | the final-stage `FROM` is not a stapel base image |
 | IMG002 | **error** | on a stapel base, but one that cannot satisfy what the requirements declare |
 | IMG003 | warning | a stapel base pinned by its moving major tag (or none) instead of an immutable `<YYYYMMDD>-<sha>` tag or a `@sha256:` digest |
+| IMG004 | warning | the service declares a Django or Python major **older** than the base image ships — the cap does not fail the build, it downgrades the framework inside the image |
 
 **IMG001 is a warning on purpose, and temporarily.** On the day it shipped all
 17 fleet services tripped it, because the migration is planned and has not run
