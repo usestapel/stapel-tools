@@ -784,6 +784,71 @@ Until 0.64.0 this linter read no noqa comment at all: a client fleet's
 host carried `# noqa: SUR002` on a `permission_classes` line for two years,
 and the marker suppressed nothing.
 
+### `stapel-image-lint` — a service must inherit its base layer, not rebuild it
+
+```bash
+stapel-image-lint <repo>            # warnings do not fail
+stapel-image-lint <repo> --strict   # for a fleet that HAS migrated
+stapel-image-lint <repo> --json
+```
+
+Measured across two client fleets on 2026-09-13: **17 service Dockerfiles, 17
+copies of the same base layer.** Each started from a bare upstream image, ran
+its own `apt-get install`, and resolved the same Python closure — Django, DRF,
+drf-spectacular, psycopg's bundled libpq, confluent-kafka's librdkafka,
+cryptography — from PyPI, on machines that were serving requests at the time.
+One fleet's own build script records the unit cost in passing: *"three minutes
+into a pip layer"*.
+
+[`stapel-images`](https://gitlab.com/stapel-studio/stapel-images) builds those
+layers once, on CI, and publishes `python-base` / `media-base` / `ml-base` /
+`node-build`. This linter keeps a service from drifting back off them — and,
+more usefully, catches a service that is on a stapel base but the **wrong**
+one, which otherwise surfaces as a missing `ffmpeg` in a worker at 3am rather
+than at build time.
+
+| rule | level | what it says |
+|---|---|---|
+| IMG001 | warning | the final-stage `FROM` is not a stapel base image |
+| IMG002 | **error** | on a stapel base, but one that cannot satisfy what the requirements declare |
+| IMG003 | warning | a stapel base pinned by its moving major tag (or none) instead of an immutable `<YYYYMMDD>-<sha>` tag or a `@sha256:` digest |
+
+**IMG001 is a warning on purpose, and temporarily.** On the day it shipped all
+17 fleet services tripped it, because the migration is planned and has not run
+(stapel-images/MIGRATION.md — one fleet had a demo running and the other had
+just come back from an outage). A rule that turns both fleets' pre-commit red
+before the work it asks for is possible is a rule people learn to skim past,
+which is strictly worse than no rule; same reasoning as DOC001's warning level
+while its sweep runs. `--strict` is how a fleet that HAS migrated keeps it
+closed early. **IMG002 is an error from day one** and was always safe to be: it
+only looks at Dockerfiles already pointing at `stapel-images`, so it cannot
+fire on a project that has not migrated.
+
+What a service needs is inferred from the requirements file its Dockerfile
+installs (`stapel-recordings`, `stapel-cdn[…images…]`, `stapel-video`,
+`pyvips` ⇒ media; `torch`, `onnxruntime`, `pyannote.audio`, `transformers` ⇒
+ml), or declared, which wins:
+
+```toml
+# stapel-service.toml, beside the Dockerfile
+[image]
+base = "media-base"
+```
+
+Only the **final** stage is graded — a builder stage on a bare upstream image
+is the supported pattern for an sdist-only dependency, not a violation — and
+`FROM <earlier stage>` is followed back to the image it rests on, with `ARG`
+defaults substituted. An `ARG` with no default resolves to nothing and is
+reported as unresolvable rather than guessed at. Scope is read off what the
+Dockerfile *does* (`pip install`, a requirements `COPY`, a gunicorn/uvicorn
+`CMD`), never off a blocklist of base images: one fleet really does build a
+Java geocoder and two node images next to its Django ones, and a linter that
+offers `eclipse-temurin:21-jre` a Python base has discredited itself on the
+one line a reader will check. Silent by design in a tree with no Dockerfile.
+
+Suppress with `# noqa: IMG001` on the `FROM` line. Full table of images,
+contents and sizes: `docs/reference/base-images.md` in the workspace docs.
+
 ### The shared `# noqa` grammar, and `stapel-escape-lint` — is this escape doing anything?
 
 Every linter above that reads a `# noqa` comment (R/AUTHZ/SIB/CFG/MIG/SWAP/DOC/

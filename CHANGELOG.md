@@ -1,5 +1,50 @@
 # Changelog
 
+## 0.66.0 — 2026-09-13
+
+### `stapel-image-lint` — IMG001/IMG002/IMG003
+
+A new linter, composed into `stapel-verify` on the `deploy` surface.
+
+The class it closes, measured across two client fleets on 2026-09-13: **17
+service Dockerfiles, 17 copies of the same base layer.** Every one started
+from a bare upstream image, ran its own `apt-get install`, and resolved the
+same Python closure — Django, DRF, drf-spectacular, psycopg's bundled libpq,
+confluent-kafka's librdkafka, cryptography — from PyPI. All of it on machines
+that were simultaneously serving requests; one fleet's own build script
+records the unit cost in passing, as "three minutes into a pip layer".
+`stapel-images` builds those layers once on CI; this rule is what keeps a
+service from drifting back off them.
+
+- **IMG001** (warning) the final-stage `FROM` is not a stapel base image.
+  Warning and not error, deliberately and temporarily: on the day it shipped
+  all 17 fleet services tripped it, because the migration is planned and has
+  not run. A rule that turns both fleets' pre-commit red before the work it
+  asks for is possible is a rule people learn to skim past — the same
+  reasoning that keeps DOC001 at warning level while its sweep runs.
+  `--strict` promotes it, which is how a fleet that HAS migrated keeps it
+  closed before the default flips.
+- **IMG002** (error) on a stapel base, but one that cannot satisfy what the
+  service's requirements declare — `python-base` under a service that names
+  `stapel-recordings` is a build that succeeds and a convert worker that fails
+  on the first recording. An error from day one and always safe to be: it only
+  looks at Dockerfiles already pointing at the stapel registry, so it cannot
+  fire on a project that has not migrated.
+- **IMG003** (warning) a stapel base pinned by its moving major tag, or by no
+  tag, rather than an immutable `<YYYYMMDD>-<sha>` tag or a `@sha256:` digest.
+
+The need is inferred from the requirements file the Dockerfile installs, or
+declared in a `stapel-service.toml` (`[image] base = "media-base"`), which
+wins. Only the final stage is graded — a builder stage on a bare upstream
+image is the supported pattern for an sdist-only dependency — `FROM <earlier
+stage>` is followed back, and `ARG` defaults are substituted (an `ARG` with no
+default is reported as unresolvable, never guessed at).
+
+Scope is read off what the Dockerfile *does*, never off a blocklist of base
+images: one fleet builds a Java geocoder and two node images next to its
+Django ones, and a linter that offers `eclipse-temurin:21-jre` a Python base
+has discredited itself on the one line a reader will check.
+
 ## 0.65.1 — 2026-09-11
 
 ### The fixture schema mirror learns columns 6 and 7

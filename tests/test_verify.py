@@ -210,6 +210,15 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     (proj / "NOTES.md").write_text("found on the acme fleet\n", encoding="utf-8")
+    # image lint: a service Dockerfile building its own base layer — the shape
+    # all 17 fleet services were in when IMG001 shipped.
+    (proj / "Dockerfile").write_text(
+        "FROM python:3.12-slim\n"
+        "COPY requirements.txt .\n"
+        "RUN pip install --no-cache-dir -r requirements.txt\n"
+        'CMD ["gunicorn", "config.wsgi:application"]\n',
+        encoding="utf-8",
+    )
     reports = verify_project(proj)
 
     by_name = {r.name: r for r in reports}
@@ -228,11 +237,16 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
         "stapel-index-lint",
         "stapel-nginx-cache-lint",
         "stapel-env-address-lint",
+        "stapel-image-lint",
         "stapel-frontend-delivery-lint",
         "stapel-po-lint",
         "stapel-exposure-lint",
         "stapel-escape-lint",
     }
+
+    assert {f["rule"] for f in by_name["stapel-image-lint"].findings} == {"IMG001"}
+    assert by_name["stapel-image-lint"].warnings == 1
+    assert by_name["stapel-image-lint"].errors == 0  # warning while the fleets migrate
 
     assert by_name["stapel-exposure-lint"].errors >= 1
     assert {f["rule"] for f in by_name["stapel-exposure-lint"].findings} == {"EXP001"}
@@ -339,7 +353,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 18 linters." in out
+    assert "All clean across 19 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -349,7 +363,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     assert code == 1
     assert payload["ok"] is False
     assert payload["errors"] == 12
-    assert len(payload["linters"]) == 18
+    assert len(payload["linters"]) == 19
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
@@ -366,6 +380,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
         "stapel-index-lint",
         "stapel-nginx-cache-lint",
         "stapel-env-address-lint",
+        "stapel-image-lint",
         "stapel-frontend-delivery-lint",
         "stapel-po-lint",
         "stapel-exposure-lint",

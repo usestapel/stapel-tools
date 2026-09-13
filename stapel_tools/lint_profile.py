@@ -96,7 +96,7 @@ SURFACES: dict[str, str] = {
     "docs": "in-repo documentation: model field docs",
     "i18n": "gettext catalogues under locale/",
     "deploy": "deployment-class files: nginx cache canon, environment "
-              "addresses, private-name exposure",
+              "addresses, base-image discipline, private-name exposure",
 }
 
 #: Which surface each composed linter belongs to. A linter absent from this
@@ -117,6 +117,7 @@ LINTER_SURFACES: dict[str, str] = {
     "stapel-doc-lint": "docs",
     "stapel-nginx-cache-lint": "deploy",
     "stapel-env-address-lint": "deploy",
+    "stapel-image-lint": "deploy",
     "stapel-exposure-lint": "deploy",
     "stapel-frontend-delivery-lint": "frontend",
     "stapel-po-lint": "i18n",

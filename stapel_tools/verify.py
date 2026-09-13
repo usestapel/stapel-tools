@@ -115,6 +115,20 @@ Linters composed (in this order)
   above); EADDR003 catches an env-boundary proxy location with no fast
   ``proxy_connect_timeout``, which is half of why the original incident read
   as "server load" for a full day instead of "wrong address".
+* ``stapel_tools.image_lint``      — IMG-codes (base-image discipline: a
+  service must inherit a stapel base image rather than rebuild the same apt
+  and pip layers on the host that serves it, and the base it names must
+  satisfy what its requirements declare. Composed HERE for the same reason as
+  the nginx rules — every generated project's pre-commit already runs
+  ``stapel-verify .``, so a project picks the gate up on its next
+  stapel-tools upgrade with nothing to regenerate — and it is silent by
+  design in a tree with no Dockerfile. The class it closes, measured over the
+  two client fleets on 2026-09-13: 17 service Dockerfiles, 17 copies of the
+  same base layer, every one of them built on a machine that was serving
+  traffic at the time. IMG001 is a WARNING while that migration runs
+  (stapel-images/MIGRATION.md); IMG002 — the wrong stapel base, which builds
+  green and fails at run time — is an error from the first day, and can only
+  fire on a project that has already migrated.)
 * ``stapel_tools.escape_lint``     — ESC001/ESC002 (§ escape grammar
   audit — a marker's own credibility). Every linter above that reads
   ``# noqa`` shares ONE grammar now (``stapel_tools.escape``); ESC001 (error)
@@ -183,6 +197,7 @@ from . import (
     escape_lint,
     exposure_lint,
     frontend_delivery_lint,
+    image_lint,
     index_lint,
     lint,
     lint_profile,
@@ -335,6 +350,13 @@ def run_env_address_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-env-address-lint", errors, warnings, _to_dicts(findings), notes)
 
 
+def run_image_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = image_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-image-lint", errors, warnings, _to_dicts(findings), notes)
+
+
 def run_exposure_lint(project: Path) -> LinterReport:
     notes: list[str] = []
     findings = exposure_lint.lint_project(project, notes=notes)
@@ -394,6 +416,7 @@ COMPOSED_LINTERS: tuple[str, ...] = (
     "stapel-index-lint",
     "stapel-nginx-cache-lint",
     "stapel-env-address-lint",
+    "stapel-image-lint",
     "stapel-frontend-delivery-lint",
     "stapel-po-lint",
     "stapel-exposure-lint",
@@ -510,6 +533,7 @@ def verify_project(
         ("stapel-index-lint", lambda: run_index_lint(project)),
         ("stapel-nginx-cache-lint", lambda: run_nginx_cache_lint(project)),
         ("stapel-env-address-lint", lambda: run_env_address_lint(project)),
+        ("stapel-image-lint", lambda: run_image_lint(project)),
         ("stapel-frontend-delivery-lint", lambda: run_frontend_delivery_lint(project)),
         ("stapel-po-lint", lambda: run_po_lint(project)),
         ("stapel-exposure-lint", lambda: run_exposure_lint(project)),
