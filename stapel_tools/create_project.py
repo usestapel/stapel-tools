@@ -478,8 +478,24 @@ STAPEL_LIBS = {
 # and because the nav mirror below is what the drift gate checks. Splitting it
 # into a second registry would mean two places to pin one package.
 #
-# Pins verified 2026-08-31 against BOTH the sibling stapel-react checkout's
-# `packages/<key>-react/nav-manifest.json` `version` AND the live
+# Pins re-verified 2026-09-14 (stapel-tools 0.67.2) against `npm view
+# @stapel/<key>-react version --prefer-online` for every entry, clearing the
+# whole backlog the `--registry` gate had been naming on every daily run:
+# nineteen pins moved, four of them by more than twenty minors
+# (search 0.15.0 -> 0.48.1, listings 0.14.1 -> 0.35.0,
+# categories 0.9.1 -> 0.31.4, chat 0.6.1 -> 0.19.1). Not one nav MIRROR
+# changed — `check_nav_manifest_sync.py` had been reporting every one of them
+# as "entries are identical, only the version differs", which is precisely the
+# drift a reader diffing this file cannot see and the reason the gate asks npm.
+# The five pairs that publish no nav manifest (attributes, cdn, currencies,
+# reviews, vocabularies) were stale too and are raised in the same pass: the
+# --registry gate walks nav-bearing pairs only, so nothing was naming them,
+# and `@stapel/chat-react` 0.19.1 peers `@stapel/cdn-react ">=0.5.0"` while
+# `@stapel/categories-react` 0.31.4 peers `@stapel/attributes-react ">=0.16.6"`
+# — two pins this table would otherwise have installed BELOW a pair's floor.
+#
+# Earlier pins were verified 2026-08-31 against BOTH the sibling stapel-react
+# checkout's `packages/<key>-react/nav-manifest.json` `version` AND the live
 # `npm view @stapel/<key>-react version` (identical for every entry — the
 # workspace checkout is not ahead of its own last publish for these
 # packages). The attributes-v2 wave moved seven of them at once
@@ -535,7 +551,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.18.1",
+        "version": "0.23.0",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
@@ -648,12 +664,12 @@ FRONTEND_REACT_LIBS = {
     "attributes": {
         # L0 — no client, no provider, no runtime. See the dict docstring.
         "package": "@stapel/attributes-react",
-        "version": "0.8.1",
+        "version": "0.17.0",
         "register_i18n": "registerAttributesI18n",
     },
     "billing": {
         "package": "@stapel/billing-react",
-        "version": "0.10.0",
+        "version": "0.10.3",
         "provider": "BillingProvider",
         "create_runtime": "createBillingRuntime",
         "register_i18n": "registerBillingI18n",
@@ -676,7 +692,7 @@ FRONTEND_REACT_LIBS = {
     },
     "calendar": {
         "package": "@stapel/calendar-react",
-        "version": "0.8.1",
+        "version": "0.8.2",
         "provider": "CalendarProvider",
         "create_runtime": "createCalendarRuntime",
         "register_i18n": "registerCalendarI18n",
@@ -712,7 +728,7 @@ FRONTEND_REACT_LIBS = {
     },
     "categories": {
         "package": "@stapel/categories-react",
-        "version": "0.9.1",
+        "version": "0.31.4",
         "provider": "CategoriesProvider",
         "create_runtime": "createCategoriesRuntime",
         "register_i18n": "registerCategoriesI18n",
@@ -749,14 +765,14 @@ FRONTEND_REACT_LIBS = {
         # menu item leading nowhere would be worse than its absence
         # (storefront spec §13.6 item 8).
         "package": "@stapel/cdn-react",
-        "version": "0.4.1",
+        "version": "0.5.0",
         "provider": "CdnProvider",
         "create_runtime": "createCdnRuntime",
         "register_i18n": "registerCdnI18n",
     },
     "chat": {
         "package": "@stapel/chat-react",
-        "version": "0.6.1",
+        "version": "0.19.1",
         "provider": "ChatProvider",
         "create_runtime": "createChatRuntime",
         "register_i18n": "registerChatI18n",
@@ -789,7 +805,7 @@ FRONTEND_REACT_LIBS = {
         # value, `CurrencyPicker` `value`/`onChange`/`options`, `RateTable`
         # `rates`/`base` (read off the pair's own `src/default/*.tsx`).
         "package": "@stapel/currencies-react",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "provider": "CurrenciesProvider",
         "create_runtime": "createCurrenciesRuntime",
         "register_i18n": "registerCurrenciesI18n",
@@ -818,7 +834,7 @@ FRONTEND_REACT_LIBS = {
         # (NAV_ENTRY_MOUNTS route_params), and all three hang from the
         # container-owned `account.root`.
         "package": "@stapel/forms-react",
-        "version": "0.3.1",
+        "version": "0.4.0",
         "provider": "FormsProvider",
         "create_runtime": "createFormsRuntime",
         "register_i18n": "registerFormsI18n",
@@ -863,7 +879,7 @@ FRONTEND_REACT_LIBS = {
     },
     "gdpr": {
         "package": "@stapel/gdpr-react",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "provider": "GdprProvider",
         "create_runtime": "createGdprRuntime",
         "register_i18n": "registerGdprI18n",
@@ -931,7 +947,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.14.1",
+        "version": "0.35.0",
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -1010,7 +1026,7 @@ FRONTEND_REACT_LIBS = {
         # they belong inside another pair's screen and nowhere a generator
         # can put them.
         "package": "@stapel/moderation-react",
-        "version": "0.1.1",
+        "version": "0.2.1",
         "provider": "ModerationProvider",
         "create_runtime": "createModerationRuntime",
         "register_i18n": "registerModerationI18n",
@@ -1081,7 +1097,7 @@ FRONTEND_REACT_LIBS = {
     },
     "notifications": {
         "package": "@stapel/notifications-react",
-        "version": "0.11.0",
+        "version": "0.11.1",
         "provider": "NotificationsProvider",
         "create_runtime": "createNotificationsRuntime",
         "register_i18n": "registerNotificationsI18n",
@@ -1190,7 +1206,7 @@ FRONTEND_REACT_LIBS = {
     },
     "recordings": {
         "package": "@stapel/recordings-react",
-        "version": "0.6.2",
+        "version": "0.7.0",
         "provider": "RecordingsProvider",
         "create_runtime": "createRecordingsRuntime",
         "register_i18n": "registerRecordingsI18n",
@@ -1247,7 +1263,7 @@ FRONTEND_REACT_LIBS = {
         # No nav manifest either — reviews render inside a listing page and a
         # seller page, never on a route of their own (§13.8 item 11).
         "package": "@stapel/reviews-react",
-        "version": "0.6.0",
+        "version": "0.8.3",
         "provider": "ReviewsProvider",
         "create_runtime": "createReviewsRuntime",
         "register_i18n": "registerReviewsI18n",
@@ -1255,7 +1271,7 @@ FRONTEND_REACT_LIBS = {
     "search": {
         # No STAPEL_LIBS entry — see the dict docstring.
         "package": "@stapel/search-react",
-        "version": "0.15.0",
+        "version": "0.48.1",
         "provider": "SearchProvider",
         "create_runtime": "createSearchRuntime",
         "register_i18n": "registerSearchI18n",
@@ -1289,7 +1305,7 @@ FRONTEND_REACT_LIBS = {
     },
     "video": {
         "package": "@stapel/video-react",
-        "version": "0.2.1",
+        "version": "0.3.5",
         "provider": "VideoProvider",
         "create_runtime": "createVideoRuntime",
         "register_i18n": "registerVideoI18n",
@@ -1334,7 +1350,7 @@ FRONTEND_REACT_LIBS = {
         # `VocabularyTermSelect`, which REQUIRES `vocabulary`/`level`/`value`
         # props a scaffold cannot fabricate.
         "package": "@stapel/vocabularies-react",
-        "version": "0.2.1",
+        "version": "0.5.0",
         "provider": "VocabulariesProvider",
         "create_runtime": "createVocabulariesRuntime",
         "register_i18n": "registerVocabulariesI18n",
@@ -1364,7 +1380,7 @@ FRONTEND_REACT_LIBS = {
     },
     "workspaces": {
         "package": "@stapel/workspaces-react",
-        "version": "0.19.0",
+        "version": "0.19.1",
         "provider": "WorkspacesProvider",
         "create_runtime": "createWorkspacesRuntime",
         "register_i18n": "registerWorkspacesI18n",
@@ -1715,7 +1731,19 @@ FRONTEND_REACT_CORE_DEPS = {
     # an older core turns that field into an excess-property error at BUILD
     # time — a generated project that does not compile, which is the one
     # failure mode a pin exists to prevent.
-    "@stapel/core": "0.22.0",
+    #
+    # 0.26.1 (2026-09-14): the stale-pin gate's whole backlog moved at once,
+    # and two of the raised pairs carry a core floor ABOVE this table's old
+    # 0.22.0 — `@stapel/categories-react` 0.31.4 and `@stapel/search-react`
+    # 0.48.1 both peer `"@stapel/core": ">=0.26.0 <1.0.0"` (read off their
+    # published `peerDependencies`, not remembered). Against 0.22.0 that is an
+    # ERESOLVE at install for every project selecting either — the 0.55.5
+    # shape again, which is why the pair pins and this table move in ONE
+    # commit. `npm view @stapel/core version` -> 0.26.1; the reasons for the
+    # floors underneath still hold, and nothing in 0.23.0…0.26.1 is a major
+    # (the package's CHANGELOG carries no "Major Changes" heading at all), so
+    # the surfaces the generated container binds are unchanged.
+    "@stapel/core": "0.26.1",
     "@tanstack/react-query": "5.102.8",
 }
 # Only pulled in when >=1 selected module's registry entry has
@@ -1790,7 +1818,18 @@ FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
 # release carrying its contract, measured off that release's own published
 # `.d.ts` rather than remembered, so a pin that ever moves BACK degrades the
 # emission instead of emitting a prop the installed shell does not have.
-FRONTEND_SHELL_REACT_VERSION = "0.12.0"
+#
+# 0.18.1 (`npm view @stapel/shell-react version`, 2026-09-14) — raised with
+# the rest of the stale-pin backlog, and it is the substrate half of that
+# wave rather than a feature request: 0.12.0 was six minors behind what every
+# generated project's pairs are built against. Everything between is ADDITIVE
+# (the package's CHANGELOG carries no "Major Changes" heading; 0.13-0.18 add
+# `scrolledChipRow`, a `headerSticky` default, `useRouteScrollReset` and the
+# pinned-header seam), so the three floors below all stay satisfied and the
+# container emits exactly what it emitted before. Its own peers
+# (`@stapel/core ">=0.20.0 <1.0.0"`, `@stapel/tokens-antd ">=0.7.0"`,
+# `react-router ">=7.0.0 <8"`) hold against the pins above.
+FRONTEND_SHELL_REACT_VERSION = "0.18.1"
 
 # The first `@stapel/shell-react` release that themes ITSELF and reads the
 # container's staff answer. Two facts, one release, because they are one

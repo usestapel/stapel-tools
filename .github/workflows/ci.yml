@@ -340,17 +340,20 @@ jobs:
       # and the daily schedule, which is the only run that fires when the
       # drift arrived from another repo and this one has no push.
       #
-      # `continue-on-error`, deliberately and for the same reason the
-      # `registry` job carries it: there is a real backlog behind this gate
-      # (the fourteen pins above, plus the substrate they stand on —
-      # @stapel/core 0.22.0 vs 0.26.1, tokens-antd 0.17.3 vs 0.22.0,
-      # shell-react 0.12.0 vs 0.18.1), raising every one of them is a fleet
-      # wave with its own registry-install proof, and reddening every PR over a
-      # known backlog is how a gate gets deleted. It NAMES each stale pin on
-      # every daily run instead of printing a forgiving line — that is the
-      # change. Drop `continue-on-error` the run after the backlog closes.
+      # It carried `continue-on-error` while there was a backlog behind it —
+      # the fourteen pins it named, plus the substrate they stood on
+      # (@stapel/core 0.22.0 vs 0.26.1, shell-react 0.12.0 vs 0.18.1,
+      # eslint-plugin ^0.12.1 vs 0.13.3) — because reddening every PR over a
+      # known backlog is how a gate gets deleted. 0.67.2 closed it: nineteen
+      # pair pins and the whole substrate raised to what npm serves, with this
+      # gate and `check_npm_peer_graph.py` both green before the commit and the
+      # e2e install below as the proof. So the flag comes off in the same
+      # commit that empties the list, which is the ONLY moment it can come off
+      # honestly — a `continue-on-error` left on a gate with nothing to forgive
+      # is a gate that reports drift to a log nobody reads. From here a stale
+      # pin FAILS: the daily schedule is what catches a pair that raised its
+      # version in another repo, and failing is how it says so.
       - name: The pair pins are the versions npm serves (stale-pin gate)
-        continue-on-error: true
         env:
           SIBLING_ROOT: ${{ github.workspace }}/siblings
         run: |

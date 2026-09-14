@@ -56,7 +56,7 @@ PACKAGE_JSON = """\
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@stapel/eslint-plugin": "^0.12.1",
+    "@stapel/eslint-plugin": "^0.13.3",
     "@stapel/tokens": "^0.8.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
@@ -3870,10 +3870,18 @@ def render_public_modules_tsx(
 #
 # The two `@stapel/*` entries are the exception that proves it: the monorepo
 # carries them as `workspace:*`, so the published version IS the mirror
-# (`npm view`, 2026-08-31 — eslint-plugin 0.12.1, tokens 0.6.0). They had
+# (`npm view`, 2026-09-14 — eslint-plugin 0.13.3, tokens 0.8.0). They had
 # drifted apart from the minimal template's copy above (^0.10.0 here, ^0.3.0
 # there); both tables are now checked by `scripts/check_npm_peer_graph.py`,
 # which reads THESE constants rather than a copy.
+#
+# `@stapel/eslint-plugin` moves to ^0.13.3 with the rest of the stale-pin
+# backlog. 0.13.0 broadened `no-hardcoded-theme-mode` to flag a literal
+# `mode`/`themeMode`/`colorMode` JSX attribute in ANY source file, which the
+# generated container used to emit — and no longer does at this shell pin:
+# `mode="light"` is written only BELOW `FRONTEND_SHELL_SELF_THEMING_FLOOR`,
+# and `FRONTEND_SHELL_REACT_VERSION` is 0.18.1. The two pins have to move
+# together or a scaffolded project's own `npm run lint` reports the generator.
 #
 # `@stapel/tokens` moves to ^0.8.0 with the `@stapel/tokens-antd` 0.17.3
 # pin, not on its own: 0.17.3 DEPENDS on `"@stapel/tokens": "^0.8.0"` (a
@@ -3882,7 +3890,7 @@ def render_public_modules_tsx(
 # the container's own `cssVar` calls reading the other.
 PUBLIC_DEV_DEPS = {
     "@eslint/js": "^9.30.0",
-    "@stapel/eslint-plugin": "^0.12.1",
+    "@stapel/eslint-plugin": "^0.13.3",
     "@stapel/tokens": "^0.8.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
