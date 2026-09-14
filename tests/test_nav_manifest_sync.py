@@ -111,7 +111,9 @@ def test_a_bump_npm_ALREADY_SERVES_is_a_stale_pin_not_a_pending_publish(
         asked.append((package, version))
         return True
 
-    assert gate.check(tmp_path, ask_registry=True, published=served) == 1
+    assert gate.check(
+        tmp_path, ask_registry=True, published=served, latest=lambda *_: None,
+    ) == 1
     assert asked == [("@stapel/demo-react", "1.3.0")]
     out = capsys.readouterr().out
     assert "STALE PIN" in out
@@ -127,7 +129,9 @@ def test_a_bump_npm_does_NOT_serve_stays_the_benign_unpublished_bump(
     _registry(monkeypatch, {
         "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
     })
-    assert gate.check(tmp_path, ask_registry=True, published=lambda *_: False) == 0
+    assert gate.check(
+        tmp_path, ask_registry=True, published=lambda *_: False, latest=lambda *_: None,
+    ) == 0
     assert "UNPUBLISHED BUMP" in capsys.readouterr().out
 
 
@@ -142,7 +146,9 @@ def test_an_UNASKABLE_registry_never_becomes_a_verdict(
     _registry(monkeypatch, {
         "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
     })
-    assert gate.check(tmp_path, ask_registry=True, published=lambda *_: None) == 0
+    assert gate.check(
+        tmp_path, ask_registry=True, published=lambda *_: None, latest=lambda *_: None,
+    ) == 0
     assert "UNPUBLISHED BUMP" in capsys.readouterr().out
 
 
@@ -157,7 +163,7 @@ def test_without_the_flag_npm_is_never_asked(gate, tmp_path, monkeypatch):
     def boom(*_):  # pragma: no cover - the point is that it never runs
         raise AssertionError("npm was asked without --registry")
 
-    assert gate.check(tmp_path, published=boom) == 0
+    assert gate.check(tmp_path, published=boom, latest=boom) == 0
 
 
 def test_npm_published_reports_None_when_npm_is_absent(gate, monkeypatch):
@@ -168,6 +174,94 @@ def test_npm_published_reports_None_when_npm_is_absent(gate, monkeypatch):
 
     monkeypatch.setattr(gate.subprocess, "run", missing)
     assert gate.npm_published("@stapel/demo-react", "1.3.0") is None
+
+
+def test_npm_latest_reports_None_when_npm_is_absent(gate, monkeypatch):
+    """Same seam, same contract, for the pin-table walk's own registry
+    question: no node is 'not asked', never 'nothing published'."""
+    def missing(*_a, **_k):
+        raise FileNotFoundError("npm")
+
+    monkeypatch.setattr(gate.subprocess, "run", missing)
+    assert gate.npm_latest("@stapel/demo-react") is None
+
+
+def test_a_NAV_LESS_pair_with_a_stale_pin_FAILS_under_registry(
+    gate, tmp_path, monkeypatch
+):
+    """attributes, cdn, currencies, reviews and vocabularies publish no nav
+    manifest at all, so the nav-mirror walk above never reaches them and
+    never asks the registry about them either — the exact blind spot that let
+    two pairs sit below another pair's declared peer floor. The pin table is
+    the WHOLE `FRONTEND_REACT_LIBS`, mirrored or not, and this pair (no "nav"
+    key, same shape as attributes/cdn/etc.) is pinned behind what npm serves."""
+    (tmp_path / "stapel-react" / "packages").mkdir(parents=True)
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3"},
+    })
+    assert gate.check(
+        tmp_path, ask_registry=True,
+        published=lambda *_: None,
+        latest=lambda pkg: {"@stapel/demo-react": "1.5.0"}.get(pkg),
+    ) == 1
+
+
+def test_a_SUBSTRATE_pin_with_a_stale_pin_FAILS_under_registry(
+    gate, tmp_path, monkeypatch, capsys
+):
+    """The substrate every nav-wired project also installs — core,
+    shell-react, tokens-antd, tokens, image, eslint-plugin — never went
+    through the nav-mirror walk at all (they are not `FRONTEND_REACT_LIBS`
+    entries), so a raised peer floor in any of them was invisible to
+    `--registry` too. `full_pin_table()` walks them by name."""
+    (tmp_path / "stapel-react" / "packages").mkdir(parents=True)
+    _registry(monkeypatch, {})
+
+    def latest(pkg):
+        return {"@stapel/core": "9.9.9"}.get(pkg)
+
+    assert gate.check(
+        tmp_path, ask_registry=True,
+        published=lambda *_: None,
+        latest=latest,
+    ) == 1
+    out = capsys.readouterr().out
+    assert "STALE PIN" in out
+    assert "@stapel/core" in out
+
+
+def test_pin_table_walk_stays_benign_when_npm_cannot_be_asked(
+    gate, tmp_path, monkeypatch
+):
+    """Missing npm/network on any one package must not become a verdict —
+    the same `None`-is-not-a-verdict contract `npm_published` already keeps,
+    now over the whole pin table."""
+    (tmp_path / "stapel-react" / "packages").mkdir(parents=True)
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3"},
+    })
+    assert gate.check(
+        tmp_path, ask_registry=True,
+        published=lambda *_: None,
+        latest=lambda *_: None,
+    ) == 0
+
+
+def test_full_pin_table_covers_the_substrate_and_every_registered_pair(gate):
+    """`full_pin_table()` itself: every FRONTEND_REACT_LIBS key is in it
+    (nav-bearing or not — the real registry is not monkeypatched here), plus
+    the six named substrate packages."""
+    table = gate.full_pin_table()
+    packages = {pkg for _src, pkg, _v in table}
+    import stapel_tools.create_project as cp
+
+    for info in cp.FRONTEND_REACT_LIBS.values():
+        assert info["package"] in packages
+    for expected in (
+        "@stapel/core", "@stapel/shell-react", "@stapel/tokens-antd",
+        "@stapel/tokens", "@stapel/image", "@stapel/eslint-plugin",
+    ):
+        assert expected in packages, expected
 
 
 def test_a_checkout_bumped_ahead_with_DIFFERENT_entries_still_fails(

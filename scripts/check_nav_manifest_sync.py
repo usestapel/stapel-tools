@@ -71,6 +71,26 @@ guards is worse than no gate, because it is believed.
   package no longer publishes, and every scaffolded project keeps mounting
   routes for screens that are not there.
 
+``--registry`` also walks the WHOLE pin table, not only the nav-mirror one
+--------------------------------------------------------------------------
+Everything above only ever reaches a pair THROUGH its nav mirror — which
+means a pair with no mirror at all (``attributes``, ``cdn``, ``currencies``,
+``reviews``, ``vocabularies`` publish no nav manifest) and the substrate
+constants a nav-wired project also installs (``@stapel/core``,
+``@stapel/shell-react``, ``@stapel/tokens-antd``, ``@stapel/tokens``,
+``@stapel/image``, ``@stapel/eslint-plugin``) never went through the
+registry question above AT ALL. Two of the nav-less pairs were about to be
+installed below another pair's declared peer floor — invisible to a gate
+that only asks npm about pairs it already suspects.
+
+``full_pin_table()`` enumerates every one of those (from the generator's own
+constants, never a copy) and, under ``--registry``, each pin is compared
+straight against ``npm view <pkg> version`` — no sibling checkout involved.
+A mismatch is a **STALE PIN → FAILURE**, named by source (the
+``FRONTEND_REACT_LIBS`` key, or the substrate constant). npm unreachable for
+one package → the benign branch, same as ``npm_published`` returning
+``None``: the question was not asked, so it is not a verdict.
+
     python scripts/check_nav_manifest_sync.py
     SIBLING_ROOT=/path/to/workspace python scripts/check_nav_manifest_sync.py
 
@@ -172,11 +192,88 @@ def npm_published(package: str, version: str) -> bool | None:
     return bool(payload)
 
 
+def npm_latest(package: str) -> str | None:
+    """The version npm currently serves as ``latest`` for *package*. Same
+    contract as :func:`npm_published`: ``None`` means the question could not
+    be asked (no node, no network, an unparsable reply) — never mistaken for
+    "nothing is published"."""
+    try:
+        proc = subprocess.run(
+            ["npm", "view", package, "version", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+    except (OSError, FileNotFoundError):
+        return None  # no node on this machine — the question was not asked
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0 or not out:
+        return None
+    try:
+        payload = json.loads(out)
+    except ValueError:
+        return None
+    if isinstance(payload, list):
+        return payload[-1] if payload else None
+    if isinstance(payload, str):
+        return payload
+    return None
+
+
+def full_pin_table() -> list[tuple[str, str, str]]:
+    """Every ``@stapel/*`` pin the scaffold writes — every
+    ``FRONTEND_REACT_LIBS`` entry, nav-bearing or not, PLUS the substrate a
+    nav-wired project also installs (core, shell-react, tokens-antd, tokens,
+    image, eslint-plugin). Read from the generator's own constants, never a
+    copy, the same discipline ``scripts/check_npm_peer_graph.py``'s
+    ``declarations()`` uses over this same table.
+
+    Returns ``(source, package, pinned_version)``. *source* names the pair or
+    constant so a stale pin is reported by name — the gap this closes:
+    ``--registry`` used to reach a pin's version comparison only through the
+    nav-mirror walk above, which a nav-less pair (attributes, cdn, currencies,
+    reviews, vocabularies) and the substrate constants never go through at
+    all, so they went stale unnamed.
+    """
+    sys.path.insert(0, str(REPO_ROOT))
+    from stapel_tools import _frontend_templates as templates
+    from stapel_tools.create_project import (
+        FRONTEND_IMAGE_PACKAGE,
+        FRONTEND_IMAGE_VERSION,
+        FRONTEND_REACT_ANTD_DEPS,
+        FRONTEND_REACT_CORE_DEPS,
+        FRONTEND_REACT_LIBS,
+        FRONTEND_SHELL_REACT_PACKAGE,
+        FRONTEND_SHELL_REACT_VERSION,
+    )
+
+    def bare(spec: str) -> str:
+        """Strip a leading range operator — every pin this fleet writes is an
+        exact version behind ``^`` (see the tables' own module docstrings), so
+        the floor IS the pin."""
+        return spec.lstrip("^~=<> ").strip()
+
+    table: list[tuple[str, str, str]] = [
+        (f"FRONTEND_REACT_LIBS[{key!r}]", info["package"], info["version"])
+        for key, info in FRONTEND_REACT_LIBS.items()
+    ]
+    table += [
+        ("FRONTEND_REACT_CORE_DEPS", "@stapel/core", FRONTEND_REACT_CORE_DEPS["@stapel/core"]),
+        ("FRONTEND_REACT_ANTD_DEPS", "@stapel/tokens-antd",
+         FRONTEND_REACT_ANTD_DEPS["@stapel/tokens-antd"]),
+        ("FRONTEND_SHELL_REACT_VERSION", FRONTEND_SHELL_REACT_PACKAGE, FRONTEND_SHELL_REACT_VERSION),
+        ("FRONTEND_IMAGE_VERSION", FRONTEND_IMAGE_PACKAGE, FRONTEND_IMAGE_VERSION),
+        ("PUBLIC_DEV_DEPS", "@stapel/eslint-plugin",
+         bare(templates.PUBLIC_DEV_DEPS["@stapel/eslint-plugin"])),
+        ("PUBLIC_DEV_DEPS", "@stapel/tokens", bare(templates.PUBLIC_DEV_DEPS["@stapel/tokens"])),
+    ]
+    return table
+
+
 def check(
     root: Path | None = None,
     *,
     ask_registry: bool = False,
     published=npm_published,
+    latest=npm_latest,
 ) -> int:
     packages = packages_root(root)
     if not packages.is_dir():
@@ -296,10 +393,42 @@ def check(
     for line in ahead:
         print(f"check_nav_manifest_sync: UNPUBLISHED BUMP — {line}")
 
+    # The pin-table half of `--registry`: every `@stapel/*` pin the scaffold
+    # writes, nav-bearing or not, plus the substrate — compared straight
+    # against `npm view <pkg> version`, with no sibling checkout involved at
+    # all. This is what a nav-less pair (attributes, cdn, currencies,
+    # reviews, vocabularies) and the substrate constants (core, shell-react,
+    # tokens-antd, tokens, image, eslint-plugin) never reached before: the
+    # nav-mirror walk above only asks the registry about a pair whose mirror
+    # already disagrees with its OWN checkout, which a nav-less pair can
+    # never trigger because it carries no mirror to disagree.
+    stale_pins: list[str] = []
+    if ask_registry:
+        for source, package, pinned in full_pin_table():
+            served = latest(package)
+            if served is None:
+                continue  # could not ask — the benign branch, same as npm_published
+            if served != pinned:
+                stale_pins.append(
+                    f"{source}: pins {package}@{pinned!r}, but npm serves "
+                    f"{served!r} (`npm view {package} version`) — STALE PIN. "
+                    "Raise the pin to what npm serves."
+                )
+
     if mismatches:
         print("check_nav_manifest_sync: FRONTEND_REACT_LIBS nav mirror drift found:\n")
         for m in mismatches:
             print(m, "\n")
+
+    if stale_pins:
+        print(
+            "check_nav_manifest_sync: STALE PIN(s) in the full pin table "
+            "(--registry — pinned version != what npm serves):\n"
+        )
+        for s in stale_pins:
+            print(s, "\n")
+
+    if mismatches or stale_pins:
         return 1
 
     # Both numbers, because the second is what the old gate could not see: a
@@ -324,10 +453,14 @@ def main(argv: list[str] | None = None) -> None:
         "--registry", action="store_true",
         help="ask npm whether an 'unpublished bump' has in fact been "
              "published — a pin the registry has already overtaken is a "
-             "STALE PIN and fails. Needs node + network, so it is opt-in and "
-             "lives in the CI job that has both (and on the daily schedule, "
-             "which is the only run that fires when this repo has no push "
-             "and the drift arrived from another repo).",
+             "STALE PIN and fails. Also walks the WHOLE pin table (every "
+             "FRONTEND_REACT_LIBS entry, nav-bearing or not, plus the "
+             "substrate: core, shell-react, tokens-antd, tokens, image, "
+             "eslint-plugin), comparing each pin straight against "
+             "`npm view <pkg> version`. Needs node + network, so it is "
+             "opt-in and lives in the CI job that has both (and on the "
+             "daily schedule, which is the only run that fires when this "
+             "repo has no push and the drift arrived from another repo).",
     )
     args = parser.parse_args(argv)
     sys.exit(check(ask_registry=args.registry))
