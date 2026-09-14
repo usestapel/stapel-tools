@@ -1738,7 +1738,18 @@ FRONTEND_REACT_ANTD_DEPS = {
     # release whose bridge reads the neutral colour-role dictionary the
     # generated `stapel.theme.json` emits, and 0.5.0 was an ERESOLVE against
     # all 17 pairs.
-    "@stapel/tokens-antd": "0.17.3",
+    #
+    # 0.22.0 (2026-09-14): raising the `profiles-react` pin to the published
+    # 0.26.2 raised this floor with it — that release peers
+    # `@stapel/tokens-antd ">=0.20.0"`, and the 0.17.3 pin was an ERESOLVE for
+    # any project selecting profiles. Caught by `check_npm_peer_graph.py` in
+    # the release-gating e2e, which is exactly the shape the 0.55.5 incident
+    # put that gate there for: a pair raises a peer floor in ANOTHER repo and
+    # no commit here says so. `npm view @stapel/tokens-antd version` ->
+    # 0.22.0; its own peers (`@stapel/core ">=0.20.0 <1.0.0"`, `antd
+    # ">=6.0.0 <7"`) hold against the pins above, and its `@stapel/tokens`
+    # dependency is still `^0.8.0` — the range PUBLIC_DEV_DEPS carries.
+    "@stapel/tokens-antd": "0.22.0",
 }
 
 # Scripted-fullstack navigation (P1) — router deps for the generated

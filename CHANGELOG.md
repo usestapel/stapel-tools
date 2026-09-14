@@ -44,6 +44,18 @@ raising it is a fleet wave with its own registry-install proof, and reddening
 every PR over a known backlog is how a gate gets deleted. What changed is that
 each stale pin is now NAMED on every daily run.
 
+### `@stapel/tokens-antd` 0.17.3 -> 0.22.0, because the profiles pin moved
+
+Raising `profiles-react` to the published 0.26.2 raised a floor underneath it:
+that release peers `@stapel/tokens-antd ">=0.20.0"`, and the scaffold's 0.17.3
+pin is an ERESOLVE for any generated project that selects profiles. Caught by
+`check_npm_peer_graph.py` in the release-gating e2e — the exact shape the
+0.55.5 incident put that gate there for, a peer floor raised by a release in
+another repo with no commit here to review. 0.22.0's own peers
+(`@stapel/core ">=0.20.0 <1.0.0"`, `antd ">=6.0.0 <7"`) hold against the pins
+above it, and its `@stapel/tokens` dependency is still the `^0.8.0` range
+`PUBLIC_DEV_DEPS` carries.
+
 ### CFG003 stops calling a lib's own nested settings block a stale row
 
 `assemble_scaffold`'s four-lib proof was failing its `config-lint` gate on
