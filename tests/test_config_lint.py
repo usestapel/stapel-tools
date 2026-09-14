@@ -425,3 +425,105 @@ def test_aggregate_extra_project_entries():
     entries = {e.key: e for e in parse_config_md(text)}
     assert "MY_KEY" in entries
     assert entries["MY_KEY"].owner == "project"
+
+
+# --- sub-sections inside one owner's registry -------------------------------
+
+NESTED_LIB_CONFIG_MD = """# CONFIG.MD — stapel-demo
+
+## stapel-demo
+
+| Key | Source | Purpose | Required | Default |
+|-----|--------|---------|----------|---------|
+| DEMO_THING | env | top-level knob | no | 1 |
+| CONTACTS | env | the nested block | no | see below |
+
+## `STAPEL_DEMO["CONTACTS"]`
+
+Prose the parser must walk past.
+
+| Key | Source | Purpose | Required | Default |
+|-----|--------|---------|----------|---------|
+| REVEAL_PER_HOUR | env | member of the nested block | no | 30 |
+
+## Host settings this module reads (not its own namespace)
+
+| Setting | Why |
+|---|---|
+| `LANGUAGES` | not a config row at all — no Source column |
+"""
+
+
+def test_a_sub_section_does_not_become_a_new_owner():
+    """The D-CFG003/profiles cause. A lib is free to document a NESTED settings
+    block under its own heading (``## `STAPEL_PROFILES["CONTACTS"]` ``) or to
+    break its registry into prose sections (``## Corpora``). The parser used to
+    read any level-2 heading as a new OWNER, so those rows came out owned by a
+    string that is not a library: `library_owned` was False, and CFG003 called
+    three keys the module reads itself ("REVEAL_PER_HOUR", "POLICIES",
+    "OTP_PROVIDER") stale rows in every project that selects profiles.
+    """
+    entries = {e.key: e for e in parse_config_md(NESTED_LIB_CONFIG_MD)}
+    assert entries["DEMO_THING"].owner == "stapel-demo"
+    assert entries["DEMO_THING"].namespace is None
+    nested = entries["REVEAL_PER_HOUR"]
+    assert nested.owner == "stapel-demo"
+    assert nested.namespace == '`STAPEL_DEMO["CONTACTS"]`'
+    assert nested.library_owned is True  # CFG003 exempt, like every lib row
+    # The host-settings table has no Source column, so it is not a registry.
+    assert "LANGUAGES" not in entries
+
+
+def test_a_nested_block_stays_nested_through_render_and_reparse():
+    """Rendering must not flatten the block's members into the module's own
+    table, where `REVEAL_PER_HOUR` reads as a top-level knob — and whatever it
+    emits has to parse back to the same ownership."""
+    text = render_config_md(parse_config_md(NESTED_LIB_CONFIG_MD), title="T")
+    assert "## stapel-demo" in text
+    assert '### `STAPEL_DEMO["CONTACTS"]`' in text
+    reparsed = {e.key: e for e in parse_config_md(text)}
+    assert reparsed["REVEAL_PER_HOUR"].owner == "stapel-demo"
+    assert reparsed["REVEAL_PER_HOUR"].namespace == '`STAPEL_DEMO["CONTACTS"]`'
+    assert reparsed["DEMO_THING"].namespace is None
+
+
+def test_an_owner_heading_may_carry_a_qualifier():
+    """`## stapel-classified — \\`STAPEL_CLASSIFIED\\`` names an owner, not a
+    sub-section: the owner token is what is matched, not the whole line."""
+    text = (
+        "## stapel-classified — `STAPEL_CLASSIFIED`\n\n"
+        "| Key | Source | Purpose | Required | Default |\n"
+        "|--|--|--|--|--|\n"
+        "| PRESET | env | p | no | x |\n"
+    )
+    entry = parse_config_md(text)[0]
+    assert entry.owner == "stapel-classified"
+    assert entry.namespace is None
+
+
+def test_a_nested_member_does_not_shadow_another_lib_top_level_key(tmp_path):
+    """Dedup is by (sub-section, key). A generic member name inside a nested
+    block is not the same knob as a top-level key some other lib owns, and
+    neither may swallow the other."""
+    from stapel_tools.config_manifest import collect_lib_entries
+
+    for lib, body in (
+        ("alpha", "## stapel-alpha\n\n| Key | Source | Purpose | Required | Default |\n"
+                  "|--|--|--|--|--|\n| POLICIES | env | alpha's own | no | a |\n"),
+        ("beta", "## stapel-beta\n\n| Key | Source | Purpose | Required | Default |\n"
+                 "|--|--|--|--|--|\n| BETA | env | b | no | b |\n"
+                 "\n## `STAPEL_BETA[\"CONTACTS\"]`\n\n"
+                 "| Key | Source | Purpose | Required | Default |\n"
+                 "|--|--|--|--|--|\n| POLICIES | env | beta's nested | no | b |\n"),
+    ):
+        d = tmp_path / f"stapel-{lib}"
+        d.mkdir()
+        (d / CONFIG_MD_FILENAME).write_text(body)
+
+    entries, missing = collect_lib_entries(["alpha", "beta"], workspace_root=tmp_path)
+    assert missing == []
+    policies = [e for e in entries if e.key == "POLICIES"]
+    assert [(e.owner, e.namespace) for e in policies] == [
+        ("stapel-alpha", None),
+        ("stapel-beta", '`STAPEL_BETA["CONTACTS"]`'),
+    ]

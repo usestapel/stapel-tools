@@ -244,6 +244,14 @@ jobs:
         with:
           node-version: "22"
 
+      # The real nav manifests, for the stale-pin gate near the end of this
+      # job. Same checkout the `test` job takes, same SIBLING_ROOT convention.
+      - name: Fetch the sibling stapel-react checkout
+        uses: actions/checkout@v4
+        with:
+          repository: usestapel/stapel-react
+          path: siblings/stapel-react
+
       - name: Install tools + generated-project runtime deps
         run: |
           pip install -e . --quiet
@@ -319,6 +327,34 @@ jobs:
       # raising its floor) ever gets noticed here.
       - name: The scaffold's pins satisfy every pair's peer ranges
         run: python "$GITHUB_WORKSPACE/scripts/check_npm_peer_graph.py"
+
+      # …and the pair pins are the versions npm ACTUALLY SERVES.
+      #
+      # The `test` job above runs the same script WITHOUT --registry: offline,
+      # a pair whose checkout is ahead of the pin is a pending publish and the
+      # gate says so, patiently, forever. On 2026-09-14 all fourteen pairs it
+      # was being patient about had shipped weeks earlier — search pinned
+      # 0.15.0 against a published 0.48.1 — and no run of anything said a word,
+      # because nothing asked npm. This step asks. It belongs HERE and not in
+      # `test` for the same reason check_npm_peer_graph.py does: node, network,
+      # and the daily schedule, which is the only run that fires when the
+      # drift arrived from another repo and this one has no push.
+      #
+      # `continue-on-error`, deliberately and for the same reason the
+      # `registry` job carries it: there is a real backlog behind this gate
+      # (the fourteen pins above, plus the substrate they stand on —
+      # @stapel/core 0.22.0 vs 0.26.1, tokens-antd 0.17.3 vs 0.22.0,
+      # shell-react 0.12.0 vs 0.18.1), raising every one of them is a fleet
+      # wave with its own registry-install proof, and reddening every PR over a
+      # known backlog is how a gate gets deleted. It NAMES each stale pin on
+      # every daily run instead of printing a forgiving line — that is the
+      # change. Drop `continue-on-error` the run after the backlog closes.
+      - name: The pair pins are the versions npm serves (stale-pin gate)
+        continue-on-error: true
+        env:
+          SIBLING_ROOT: ${{ github.workspace }}/siblings
+        run: |
+          python "$GITHUB_WORKSPACE/scripts/check_nav_manifest_sync.py" --registry
 
       # The 0.54.0 publish died right here on `No matching version found for
       # @stapel/auth-react@^0.16.1`: the scaffold's version mirror is copied

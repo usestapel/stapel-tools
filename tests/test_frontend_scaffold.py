@@ -1005,8 +1005,10 @@ class TestFrontendNavWiring:
             "admin.root",
         ]
         settings = next(e for e in resolved if e["id"] == "profiles.settings")
+        # `profiles.contacts` (profiles-react 0.26.2, ContactsManager) is the
+        # third menu-visible child: the seller's own phone numbers.
         assert [c["id"] for c in settings["children"]] == [
-            "auth.security", "notifications.push",
+            "auth.security", "notifications.push", "profiles.contacts",
         ]
 
     def test_the_generated_container_speaks_the_pinned_shells_contract(self, tmp_path):

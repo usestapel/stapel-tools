@@ -111,9 +111,9 @@ class TestRoutePlan:
     def test_member_relative_routes_hang_under_account(self):
         plan = self._built()
         paths = {r["path"] for r in plan["account_children"]}
-        assert paths == {"chat", "connections", "settings", "settings/language",
-                         "settings/notifications", "settings/security", "listings",
-                         "favorites"}
+        assert paths == {"chat", "connections", "settings", "settings/contacts",
+                         "settings/language", "settings/notifications",
+                         "settings/security", "listings", "favorites"}
         assert plan["account_entry"]["id"] == "account.root"
 
     def test_submenu_orphan_is_dropped_not_thrown(self):

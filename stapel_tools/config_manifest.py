@@ -87,6 +87,7 @@ class ConfigEntry:
     owner: Optional[str] = None
     line: int = 0
     secret: bool = False
+    namespace: Optional[str] = None
 
     @property
     def library_owned(self) -> bool:
@@ -104,6 +105,28 @@ class ConfigEntry:
 
 
 _UNESCAPED_PIPE = re.compile(r"(?<!\\)\|")
+
+# A section heading that NAMES AN OWNER — `## stapel-profiles`, `## project`,
+# or an owner followed by a qualifier (`## stapel-classified — `STAPEL_...``).
+# Every other heading is a SUB-SECTION of the owner above it, not a new owner.
+#
+# That distinction is the whole of D-CFG003/profiles: a lib CONFIG.MD is free
+# to break its registry into prose sections (`## Corpora`, `## Ingest`) and to
+# document a NESTED settings block under its own heading — stapel-profiles'
+# ``## `STAPEL_PROFILES["CONTACTS"]` ``. The parser used to read any level-2
+# heading as a new owner, so those rows came out owned by a string that is not
+# a library: `library_owned` said False, and CFG003 called three keys the
+# module reads itself ("REVEAL_PER_HOUR", "POLICIES", "OTP_PROVIDER") stale
+# rows in every project that selects profiles. `regenerate_config_md` made the
+# same mistake in the other direction — it preserved them as hand-authored
+# "project" rows and stopped refreshing them from the lib.
+_OWNER_HEADING = re.compile(r"^(stapel-[a-z0-9][a-z0-9-]*|project)(?:\s|$)")
+
+
+def _heading_owner(heading: str) -> Optional[str]:
+    """The owner a section heading names, or None when it is a sub-section."""
+    match = _OWNER_HEADING.match(heading.strip().strip("`").strip())
+    return match.group(1) if match else None
 
 
 def _cell(value: str) -> str:
@@ -152,6 +175,7 @@ def parse_config_md(source: str | Path, *, path_label: str | None = None) -> lis
 
     entries: list[ConfigEntry] = []
     owner: Optional[str] = None
+    namespace: Optional[str] = None
     header: Optional[list[str]] = None
     col: dict[str, int] = {}
 
@@ -160,10 +184,20 @@ def parse_config_md(source: str | Path, *, path_label: str | None = None) -> lis
         if line.startswith("#"):
             level = len(line) - len(line.lstrip("#"))
             heading = line.lstrip("#").strip()
-            if level == 2:
-                owner = heading or None
-            elif level == 1:
+            if level == 1:
                 owner = None
+                namespace = None
+            elif level == 2:
+                named = _heading_owner(heading) if heading else None
+                if named is not None:
+                    owner, namespace = named, None
+                else:
+                    # A sub-section of whatever owner is open: the rows below
+                    # still belong to that library. `owner` is deliberately NOT
+                    # cleared — see _OWNER_HEADING.
+                    namespace = heading or None
+            else:
+                namespace = heading or None
             header = None
             continue
         if not line.startswith("|"):
@@ -210,6 +244,7 @@ def parse_config_md(source: str | Path, *, path_label: str | None = None) -> lis
             owner=owner,
             line=lineno,
             secret=secret_val,
+            namespace=namespace,
         ))
     return entries
 
@@ -251,7 +286,7 @@ def collect_lib_entries(
     ``stapel-<lib>``) + the list of libs that ship no CONFIG.MD yet."""
     entries: list[ConfigEntry] = []
     missing: list[str] = []
-    seen: set[str] = set()
+    seen: set[tuple[Optional[str], str]] = set()
     for lib in libs:
         path = locate_lib_config_md(lib, workspace_root)
         if path is None:
@@ -260,9 +295,14 @@ def collect_lib_entries(
         for entry in parse_config_md(path):
             if entry.owner is None:
                 entry.owner = f"stapel-{lib}"
-            if entry.key in seen:
+            # Keyed by (sub-section, key): a NESTED block's member may share a
+            # name with a top-level key of another lib without either shadowing
+            # the other — `POLICIES` under STAPEL_PROFILES["CONTACTS"] is not
+            # the same knob as a `POLICIES` some other namespace owns.
+            ident = (entry.namespace, entry.key)
+            if ident in seen:
                 continue  # first declaring lib wins (core before features)
-            seen.add(entry.key)
+            seen.add(ident)
             entries.append(entry)
     return entries, missing
 
@@ -283,25 +323,42 @@ def render_config_md(entries: Iterable[ConfigEntry], *, title: str = "CONFIG.MD"
         "",
     ]
     order: list[str] = []
-    by_owner: dict[str, list[ConfigEntry]] = {}
+    # owner -> sub-section (None = the owner's own table) -> rows, both in
+    # declaration order. A lib that documents a nested settings block keeps it
+    # nested here instead of having its members flattened into the module's
+    # table, where `REVEAL_PER_HOUR` would read as a top-level knob.
+    by_owner: dict[str, dict[Optional[str], list[ConfigEntry]]] = {}
     for entry in entries:
         owner = entry.owner or "project"
         if owner not in by_owner:
-            by_owner[owner] = []
+            by_owner[owner] = {}
             order.append(owner)
-        by_owner[owner].append(entry)
+        by_owner[owner].setdefault(entry.namespace, []).append(entry)
 
-    for owner in order:
-        lines.append(f"## {owner}")
-        lines.append("")
+    def _table(rows: list[ConfigEntry]) -> None:
         lines.append("| Key | Source | Purpose | Required | Default |")
         lines.append("|-----|--------|---------|----------|---------|")
-        for e in by_owner[owner]:
+        for e in rows:
             req = "yes" if e.required else "no"
             default = (e.default or "").replace("|", "\\|")
             purpose = (e.purpose or "").replace("|", "\\|")
             lines.append(f"| {e.key} | {e.source} | {purpose} | {req} | {default} |")
         lines.append("")
+
+    for owner in order:
+        sections = by_owner[owner]
+        lines.append(f"## {owner}")
+        lines.append("")
+        if None in sections:
+            _table(sections[None])
+        for namespace, rows in sections.items():
+            if namespace is None:
+                continue
+            # Level 3: a sub-section never reads back as a new owner, whichever
+            # heading text the lib chose.
+            lines.append(f"### {namespace}")
+            lines.append("")
+            _table(rows)
     return "\n".join(lines).rstrip() + "\n"
 
 

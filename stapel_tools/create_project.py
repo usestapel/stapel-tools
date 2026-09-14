@@ -1113,7 +1113,7 @@ FRONTEND_REACT_LIBS = {
     },
     "profiles": {
         "package": "@stapel/profiles-react",
-        "version": "0.20.0",
+        "version": "0.26.2",
         "provider": "ProfilesProvider",
         "create_runtime": "createProfilesRuntime",
         "register_i18n": "registerProfilesI18n",
@@ -1151,6 +1151,17 @@ FRONTEND_REACT_LIBS = {
                 "menuVisibleDefault": False,
                 "requiresAuth": True,
                 "order": 30,
+            },
+            {
+                "id": "profiles.contacts",
+                "labelKey": "profiles.nav.contacts",
+                "icon": "MessageOutlined",
+                "route": {"path": "contacts"},
+                "component": {"export": "ContactsManager", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "profiles.settings"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "order": 40,
             },
             {
                 "id": "profiles.connections",

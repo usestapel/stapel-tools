@@ -92,6 +92,84 @@ def test_a_checkout_bumped_ahead_with_identical_entries_is_not_drift(
     assert "demo" in out
 
 
+def test_a_bump_npm_ALREADY_SERVES_is_a_stale_pin_not_a_pending_publish(
+    gate, tmp_path, monkeypatch, capsys
+):
+    """The hole the forgiving branch above had: it assumed the publish was
+    still pending and never asked. Measured 2026-09-14 — all fourteen pairs it
+    was reporting had shipped weeks earlier (search pinned 0.15.0 against a
+    published 0.48.1). When npm SERVES the checkout's version there is nothing
+    to wait for: the pin is stale and every generated project installs a
+    version the fleet left behind."""
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.3.0", [ENTRY])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
+    })
+    asked: list = []
+
+    def served(package, version):
+        asked.append((package, version))
+        return True
+
+    assert gate.check(tmp_path, ask_registry=True, published=served) == 1
+    assert asked == [("@stapel/demo-react", "1.3.0")]
+    out = capsys.readouterr().out
+    assert "STALE PIN" in out
+    assert "UNPUBLISHED BUMP" not in out
+
+
+def test_a_bump_npm_does_NOT_serve_stays_the_benign_unpublished_bump(
+    gate, tmp_path, monkeypatch, capsys
+):
+    """The window the exemption was written for is still real: asked, npm says
+    no, and the mirror is as correct as it is allowed to be."""
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.3.0", [ENTRY])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
+    })
+    assert gate.check(tmp_path, ask_registry=True, published=lambda *_: False) == 0
+    assert "UNPUBLISHED BUMP" in capsys.readouterr().out
+
+
+def test_an_UNASKABLE_registry_never_becomes_a_verdict(
+    gate, tmp_path, monkeypatch, capsys
+):
+    """No node, no network, a registry 500 — `npm_published` returns None and
+    the benign branch stands. A gate that fails on a question it could not ask
+    is a gate somebody turns off; one that PASSES on it would be worse still,
+    so the unasked case keeps printing the loud line."""
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.3.0", [ENTRY])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
+    })
+    assert gate.check(tmp_path, ask_registry=True, published=lambda *_: None) == 0
+    assert "UNPUBLISHED BUMP" in capsys.readouterr().out
+
+
+def test_without_the_flag_npm_is_never_asked(gate, tmp_path, monkeypatch):
+    """`make check` runs this on a laptop with no node and must not reach for
+    the network at all — the flag is the whole switch."""
+    _pair(tmp_path, "demo", "@stapel/demo-react", "1.3.0", [ENTRY])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
+    })
+
+    def boom(*_):  # pragma: no cover - the point is that it never runs
+        raise AssertionError("npm was asked without --registry")
+
+    assert gate.check(tmp_path, published=boom) == 0
+
+
+def test_npm_published_reports_None_when_npm_is_absent(gate, monkeypatch):
+    """The seam itself: an OSError from `npm` missing is 'not asked', never
+    'not published'."""
+    def missing(*_a, **_k):
+        raise FileNotFoundError("npm")
+
+    monkeypatch.setattr(gate.subprocess, "run", missing)
+    assert gate.npm_published("@stapel/demo-react", "1.3.0") is None
+
+
 def test_a_checkout_bumped_ahead_with_DIFFERENT_entries_still_fails(
     gate, tmp_path, monkeypatch
 ):

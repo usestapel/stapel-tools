@@ -52,6 +52,17 @@ guards is worse than no gate, because it is believed.
   registry. Nothing a container mounts differs, and the mirror is as correct
   as it is allowed to be. The line stays loud because the discrepancy is real
   and somebody closes it by publishing.
+
+  …which is exactly what nobody could see was ALREADY DONE. That branch
+  assumes the publish is still pending and never checks; on 2026-09-14 all
+  fourteen pairs it was patiently reporting had shipped weeks earlier (search
+  pinned 0.15.0 against a published 0.48.1 — 33 minors), and the gate printed
+  the same forgiving line on every run. ``--registry`` asks npm whether the
+  checkout's version is served: when it is, the pin is not waiting for
+  anything, it is STALE, and that is a **FAILURE**. The flag is opt-in
+  because ``make check`` must stay runnable with no node and no network, and
+  a question that could not be asked must not become a verdict
+  (``npm_published`` returns ``None``, and the benign branch stands).
 * A pair whose mirror differs from the real file (entries — always; version,
   unless it is the unpublished-bump case above) → **FAILURE**.
 * A pair that DOES carry a ``"nav"`` mirror but whose real
@@ -74,8 +85,10 @@ mirror if the pair really did retire the surface).
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -123,7 +136,48 @@ def _is_ahead(checkout: str | None, mirrored: str) -> bool:
     return _parts(checkout) > _parts(mirrored)
 
 
-def check(root: Path | None = None) -> int:
+def npm_published(package: str, version: str) -> bool | None:
+    """Does npm already SERVE ``package@version``? ``None`` when the question
+    could not be asked (no node, no network, a registry error) — a gate must
+    not turn an unanswered question into a verdict.
+
+    ``npm view`` is the same registry seam ``scripts/check_npm_peer_graph.py``
+    and ``scripts/e2e_npm_pins.py`` use; this script keeps its own one-liner
+    rather than importing theirs, because it has to stay runnable with no node
+    at all (see ``--registry``).
+    """
+    try:
+        proc = subprocess.run(
+            ["npm", "view", f"{package}@{version}", "version", "--json"],
+            capture_output=True, text=True, check=False,
+        )
+    except (OSError, FileNotFoundError):
+        return None  # no node on this machine — the question was not asked
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0:
+        # npm exits non-zero for BOTH "no such version" and "no network". The
+        # first is an answer, the second is not, and E404 is how npm tells
+        # them apart.
+        if "E404" in (proc.stderr or "") or "404" in (proc.stderr or ""):
+            return False
+        return None
+    if not out:
+        return False
+    try:
+        payload = json.loads(out)
+    except ValueError:
+        return None
+    if isinstance(payload, list):
+        return bool(payload)
+    return bool(payload)
+
+
+def check(
+    root: Path | None = None,
+    *,
+    ask_registry: bool = False,
+    published=npm_published,
+) -> int:
     packages = packages_root(root)
     if not packages.is_dir():
         print(
@@ -194,12 +248,37 @@ def check(root: Path | None = None) -> int:
             if _is_ahead(real.get("version"), info["version"]) and (
                 mirrored_entries == real_entries
             ):
+                # ...unless npm ALREADY SERVES the checkout's version. Then
+                # nothing is pending: the pair shipped, and the pin is simply
+                # stale — every generated project installs a version the fleet
+                # left behind. Without asking, this branch prints a patient
+                # line about a publish that already happened, forever; that is
+                # how 14 pairs sat up to 33 minors behind under a green gate.
+                #
+                # The question is only ASKED with --registry, because `make
+                # check` must stay runnable on a laptop with no node and no
+                # network, and an unanswerable question stays the benign case.
+                served = published(info["package"], real["version"]) if ask_registry else None
+                if served:
+                    mismatches.append(
+                        f"{key}: the registry pins {info['version']!r}, but npm "
+                        f"already serves {real['version']!r} (the checkout's "
+                        "version) — this is not a pending publish, it is a "
+                        "STALE PIN. Every generated project installs "
+                        f"{info['package']}@^{info['version']}. Raise the "
+                        "\"version\" in FRONTEND_REACT_LIBS to "
+                        f"{real['version']!r} (and re-run "
+                        "scripts/check_npm_peer_graph.py — a raised pair pin "
+                        "can move a peer floor)."
+                    )
+                    continue
                 ahead.append(
                     f"{key}: checkout is at {real.get('version')!r} while the "
                     f"registry pins {info['version']!r} — the published "
                     "version. Entries are identical, so no container mounts "
                     "anything different; the pin moves when the pair is "
                     "published."
+                    + ("" if ask_registry else " (npm not asked — --registry)")
                 )
                 continue
             mismatches.append(
@@ -235,8 +314,23 @@ def check(root: Path | None = None) -> int:
     return 0
 
 
-def main() -> None:
-    sys.exit(check())
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(
+        prog="check_nav_manifest_sync.py",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--registry", action="store_true",
+        help="ask npm whether an 'unpublished bump' has in fact been "
+             "published — a pin the registry has already overtaken is a "
+             "STALE PIN and fails. Needs node + network, so it is opt-in and "
+             "lives in the CI job that has both (and on the daily schedule, "
+             "which is the only run that fires when this repo has no push "
+             "and the drift arrived from another repo).",
+    )
+    args = parser.parse_args(argv)
+    sys.exit(check(ask_registry=args.registry))
 
 
 if __name__ == "__main__":

@@ -1987,12 +1987,14 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     # device that can never be delivered to — so the entry gets the placeholder
     # naming the prop.
     "notifications.push": {"container": ("getToken",)},
-    # profiles-react 0.20.0 — ProfileSettings/LanguageSettings/
-    # NotificationPreferences/ConnectionsPage: every prop optional.
+    # profiles-react 0.26.2 — ProfileSettings/LanguageSettings/
+    # NotificationPreferences/ContactsManager/ConnectionsPage: every prop
+    # optional (`ContactsManagerProps` is mode/surface/gutter, all skin).
     # PublicProfilePage requires `userId`, which its own route carries.
     "profiles.settings": {},
     "profiles.language": {},
     "profiles.notifications": {},
+    "profiles.contacts": {},
     "profiles.connections": {},
     "profiles.public": {"route_params": {"userId": "string"}},
     # categories-react 0.2.0

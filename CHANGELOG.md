@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.67.1 — 2026-09-14
+
+Unblocks the release train: CI had been red since the 2026-09-12 schedule, so
+0.66.0 (IMG001–003) and 0.67.0 (IMG004) were written, merged and never tagged
+or published. Two gates were failing, for two unrelated reasons, and neither
+was about the image-lint work.
+
+### The nav mirror catches up to profiles-react 0.26.2 — and the gate learns to ask npm
+
+`check_nav_manifest_sync.py` was red on one pair: `profiles-react` published
+`profiles.contacts` (the seller's own phone numbers — `ContactsManager`,
+mounted at `settings/contacts`) and the scaffold's mirror had five entries
+where the pair now has six. Every generated container was missing the screen.
+The mirror, its `NAV_ENTRY_MOUNTS` row (all props optional) and the pin
+(0.20.0 → 0.26.2, the version npm serves) now match the published pair.
+
+The second half is the gate itself. It was ALSO printing fourteen
+`UNPUBLISHED BUMP` lines — its own name for "the checkout is ahead of the pin,
+the publish must still be pending, nothing a container mounts differs". It
+never checked. All fourteen had shipped weeks earlier: `search-react` pinned
+0.15.0 against a published **0.48.1**, thirty-three minors; `categories` 0.9.1
+against 0.31.4; `chat` 0.6.1 against 0.19.1. A forgiving branch that cannot
+tell a pending publish from a stale pin prints the same patient line either
+way, forever.
+
+`--registry` asks npm. A bump the registry ALREADY SERVES is not pending — it
+is a stale pin, and it fails, naming the version every generated project
+installs instead. The flag is opt-in because `make check` must stay runnable
+with no node and no network, and a question that could not be asked must not
+become a verdict: `npm_published` returns `None` on a missing `npm`, a dead
+network or a registry error, and the benign branch stands. CI runs it with the
+flag in `e2e-generated-project` — the job that already has node, already asks
+the registry for `check_npm_peer_graph.py`, and is fired by the daily schedule,
+which is the only run that happens when the drift arrived from another repo and
+this one has no push.
+
+It is `continue-on-error` there, for the reason the `registry` job carries the
+same flag: the backlog behind it is real (those fourteen pins, plus the
+substrate under them — `@stapel/core` 0.22.0 against a published 0.26.1,
+`tokens-antd` 0.17.3 against 0.22.0, `shell-react` 0.12.0 against 0.18.1),
+raising it is a fleet wave with its own registry-install proof, and reddening
+every PR over a known backlog is how a gate gets deleted. What changed is that
+each stale pin is now NAMED on every daily run.
+
+### CFG003 stops calling a lib's own nested settings block a stale row
+
+`assemble_scaffold`'s four-lib proof was failing its `config-lint` gate on
+three keys — `REVEAL_PER_HOUR`, `POLICIES`, `OTP_PROVIDER` — reported as
+"declared in CONFIG.MD but read nowhere in the project". They are read by
+stapel-profiles itself: they are members of `STAPEL_PROFILES["CONTACTS"]`,
+documented under the sub-heading the module gives that nested block.
+
+`parse_config_md` read EVERY level-2 heading as a new owner. A sub-section
+heading is not a library name, so `library_owned` was false for every row
+under it and CFG003 — whose entire job is to exempt rows a library reads
+itself — turned on them. `regenerate_config_md` made the mirror-image mistake:
+it kept those rows as hand-authored "project" rows and stopped refreshing them
+from the lib at all.
+
+A heading now names an owner only when it IS one (`## stapel-profiles`,
+`## project`, or an owner with a qualifier, as in
+`## stapel-classified` followed by its namespace). Anything else is a
+sub-section OF the owner above it, carried
+on the entry as `namespace`, rendered back as a `###` sub-table rather than
+flattened into the module's own table, and deduplicated by `(namespace, key)`
+so a generic member name inside a nested block cannot shadow another lib's
+top-level key. This was never only about profiles: `search`, `webhooks`,
+`alerts`, `analytics`, `classified`, `forms`, `notifications`, `categories`
+and `billing` all break their registries into prose sections, and every row
+under one was mis-attributed the same way.
+
 ## 0.67.0 — 2026-09-13
 
 ### IMG004 — a declaration older than the base it is installed on
