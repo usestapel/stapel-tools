@@ -1,5 +1,90 @@
 # Changelog
 
+## 0.67.2 — 2026-09-14
+
+0.67.1 gave the nav gate a `--registry` flag and it came back with a list.
+This release is the list, emptied — and the flag that named it promoted from
+advisory to failing, in the commit that leaves it nothing to say.
+
+### Nineteen pair pins raised to what npm serves
+
+Every one verified with `npm view <pkg> version --prefer-online`, not
+remembered:
+
+| pair | was | now | | pair | was | now |
+| --- | --- | --- | --- | --- | --- | --- |
+| `auth-react` | 0.18.1 | **0.23.0** | | `moderation-react` | 0.1.1 | **0.2.1** |
+| `attributes-react` | 0.8.1 | **0.17.0** | | `notifications-react` | 0.11.0 | **0.11.1** |
+| `billing-react` | 0.10.0 | **0.10.3** | | `recordings-react` | 0.6.2 | **0.7.0** |
+| `calendar-react` | 0.8.1 | **0.8.2** | | `reviews-react` | 0.6.0 | **0.8.3** |
+| `categories-react` | 0.9.1 | **0.31.4** | | `search-react` | 0.15.0 | **0.48.1** |
+| `cdn-react` | 0.4.1 | **0.5.0** | | `video-react` | 0.2.1 | **0.3.5** |
+| `chat-react` | 0.6.1 | **0.19.1** | | `vocabularies-react` | 0.2.1 | **0.5.0** |
+| `currencies-react` | 0.3.0 | **0.4.0** | | `workspaces-react` | 0.19.0 | **0.19.1** |
+| `forms-react` | 0.3.1 | **0.4.0** | | | | |
+| `gdpr-react` | 0.3.0 | **0.4.0** | | | | |
+| `listings-react` | 0.14.1 | **0.35.0** | | | | |
+
+Not one nav MIRROR entry changed — every raised pair publishes the same nav
+surface it published at the old pin, which is the case the gate was built to
+catch, because a pin drifting under an identical entry list is invisible to a
+reader diffing this file.
+
+Five of them (`attributes`, `cdn`, `currencies`, `reviews`, `vocabularies`)
+publish no nav manifest at all, so the gate walks past them and **nothing was
+naming them**. Two were about to be installed below another pair's declared
+floor: `chat-react` 0.19.1 peers `@stapel/cdn-react ">=0.5.0"` against a 0.4.1
+pin, and `categories-react` 0.31.4 peers `@stapel/attributes-react ">=0.16.6"`
+against 0.8.1. A gate that only walks nav-bearing pairs is not a gate over the
+pin table, and the pin table is what installs.
+
+### The substrate moves with the pairs
+
+The 0.55.5 lesson, applied before it could bite again:
+
+* **`@stapel/core` 0.22.0 → 0.26.1.** `categories-react` 0.31.4 and
+  `search-react` 0.48.1 both peer `">=0.26.0 <1.0.0"`. Raising the pairs and
+  leaving core behind is an ERESOLVE at install for any project selecting
+  either — the exact shape that broke 0.55.5.
+* **`@stapel/shell-react` 0.12.0 → 0.18.1.** Six minors, all additive (the
+  package's CHANGELOG carries no "Major Changes" heading): `scrolledChipRow`,
+  a `headerSticky` default, `useRouteScrollReset`, the pinned-header seam. All
+  three emission floors stay satisfied, so the generated container emits
+  exactly what it emitted before.
+* **`@stapel/eslint-plugin` ^0.12.1 → ^0.13.3**, in both dev-dep tables, and it
+  had to move *with* the shell rather than on its own: 0.13.0 broadened
+  `no-hardcoded-theme-mode` to flag a literal `mode`/`themeMode`/`colorMode`
+  JSX attribute in ANY source file. The container writes `mode="light"` only
+  BELOW the shell's self-theming floor; at 0.18.1 it writes none, so there is
+  nothing for the widened rule to report. Pinned the other way round, a
+  scaffolded project's own `npm run lint` would have reported the generator.
+
+`tokens-antd` (0.22.0), `tokens` (^0.8.0), `image` (0.4.2), `react-router`
+(7.18.3) and `@tanstack/react-query` (5.102.8) were already the versions npm
+serves and did not move.
+
+### The stale-pin gate stops being advisory
+
+`continue-on-error` comes off the CI step in the same commit that empties its
+backlog, which is the only moment it can come off honestly. A gate with nothing
+left to forgive that still cannot fail is a gate reporting drift into a log
+nobody reads — and the flag's own comment had said "drop it the run after the
+backlog closes" since the day it was written.
+
+From here a stale pin FAILS. That matters most on the daily schedule, which is
+the run that fires when a pair raised its version in ANOTHER repo and this one
+has no push to notice it with.
+
+### Proof
+
+`check_nav_manifest_sync.py --registry` exit 0 · `check_npm_peer_graph.py` exit
+0 ("every pinned `@stapel/*` peer range is satisfied") · `make check` 2185
+passed, 15 skipped · CI run
+[34850257090](https://github.com/usestapel/stapel-tools/actions/runs/34850257090)
+green with `e2e-generated-project` green — a real `npm install` + `vite build`
+of a generated project against the new pins, with `e2e_npm_pins` reporting
+"every mirrored pin resolves on npm" and no fallback.
+
 ## 0.67.1 — 2026-09-14
 
 Unblocks the release train: CI had been red since the 2026-09-12 schedule, so
