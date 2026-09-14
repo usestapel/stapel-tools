@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.67.3 — 2026-09-14
+
+`--registry` used to reach a pin's version comparison only THROUGH the
+nav-mirror walk: it asked npm about a pair only after that pair's mirror
+already disagreed with its own checkout. A pair with no nav manifest at all
+(`attributes`, `cdn`, `currencies`, `reviews`, `vocabularies`) never carries a
+mirror, so it never reached that question — and neither did the substrate
+constants (`@stapel/core`, `shell-react`, `tokens-antd`, `tokens`, `image`,
+`eslint-plugin`), which are not `FRONTEND_REACT_LIBS` entries at all. Two
+pairs were about to be installed below another pair's declared peer floor,
+invisible to a gate that only asks npm about pins it already suspects.
+
+### `full_pin_table()` — the registry gate now walks the WHOLE pin table
+
+`scripts/check_nav_manifest_sync.py --registry` gained a second, independent
+walk: every `FRONTEND_REACT_LIBS` entry (nav-bearing or not) plus the six
+substrate constants, read straight off the generator's own tables — no
+sibling checkout involved. Each pin is compared directly against
+`npm view <pkg> version`; a mismatch is a **STALE PIN**, named by source, and
+fails. npm/network unreachable for one package stays the benign branch, the
+same "an unanswered question is not a verdict" contract `npm_published`
+already keeps (`npm_latest` mirrors it exactly).
+
+Verified clean against the live registry: `check_nav_manifest_sync.py
+--registry` against the real pin table reports no drift (every pair and
+every substrate pin already matches what npm serves as of this release).
+
+Tests: two new registry-gate cases (a nav-less pair, a substrate pin) plus a
+direct test of the `npm_latest()` seam, all red before the fix. Three
+pre-existing `--registry` tests now inject a `latest=` stub so they stay
+hermetic now that the flag also drives the new pin-table walk.
+
 ## 0.67.2 — 2026-09-14
 
 0.67.1 gave the nav gate a `--registry` flag and it came back with a list.
