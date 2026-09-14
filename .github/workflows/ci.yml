@@ -191,9 +191,33 @@ jobs:
   # and tags present, zero workflow runs). Found by hand every time.
   #
   # `fetch-depth: 0` is required: without tags there's nothing to check.
-  # `continue-on-error` is deliberate: the fleet has historical gaps (~40 as
-  # of 2026-08-07), and reddening every PR over them gets this gate turned
-  # off. Watch the daily run instead.
+  # `continue-on-error` is deliberate and, per the audit below, PERMANENT —
+  # this is not a shrinking backlog like the nav-manifest-sync/peer-graph
+  # gates that got promoted in 0.67.2/0.67.3.
+  #
+  # Audited 2026-09-14 (stapel-tools 0.67.4): 125 REG001 findings
+  # across 22 repos (up from ~40 on 2026-08-07 as more repos joined the
+  # fleet and grew their own history), all across every repo checked. Every
+  # one of the 30 under THIS repo was cross-checked against
+  # `gh run list --workflow=publish.yml` — each traces to an actual FAILED
+  # "Publish to PyPI" run, superseded within hours by the next version tag,
+  # which DID publish (`pip index versions stapel-tools`). Same shape as
+  # 0.61.0 (see that release commit): the code was fine or fixed forward,
+  # the tag is just where a retry sequence left a corpse. Re-publishing a
+  # superseded, sometimes-broken old version now serves no consumer and
+  # would ship known-bad code under a version nobody could ever have
+  # depended on; moving or deleting an already-pushed tag is worse still.
+  # Neither is "closing" the gap — leaving the tag dangling with this note
+  # is. The other 21 repos' gaps are the same shape (spot-checked via
+  # `pip index versions` / `npm view`) and are theirs to close or accept,
+  # not this repo's to edit. The ONE exception found: stapel-alerts 0.1.0 is
+  # its own newest AND only tag, unpublished — a live gap, not history;
+  # flagged to that repo's owner.
+  #
+  # So: watch the daily run for NEW gaps (a repo whose latest tag is also
+  # missing, like stapel-alerts above), not for this permanent count to
+  # reach zero — it structurally cannot without doing something worse than
+  # the gap itself.
   registry:
     runs-on: ubuntu-latest
     steps:

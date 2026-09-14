@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.67.4 — 2026-09-14
+
+The `registry` CI job's `stapel-registry-check` step has carried
+`continue-on-error` since it was added, masking ~40 pre-existing gaps
+(2026-08-07). Audited fresh: 125 REG001 findings across 22 repos (the fleet
+grew; more repos accumulated their own history in the same shape).
+
+### Every finding traced to real evidence, not guessed
+
+For this repo's own 30: cross-checked against
+`gh run list --workflow=publish.yml` and `pip index versions stapel-tools`.
+Every missing tag is an actual FAILED "Publish to PyPI" run, superseded
+within hours by the next version, which DID publish. Same shape as 0.61.0
+(0.61.1's release commit): a retry sequence leaves a dangling tag behind, and
+"closing" it by republishing superseded — sometimes actively broken, like
+0.61.0's bad peer pin — code under an old version number ships known-bad
+code to nobody, while moving or deleting an already-pushed tag is worse. So
+none of the 30 gets closed; the CHANGELOG note here is the closure, same as
+0.61.1's was.
+
+The other 21 repos' 95 findings are spot-checked the same way
+(`pip index versions` / `npm view`) and are real, but belong to those repos
+— not edited here. One is a LIVE gap, not history: `stapel-alerts` 0.1.0 is
+its own newest and only tag, never published — flagged to its owner, not
+fixed here.
+
+### `continue-on-error` stays — this backlog is permanent, not shrinking
+
+Unlike the nav-manifest-sync and peer-graph backlogs closed in 0.67.1-0.67.3,
+this one cannot reach zero without doing something worse than leaving it red
+(republishing dead code, or moving/deleting pushed tags — both refused).
+The CI comment now says so, so the flag is not mistaken for a "still working
+on it" the way the other two were before they got emptied.
+
+Tests: none — no check logic changed; the fix is the documentation of why
+`continue-on-error` is not a TODO here, plus the CI comment carrying the
+audited count and its evidence instead of a five-week-stale guess.
+
 ## 0.67.3 — 2026-09-14
 
 `--registry` used to reach a pin's version comparison only THROUGH the
