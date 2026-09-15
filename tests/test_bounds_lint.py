@@ -640,6 +640,44 @@ class TestBND003:
         ''')
         assert _rules(bl.lint_source_file(path, table)) == {"BND003"}
 
+    def test_a_workspace_finds_the_same_libraries_as_naming_each_child(self, tmp_path):
+        """A model-bearing tree with no pyproject.toml must be found from the
+        WORKSPACE, not only when it is named on its own.
+
+        The walk only ever appends a distribution, so such a tree was appended
+        by nobody, and the "nothing found" fallback cannot rescue it once any
+        sibling has matched. It cost five findings on the first fleet sweep —
+        three of them the best BND003 had — in the mode the README advertises
+        for exactly this job.
+        """
+        workspace = tmp_path / "workspace"
+        # a sibling WITH a pyproject.toml, so `found` is non-empty and the
+        # fallback is unreachable: that is the shape that hid the bug
+        packaged = workspace / "lib-packaged"
+        packaged.mkdir(parents=True)
+        (packaged / "pyproject.toml").write_text(
+            '[project]\nname = "lib-packaged"\n', encoding="utf-8"
+        )
+        (packaged / "models.py").write_text(MODELS, encoding="utf-8")
+
+        # …and one with models and no distribution metadata at all
+        loose = workspace / "svc-loose" / "app"
+        loose.mkdir(parents=True)
+        (loose / "models.py").write_text(MODELS, encoding="utf-8")
+        (loose / "writes.py").write_text(
+            "def ingest(payload):\n"
+            "    Issue.objects.create(title=payload['title'])\n",
+            encoding="utf-8",
+        )
+
+        from_workspace = bl.lint_project(workspace)
+        from_child = bl.lint_project(workspace / "svc-loose")
+        assert from_child, "the loose tree reports nothing even when named"
+        missed = {(v.path, v.line, v.rule) for v in from_child} - {
+            (v.path, v.line, v.rule) for v in from_workspace
+        }
+        assert missed == set(), f"the workspace mode missed {sorted(missed)}"
+
     def test_a_test_module_is_out_of_scope(self, tmp_path):
         """A suite fabricates columns by the thousand and every one of them
         was written to fit. On the day the rule shipped they were 140 of its

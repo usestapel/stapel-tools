@@ -428,7 +428,30 @@ def find_libraries(root: Path) -> list:
                 found.append(dirpath)
     if not found and model_files(root):
         return [root]
-    return sorted(found)
+
+    # A model-bearing child that is NOT a distribution is still a library, and
+    # must be found from a workspace exactly as it is when it is named on its
+    # own — the paragraph above already says so, and the walk alone does not
+    # do it: the walk only ever appends a distribution, so a tree with models
+    # and no pyproject.toml is appended by nobody, and the `not found`
+    # fallback cannot rescue it once any sibling has matched.
+    #
+    # It silently cost five findings on this gate's first sweep, three of them
+    # the best BND003 had (an LLM's JSON going into a `severity(16)` and a
+    # `fingerprint(255)`), and it cost them in the mode the README advertises
+    # for exactly this job. A gate that covers fewer libraries from a
+    # workspace than from naming each child is a gate that quietly proves less
+    # than it claims, which is the failure this whole file exists to argue
+    # against.
+    claimed = list(found)
+    for child in sorted(p for p in root.iterdir() if p.is_dir()):
+        if _skipped_dir(child.name):
+            continue
+        if any(library == child or library.is_relative_to(child) for library in claimed):
+            continue
+        if model_files(child):
+            found.extend(find_libraries(child))
+    return sorted(set(found))
 
 
 def _parse(path: Path) -> Optional[ast.Module]:
