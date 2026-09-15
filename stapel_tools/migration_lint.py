@@ -55,6 +55,21 @@ MIG005  both ``# stapel: contract-phase`` and ``# stapel: cutover-phase``
         about the same release; an author who writes both does not know
         which claim they are making, so neither licenses anything and the
         destructive operations are reported by MIG001 as well.
+MIG006  a ``dependencies`` entry names an app label this app does not have,
+        for a migration that IS this app's own. Django resolves dependencies
+        by LABEL (``apps.py``'s ``label``, else the last component of
+        ``name``), and a hand-written migration is written by somebody looking
+        at the PACKAGE name — ``("stapel_cdn", "0009_…")`` when the label is
+        ``cdn``. The graph then carries a dangling node and every host that
+        installs the app fails on the first test touching a database, while
+        the library's own suite stays green because it never builds the graph.
+        Seen twice in one hour on 2026-09-16, in two libraries, released both
+        times.
+
+        Deliberately narrow: only fires when the named migration file EXISTS
+        IN THIS APP. A dependency on another distribution's app is normal and
+        its label is not knowable from here, so it is never graded.
+
 MIG101  ``operations`` is not a static list — cannot analyze → WARNING.
 MIG102  ``# stapel: irreversible`` marker on a migration whose operations
         are all reversible — stale marker needlessly lowers the app's
@@ -212,6 +227,8 @@ class MigrationScan:
     ops: list                 # list[Op]
     analyzable: bool
     lines: list               # source lines (noqa lookup)
+    #: ``[(app_label, migration_name, line), …]`` from ``dependencies``.
+    dependencies: list = _dc_field(default_factory=list)
 
     @property
     def irreversible_ops(self) -> list:
@@ -404,6 +421,7 @@ def scan_migration_file(path: Path) -> MigrationScan:
         return MigrationScan(name, path, markers, [], analyzable=False, lines=lines)
 
     ops: list = []
+    dependencies: list = []
     analyzable = False
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
@@ -412,6 +430,13 @@ def scan_migration_file(path: Path) -> MigrationScan:
             if not isinstance(item, ast.Assign):
                 continue
             targets = [t.id for t in item.targets if isinstance(t, ast.Name)]
+            if "dependencies" in targets and isinstance(item.value, (ast.List, ast.Tuple)):
+                for element in item.value.elts:
+                    if not isinstance(element, (ast.Tuple, ast.List)):
+                        continue  # swappable_dependency(...) and friends
+                    parts = [_const(part) for part in element.elts]
+                    if len(parts) == 2 and all(isinstance(part, str) for part in parts):
+                        dependencies.append((parts[0], parts[1], element.lineno))
             if "operations" not in targets:
                 continue
             if isinstance(item.value, (ast.List, ast.Tuple)):
@@ -422,7 +447,10 @@ def scan_migration_file(path: Path) -> MigrationScan:
                     analyzable = analyzable and ok
             else:
                 analyzable = False
-    return MigrationScan(name, path, markers, ops, analyzable=analyzable, lines=lines)
+    return MigrationScan(
+        name, path, markers, ops, analyzable=analyzable, lines=lines,
+        dependencies=dependencies,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +731,46 @@ def lint_app(
                 f"INSERTs rows without this column during the migrate→swap "
                 f"window; add null=True now (expand) and tighten in a later "
                 f"release, or provide default/db_default",
+            ))
+
+        # MIG006 — a dependency that names this app by the wrong name
+        #
+        # Django resolves dependencies by LABEL. A hand-written migration is
+        # written by somebody looking at the PACKAGE name, so `("stapel_cdn",
+        # …)` gets typed where the label is `cdn`, the graph carries a
+        # dangling node, and every host that installs the app fails on the
+        # first test that touches a database — while the library's own suite
+        # stays green, because it never builds the graph.
+        #
+        # Narrow on purpose: only when the named migration IS ONE OF THIS
+        # APP'S OWN. A dependency on another distribution's app is ordinary
+        # and its label cannot be known from here, so it is never graded.
+        own_migrations = {other.name for other in app.migrations}
+        # The app's own PACKAGE/DIRECTORY name — the name that is in front of
+        # whoever is typing, and the one thing the label is mistaken FOR. Not
+        # "any label we do not recognise": `0001_initial` exists in every app
+        # in the world, so a cross-app dependency on somebody else's
+        # `0001_initial` would light up on the first sweep. It did, on three
+        # studio apps and on stapel-workspaces, and every one of those was
+        # legitimate.
+        package_name = app.app_dir.name.replace("-", "_")
+        for dep_label, dep_name, dep_line in migration.dependencies:
+            if dep_label == app.label or dep_label != package_name:
+                continue
+            if dep_name not in own_migrations:
+                continue
+            violations.append(Violation(
+                path, dep_line, "MIG006",
+                f"dependency ('{dep_label}', '{dep_name}') names app label "
+                f"'{dep_label}', but '{dep_name}' is THIS app's migration and "
+                f"this app's label is '{app.label}'. Django resolves "
+                f"dependencies by label, so the graph gets a dangling node: "
+                f"every project installing this app fails with "
+                f"NodeNotFoundError on the first test that touches a "
+                f"database, while this repo's own suite stays green because "
+                f"it never builds the graph. Write ('{app.label}', "
+                f"'{dep_name}') — which is what makemigrations would have "
+                f"written",
             ))
 
         # MIG005 — the two phase markers claim incompatible things

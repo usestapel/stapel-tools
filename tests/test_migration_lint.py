@@ -623,3 +623,88 @@ class TestDiscoveryAndCli:
         ])
         violations, _ = run_lint(tmp_path)
         assert rules(violations) == ["MIG003"]
+
+
+# ---------------------------------------------------------------------------
+# MIG006 — a dependency that names this app by its package, not its label
+# ---------------------------------------------------------------------------
+
+
+def _app_with_label(tmp_path, dir_name, label):
+    app = tmp_path / dir_name
+    app.mkdir(parents=True, exist_ok=True)
+    (app / "apps.py").write_text(
+        "from django.apps import AppConfig\n\n\n"
+        "class Config(AppConfig):\n"
+        f"    name = '{dir_name.replace('-', '_')}'\n"
+        f"    label = '{label}'\n"
+    )
+    return app
+
+
+def _migration_depending_on(app, name, dep_label, dep_name):
+    mig_dir = app / "migrations"
+    mig_dir.mkdir(parents=True, exist_ok=True)
+    (mig_dir / "__init__.py").write_text("")
+    (mig_dir / f"{name}.py").write_text(
+        "from django.db import migrations, models\n\n\n"
+        "class Migration(migrations.Migration):\n"
+        "    dependencies = [\n"
+        f"        ('{dep_label}', '{dep_name}'),\n"
+        "    ]\n\n"
+        "    operations = [\n"
+        "        migrations.AlterField(model_name='thing', name='x', "
+        "field=models.CharField(max_length=10)),\n"
+        "    ]\n"
+    )
+
+
+class TestMIG006DependencyNamesTheLabel:
+    """Django resolves dependencies by LABEL. A hand-written migration is
+    written by somebody looking at the PACKAGE name, so `("stapel_cdn", …)`
+    gets typed where the label is `cdn`. The graph then carries a dangling
+    node and every host installing the app fails with NodeNotFoundError on the
+    first test that touches a database — while the library's own suite stays
+    green, because it never builds the graph.
+
+    Transcribed from the two it was written for, both made in one hour and
+    both released: stapel-cdn 0010 and stapel-translate 0023.
+    """
+
+    def test_the_package_name_in_place_of_the_label_is_reported(self, tmp_path):
+        app = _app_with_label(tmp_path, "stapel-cdn", "cdn")
+        make_migration(app, "0009_audio", ["migrations.AddField(model_name='a', name='b', field=models.CharField(max_length=1, null=True))"])
+        _migration_depending_on(app, "0010_widen", "stapel_cdn", "0009_audio")
+
+        violations, _apps = lint_paths([str(tmp_path)])
+        mig006 = [v for v in violations if v.rule == "MIG006"]
+        assert len(mig006) == 1, [str(v) for v in violations]
+        assert "this app's label is 'cdn'" in mig006[0].message
+        assert "('cdn', '0009_audio')" in mig006[0].message
+
+    def test_the_correct_label_is_silent(self, tmp_path):
+        app = _app_with_label(tmp_path, "stapel-cdn", "cdn")
+        make_migration(app, "0009_audio", ["migrations.AddField(model_name='a', name='b', field=models.CharField(max_length=1, null=True))"])
+        _migration_depending_on(app, "0010_widen", "cdn", "0009_audio")
+
+        assert [v for v in lint_paths([str(tmp_path)])[0] if v.rule == "MIG006"] == []
+
+    def test_a_dependency_on_another_apps_initial_is_not_a_finding(self, tmp_path):
+        """THE false positive this rule had on its first sweep, and the reason
+        it is not simply "a label we do not recognise": `0001_initial` exists
+        in every app in the world, so a legitimate cross-app dependency on
+        somebody else's `0001_initial` lit up on three studio apps and on
+        stapel-workspaces. Every one of those was correct code."""
+        app = _app_with_label(tmp_path / "svc", "studio_cto", "studio_cto")
+        make_migration(app, "0001_initial", ["migrations.AddField(model_name='a', name='b', field=models.CharField(max_length=1, null=True))"])
+        _migration_depending_on(app, "0002_rls", "studio_projects", "0001_initial")
+
+        assert [v for v in lint_paths([str(tmp_path)])[0] if v.rule == "MIG006"] == []
+
+    def test_a_cross_distribution_dependency_is_never_graded(self, tmp_path):
+        """Another distribution's label is not knowable from here."""
+        app = _app_with_label(tmp_path, "stapel-workspaces", "workspaces")
+        make_migration(app, "0001_initial", ["migrations.AddField(model_name='a', name='b', field=models.CharField(max_length=1, null=True))"])
+        _migration_depending_on(app, "0009_audit", "stapel_eventstore", "0001_initial")
+
+        assert [v for v in lint_paths([str(tmp_path)])[0] if v.rule == "MIG006"] == []
