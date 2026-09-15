@@ -926,6 +926,85 @@ note, in a tree that commits no schema at all. Suppress a deliberate SCH003
 with `# noqa: SCH003` on the `@extend_schema` decorator. Composed into
 `stapel-verify` on the `python` surface.
 
+### `stapel-bounds-lint` — untrusted text into a bounded column, and Postgres does not truncate
+
+```bash
+stapel-bounds-lint <repo>              # warnings do not fail
+stapel-bounds-lint <repo> --strict     # BND003 included in the verdict
+stapel-bounds-lint <workspace>         # every library under a parent directory
+stapel-bounds-lint <repo> --json
+stapel-bounds-lint <repo> --fitter shorten_for_column   # a project's own bound
+```
+
+Django validates `max_length` in **forms**, never on a write. `.objects.create()`
+hands the string to Postgres, which raises `StringDataRightTruncation` rather
+than truncating: the transaction rolls back and the endpoint answers 500. So a
+column bound declared in a model is not a bound enforced on the path that writes
+it, and every string arriving from another process — an exception message, a
+stack frame, a filename, a field of a JSON body — has a length nobody promised.
+
+On 2026-09-15 a client's alert store answered 500 on **every** report for twenty
+minutes, eight of them, because a payload title longer than 255 characters
+reached `title = models.CharField(max_length=255)`. The reports that were lost
+were reports *about* defects. The repair is `stapel-alerts/bounds.py`, and this
+linter checks the rule that module states: **no value from a payload reaches a
+bounded column unbounded, and the bound is read off the field itself.** The
+field table here is parsed out of each app's `models.py` (and any `models/`
+package) for the same reason `bounds.py` reads `max_length_of`: a limit typed a
+second time makes the next `max_length` change a silent data-loss bug.
+
+| rule | level | what it says |
+|---|---|---|
+| BND001 | **error** | a payload dict is **splatted** into a model with bounded columns (`Model(**d)`, `.create(**d)`, `defaults=d`) — every key lands in a column and no field name is even visible in the source |
+| BND002 | **error** | a payload subscript is assigned straight to a `max_length` field (`title=payload["title"]`, `service=data.get("service", "")`, `obj.culprit = request.data["culprit"]`) with no fitter, slice or cast in between |
+| BND003 | warning | a `max_length` field is given a **call result** (or a string built from one) that nothing proves fits — the inverse burden, and the only rule of the three that reaches the frame the incident lived in |
+
+The remedy the message names depends on the column: `bounds.fit` for prose, and
+`bounds.choice_or_default` for a `choices` field, because a level that is not a
+level is not a *long* value, it is a *wrong* one, and `"warninggggg"[:16]` is
+not a level either.
+
+**BND003 does not require a payload to be visible in the same frame, and that
+was measured before it was chosen.** The incident's write lived in a service
+function the view called with the payload already unpacked into ordinary `str`
+parameters — `title=norm.title_for(trace, message=message)` — where no taint
+analysis has anything left to see. Conditioning the rule on "a payload source in
+scope" gives 5 findings across 23 libraries instead of 39 and is silent on the
+defect it was built for. The positive/negative control is in the suite: the
+pre-fix `record()` reports, the repaired one does not. `--payload-in-frame`
+restores the conditioned reading for a project that wants it.
+
+What BND003 never reports: a bare name (`create(name=name)` is most of the
+fleet); a literal, or anything that folds to one that fits (`"a" * 64`); a
+dotted chain (`Level.ERROR`, `settings.SERVICE`); a digest-shaped call; a
+same-named field read (`title=series.title` — a column cannot overflow the
+column it came out of); an f-string whose pieces are all safe; and **anything
+in a test module** — a suite's fabricated `file_hash="a" * 64` is not untrusted
+text, and those were 140 of the rule's first 196 findings.
+
+What none of the three can catch, stated plainly: taint does not cross a
+function boundary (BND001/BND002 stop at one, which is why BND003 puts the
+burden on the write instead of guessing); a payload arriving under a name this
+module does not know (a Kafka message, a Celery argument called `msg`, an LLM
+response); `**kwargs` that is not *named* like a payload (`def make(**kwargs)`
+is a factory, `def ingest(**payload)` is a door); whether a bound is the RIGHT
+bound (`value[:64]` into a `max_length=32` column passes and still fails); and a
+DRF serializer that already enforced the limit. That last family splits both
+ways in the fleet and the rule assumes neither: `stapel-recordings` validates
+`title` with `CharField(max_length=500)` into a 500 column (false today, and
+fragile — the limit is typed twice), while `stapel-categories`'
+`CategoryCommandSerializer` is a plain `Serializer` whose `name`/`slug` are
+`CharField()` with **no** `max_length` over 255-char columns, so an over-long
+name passes validation and 500s the write. An automatic "it came through a
+serializer, it is fine" would hide the second to quieten the first; the answer
+to a false one is a `# noqa: BND002` naming the serializer that bounds it.
+
+A **library** is a distribution root that declares models, so the same command
+works in a library's pre-commit and over a whole workspace; `migrations/` is
+skipped because it describes history, not the current model. Silent, with a
+note, in a tree with no models. Suppress with `# noqa: BND001` (etc.) on the
+call or assignment line. Composed into `stapel-verify` on the `python` surface.
+
 ### The shared `# noqa` grammar, and `stapel-escape-lint` — is this escape doing anything?
 
 Every linter above that reads a `# noqa` comment (R/AUTHZ/SIB/CFG/MIG/SWAP/DOC/

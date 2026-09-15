@@ -195,6 +195,11 @@ _register(
 )
 _register("stapel-schema-lint", True, "the @extend_schema decorator", "SCH003")
 
+_register(
+    "stapel-bounds-lint", True, "the model write or the assignment line",
+    "BND001", "BND002", "BND003",
+)
+
 _register("stapel-config-lint", True, "the reported line", "CFG001", "CFG006", "CFG007")
 _register(
     "stapel-config-lint", False,

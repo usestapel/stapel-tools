@@ -68,6 +68,22 @@ Linters composed (in this order)
   document; SCH003 (error) a declared 2xx ARRAY on a method whose body
   returns a hand-built dict. Silent, with a note, in a tree that commits no
   ``docs/schema.json``.)
+* ``stapel_tools.bounds_lint``     — BND-codes (the "untrusted external text
+  assigned to a bounded column without a boundary" class. Django validates
+  ``max_length`` in forms and never on a write, so a column bound declared in
+  a model is not a bound enforced on the path that writes it: Postgres raises
+  ``StringDataRightTruncation``, the transaction rolls back and the endpoint
+  answers 500. A client's alert store did exactly that on 2026-09-15 — eight
+  500s in twenty minutes from a payload title longer than 255 characters, and
+  the reports that were lost were reports ABOUT defects. BND001 (error) a
+  payload dict SPLATTED into a model with bounded columns, where every key
+  lands in a column and no field name is even visible in the source; BND002
+  (error) a payload subscript assigned straight to a ``max_length`` field with
+  no fitter, slice or cast in between; BND003 (warning) a bounded field given
+  a value that is neither provably bounded nor constant, in a frame that has a
+  payload in scope. The limits are read off the models, never typed twice, so
+  a ``max_length`` change cannot leave a truncation behind. Silent, with a
+  note, in a tree that declares no models.)
 * ``stapel_tools.config_lint``     — CFG-codes (config-in-one-place law)
 * ``stapel_tools.migration_lint``  — MIG-codes (expand/contract discipline)
 * ``stapel_tools.swap_lint``       — SWAP001/SWAP002/SWAP003/SWAP004 (§55
@@ -207,6 +223,7 @@ from . import (
     adoption_lint,
     api_lint,
     authz_lint,
+    bounds_lint,
     config_lint,
     doc_lint,
     env_address_lint,
@@ -381,6 +398,13 @@ def run_schema_wire_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-schema-lint", errors, warnings, _to_dicts(findings), notes)
 
 
+def run_bounds_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = bounds_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-bounds-lint", errors, warnings, _to_dicts(findings), notes)
+
+
 def run_exposure_lint(project: Path) -> LinterReport:
     notes: list[str] = []
     findings = exposure_lint.lint_project(project, notes=notes)
@@ -433,6 +457,7 @@ COMPOSED_LINTERS: tuple[str, ...] = (
     "stapel-sibling-lint",
     "stapel-api-lint",
     "stapel-schema-lint",
+    "stapel-bounds-lint",
     "stapel-config-lint",
     "stapel-migration-lint",
     "stapel-swap-lint",
@@ -551,6 +576,7 @@ def verify_project(
         ("stapel-sibling-lint", lambda: run_sibling_lint(project)),
         ("stapel-api-lint", lambda: run_api_lint(project, base_sha)),
         ("stapel-schema-lint", lambda: run_schema_wire_lint(project)),
+        ("stapel-bounds-lint", lambda: run_bounds_lint(project)),
         ("stapel-config-lint", lambda: run_config_lint(project)),
         ("stapel-migration-lint", lambda: run_migration_lint(project, base_sha)),
         ("stapel-swap-lint", lambda: run_swap_lint(project)),

@@ -116,6 +116,7 @@ LINTER_SURFACES: dict[str, str] = {
     "stapel-index-lint": "python",
     "stapel-api-lint": "python",
     "stapel-schema-lint": "python",
+    "stapel-bounds-lint": "python",
     "stapel-doc-lint": "docs",
     "stapel-nginx-cache-lint": "deploy",
     "stapel-env-address-lint": "deploy",
