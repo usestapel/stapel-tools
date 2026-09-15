@@ -3,7 +3,7 @@ at all.
 
 The problem this closes
 -----------------------
-``stapel-verify`` composes fourteen linters that encode *this fleet's*
+``stapel-verify`` composes twenty linters that encode *this fleet's*
 contracts: ``StapelResponse`` discipline, presenter indirection, the
 config-in-one-place law, the search-index contract, the SPA cache canon.
 Against a project that stapel generated, every one of them is a fair gate.
@@ -90,7 +90,8 @@ SURFACES: dict[str, str] = {
     "python": "backend Python: response/flow discipline, adoption, config, "
               "migrations, swap indirection, urls, index, authentication/"
               "authorization seams, test-suite sibling declarations, HTTP "
-              "surface versioning and surface contracts",
+              "surface versioning, surface contracts and the wire proof "
+              "behind docs/schema.json",
     "frontend": "the SPA: delivery canon (build output, entry document, asset "
                 "hashing)",
     "docs": "in-repo documentation: model field docs",
@@ -114,6 +115,7 @@ LINTER_SURFACES: dict[str, str] = {
     "stapel-surface-lint": "python",
     "stapel-index-lint": "python",
     "stapel-api-lint": "python",
+    "stapel-schema-lint": "python",
     "stapel-doc-lint": "docs",
     "stapel-nginx-cache-lint": "deploy",
     "stapel-env-address-lint": "deploy",

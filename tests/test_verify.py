@@ -229,6 +229,7 @@ def test_every_linter_contributes_a_finding(tmp_path, monkeypatch):
         "stapel-authz-lint",
         "stapel-sibling-lint",
         "stapel-api-lint",
+        "stapel-schema-lint",
         "stapel-config-lint",
         "stapel-migration-lint",
         "stapel-swap-lint",
@@ -355,7 +356,7 @@ def test_cli_exit_code_0_on_clean_project(tmp_path, capsys):
     code = main([str(proj)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "All clean across 19 linters." in out
+    assert "All clean across 20 linters." in out
 
 
 def test_cli_json_shape_and_exit_code(tmp_path, capsys):
@@ -365,7 +366,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
     assert code == 1
     assert payload["ok"] is False
     assert payload["errors"] == 12
-    assert len(payload["linters"]) == 19
+    assert len(payload["linters"]) == 20
     names = {entry["name"] for entry in payload["linters"]}
     assert names == {
         "stapel-lint",
@@ -374,6 +375,7 @@ def test_cli_json_shape_and_exit_code(tmp_path, capsys):
         "stapel-authz-lint",
         "stapel-sibling-lint",
         "stapel-api-lint",
+        "stapel-schema-lint",
         "stapel-config-lint",
         "stapel-migration-lint",
         "stapel-swap-lint",

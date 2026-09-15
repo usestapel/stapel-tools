@@ -52,6 +52,22 @@ Linters composed (in this order)
                                      versioning: a breaking OpenAPI diff must
                                      carry a bump, an UPGRADE.json record and a
                                      vN+1 mounted beside the frozen vN)
+* ``stapel_tools.schema_wire_lint`` — SCH-codes (the "``docs/schema.json`` is
+  a CLAIM" class: an ``@extend_schema`` annotation is a hand-written statement
+  the generator copies into the document without checking it against the
+  method body, and ``tests/test_contract.py`` compares the committed document
+  against a fresh emission of those same annotations — it compares the claim
+  with itself. stapel-alerts 0.2.0 declared ``GET /issues`` as ``Issue[]``
+  while the wire carried ``{count, offset, limit, results}``; the drift gate
+  was green for the whole life of the release and the frontend pair found it
+  by rendering ``undefined``. SCH001 (warning while the sweep runs) a library
+  publishing 2xx JSON bodies with no WIRE TEST — no module that reads the
+  committed document, enumerates its ``paths``, performs each operation and
+  validates the body received; SCH002 (error) a test that issues requests and
+  validates bodies but works from a hand-picked endpoint list instead of the
+  document; SCH003 (error) a declared 2xx ARRAY on a method whose body
+  returns a hand-built dict. Silent, with a note, in a tree that commits no
+  ``docs/schema.json``.)
 * ``stapel_tools.config_lint``     — CFG-codes (config-in-one-place law)
 * ``stapel_tools.migration_lint``  — MIG-codes (expand/contract discipline)
 * ``stapel_tools.swap_lint``       — SWAP001/SWAP002/SWAP003/SWAP004 (§55
@@ -204,6 +220,7 @@ from . import (
     migration_lint,
     nginx_cache_lint,
     po_lint,
+    schema_wire_lint,
     sibling_lint,
     surface_lint,
     swap_lint,
@@ -357,6 +374,13 @@ def run_image_lint(project: Path) -> LinterReport:
     return LinterReport("stapel-image-lint", errors, warnings, _to_dicts(findings), notes)
 
 
+def run_schema_wire_lint(project: Path) -> LinterReport:
+    notes: list[str] = []
+    findings = schema_wire_lint.lint_project(project, notes=notes)
+    errors, warnings = _count(findings)
+    return LinterReport("stapel-schema-lint", errors, warnings, _to_dicts(findings), notes)
+
+
 def run_exposure_lint(project: Path) -> LinterReport:
     notes: list[str] = []
     findings = exposure_lint.lint_project(project, notes=notes)
@@ -408,6 +432,7 @@ COMPOSED_LINTERS: tuple[str, ...] = (
     "stapel-authz-lint",
     "stapel-sibling-lint",
     "stapel-api-lint",
+    "stapel-schema-lint",
     "stapel-config-lint",
     "stapel-migration-lint",
     "stapel-swap-lint",
@@ -525,6 +550,7 @@ def verify_project(
         ("stapel-authz-lint", lambda: run_authz_lint(project)),
         ("stapel-sibling-lint", lambda: run_sibling_lint(project)),
         ("stapel-api-lint", lambda: run_api_lint(project, base_sha)),
+        ("stapel-schema-lint", lambda: run_schema_wire_lint(project)),
         ("stapel-config-lint", lambda: run_config_lint(project)),
         ("stapel-migration-lint", lambda: run_migration_lint(project, base_sha)),
         ("stapel-swap-lint", lambda: run_swap_lint(project)),

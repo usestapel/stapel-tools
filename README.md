@@ -850,6 +850,82 @@ one line a reader will check. Silent by design in a tree with no Dockerfile.
 Suppress with `# noqa: IMG001` on the `FROM` line. Full table of images,
 contents and sizes: `docs/reference/base-images.md` in the workspace docs.
 
+### `stapel-schema-lint` — `docs/schema.json` is a claim, and the drift gate compares it with itself
+
+```bash
+stapel-schema-lint <repo>            # warnings do not fail
+stapel-schema-lint <repo> --strict   # for a library that HAS a wire test
+stapel-schema-lint <workspace>       # every library under a parent directory
+stapel-schema-lint <repo> --json
+```
+
+`docs/schema.json` is emitted from the views' `@extend_schema` annotations. An
+annotation is a **hand-written statement** about what a method returns, and
+drf-spectacular has no way to check it against the method body — it copies the
+claim into the document. Every library's `tests/test_contract.py` then compares
+the committed document against a **fresh emission of the same annotations**,
+which proves the file is not stale and nothing else: both sides come from the
+claim.
+
+`stapel-alerts` 0.2.0 is the worked example. `GET /alerts/api/v1/issues`
+carried `responses=IssueSerializer(many=True)` — declared `Issue[]` — while the
+body built `{"count": …, "offset": …, "limit": …, "results": …}` and returned
+it. The drift gate was green for the whole life of the release. The frontend
+pair generated a typed client from the document, read `response[0]`, and
+rendered `undefined` — the defect was found by a person looking at a screen,
+the most expensive place in the estate to find one. The fix's
+`tests/test_contract_wire.py` is the gate the generator cannot be: it reads the
+**committed** document, enumerates every operation declaring a JSON response,
+performs each one against a real client, and validates the body it gets back
+against the schema it was promised.
+
+| rule | level | what it says |
+|---|---|---|
+| SCH001 | warning | the library publishes 2xx `application/json` bodies and **no wire test proves any of them** |
+| SCH002 | **error** | a test issues client requests and validates bodies with `jsonschema`, but from a hand-picked endpoint list instead of the committed document |
+| SCH003 | **error** | a method declares an **array** 2xx response (`responses=X(many=True)`) and returns an **object** it builds by hand |
+
+A wire test is recognised by **behaviour, never by filename** — a file called
+`test_contract_wire.py` that asserts `2 + 2 == 4` is not one, and a proof
+written inside `tests/test_api.py` is. Four AST signals, all required: it reads
+a path whose basename is `schema.json`; it subscripts the loaded document by
+`"paths"`; it calls `client.get`/`.post`/… (or `getattr(client, method)`); and
+it validates a **received body** (`response.json()`, `response.data`, or a name
+assigned one) with `jsonschema`. The last condition is what keeps the rule
+honest: half the fleet validates event-bus payloads against `docs/events/*.json`
+in a module that also drives a client, and reading that as "the wire is proven"
+would report a gate nobody wrote.
+
+**SCH001 is a warning on purpose, and temporarily.** On the day it shipped, 25
+of the 26 libraries that commit a schema tripped it — only `stapel-alerts`,
+which wrote its wire test the day the defect was found, is clean. A rule that
+turns the whole fleet red on the day it lands is a rule people learn to skim
+past, which is strictly worse than no rule; same reasoning as IMG001 and
+DOC001. `--strict` is how a library that HAS written its wire test keeps the
+gate closed before the default flips. **SCH002 and SCH003 are errors from day
+one** and are safe to be: SCH002 can only fire on a library that already wrote
+such a test, and SCH003 is a contradiction at the level of *type* — an array is
+not an object, whatever is inside either of them, so it needs no knowledge of
+the serializer's fields, no emission and no running application.
+
+What it deliberately does **not** catch: a declared *object* whose fields are
+wrong (that needs the application, and is what SCH001 demands a test for); a
+body assembled anywhere but a dict literal in the same function (following
+values across functions turns a decidable check into a guess); and the
+*coverage* of an existing wire test — SCH001/SCH002 grade the shape of the
+proof, never how many rows it walks. A view declaring a `pagination_class` is
+exempt from SCH003, and has to be: drf-spectacular wraps a `many=True` response
+in that paginator's envelope before it reaches the document, so the annotation
+declares `PaginatedXList`, an object, and the hand-assembled envelope in the
+body is the matching body (`stapel-workspaces`' audit endpoint is exactly this,
+and is correct).
+
+A **library** is a directory containing `docs/schema.json`, so the same command
+works in a library's pre-commit and over a whole workspace. Silent, with a
+note, in a tree that commits no schema at all. Suppress a deliberate SCH003
+with `# noqa: SCH003` on the `@extend_schema` decorator. Composed into
+`stapel-verify` on the `python` surface.
+
 ### The shared `# noqa` grammar, and `stapel-escape-lint` — is this escape doing anything?
 
 Every linter above that reads a `# noqa` comment (R/AUTHZ/SIB/CFG/MIG/SWAP/DOC/

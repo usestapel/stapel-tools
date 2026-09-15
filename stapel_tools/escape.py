@@ -188,6 +188,13 @@ _register(
     "API001", "API002", "API003", "SCHEMA001",
 )
 
+_register(
+    "stapel-schema-lint", False,
+    "a docs/schema.json or whole-test-module finding (no source line to annotate)",
+    "SCH001", "SCH002",
+)
+_register("stapel-schema-lint", True, "the @extend_schema decorator", "SCH003")
+
 _register("stapel-config-lint", True, "the reported line", "CFG001", "CFG006", "CFG007")
 _register(
     "stapel-config-lint", False,
