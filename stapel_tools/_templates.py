@@ -240,10 +240,22 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 with open(BASE_DIR / "version.txt") as v_file:
     APP_VERSION_NUMBER = v_file.read().strip()
 
-STATIC_ROOT = "/app/staticfiles/{{SLUG}}/"
+# THE CONTAINER'S PATHS ARE THE CONTAINER'S, not this file's. Compose mounts
+# the shared volumes at /app/staticfiles and /app/media and sets these two env
+# vars to point into them; off the container — a laptop, CI, a scaffold test —
+# there is no /app and its nearest existing ancestor is /, owned by root. A
+# hardcoded container path therefore made `manage.py check` fail everywhere
+# that is not a container, which is where the check is most often run.
+#
+# `stapel_core.storage` (E001/E002) refuses a storage root it cannot create or
+# write, and it is right to: a service whose media root is unwritable does not
+# fail, it runs DEGRADED — every upload raising PermissionError while the API
+# answers 2xx. The fix is a default that is writable wherever the project is
+# checked out, not a quieter gate.
+STATIC_ROOT = os.getenv("STATIC_ROOT", str(BASE_DIR / "var" / "staticfiles" / "{{SLUG}}"))
 STATIC_URL = "/staticfiles/{{SLUG}}/"
 STATICFILES_DIRS = get_staticfiles_dirs(BASE_DIR)
-MEDIA_ROOT = "/app/media/{{SLUG}}/"
+MEDIA_ROOT = os.getenv("MEDIA_ROOT", str(BASE_DIR / "var" / "media" / "{{SLUG}}"))
 MEDIA_URL = "/media/{{SLUG}}/"
 
 # Dev fallbacks live in dev.py; prod.py refuses to start without real values.
@@ -618,7 +630,25 @@ select = ["E", "F", "W", "I", "B", "UP"]
 # dev -> local, base -> prod — Django's own convention): every name a lower
 # tier defines looks "undefined" to a linter reading a higher tier's file in
 # isolation. Not a bug — silence F403/F405 for this directory only.
-"config/settings/*.py" = ["F403", "F405"]
+#
+# E402 belongs here for the same reason and only here: a settings module
+# legitimately imports something AFTER the block that configures what the
+# import will read (a spectacular helper after REST_FRAMEWORK, a backend
+# after its own settings). Anywhere else in a project that is an accident.
+#
+# What is deliberately NOT ignored: F541 (an f-string with no placeholder).
+# That is a leftover from a value that used to be interpolated, not an idiom
+# — this scaffold does not emit one, and ignoring it fleet-wide would hide
+# the next one.
+"config/settings/*.py" = ["F403", "F405", "E402"]
+
+# Django's own `startapp` stubs: `from django.db import models` in an app
+# with no models yet, `from django.contrib import admin` in one with nothing
+# registered. Everybody keeps them, because the next edit to the file needs
+# them, and a scaffold that deleted them would be handing out a file that
+# fails the moment it is used.
+"apps/*/models.py" = ["F401"]
+"apps/*/admin.py" = ["F401"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["config", "apps", "tests"]
@@ -753,6 +783,12 @@ services:
       sh -c "sh bootstrap.sh && ${RUN_CMD}"
     environment:
       POSTGRES_DB: "{{DB_NAME}}"
+      # The shared volumes below are where this service's static and media
+      # trees live IN THE CONTAINER. settings/base.py defaults them to a
+      # writable path inside the checkout so the project's own gates pass off
+      # the container too; here is where the container's answer is given.
+      STATIC_ROOT: "/app/staticfiles/{{SLUG}}/"
+      MEDIA_ROOT: "/app/media/{{SLUG}}/"
     volumes:
       - static-content:/app/staticfiles
       - media-content:/app/media

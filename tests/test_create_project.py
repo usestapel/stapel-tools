@@ -3,6 +3,8 @@ import json
 import subprocess
 import sys
 
+import re
+import shutil
 import pytest
 from siblings import requires
 
@@ -416,8 +418,47 @@ class TestMonolithControls:
         pyproject = (svc / "pyproject.toml").read_text()
         assert "[tool.ruff]" in pyproject
         # Django settings tiers star-import the layer below by design — the
-        # linter must not flag every name a lower tier defines as undefined.
-        assert '"config/settings/*.py" = ["F403", "F405"]' in pyproject
+        # linter must not flag every name a lower tier defines as undefined —
+        # and a settings module legitimately imports after the block the
+        # import will read.
+        settings_ignores = re.search(
+            r'"config/settings/\*\.py" = \[([^\]]*)\]', pyproject
+        )
+        assert settings_ignores, pyproject
+        for code in ("F403", "F405", "E402"):
+            assert code in settings_ignores.group(1)
+        # …and NOT F541: an f-string with no placeholder is a leftover, not an
+        # idiom, and this scaffold does not emit one. Checked against the
+        # ignore LISTS rather than the file text, because the file explains in
+        # prose why F541 is absent and a substring check reads that as a hit —
+        # the same class of mistake as a gate matching on a comment.
+        ignored_codes = set()
+        for listed in re.findall(r"=\s*\[([^\]]*)\]", pyproject):
+            ignored_codes |= set(re.findall(r"[A-Z]+\d+", listed))
+        assert "F541" not in ignored_codes
+
+    def test_a_generated_project_passes_the_hook_that_will_lint_it(self, tmp_path):
+        """The pre-push hook every generated project ships runs
+        `ruff check <tree> --select E,F,W --ignore E501` over the committed
+        tree. A scaffold whose own output fails that hook hands its users a
+        repository they cannot push from — which is exactly what happened to
+        `stapel-example-monolith` (25 errors, no ruff config at all, because
+        it predates the one this scaffold now writes).
+
+        Asserting the config's TEXT, as the test above does, cannot see that:
+        the config can be perfect and a template can still emit a line it does
+        not cover. This runs the hook's own command.
+        """
+        ruff = shutil.which("ruff")
+        if ruff is None:  # pragma: no cover - environment without ruff
+            pytest.skip("ruff is not on PATH")
+        proj = _create(tmp_path, "app", "monolith")
+        result = subprocess.run(
+            [ruff, "check", str(proj), "--select", "E,F,W", "--ignore", "E501"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
     def test_monolith_service_generates_boot_smoke_settings(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
