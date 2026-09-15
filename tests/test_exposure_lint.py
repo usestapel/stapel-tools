@@ -19,6 +19,7 @@ from stapel_tools.exposure_lint import (
     lint_pushed,
     load_private_names,
     main,
+    stale_hook_note,
 )
 
 
@@ -326,3 +327,65 @@ class TestPushedMode:
         _git(root, "commit", "-q", "--allow-empty", "-m", "fix: the acme fleet")
         head = _git(root, "rev-parse", "HEAD")
         assert [f.rule for f in lint_pushed(root, head, "b" * 40)] == ["EXP002"]
+
+
+class TestTheHookScansWhatIsPushed:
+    """A pre-push hook judges the commits being pushed, never the checkout.
+
+    Two sessions sharing one worktree once had a peer's UNCOMMITTED scratch
+    file fail the other's push, which is how a hook teaches people to reach
+    for ``--no-verify``. The behaviour is pinned here from both ends: the
+    committed name still fails, the untracked one is invisible.
+    """
+
+    def _hook(self, root: Path, body: str) -> Path:
+        hooks = root / ".githooks"
+        hooks.mkdir(exist_ok=True)
+        hook = hooks / "pre-push"
+        hook.write_text(body, encoding="utf-8")
+        return hook
+
+    def test_untracked_name_does_not_fail_the_push_but_a_committed_one_does(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path)
+        # a peer's work in progress, and my own dirty edit: neither is pushed
+        (root / "peer_wip.py").write_text("# acme.example\n", encoding="utf-8")
+        (root / "thing.py").write_text("# acme in my dirty tree\n", encoding="utf-8")
+        head = _git(root, "rev-parse", "HEAD")
+        assert lint_pushed(root, head) == [], "an untracked file blocked a push"
+
+        # …and the same name, committed, still fails
+        _git(root, "add", "thing.py")
+        _git(root, "commit", "-q", "-m", "wip")
+        assert [f.rule for f in lint_pushed(root, _git(root, "rev-parse", "HEAD"))] == [
+            "EXP001"
+        ]
+
+    def test_a_worktree_hook_is_noted(self, tmp_path):
+        root = _repo(tmp_path)
+        self._hook(root, "#!/usr/bin/env bash\nstapel-exposure-lint . --commits\n")
+        note = stale_hook_note(root)
+        assert note is not None and "WORKING TREE" in note
+
+    def test_a_pushed_hook_is_not_noted(self, tmp_path):
+        root = _repo(tmp_path)
+        self._hook(
+            root,
+            "#!/usr/bin/env bash\n"
+            'command -v stapel-exposure-lint >/dev/null 2>&1 || exit 0\n'
+            'stapel-exposure-lint --pushed "$local_sha" --remote "$remote_sha"\n',
+        )
+        assert stale_hook_note(root) is None
+
+    def test_no_hook_is_not_noted(self, tmp_path):
+        assert stale_hook_note(_repo(tmp_path)) is None
+
+    def test_the_note_never_changes_the_exit_code(self, tmp_path, monkeypatch, capsys):
+        """A note is a note: the stale hook must not fail anybody's push."""
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _repo(tmp_path)
+        self._hook(root, "#!/usr/bin/env bash\nstapel-exposure-lint . --commits\n")
+        assert main([str(root), "--pushed", _git(root, "rev-parse", "HEAD")]) == 0
+        assert "WORKING TREE" in capsys.readouterr().err

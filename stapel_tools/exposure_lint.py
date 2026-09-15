@@ -88,6 +88,12 @@ Modes
     two sessions sharing one worktree once had a peer's UNCOMMITTED files
     fail the other's push, because the hook scanned ``.`` — a pre-push hook
     judges the commits being pushed, never the working tree.
+
+Every run also prints a NOTE (never a finding, never an exit code) when THIS
+checkout's own ``.githooks/pre-push`` still hands the tool a directory. A note
+rather than a rule because on the day it shipped 38 of the fleet's 39
+repositories carried the old hook, and failing all of their pushes to say so
+would have taught one thing only: ``--no-verify``.
 """
 from __future__ import annotations
 
@@ -516,6 +522,40 @@ def lint_pushed(
     return findings
 
 
+#: A pre-push hook that hands this tool a DIRECTORY is scanning the working
+#: tree — every untracked scratch file in the checkout, including another
+#: session's. `--pushed <sha>` judges the commits being pushed instead. The
+#: canonical hook is stapel_tools._library_templates.PRE_PUSH.
+_WORKTREE_HOOK_RE = re.compile(
+    r"^\s*stapel-exposure-lint\s+(?!--pushed\b)[^\s|&;]", re.MULTILINE
+)
+
+
+def stale_hook_note(project: Path) -> Optional[str]:
+    """A note when THIS checkout's pre-push hook still scans the working tree.
+
+    A note and not a finding, deliberately. On the day this shipped 38 of the
+    fleet's 39 repositories carried the old hook, and turning every one of
+    their pushes red to tell them so would have taught exactly one thing:
+    ``--no-verify``. The note costs nothing, is printed on every run in the
+    repository that has the problem, and names the one line to change.
+    """
+    hook = project / ".githooks" / "pre-push"
+    try:
+        text = hook.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not _WORKTREE_HOOK_RE.search(text):
+        return None
+    return (
+        "stapel-exposure-lint: .githooks/pre-push scans the WORKING TREE "
+        "(`stapel-exposure-lint <dir>`), so an untracked file — a peer's, in a "
+        "shared checkout — can fail a push that does not contain it. Use "
+        "`--pushed \"$local_sha\" [--remote \"$remote_sha\"]` over the refs git "
+        "names on stdin (stapel_tools._library_templates.PRE_PUSH)."
+    )
+
+
 def lint_project(
     project: Path,
     *,
@@ -602,6 +642,9 @@ def main(argv: Optional[list] = None) -> int:
         return 2
 
     notes: list[str] = []
+    hook_note = stale_hook_note(project)
+    if hook_note is not None:
+        notes.append(hook_note)
     names = load_private_names()
     if args.pushed:
         if _git(project, ["rev-parse", "--verify", "--quiet",
