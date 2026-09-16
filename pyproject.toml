@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.67.4"
+version = "0.68.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -85,6 +85,18 @@ test = [
     # that bundle libvips, so this needs no apt step.
     "pyvips[binary]",
 ]
+
+# Auto-loaded by pytest in any environment where stapel-tools is installed —
+# which is every shared development virtualenv in this workspace, and is
+# exactly where the failure it catches lives. It asserts that the package a
+# repository BUILDS imports from inside that repository, so a suite can never
+# quietly measure a stale installed copy of the thing you are editing.
+#
+# Not needed in CI, and the reason is worth knowing: CI installs the repo
+# under test from the checkout, so copy and source are the same by
+# construction. This is a property of long-lived dev environments.
+[project.entry-points.pytest11]
+stapel_freshness = "stapel_tools.freshness"
 
 [project.scripts]
 stapel-lint = "stapel_tools.lint:main"

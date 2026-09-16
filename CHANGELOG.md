@@ -1,5 +1,47 @@
 # Changelog
 
+## 0.68.0 — 2026-09-16
+
+### Added — the artifact under test must be the artifact you edited
+
+A pytest plugin, auto-loaded wherever stapel-tools is installed, that asserts
+at session start that the package a repository BUILDS imports from inside that
+repository. Exit code 3 and a message naming both the stale path and the fresh
+one, before a single test runs.
+
+The failure it exists for: in a shared development virtualenv `stapel_profiles`
+was installed as a regular (non-editable) copy at 0.20.2 while the repo sat at
+0.20.4. Every test run in that repo imported the installed copy — green suite,
+real coverage, measuring a month-old library, for an unknown number of sessions
+because nothing ever said so. It surfaced only because a NEW name failed to
+import; a change to an existing function would have silently exercised the old
+body and passed.
+
+That is a class, not an incident: **a run that reports on a different copy of
+the thing than the one you changed.** Its siblings tonight were a Docker build
+reusing a cached pip layer after requirements.txt moved (four services kept
+0.2.1 while reporting "Built"), and a generated artifact committed stale
+against its own source (`docs/capabilities.json` embedding a version pyproject
+had moved, which burned a release tag).
+
+Scope is deliberately narrow, and the module says so in its own docstring:
+
+* siblings are NOT checked — a repo legitimately reaches its siblings through
+  installed copies, and asserting otherwise would demand a full editable
+  workspace of everybody;
+* it cannot see a stale copy inside a container image: that boundary is a
+  build, not an import, and catching it means asserting the installed version
+  against the pin AFTER the build;
+* it cannot see a generated artifact stale against its input — that is what
+  each repo's own contract drift gate is for;
+* it is unnecessary in CI, because CI installs the repo under test from the
+  checkout, so copy and source are the same by construction. The defect is a
+  property of long-lived shared dev environments, which is exactly where
+  nobody is watching.
+
+`--no-freshness-check` / `STAPEL_SKIP_FRESHNESS=1` opt out, for deliberately
+testing an installed artifact. Neither is a fix for the case above.
+
 ## 0.67.4 — 2026-09-14
 
 The `registry` CI job's `stapel-registry-check` step has carried
