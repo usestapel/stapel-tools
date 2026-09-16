@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.69.0 — 2026-09-17
+
+### Added — a release tag may not be cut over stale contract artifacts
+
+The pre-push hook now runs `make contract-check` when the ref being pushed is
+a `v*` tag, and refuses the push if the committed artifacts do not match what
+the code emits. Nothing on a branch push; one check on a tag.
+
+**This is the cheap half of a gate that already worked.** CI refuses to
+publish a release cut over stale artifacts — the drift tests fail and the
+publish workflow's `ci-gate` waits on a green CI run for the tagged commit —
+and that is exactly what stopped stapel-gdpr 0.7.3 and stapel-profiles 0.20.5
+from ever reaching PyPI. Neither is on the index.
+
+What nothing stopped was the TAG. So the tag landed, CI went red, and the
+version number was burned: two in one night, each needing a re-cut under a new
+number and a changelog entry explaining the hole. This catches it before the
+tag leaves the machine, where fixing it costs a `make contract` and a commit
+rather than a version.
+
+The expensive half stays in CI, and deliberately: only CI can prove the
+artifacts regenerate on a clean checkout with the pinned toolchain, rather
+than on whatever this laptop happens to have installed.
+
+Proved against the two real commits rather than a fixture — `make
+contract-check` on the tree of `stapel-gdpr v0.7.3` exits 2 with
+`DRIFT: docs/capabilities.json is stale` and `version drift: pyproject.toml
+says 0.7.3, docs/capabilities.json says 0.7.2`; on `v0.8.0` it exits 0.
+
+A repo with no `contract-check` target is not blocked: not every repository
+emits a contract, and absence is not a failure.
+
 ## 0.68.0 — 2026-09-16
 
 ### Added — the artifact under test must be the artifact you edited

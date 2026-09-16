@@ -378,3 +378,80 @@ class TestPrePushGateWithNoNamesConfigured:
         blocked = _git(root, "push", "-q", "origin", "main")
         assert blocked.returncode != 0
         assert "EXP000" in blocked.stdout + blocked.stderr
+
+
+class TestATagIsRefusedOverStaleContractArtifacts:
+    """CI already refuses to PUBLISH a release cut over stale artifacts — the
+    drift tests fail and the publish workflow's ci-gate waits on a green CI
+    run for the tagged commit. That is what stopped stapel-gdpr 0.7.3 and
+    stapel-profiles 0.20.5 from ever reaching PyPI.
+
+    What nothing stopped was the TAG. So the tag landed, CI went red, and the
+    version number was burned — twice in one night, each needing a re-cut
+    under a new number and a changelog entry explaining the hole. This closes
+    the cheap half, before the tag leaves the machine.
+    """
+
+    def test_the_template_gates_tag_pushes_only(self):
+        from stapel_tools._library_templates import PRE_PUSH
+
+        assert "refs/tags/v*)" in PRE_PUSH
+        assert "make contract-check" in PRE_PUSH
+        # and says what it would have cost, rather than just failing
+        assert "burned" in PRE_PUSH
+
+    def _repo_with_contract_target(self, tmp_path, *, dirty: bool):
+        root = _repo_with_hook(tmp_path)
+        # A Makefile whose contract-check passes or fails on demand — the
+        # hook must not care HOW a repo checks its own artifacts, only that
+        # the target exists and what it answers.
+        (root / "Makefile").write_text(
+            "contract-check:\n\t@exit %d\n" % (1 if dirty else 0),
+            encoding="utf-8",
+        )
+        (root / "thing.py").write_text("VALUE = 1\n", encoding="utf-8")
+        _git(root, "add", "Makefile", "thing.py")
+        _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+        return root
+
+    def test_a_branch_push_is_not_gated(self, tmp_path, monkeypatch):
+        """It costs nothing on the ordinary path."""
+        _skip_unless_push_tools()
+        _configured_names(tmp_path, monkeypatch)
+        root = self._repo_with_contract_target(tmp_path, dirty=True)
+        pushed = _git(root, "push", "origin", "main")
+        assert pushed.returncode == 0, pushed.stderr
+
+    def test_a_tag_push_is_refused_when_the_artifacts_are_stale(
+        self, tmp_path, monkeypatch
+    ):
+        _skip_unless_push_tools()
+        _configured_names(tmp_path, monkeypatch)
+        root = self._repo_with_contract_target(tmp_path, dirty=True)
+        _git(root, "push", "-q", "origin", "main")
+        _git(root, "tag", "-a", "v1.0.0", "-m", "rel")
+        pushed = _git(root, "push", "origin", "v1.0.0")
+        assert pushed.returncode != 0
+        assert "REFUSING to push v1.0.0" in pushed.stderr + pushed.stdout
+
+    def test_a_tag_push_succeeds_when_they_are_fresh(self, tmp_path, monkeypatch):
+        _skip_unless_push_tools()
+        _configured_names(tmp_path, monkeypatch)
+        root = self._repo_with_contract_target(tmp_path, dirty=False)
+        _git(root, "push", "-q", "origin", "main")
+        _git(root, "tag", "-a", "v1.0.0", "-m", "rel")
+        pushed = _git(root, "push", "origin", "v1.0.0")
+        assert pushed.returncode == 0, pushed.stderr + pushed.stdout
+
+    def test_a_repo_without_the_target_is_not_blocked(self, tmp_path, monkeypatch):
+        """Not every repo emits a contract; absence is not a failure."""
+        _skip_unless_push_tools()
+        _configured_names(tmp_path, monkeypatch)
+        root = _repo_with_hook(tmp_path)
+        (root / "thing.py").write_text("VALUE = 1\n", encoding="utf-8")
+        _git(root, "add", "thing.py")
+        _git(root, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init")
+        _git(root, "push", "-q", "origin", "main")
+        _git(root, "tag", "-a", "v1.0.0", "-m", "rel")
+        pushed = _git(root, "push", "origin", "v1.0.0")
+        assert pushed.returncode == 0, pushed.stderr + pushed.stdout

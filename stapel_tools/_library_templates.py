@@ -1109,6 +1109,37 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             stapel-exposure-lint --pushed "$local_sha" --remote "$remote_sha"
         fi
     fi
+
+    # A RELEASE TAG may not be cut over stale contract artifacts.
+    #
+    # CI already refuses to publish one — the drift tests fail and the
+    # publish workflow's ci-gate waits on a green CI run for the tagged
+    # commit, which is what stopped stapel-gdpr 0.7.3 and stapel-profiles
+    # 0.20.5 from ever reaching PyPI. That half works. What it does not do is
+    # stop the TAG, so the tag lands, CI goes red, and the version number is
+    # burned: two were burned in one night that way, each needing a re-cut
+    # under a new number with a changelog entry explaining the hole.
+    #
+    # This is the cheap half — it costs a `make contract-check` on a tag push
+    # and nothing at all on a branch push. The expensive half stays in CI,
+    # because only CI can prove the artifacts regenerate on a clean checkout
+    # with the pinned toolchain rather than on whatever this laptop has.
+    case "$local_ref" in
+        refs/tags/v*)
+            if [ -f Makefile ] && grep -q '^contract-check:' Makefile; then
+                echo "Release tag ${local_ref#refs/tags/}: checking contract artifacts..."
+                if ! make contract-check; then
+                    echo ""
+                    echo "REFUSING to push ${local_ref#refs/tags/}: the committed"
+                    echo "contract artifacts do not match what this code emits."
+                    echo "CI would fail this tag and the version number would be"
+                    echo "burned. Run 'make contract', commit the result, move the"
+                    echo "tag, and push again."
+                    exit 1
+                fi
+            fi
+            ;;
+    esac
 done
 '''
 
