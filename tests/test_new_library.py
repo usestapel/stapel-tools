@@ -455,3 +455,93 @@ class TestATagIsRefusedOverStaleContractArtifacts:
         _git(root, "tag", "-a", "v1.0.0", "-m", "rel")
         pushed = _git(root, "push", "origin", "v1.0.0")
         assert pushed.returncode == 0, pushed.stderr + pushed.stdout
+
+
+class TestATagIsCheckedAgainstTheCommitNotTheTree:
+    """`make contract-check` validated the wrong tree, and burned two versions.
+
+    The gate regenerates the contract artifacts into a temp dir and compares
+    them with the ones ON DISK. On both releases the disk was right — `make
+    contract` had just been run — and the COMMIT was not, because the pathspec
+    `git add` named `docs/capabilities.json` and `make contract` writes four
+    files. The tag went out over stale artifacts, CI went red on drift, and
+    stapel-core 0.82.0 and 0.82.1 were both burned; 0.82.2 exists only to
+    carry their content.
+
+    Checking the tree is a valid proxy for checking the commit exactly when
+    the tree matches the commit. So the gate asks that first, and a tag cut
+    from a tree that has drifted from it is refused with the diff named.
+
+    The fix deliberately is NOT "make the contract target stage what it
+    writes". A build target that runs `git add` is a target that commits work
+    nobody read — the same hazard that put another agent's files, and then
+    another agent's edits, into two of tonight's commits, with a nicer label
+    on it.
+    """
+
+    def test_a_tag_over_a_drifted_tree_is_refused(self, tmp_path, monkeypatch):
+        _skip_unless_push_tools()
+        _configured_names(tmp_path, monkeypatch)
+        root = _repo_with_hook(tmp_path)
+        (root / "Makefile").write_text(
+            "contract-check:\n\t@exit 0\n", encoding="utf-8"
+        )
+        (root / "docs.json").write_text('{"version": "1.0.0"}\n', encoding="utf-8")
+        _git(root, "add", "Makefile", "docs.json")
+        _git(root, "commit", "-qm", "v1")
+        _git(root, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+        # What `make contract` writes and a pathspec commit forgets.
+        (root / "docs.json").write_text('{"version": "1.0.1"}\n', encoding="utf-8")
+
+        out = _git(root, "push", "origin", "refs/tags/v1.0.0")
+        combined = out.stdout + out.stderr
+        assert out.returncode != 0, combined
+        assert "docs.json" in combined, combined
+
+    def test_a_tag_from_a_matching_tree_is_pushed(self, tmp_path, monkeypatch):
+        _skip_unless_push_tools()
+        _configured_names(tmp_path, monkeypatch)
+        root = _repo_with_hook(tmp_path)
+        (root / "Makefile").write_text(
+            "contract-check:\n\t@exit 0\n", encoding="utf-8"
+        )
+        (root / "docs.json").write_text('{"version": "1.0.0"}\n', encoding="utf-8")
+        _git(root, "add", "Makefile", "docs.json")
+        _git(root, "commit", "-qm", "v1")
+        _git(root, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+
+        out = _git(root, "push", "origin", "refs/tags/v1.0.0")
+        assert out.returncode == 0, out.stdout + out.stderr
+
+    def test_an_untracked_file_does_not_block_a_tag(self, tmp_path, monkeypatch):
+        """Scratch files are not drift. Only tracked content decides."""
+        _skip_unless_push_tools()
+        _configured_names(tmp_path, monkeypatch)
+        root = _repo_with_hook(tmp_path)
+        (root / "Makefile").write_text(
+            "contract-check:\n\t@exit 0\n", encoding="utf-8"
+        )
+        (root / "docs.json").write_text('{"version": "1.0.0"}\n', encoding="utf-8")
+        _git(root, "add", "Makefile", "docs.json")
+        _git(root, "commit", "-qm", "v1")
+        _git(root, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+        (root / "scratch.txt").write_text("notes\n", encoding="utf-8")
+
+        out = _git(root, "push", "origin", "refs/tags/v1.0.0")
+        assert out.returncode == 0, out.stdout + out.stderr
+
+    def test_a_branch_push_over_a_drifted_tree_is_untouched(self, tmp_path, monkeypatch):
+        """The tree-match rule is a RELEASE rule. Ordinary work is not a release."""
+        _skip_unless_push_tools()
+        _configured_names(tmp_path, monkeypatch)
+        root = _repo_with_hook(tmp_path)
+        (root / "Makefile").write_text(
+            "contract-check:\n\t@exit 1\n", encoding="utf-8"
+        )
+        (root / "docs.json").write_text('{"version": "1.0.0"}\n', encoding="utf-8")
+        _git(root, "add", "Makefile", "docs.json")
+        _git(root, "commit", "-qm", "v1")
+        (root / "docs.json").write_text('{"version": "1.0.1"}\n', encoding="utf-8")
+
+        out = _git(root, "push", "origin", "main")
+        assert out.returncode == 0, out.stdout + out.stderr

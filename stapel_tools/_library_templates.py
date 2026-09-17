@@ -1144,6 +1144,27 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # with the pinned toolchain rather than on whatever this laptop has.
     case "$local_ref" in
         refs/tags/v*)
+            # `make contract-check` regenerates into a temp dir and compares
+            # with the artifacts ON DISK. That is only a check of the TAG when
+            # the disk matches the tag. Twice in one night it did not: the
+            # disk was right, `make contract` had just run, and the COMMIT was
+            # stale because the pathspec `git add` named one file and `make
+            # contract` writes four. Both tags went out green here, went red
+            # in CI on drift, and burned a version number each.
+            #
+            # So ask the cheap question first. Tracked content only —
+            # scratch files are not drift, and an untracked file that would
+            # change what the artifacts emit is not in the tag either.
+            if ! git diff --quiet "$local_sha" --; then
+                echo ""
+                echo "REFUSING to push ${local_ref#refs/tags/}: the working tree"
+                echo "does not match the commit this tag points at, so nothing"
+                echo "checked here would be a check of the TAG. Files that differ:"
+                git diff --name-only "$local_sha" -- | sed 's/^/  /'
+                echo ""
+                echo "Commit them (or stash them), move the tag, and push again."
+                exit 1
+            fi
             if [ -f Makefile ] && grep -q '^contract-check:' Makefile; then
                 echo "Release tag ${local_ref#refs/tags/}: checking contract artifacts..."
                 if ! make contract-check; then

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.69.1] — 2026-09-17
+
+Patch: the release-tag gate checks the COMMIT, not the working tree.
+
+`make contract-check` regenerates the contract artifacts into a temp dir and
+compares them with the ones on disk. That is a check of the tag only when the
+disk matches the tag. Twice in one night it did not: the disk was right — `make
+contract` had just been run — and the commit was stale, because the pathspec
+`git add` named `docs/capabilities.json` and `make contract` writes four files.
+Both tags passed this gate, went red in CI on drift, and burned a version
+number each; stapel-core 0.82.2 exists only to carry 0.82.1's content.
+
+The gate now refuses a tag whose working tree has drifted from the commit it
+points at, and names the files. Tracked content only — scratch files are not
+drift. Branch pushes are untouched: this is a release rule.
+
+Deliberately NOT fixed by making `make contract` stage what it writes. A build
+target that runs `git add` is a target that commits work nobody read, which is
+the same hazard that put another agent's files, and then another agent's edits,
+into two of tonight's commits — with a nicer label on it.
+
 ## 0.69.0 — 2026-09-17
 
 ### Added — a release tag may not be cut over stale contract artifacts
