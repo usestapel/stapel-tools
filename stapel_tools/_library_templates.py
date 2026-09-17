@@ -1071,6 +1071,24 @@ set -e
 echo "Running ruff lint check..."
 ruff check . --select E,F,W --ignore E501
 echo "Lint check passed."
+
+# A Dockerfile edit is a claim; a build is the evidence — iron-auth's
+# Dockerfile was unbuildable for a day because nothing rebuilt the image
+# until an urgent deploy did, so any staged Dockerfile now builds here first.
+# Silently skipped when docker is unavailable: a checkout without docker is
+# not the author's machine, and a hook that fails there gets disabled.
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    for dockerfile in $(git diff --cached --name-only --diff-filter=ACMR -- '*/Dockerfile'); do
+        [ -f "$dockerfile" ] || continue
+        service_dir="$(dirname "$dockerfile")"
+        service_name="$(basename "$service_dir")"
+        echo "Building $dockerfile (docker build $service_dir) to verify it still builds..."
+        if ! docker build -f "$dockerfile" -t "precommit-check/${service_name}:latest" "$service_dir"; then
+            echo "Docker build failed for $dockerfile — commit refused."
+            exit 1
+        fi
+    done
+fi
 '''
 
 PRE_PUSH = '''#!/usr/bin/env bash
