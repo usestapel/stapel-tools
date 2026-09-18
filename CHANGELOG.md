@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.69.2] — 2026-09-18
+
+Patch: the `.githooks/pre-commit` Dockerfile-build gate no longer probes
+docker before checking whether a Dockerfile is even staged.
+
+The gate (added in 0.69.0) ran `docker info` first and only then looked for
+a staged Dockerfile. With Docker Desktop installed but its daemon
+unresponsive — a real state on a real laptop — `docker info` hangs
+indefinitely, and every commit in every consumer repo hung for minutes,
+Dockerfile or not, until someone killed the probe by hand. Two agents hit
+this on the same machine in one session.
+
+The gate now computes the staged-Dockerfile list first; empty means it
+never touches docker at all. Only when a Dockerfile is staged does it probe
+docker, under a hard 15s watchdog (plain bash job control — `timeout(1)` is
+not on stock macOS, and the hook's own shebang is bash). Timeout or failure
+prints one line ("docker unavailable (timeout/failure): skipping the
+Dockerfile build gate — CI builds it") and exits 0. Both backgrounded
+watchdog/probe subshells redirect their own stdout/stderr away from the
+hook's inherited fds — otherwise a caller that captures hook output via a
+pipe (a CI wrapper, a test) blocks on EOF until the orphaned process closes
+it, which reintroduces the same class of hang for anything other than an
+interactive tty.
+
 ## [0.69.1] — 2026-09-17
 
 Patch: the release-tag gate checks the COMMIT, not the working tree.

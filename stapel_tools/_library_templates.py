@@ -1075,19 +1075,55 @@ echo "Lint check passed."
 # A Dockerfile edit is a claim; a build is the evidence — iron-auth's
 # Dockerfile was unbuildable for a day because nothing rebuilt the image
 # until an urgent deploy did, so any staged Dockerfile now builds here first.
-# Silently skipped when docker is unavailable: a checkout without docker is
-# not the author's machine, and a hook that fails there gets disabled.
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    for dockerfile in $(git diff --cached --name-only --diff-filter=ACMR -- '*/Dockerfile'); do
-        [ -f "$dockerfile" ] || continue
-        service_dir="$(dirname "$dockerfile")"
-        service_name="$(basename "$service_dir")"
-        echo "Building $dockerfile (docker build $service_dir) to verify it still builds..."
-        if ! docker build -f "$dockerfile" -t "precommit-check/${service_name}:latest" "$service_dir"; then
-            echo "Docker build failed for $dockerfile — commit refused."
-            exit 1
+#
+# Order matters: the staged-Dockerfile check runs BEFORE anything touches
+# docker. A commit that never staged a Dockerfile must never probe docker at
+# all — on a laptop with Docker Desktop installed but its daemon unresponsive,
+# `docker info` hangs indefinitely (no built-in timeout), and every commit in
+# every consumer repo hung for minutes until someone killed the probe by hand.
+#
+# Only when a Dockerfile IS staged do we probe docker, and only under a hard
+# 15s watchdog (plain bash job control — `timeout(1)` from coreutils is not on
+# stock macOS, and this hook's own shebang is bash, not sh). On timeout or any
+# failure the gate is skipped, one line explains why, and the commit proceeds
+# — CI builds the image for real. A checkout without a live docker daemon is
+# not the moment to block every commit on that fact.
+dockerfiles="$(git diff --cached --name-only --diff-filter=ACMR -- '*/Dockerfile')"
+if [ -n "$dockerfiles" ]; then
+    docker_ready=0
+    if command -v docker >/dev/null 2>&1; then
+        # Both backgrounded subshells redirect THEIR OWN stdout/stderr away
+        # from the hook's inherited fds, not just the commands inside them —
+        # a caller that captures hook output via a pipe (a CI wrapper, an
+        # IDE, a test) blocks on EOF until every process holding the write
+        # end closes it. Without this, a killed-but-still-exiting watchdog
+        # (or a probe that lingers a beat after SIGTERM) holds that pipe
+        # open and the hook appears to hang even after it has logically
+        # finished — the same class of hang this fix exists to remove.
+        ( docker info >/dev/null 2>&1 ) >/dev/null 2>&1 &
+        probe_pid=$!
+        ( sleep 15; kill "$probe_pid" >/dev/null 2>&1 ) >/dev/null 2>&1 &
+        watchdog_pid=$!
+        if wait "$probe_pid" 2>/dev/null; then
+            docker_ready=1
         fi
-    done
+        kill "$watchdog_pid" >/dev/null 2>&1 || true
+        wait "$watchdog_pid" 2>/dev/null || true
+    fi
+    if [ "$docker_ready" -eq 1 ]; then
+        for dockerfile in $dockerfiles; do
+            [ -f "$dockerfile" ] || continue
+            service_dir="$(dirname "$dockerfile")"
+            service_name="$(basename "$service_dir")"
+            echo "Building $dockerfile (docker build $service_dir) to verify it still builds..."
+            if ! docker build -f "$dockerfile" -t "precommit-check/${service_name}:latest" "$service_dir"; then
+                echo "Docker build failed for $dockerfile — commit refused."
+                exit 1
+            fi
+        done
+    else
+        echo "docker unavailable (timeout/failure): skipping the Dockerfile build gate — CI builds it"
+    fi
 fi
 '''
 
