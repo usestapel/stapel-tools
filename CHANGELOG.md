@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.69.3] — 2026-09-18
+
+Patch: refresh the frontend scaffold's stale `@stapel/*` npm pins.
+
+The `e2e-generated-project` job's stale-pin gate
+(`check_nav_manifest_sync.py --registry`) failed the last four release
+attempts (0.68.0 through 0.69.2) for the same underlying reason each time:
+the frontend monorepo kept publishing pairs faster than this repo's pins
+tracked them, and the gate is designed to catch exactly that — a
+`FRONTEND_REACT_LIBS`/substrate pin that npm's registry has already
+overtaken is a STALE PIN, not a pending publish, and every generated
+project installs the old version until someone raises the pin.
+
+Raised every flagged pin to what `npm view <pkg> version` serves now: 15
+`FRONTEND_REACT_LIBS` entries (auth, billing, categories, cdn, chat, gdpr,
+listings, moderation, notifications, profiles, recordings, reviews,
+search, video, workspaces), the substrate (`@stapel/tokens-antd`,
+`@stapel/shell-react`), and both dev-dep tables
+(`_frontend_templates.PACKAGE_JSON` and `PUBLIC_DEV_DEPS`, kept in
+lockstep here) for `@stapel/eslint-plugin` and `@stapel/tokens`. Verified
+against the real registry: `check_nav_manifest_sync.py --registry`,
+`check_npm_peer_graph.py` and `e2e_npm_pins.py --check --strict` against a
+freshly generated project all pass.
+
 ## [0.69.2] — 2026-09-18
 
 Patch: the `.githooks/pre-commit` Dockerfile-build gate no longer probes
