@@ -56,8 +56,8 @@ PACKAGE_JSON = """\
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
-    "@stapel/eslint-plugin": "^0.13.3",
-    "@stapel/tokens": "^0.8.0",
+    "@stapel/eslint-plugin": "^0.16.0",
+    "@stapel/tokens": "^0.8.1",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
@@ -3888,10 +3888,17 @@ def render_public_modules_tsx(
 # real dependency, not a peer), so a container holding an older range
 # installs two copies of the token vocabulary — the bridge themed off one,
 # the container's own `cssVar` calls reading the other.
+#
+# 2026-09-18: both raised again with the rest of the stale-pin backlog behind
+# the 0.68.0-0.69.2 release chain — `npm view @stapel/eslint-plugin version`
+# -> 0.16.0, `npm view @stapel/tokens version` -> 0.8.1. `FRONTEND_SHELL_REACT_
+# VERSION` (0.19.0) still sits above `FRONTEND_SHELL_SELF_THEMING_FLOOR`, so
+# the `no-hardcoded-theme-mode` widening this pair's rule went through at
+# 0.13.0 still finds nothing to flag in the generated container.
 PUBLIC_DEV_DEPS = {
     "@eslint/js": "^9.30.0",
-    "@stapel/eslint-plugin": "^0.13.3",
-    "@stapel/tokens": "^0.8.0",
+    "@stapel/eslint-plugin": "^0.16.0",
+    "@stapel/tokens": "^0.8.1",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",

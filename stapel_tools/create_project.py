@@ -551,7 +551,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.23.0",
+        "version": "0.24.0",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
@@ -669,7 +669,7 @@ FRONTEND_REACT_LIBS = {
     },
     "billing": {
         "package": "@stapel/billing-react",
-        "version": "0.10.3",
+        "version": "0.11.0",
         "provider": "BillingProvider",
         "create_runtime": "createBillingRuntime",
         "register_i18n": "registerBillingI18n",
@@ -728,7 +728,7 @@ FRONTEND_REACT_LIBS = {
     },
     "categories": {
         "package": "@stapel/categories-react",
-        "version": "0.31.4",
+        "version": "0.34.0",
         "provider": "CategoriesProvider",
         "create_runtime": "createCategoriesRuntime",
         "register_i18n": "registerCategoriesI18n",
@@ -765,14 +765,14 @@ FRONTEND_REACT_LIBS = {
         # menu item leading nowhere would be worse than its absence
         # (storefront spec §13.6 item 8).
         "package": "@stapel/cdn-react",
-        "version": "0.5.0",
+        "version": "0.6.1",
         "provider": "CdnProvider",
         "create_runtime": "createCdnRuntime",
         "register_i18n": "registerCdnI18n",
     },
     "chat": {
         "package": "@stapel/chat-react",
-        "version": "0.19.1",
+        "version": "0.22.0",
         "provider": "ChatProvider",
         "create_runtime": "createChatRuntime",
         "register_i18n": "registerChatI18n",
@@ -879,7 +879,7 @@ FRONTEND_REACT_LIBS = {
     },
     "gdpr": {
         "package": "@stapel/gdpr-react",
-        "version": "0.4.0",
+        "version": "0.4.1",
         "provider": "GdprProvider",
         "create_runtime": "createGdprRuntime",
         "register_i18n": "registerGdprI18n",
@@ -947,7 +947,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.35.0",
+        "version": "0.37.1",
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -1026,7 +1026,7 @@ FRONTEND_REACT_LIBS = {
         # they belong inside another pair's screen and nowhere a generator
         # can put them.
         "package": "@stapel/moderation-react",
-        "version": "0.2.1",
+        "version": "0.3.0",
         "provider": "ModerationProvider",
         "create_runtime": "createModerationRuntime",
         "register_i18n": "registerModerationI18n",
@@ -1097,7 +1097,7 @@ FRONTEND_REACT_LIBS = {
     },
     "notifications": {
         "package": "@stapel/notifications-react",
-        "version": "0.11.1",
+        "version": "0.11.2",
         "provider": "NotificationsProvider",
         "create_runtime": "createNotificationsRuntime",
         "register_i18n": "registerNotificationsI18n",
@@ -1129,7 +1129,7 @@ FRONTEND_REACT_LIBS = {
     },
     "profiles": {
         "package": "@stapel/profiles-react",
-        "version": "0.26.2",
+        "version": "0.27.0",
         "provider": "ProfilesProvider",
         "create_runtime": "createProfilesRuntime",
         "register_i18n": "registerProfilesI18n",
@@ -1206,7 +1206,7 @@ FRONTEND_REACT_LIBS = {
     },
     "recordings": {
         "package": "@stapel/recordings-react",
-        "version": "0.7.0",
+        "version": "0.8.0",
         "provider": "RecordingsProvider",
         "create_runtime": "createRecordingsRuntime",
         "register_i18n": "registerRecordingsI18n",
@@ -1263,7 +1263,7 @@ FRONTEND_REACT_LIBS = {
         # No nav manifest either — reviews render inside a listing page and a
         # seller page, never on a route of their own (§13.8 item 11).
         "package": "@stapel/reviews-react",
-        "version": "0.8.3",
+        "version": "0.8.4",
         "provider": "ReviewsProvider",
         "create_runtime": "createReviewsRuntime",
         "register_i18n": "registerReviewsI18n",
@@ -1271,7 +1271,7 @@ FRONTEND_REACT_LIBS = {
     "search": {
         # No STAPEL_LIBS entry — see the dict docstring.
         "package": "@stapel/search-react",
-        "version": "0.48.1",
+        "version": "0.52.0",
         "provider": "SearchProvider",
         "create_runtime": "createSearchRuntime",
         "register_i18n": "registerSearchI18n",
@@ -1305,7 +1305,7 @@ FRONTEND_REACT_LIBS = {
     },
     "video": {
         "package": "@stapel/video-react",
-        "version": "0.3.5",
+        "version": "0.3.9",
         "provider": "VideoProvider",
         "create_runtime": "createVideoRuntime",
         "register_i18n": "registerVideoI18n",
@@ -1380,7 +1380,7 @@ FRONTEND_REACT_LIBS = {
     },
     "workspaces": {
         "package": "@stapel/workspaces-react",
-        "version": "0.19.1",
+        "version": "0.19.2",
         "provider": "WorkspacesProvider",
         "create_runtime": "createWorkspacesRuntime",
         "register_i18n": "registerWorkspacesI18n",
@@ -1777,7 +1777,12 @@ FRONTEND_REACT_ANTD_DEPS = {
     # 0.22.0; its own peers (`@stapel/core ">=0.20.0 <1.0.0"`, `antd
     # ">=6.0.0 <7"`) hold against the pins above, and its `@stapel/tokens`
     # dependency is still `^0.8.0` — the range PUBLIC_DEV_DEPS carries.
-    "@stapel/tokens-antd": "0.22.0",
+    #
+    # 0.22.1 (2026-09-18): the stale-pin backlog behind the 0.68.0-0.69.2
+    # release chain — `npm view @stapel/tokens-antd version` -> 0.22.1, a
+    # patch with no "Major Changes" heading; its peers are unchanged from
+    # 0.22.0 and still hold against the pins above.
+    "@stapel/tokens-antd": "0.22.1",
 }
 
 # Scripted-fullstack navigation (P1) — router deps for the generated
@@ -1829,7 +1834,11 @@ FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
 # container emits exactly what it emitted before. Its own peers
 # (`@stapel/core ">=0.20.0 <1.0.0"`, `@stapel/tokens-antd ">=0.7.0"`,
 # `react-router ">=7.0.0 <8"`) hold against the pins above.
-FRONTEND_SHELL_REACT_VERSION = "0.18.1"
+#
+# 0.19.0 (2026-09-18): same stale-pin backlog as the `@stapel/tokens-antd`
+# bump above — `npm view @stapel/shell-react version` -> 0.19.0, additive
+# over 0.18.1 (no "Major Changes" heading), peers unchanged.
+FRONTEND_SHELL_REACT_VERSION = "0.19.0"
 
 # The first `@stapel/shell-react` release that themes ITSELF and reads the
 # container's staff answer. Two facts, one release, because they are one
