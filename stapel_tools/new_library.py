@@ -92,6 +92,9 @@ def file_plan(kind: str, ctx: dict) -> dict:
         ".githooks/pre-push": T.PRE_PUSH,
         "setup-hooks.sh": T.SETUP_HOOKS,
         ".gitignore": T.GITIGNORE,
+        # Hooks are shell: a CRLF checkout makes them "not found" under Git
+        # for Windows' sh, i.e. silently inactive for that teammate.
+        ".gitattributes": T.GITATTRIBUTES,
         # README-canon pre-commit hooks (§57 owner directive item 5): the
         # standard `pre-commit` framework, running the REAL stapel gate
         # (stapel-verify) — not a generic linter. Separate from the
@@ -147,7 +150,11 @@ def scaffold_library(
     for rel, content in file_plan(kind, ctx).items():
         path = target / rel
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        # newline="\n" explicitly: the default translates to os.linesep, so a
+        # scaffold generated ON Windows would emit CRLF hooks that its own sh
+        # cannot run.
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(content)
         if rel in EXECUTABLE:
             path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP)
         print(f"  created {rel}")

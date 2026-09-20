@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.70.0] — 2026-09-20
+
+Minor: `pre-push` refuses a branch that does not contain the default branch,
+and `stapel-hooks` makes the installation of the hooks checkable.
+
+Branches cut from a base hundreds of commits old keep arriving. Nothing about
+merging one looks wrong — it applies cleanly and CI is green — and it reverts
+everything that landed on the default branch in between. The push is the last
+moment at which the person who knows both sides is still there to resolve it,
+so the `.githooks/pre-push` template gained a first stage,
+**branch-contains-default**:
+
+- reads git's `<local ref> <local sha> <remote ref> <remote sha>` lines from
+  stdin; skips tag refs, deletions, and pushes whose REMOTE ref is the default
+  branch itself (git already enforces fast-forward there);
+- resolves the default branch from `refs/remotes/<remote>/HEAD`, falling back
+  to `main`, then `master`;
+- `git fetch --quiet <remote> <default>` under a hard 20 s watchdog — plain
+  job control, because `timeout(1)` is coreutils and is on neither stock macOS
+  nor Git for Windows — and REFUSES when that fetch fails: unverified
+  freshness is not a pass, and a push would not work offline anyway;
+- refuses when `<remote>/<default>` is not an ancestor of the pushed sha,
+  printing how many commits behind the branch is and the exact commands that
+  fix it, stating that rebasing a published branch is not the fix and neither
+  is `--no-verify`;
+- no environment-variable escape hatch. POSIX sh, so it runs under Git for
+  Windows' `sh`.
+
+The hook is only half of it: `core.hooksPath` is per-clone and unversioned, so
+a repo that carries the hook has none in a fresh clone and an inactive hook
+looks exactly like a passing one. New `stapel-hooks` command:
+`install` points `core.hooksPath` at `.githooks` (writing the template only
+when the hook is absent — hand-maintained variants are kept) and verifies it
+took; `doctor` exits non-zero when the hooks are not active, not executable,
+or when the installed hook's version marker (`# stapel-hooks: pre-push v1`) is
+older than the shipped template. `make check` runs `hooks-doctor` first.
+
+Also: generated libraries now carry a `.gitattributes` pinning `*.sh`,
+`.githooks/*` and `scripts/*` to `eol=lf` (a CRLF checkout makes a hook "not
+found" under Git for Windows, i.e. silently absent), the scaffold writes every
+file with LF regardless of the platform it is generated on, and
+`setup-hooks.sh` verifies the setting it just wrote instead of assuming it.
+
 ## [0.69.3] — 2026-09-18
 
 Patch: refresh the frontend scaffold's stale `@stapel/*` npm pins.

@@ -26,9 +26,23 @@ PYTHON ?= python
 # `e2e_npm_pins.py`, and the daily schedule fires that job with no push, which
 # is the only way the drift it catches (a PAIR raising its peer floor in
 # ANOTHER repo) ever shows up.
-.PHONY: check lint test nav-sync sibling-lint peer-graph
+#
+# `hooks-doctor` is first because it is the only gate here that reports on
+# the CLONE rather than the code: `core.hooksPath` is per-clone and
+# unversioned, so every fresh clone silently has no hooks at all, and an
+# inactive hook is indistinguishable from a passing one until a branch cut
+# from an ancient base lands and reverts a week of work.
+.PHONY: check lint test nav-sync sibling-lint peer-graph hooks-doctor
 
-check: lint sibling-lint nav-sync test
+check: hooks-doctor lint sibling-lint nav-sync test
+
+hooks-doctor:
+	@$(PYTHON) -m stapel_tools.hooks doctor || { \
+	  echo ""; \
+	  echo "!!! git hooks are NOT active in this clone — run ./setup-hooks.sh"; \
+	  echo "!!! until you do, nothing stops a stale branch from being pushed."; \
+	  exit 1; \
+	}
 
 lint:
 	$(PYTHON) -m ruff check .

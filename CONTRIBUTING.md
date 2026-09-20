@@ -10,8 +10,20 @@ git clone https://github.com/usestapel/stapel-tools.git && cd stapel-tools
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[all]" || pip install -e .
 pip install pytest pytest-django ruff
-./setup-hooks.sh   # enables the ruff pre-commit/pre-push hooks
+./setup-hooks.sh   # enables the git hooks — do this in every clone
 ```
+
+`./setup-hooks.sh` (equivalently `stapel-hooks install`) points
+`core.hooksPath` at `.githooks/`. That setting is **per clone and not
+versioned**, so a fresh clone has no hooks until someone runs it, and an
+inactive hook looks exactly like a passing one. `make check` runs
+`stapel-hooks doctor`, which fails when the hooks are not active or when
+`.githooks/pre-push` is older than the template this repo ships.
+
+The pre-push hook refuses to push a BRANCH that does not contain
+`origin/main`: merge `origin/main` into your branch, resolve the conflicts
+and push again. Rebasing a published branch is not the fix, and
+`--no-verify` is not acceptable.
 
 ## Running tests
 

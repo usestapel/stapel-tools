@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.69.3"
+version = "0.70.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -148,6 +148,7 @@ stapel-readme = "stapel_tools.readme:main"
 stapel-storefront = "stapel_tools.storefront:main"
 stapel-disk = "stapel_tools.disk_guard:main"
 stapel-fixture-lint = "stapel_tools.catalog_fixtures.cli:main"
+stapel-hooks = "stapel_tools.hooks:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

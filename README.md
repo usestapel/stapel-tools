@@ -1237,6 +1237,44 @@ byte-deterministic (sorted keys; `--created-at`/`SOURCE_DATE_EPOCH`).
 The platform bake step calls this during image build and bakes the file
 into the image at `/app/release.json`.
 
+### `stapel-hooks` — the git hooks, and the fact that they are installed
+
+```bash
+stapel-hooks install          # point core.hooksPath at .githooks, verify it took
+stapel-hooks doctor           # non-zero when the hooks are NOT active, or are stale
+```
+
+The hooks are the easy half. The weak spot is installation: `core.hooksPath`
+lives in `.git/config`, which is **per clone and not versioned**, so a repo
+that carries `.githooks/pre-push` still has no hooks in a fresh clone until
+somebody runs one command — and an inactive hook is indistinguishable from a
+passing one.
+
+`doctor` closes that. It fails when `core.hooksPath` is not the repo's
+`.githooks`, when the hook is missing or not executable, and when the
+installed hook's version marker (`# stapel-hooks: pre-push v1`) is older than
+the template this release ships — which is how a hand-maintained variant in a
+consumer repo can still be told apart from one that has drifted. Wire it into
+whatever a developer already runs (`make check` here) so an unhooked clone
+announces itself.
+
+**The pre-push gate it installs** refuses to push a BRANCH that does not
+contain the default branch. It reads git's ref list from stdin, skips tags,
+deletions and pushes to the default branch itself, fetches
+`<remote>/<default>` under a hard 20 s watchdog (no coreutils `timeout`, which
+exists on neither stock macOS nor Git for Windows), and demands
+`git merge-base --is-ancestor`. A stale branch is refused with how many
+commits it is behind and the three commands that fix it. It fails closed when
+the fetch fails — unverified freshness is not a pass — and there is no
+environment-variable escape hatch. The stage is POSIX sh so it runs under Git
+for Windows' `sh`; `.gitattributes` pins the hooks to LF, because a CRLF
+checkout makes a hook "not found" and therefore silently absent.
+
+Why a gate at all: a branch cut from a base hundreds of commits old reverts
+everything that landed in between the moment it is merged, and the merge
+looks clean. The push is the last point where the person who knows both sides
+is still present to resolve it.
+
 ### `stapel-disk` — build/disk lifecycle: preflight guard, tiered reclaim, ephemeral reaper
 
 ```bash
