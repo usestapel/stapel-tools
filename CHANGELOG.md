@@ -37,6 +37,13 @@ took; `doctor` exits non-zero when the hooks are not active, not executable,
 or when the installed hook's version marker (`# stapel-hooks: pre-push v1`) is
 older than the shipped template. `make check` runs `hooks-doctor` first.
 
+Shipped in the same release, because the e2e job's stale-pin gate would
+otherwise fail this tag for an unrelated reason: 11 `FRONTEND_REACT_LIBS`
+pins raised to what npm serves now (auth 0.25.0, billing 0.12.0, calendar
+0.9.0, cdn 0.7.0, listings 0.38.0, notifications 0.12.0, profiles 0.27.1,
+recordings 0.9.0, search 0.52.1, video 0.4.0, workspaces 0.20.0). A pin the
+registry has already overtaken is a stale pin, not a pending publish.
+
 Also: generated libraries now carry a `.gitattributes` pinning `*.sh`,
 `.githooks/*` and `scripts/*` to `eol=lf` (a CRLF checkout makes a hook "not
 found" under Git for Windows, i.e. silently absent), the scaffold writes every

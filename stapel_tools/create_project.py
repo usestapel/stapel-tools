@@ -551,7 +551,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.24.0",
+        "version": "0.25.0",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
@@ -669,7 +669,7 @@ FRONTEND_REACT_LIBS = {
     },
     "billing": {
         "package": "@stapel/billing-react",
-        "version": "0.11.0",
+        "version": "0.12.0",
         "provider": "BillingProvider",
         "create_runtime": "createBillingRuntime",
         "register_i18n": "registerBillingI18n",
@@ -692,7 +692,7 @@ FRONTEND_REACT_LIBS = {
     },
     "calendar": {
         "package": "@stapel/calendar-react",
-        "version": "0.8.2",
+        "version": "0.9.0",
         "provider": "CalendarProvider",
         "create_runtime": "createCalendarRuntime",
         "register_i18n": "registerCalendarI18n",
@@ -765,7 +765,7 @@ FRONTEND_REACT_LIBS = {
         # menu item leading nowhere would be worse than its absence
         # (storefront spec §13.6 item 8).
         "package": "@stapel/cdn-react",
-        "version": "0.6.1",
+        "version": "0.7.0",
         "provider": "CdnProvider",
         "create_runtime": "createCdnRuntime",
         "register_i18n": "registerCdnI18n",
@@ -947,7 +947,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.37.1",
+        "version": "0.38.0",
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -1097,7 +1097,7 @@ FRONTEND_REACT_LIBS = {
     },
     "notifications": {
         "package": "@stapel/notifications-react",
-        "version": "0.11.2",
+        "version": "0.12.0",
         "provider": "NotificationsProvider",
         "create_runtime": "createNotificationsRuntime",
         "register_i18n": "registerNotificationsI18n",
@@ -1129,7 +1129,7 @@ FRONTEND_REACT_LIBS = {
     },
     "profiles": {
         "package": "@stapel/profiles-react",
-        "version": "0.27.0",
+        "version": "0.27.1",
         "provider": "ProfilesProvider",
         "create_runtime": "createProfilesRuntime",
         "register_i18n": "registerProfilesI18n",
@@ -1206,7 +1206,7 @@ FRONTEND_REACT_LIBS = {
     },
     "recordings": {
         "package": "@stapel/recordings-react",
-        "version": "0.8.0",
+        "version": "0.9.0",
         "provider": "RecordingsProvider",
         "create_runtime": "createRecordingsRuntime",
         "register_i18n": "registerRecordingsI18n",
@@ -1271,7 +1271,7 @@ FRONTEND_REACT_LIBS = {
     "search": {
         # No STAPEL_LIBS entry — see the dict docstring.
         "package": "@stapel/search-react",
-        "version": "0.52.0",
+        "version": "0.52.1",
         "provider": "SearchProvider",
         "create_runtime": "createSearchRuntime",
         "register_i18n": "registerSearchI18n",
@@ -1305,7 +1305,7 @@ FRONTEND_REACT_LIBS = {
     },
     "video": {
         "package": "@stapel/video-react",
-        "version": "0.3.9",
+        "version": "0.4.0",
         "provider": "VideoProvider",
         "create_runtime": "createVideoRuntime",
         "register_i18n": "registerVideoI18n",
@@ -1380,7 +1380,7 @@ FRONTEND_REACT_LIBS = {
     },
     "workspaces": {
         "package": "@stapel/workspaces-react",
-        "version": "0.19.2",
+        "version": "0.20.0",
         "provider": "WorkspacesProvider",
         "create_runtime": "createWorkspacesRuntime",
         "register_i18n": "registerWorkspacesI18n",

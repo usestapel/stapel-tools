@@ -653,7 +653,12 @@ def test_make_check_runs_it():
     root = Path(__file__).resolve().parent.parent
     makefile = (root / "Makefile").read_text(encoding="utf-8")
     assert "sibling-lint" in makefile
-    assert "check: lint sibling-lint" in makefile
+    # The prerequisite LIST, not a literal string: other gates join `check`
+    # over time (hooks-doctor did), and this rule is about sibling-lint being
+    # one of them.
+    check_line = next(line for line in makefile.splitlines() if line.startswith("check:"))
+    assert "lint" in check_line.split()
+    assert "sibling-lint" in check_line.split()
 
 
 def test_this_repo_declares_its_own_siblings():
