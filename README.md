@@ -1275,6 +1275,16 @@ everything that landed in between the moment it is merged, and the merge
 looks clean. The push is the last point where the person who knows both sides
 is still present to resolve it.
 
+**And why a server-side backstop is not optional.** Measured on a real clone
+while rolling this out: check out a base that predates the hook's own commit
+and the hook file is gone from the working tree with it — `.githooks/pre-push`
+is versioned content, so an old branch simply does not have it, and the push
+that most needs the gate is the one running without it. `core.hooksPath` has
+the same shape of hole (per clone, unversioned). A client-side hook is
+therefore a convenience that tells the truth early; the rule itself has to
+live where nobody can check it out: a merge-request job that runs
+`git merge-base --is-ancestor origin/<default> HEAD`.
+
 ### `stapel-disk` — build/disk lifecycle: preflight guard, tiered reclaim, ephemeral reaper
 
 ```bash
