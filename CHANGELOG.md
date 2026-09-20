@@ -1,6 +1,27 @@
 # Changelog
 
-## [0.70.0] — 2026-09-20
+## [0.70.1] — 2026-09-20
+
+Patch: the new hook tests were green on the author's laptop and red on every
+CI runner, so 0.70.0 was tagged and never published.
+
+The tests drive a real `git push`, which runs the WHOLE hook — including the
+stage that is not under test, `stapel-exposure-lint`. That stage fails closed
+with `EXP000` when the private-names list resolves to zero names, which is
+exactly the state of a CI runner (the list is a secret the test job does not
+get). On the laptop the list is there, so nine tests passed locally and the
+same nine failed on 3.11–3.14, the tag's `ci-gate` refused to publish, and
+0.70.0 stayed unpublished. A test that can only pass on the machine that
+wrote it is the class of gate that proves nothing.
+
+The suite now points `STAPEL_PRIVATE_NAMES_FILE` at a list holding one name
+no scratch repo contains, so the stage runs, passes, and the only thing that
+can refuse those pushes is the stage being tested. Verified the way CI sees
+it: the suite passes with `HOME` pointed at an empty directory.
+
+Everything in 0.70.0 below ships here.
+
+## [0.70.0] — 2026-09-20 (tagged, never published — see 0.70.1)
 
 Minor: `pre-push` refuses a branch that does not contain the default branch,
 and `stapel-hooks` makes the installation of the hooks checkable.

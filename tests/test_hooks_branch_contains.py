@@ -25,6 +25,20 @@ from stapel_tools._library_templates import PRE_PUSH
 
 ZERO = "0" * 40
 
+#: The hook's LATER stages are not under test here, and one of them —
+#: stapel-exposure-lint — fails closed (EXP000) on a runner where the
+#: private-names list is unset, which is every CI runner. Point it at a list
+#: holding one name no scratch repo contains, so the stage runs and passes and
+#: the only thing that can refuse these pushes is the stage being tested.
+PRIVATE_NAMES = "zzz-no-such-private-name\n"
+
+
+@pytest.fixture(autouse=True)
+def _private_names(tmp_path_factory, monkeypatch):
+    names = tmp_path_factory.mktemp("names") / "private-names"
+    names.write_text(PRIVATE_NAMES, encoding="utf-8")
+    monkeypatch.setenv("STAPEL_PRIVATE_NAMES_FILE", str(names))
+
 
 def run(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
     result = subprocess.run(
