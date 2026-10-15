@@ -44,6 +44,8 @@ def test_pg_marker_is_registered_and_skipped_by_default(tmp_path):
     conftest = (svc / "conftest.py").read_text()
     assert "def pytest_collection_modifyitems" in conftest
     assert "STAPEL_TEST_DB" in conftest
+    # CFG001: the env read belongs to the settings module, not the conftest.
+    assert "os.environ" not in conftest
     compile(conftest, "conftest.py", "exec")
     pg_test = (svc / "tests" / "test_pg_profile.py").read_text()
     assert "@pytest.mark.pg" in pg_test

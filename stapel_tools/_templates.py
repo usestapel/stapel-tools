@@ -687,9 +687,11 @@ PG_MARKER_CONFTEST = """\
 
 
 def pytest_collection_modifyitems(config, items):
-    import os
+    # The settings module is the one place that reads STAPEL_TEST_DB
+    # (CFG001); here we only ask which engine it chose.
+    from django.conf import settings
 
-    if os.environ.get("STAPEL_TEST_DB", "").startswith(("postgres://", "postgresql://")):
+    if "postgresql" in settings.DATABASES["default"]["ENGINE"]:
         return
     skip = pytest.mark.skip(reason="pg: set STAPEL_TEST_DB=postgres://... to run")
     for item in items:
