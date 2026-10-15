@@ -297,7 +297,7 @@ class TestThemeJsonScaffold:
         proj = _create(tmp_path, "app", "monolith")
         dockerfile = (proj / "frontend" / "Dockerfile").read_text()
         assert "FROM node:22-alpine AS build" in dockerfile
-        assert "npm run build" in dockerfile
+        assert "RUN pnpm build" in dockerfile
         # The export stage publishes via the shipped script, not a CMD
         # one-liner — see the next test for what the script has to do.
         assert "FROM build AS export" in dockerfile
@@ -2047,3 +2047,107 @@ class TestTheMonolithHonoursTheMountTable:
             )
             if needs_more:
                 assert element != f'<{entry["component"]["export"]} />', entry["id"]
+
+
+class TestTheGeneratedProjectPassesItsOwnTierZero:
+    """0.72.2: defects a generated project met in its own Tier-0 gates on the
+    pairs published on npm (Studio dogfood, 2026-10-15). Each test names the
+    gate that went red; the full gate run is the release's acceptance."""
+
+    @pytest.mark.parametrize("pairs", [(), ("geo", "currencies")])
+    def test_composer_page_reads_the_current_pair_apis(self, pairs):
+        from stapel_tools._frontend_templates import (
+            LISTING_IMAGE_ASSET_TYPE,
+            render_listing_compose_page_tsx,
+        )
+
+        page = render_listing_compose_page_tsx(pairs)
+        # stapel/no-flattened-load-state: no query data defaulted to [].
+        assert not re.search(r"\.data\s*(\?\?|\|\|)\s*\[\]", page)
+        assert "loadStateFromQuery(useCategoryFeatures(categoryId))" in page
+        assert "(result) => result.features" in page  # CategoryFeaturesResult
+        assert "features={loadedRowsOrEmpty(features)}" in page
+        assert 'featuresLoading={features.status === "loading"}' in page
+        # The error prop only exists for a failed load: `null !== undefined`
+        # made every composer render "details failed" before.
+        assert (
+            '{...(features.status === "failed" ? { featuresError: features.error } : {})}'
+            in page
+        )
+        # cdn-react 0.8: the upload queue needs an explicit target.
+        assert "useUploadQueue({ target: GALLERY_TARGET, max: GALLERY_MAX })" in page
+        assert f'assetType: "{LISTING_IMAGE_ASSET_TYPE}"' in page
+
+    def test_listing_photos_have_an_asset_type_the_backend_accepts(self, tmp_path):
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["auth", "attributes", "categories", "cdn", "listings"],
+        )
+        base = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
+        assert "\"ASSET_TYPES\": ('avatar', 'product')," in base
+
+    def test_listings_pair_brings_its_statically_imported_peer(self, tmp_path):
+        proj = _create(
+            tmp_path, "app", "monolith",
+            modules=["auth", "attributes", "categories", "cdn", "listings"],
+        )
+        deps = json.loads((proj / "frontend" / "package.json").read_text())["dependencies"]
+        assert "@stapel/currencies-react" in deps
+
+    def test_frontend_is_pnpm_end_to_end(self, tmp_path):
+        from stapel_tools._frontend_templates import SCAFFOLD_PNPM_VERSION
+
+        proj = _create(tmp_path, "app", "monolith", modules=["auth"])
+        fe = proj / "frontend"
+        pkg = json.loads((fe / "package.json").read_text())
+        assert pkg["packageManager"] == f"pnpm@{SCAFFOLD_PNPM_VERSION}"
+        # pnpm >= 10: esbuild's postinstall must be allowlisted or the
+        # install exits 1 (ERR_PNPM_IGNORED_BUILDS).
+        workspace = yaml.safe_load((fe / "pnpm-workspace.yaml").read_text())
+        assert workspace["allowBuilds"]["esbuild"] is True
+        dockerfile = (fe / "Dockerfile").read_text()
+        assert "npm ci" not in dockerfile
+        assert f"RUN npm install -g pnpm@{SCAFFOLD_PNPM_VERSION}" in dockerfile
+        assert "COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./" in dockerfile
+        assert (
+            "if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; "
+            "else pnpm install; fi"
+        ) in dockerfile
+        assert "node_modules" in (fe / ".dockerignore").read_text().split()
+        local = yaml.safe_load((proj / "docker-compose.local.yml").read_text())
+        command = local["services"]["frontend"]["command"]
+        assert f"pnpm@{SCAFFOLD_PNPM_VERSION}" in command
+        assert "npm run" not in command and "--silent" not in command
+
+
+class TestDevSettingsSatisfyCoreConfigCheck:
+    """stapel_core.config.E001 resolves required keys from os.environ, so the
+    dev tier's secret fallback must live there, set before base.py reads it."""
+
+    def _prelude(self):
+        from stapel_tools._templates import DEV_SETTINGS
+
+        head, sep, _ = DEV_SETTINGS.partition("from .base import *")
+        assert sep, "dev.py no longer imports base"
+        return DEV_SETTINGS, head.replace("{{SLUG}}", "app")
+
+    def test_seed_runs_before_base_and_only_when_unset(self, monkeypatch):
+        full, prelude = self._prelude()
+        assert "if not SECRET_KEY:" not in full
+        monkeypatch.delenv("SECRET_KEY", raising=False)
+        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+        exec(compile(prelude, "dev.py", "exec"), {})
+        import os
+
+        assert os.environ["SECRET_KEY"] == "django-insecure-app-dev-only"
+        assert os.environ["JWT_SECRET_KEY"] == "django-insecure-app-dev-only"
+
+    def test_an_exported_secret_wins(self, monkeypatch):
+        _, prelude = self._prelude()
+        monkeypatch.setenv("SECRET_KEY", "exported")
+        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+        exec(compile(prelude, "dev.py", "exec"), {})
+        import os
+
+        assert os.environ["SECRET_KEY"] == "exported"
+        assert os.environ["JWT_SECRET_KEY"] == "exported"

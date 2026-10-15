@@ -383,6 +383,16 @@ SPECTACULAR_SETTINGS = get_spectacular_settings(
 DEV_SETTINGS = """\
 import os
 
+# The dev secret goes into os.environ BEFORE base.py reads it, and only when
+# none is exported: stapel-core's config.E001 resolves required keys from the
+# environment, not from settings, so a settings-level fallback leaves
+# `manage.py check` red on a bare native run. A recognizable dev marker;
+# prod.py never imports this module.
+if not os.environ.get("SECRET_KEY"):
+    os.environ["SECRET_KEY"] = "django-insecure-{{SLUG}}-dev-only"
+if not os.environ.get("JWT_SECRET_KEY"):
+    os.environ["JWT_SECRET_KEY"] = os.environ["SECRET_KEY"]
+
 from .base import *  # noqa
 
 DEBUG = True
@@ -431,10 +441,6 @@ CELERY_TASK_EAGER_PROPAGATES = False
 # outbound mail is written to var/mailtrap/ as JSON instead of hitting SMTP.
 MAILTRAP_DIR = BASE_DIR / "var" / "mailtrap"
 EMAIL_BACKEND = "tests.harness.mailtrap.FileMailtrapBackend"
-
-if not SECRET_KEY:
-    SECRET_KEY = "django-insecure-{{SLUG}}-dev-only"
-    JWT_SECRET_KEY = JWT_SECRET_KEY or SECRET_KEY
 
 # Dev-only frontend origin — the local stack serves the SPA through nginx on
 # http://localhost (docker-compose.local.yml; the Vite dev server itself sits

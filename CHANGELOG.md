@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.72.2] — 2026-10-15
+
+Patch: a generated monolith passes its own Tier-0 gates (eslint with every
+stapel rule at error, `tsc -b`, `vite build`, vitest, `manage.py check` on the
+dev profile, pytest) on the pairs published today, with no hand edits.
+
+- `src/pages/ListingComposePage.tsx` follows cdn-react 0.8 and
+  categories-react 0.35: `useUploadQueue` gets an explicit
+  `{ kind: "image", assetType: "product" }` target, and the category schema
+  is read as a `LoadState` (`loadStateFromQuery` + `mapLoad` over
+  `CategoryFeaturesResult.features`), so `stapel/no-flattened-load-state`
+  passes without a suppression. `featuresError` is passed only for a failed
+  load; before, `null` reached the composer and it always showed "details
+  failed". A project with listings and cdn adds `product` to
+  `STAPEL_CDN["ASSET_TYPES"]` (an explicit `--module-config` value still
+  wins).
+- `@stapel/listings-react` brings `@stapel/currencies-react` along: the pair
+  declares it an optional peer but its `/default` skin imports it
+  statically, and `vite build` failed without it.
+- `config/settings/dev.py` (and the minimal preset's settings) put the dev
+  `SECRET_KEY`/`JWT_SECRET_KEY` into `os.environ` before `base` reads them,
+  only when none is exported. stapel-core's `config.E001` resolves required
+  keys from the environment, so with an aggregated `CONFIG.MD` present,
+  `DJANGO_SETTINGS_MODULE=config.settings.dev manage.py check` failed with no
+  env.
+- The generated frontend is pnpm throughout: `packageManager: pnpm@11.9.0`,
+  `frontend/pnpm-workspace.yaml` allowlists esbuild's build script
+  (`allowBuilds`; pnpm >= 10 otherwise exits with `ERR_PNPM_IGNORED_BUILDS`),
+  the Dockerfile installs that pnpm and runs `--frozen-lockfile` only when
+  `pnpm-lock.yaml` is committed (no more `npm ci` without a
+  `package-lock.json`), a `.dockerignore` keeps a host `node_modules` out of
+  the image, and the dev compose service runs `pnpm install && pnpm dev`.
+
 ## [0.72.1] — 2026-10-15
 
 Patch: a generated service's own test suite runs with no services.

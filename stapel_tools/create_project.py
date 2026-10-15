@@ -988,6 +988,12 @@ FRONTEND_REACT_LIBS = {
     "listings": {
         "package": "@stapel/listings-react",
         "version": "0.39.0",
+        # Declared an OPTIONAL peer, but `/default`'s ListingPrice imports it
+        # statically, so a bundle without the package fails `vite build`
+        # ("formatMoney" is not exported by __vite-optional-peer-dep). The
+        # package is installed with the pair; its provider stays opt-in (the
+        # skin reads the runtime context as absent).
+        "static_peer_pairs": ["currencies"],
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -2626,6 +2632,10 @@ def _render_frontend_package_json(
         deps[FRONTEND_IMAGE_PACKAGE] = f"^{FRONTEND_IMAGE_VERSION}"
     for entry in react_entries:
         deps[entry["package"]] = f'^{entry["version"]}'
+    for entry in react_entries:
+        for key in entry.get("static_peer_pairs", ()):
+            peer = FRONTEND_REACT_LIBS[key]
+            deps.setdefault(peer["package"], f'^{peer["version"]}')
     if react_entries:
         for name, version in FRONTEND_REACT_CORE_DEPS.items():
             deps[name] = f"^{version}"
@@ -2686,6 +2696,7 @@ def _write_frontend_scaffold(
         "TITLE": ctx["title"],
         "BACKEND_UPSTREAM_DEFAULT": backend_upstream_default,
         "VITE_PROXY_RULES": _vite_proxy_rules(backend_prefixes or [ctx["slug"], "admin"]),
+        "PNPM_VERSION": F.SCAFFOLD_PNPM_VERSION,
     }
 
     def r(template: str) -> str:
@@ -2756,6 +2767,7 @@ def _write_frontend_scaffold(
         has_media=has_cdn or "profiles" in feature_libs,
     )
     _write(frontend / "package.json", package_json)
+    _write(frontend / "pnpm-workspace.yaml", F.PNPM_WORKSPACE_YAML)
     _write(
         frontend / "tsconfig.json",
         F.TSCONFIG_JSON_WITH_JSON_MODULE if routing_active else F.TSCONFIG_JSON,
@@ -2887,6 +2899,9 @@ def _write_frontend_scaffold(
     _write(frontend / "eslint.config.js", F.ESLINT_CONFIG_JS)
     _write(frontend / ".gitignore", F.GITIGNORE)
     _write(frontend / "Dockerfile", F.DOCKERFILE)
+    # `COPY . .` must not carry a host node_modules (other platform's
+    # binaries) over the one the image just installed.
+    _write(frontend / ".dockerignore", F.DOCKERIGNORE)
     # The publish step the Dockerfile's export stage runs. A separate file, not
     # a CMD one-liner, because it does a build-id swap + prune instead of the
     # old `rm -rf /output/*` — see FRONTEND_PUBLISH_SH's own comment.
@@ -2983,7 +2998,13 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     if task_broker == broker:
         task_broker = "none"  # same broker — nothing extra to wire
 
-    compose_ctx = {"SLUG": slug, "BACKEND_UPSTREAM_DEFAULT": backend_upstream_default}
+    from ._frontend_templates import SCAFFOLD_PNPM_VERSION
+
+    compose_ctx = {
+        "SLUG": slug,
+        "BACKEND_UPSTREAM_DEFAULT": backend_upstream_default,
+        "PNPM_VERSION": SCAFFOLD_PNPM_VERSION,
+    }
 
     # docker-compose files. The local stack is SELF-CONTAINED (no include —
     # see MONOLITH_COMPOSE_LOCAL's own docstring), so it needs the broker
@@ -3830,8 +3851,16 @@ def create_project(
     # module; absent when cdn isn't selected (byte-identical regression).
     if "cdn" in feature_only:
         module_config = {**(module_config or {})}
+        # A listing photo is stored under its own asset type, the one the
+        # generated composer page uploads to (LISTING_IMAGE_ASSET_TYPE);
+        # stapel-cdn refuses a type this list does not name.
+        asset_types = ("avatar",)
+        if "listings" in feature_only:
+            from ._frontend_templates import LISTING_IMAGE_ASSET_TYPE
+
+            asset_types = (*asset_types, LISTING_IMAGE_ASSET_TYPE)
         module_config.setdefault("cdn", {
-            "ASSET_TYPES": ("avatar",),
+            "ASSET_TYPES": asset_types,
             "ENABLED_SUBMODULES": ("images",),
         })
         if "profiles" in feature_only:

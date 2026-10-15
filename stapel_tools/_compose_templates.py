@@ -820,7 +820,7 @@ services:
   frontend:
     image: node:22-alpine
     working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    command: sh -c "npm install -g pnpm@{{PNPM_VERSION}} && pnpm install --config.confirmModulesPurge=false && pnpm dev --host 0.0.0.0 --port 5173"
     environment:
       VITE_BACKEND_TARGET: "http://${BACKEND_UPSTREAM:-{{BACKEND_UPSTREAM_DEFAULT}}}"
     volumes:

@@ -6,7 +6,7 @@ A minimal, real Vite + React + TypeScript app — not a placeholder. It is
 wired into:
 
   - ``docker-compose.local.yml`` — a plain ``node:22-alpine`` container runs
-    ``npm install && npm run dev`` (hot-reload, logs visible); local-nginx
+    ``pnpm install && pnpm dev`` (hot-reload, logs visible); local-nginx
     proxies everything that is not the reserved backend namespace to it.
   - ``docker-compose.yml`` (prod) — a one-shot ``frontend-build`` service
     (this dir's own ``Dockerfile``) builds the app and copies ``dist/`` into
@@ -44,6 +44,7 @@ PACKAGE_JSON = """\
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "packageManager": "pnpm@{{PNPM_VERSION}}",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -2114,9 +2115,30 @@ def render_dockerfile(package_manager: str = "npm") -> str:
     ).replace("{{BUILD_CMD}}", _BUILD_CMDS[package_manager])
 
 
-# The scaffold's own frontend is npm (that is what stapel-create-project
-# writes), so this stays the historical constant for it.
-DOCKERFILE = render_dockerfile("npm")
+# The scaffold's own frontend is pnpm: package.json names the version in
+# `packageManager`, pnpm-workspace.yaml carries the build-script allowlist, and
+# this image installs the same pnpm. No lockfile exists at scaffold time (the
+# generator does not resolve the tree), so the install is frozen exactly when
+# the project has committed one; `npm ci` without package-lock.json can only
+# fail.
+SCAFFOLD_PNPM_VERSION = "11.9.0"
+
+DOCKERFILE = DOCKERFILE_TEMPLATE.replace(
+    "{{INSTALL}}",
+    f"RUN npm install -g pnpm@{SCAFFOLD_PNPM_VERSION}\n"
+    "COPY package.json pnpm-workspace.yaml pnpm-lock.yaml* ./\n"
+    "RUN if [ -f pnpm-lock.yaml ]; then pnpm install --frozen-lockfile; "
+    "else pnpm install; fi",
+).replace("{{BUILD_CMD}}", "pnpm build")
+
+# pnpm >= 10 refuses dependency build scripts no allowlist names and exits 1
+# (ERR_PNPM_IGNORED_BUILDS). esbuild's postinstall fetches the binary Vite
+# runs, so without this entry the generated frontend neither installs nor
+# builds.
+PNPM_WORKSPACE_YAML = """\
+allowBuilds:
+  esbuild: true
+"""
 
 README_MD = """\
 # {{SLUG}}-frontend
@@ -2131,9 +2153,13 @@ backend and local-nginx — local-nginx routes the reserved backend namespace
 (`/{{SLUG}}/`, `/staticfiles/`, `/media/`) to Django and everything else to
 this Vite dev server (logs visible via `docker compose logs -f frontend`).
 
-Running `npm run dev` standalone (no local-nginx) also works — see
-`vite.config.ts`'s own dev-server proxy, pointed at `VITE_BACKEND_TARGET`
+Running `pnpm install && pnpm dev` standalone (no local-nginx) also works —
+see `vite.config.ts`'s own dev-server proxy, pointed at `VITE_BACKEND_TARGET`
 (env var, compose-network default, override in `.env` for a native backend).
+
+The package manager is pnpm (`packageManager` in package.json). Commit the
+`pnpm-lock.yaml` your first install writes: the Dockerfile installs with
+`--frozen-lockfile` whenever one is present.
 
 ## Prod
 
@@ -3072,6 +3098,12 @@ COMPOSITE_PAGES: dict[str, dict] = {
 # and not read off a pair.
 LISTING_GALLERY_MAX = 10
 
+# The cdn asset type a listing photo is stored as. cdn-react's upload queue
+# requires an explicit target, and stapel-cdn answers 400 for a type missing
+# from STAPEL_CDN["ASSET_TYPES"], so create_project adds this one to the
+# generated settings whenever listings and cdn are both selected.
+LISTING_IMAGE_ASSET_TYPE = "product"
+
 def render_listing_compose_page_tsx(pairs: tuple = ()) -> str:
     """``src/pages/ListingComposePage.tsx`` — the composer with its cross-pair
     slots filled from the pairs the container actually installed.
@@ -3127,12 +3159,15 @@ def render_listing_compose_page_tsx(pairs: tuple = ()) -> str:
         'import type { ReactElement } from "react";',
         'import { Alert, Flex } from "antd";' if not geo else 'import { Flex } from "antd";',
     ]
+    core_names = ["loadStateFromQuery", "loadedRowsOrEmpty", "mapLoad"]
     if not geo:
-        imports.append('import { useT } from "@stapel/core";')
+        core_names.append("useT")
+    imports.append(f'import {{ {", ".join(core_names)} }} from "@stapel/core";')
     imports += [
         'import { useCategoryFeatures } from "@stapel/categories-react";',
         'import { CategoryPickerField } from "@stapel/categories-react/default";',
         'import { useUploadQueue } from "@stapel/cdn-react";',
+        'import type { CdnUploadTarget } from "@stapel/cdn-react";',
         'import { MediaGalleryField } from "@stapel/cdn-react/default";',
     ]
     if currencies:
@@ -3202,9 +3237,14 @@ def render_listing_compose_page_tsx(pairs: tuple = ()) -> str:
         "  // feature read; the composer reports every change through onCategoryChange.",
         '  const [category, setCategory] = useState("");',
         '  const categoryId = category === "" ? null : Number(category);',
-        "  const features = useCategoryFeatures(categoryId);",
+        "  // The schema as a LoadState: still loading, failed and loaded are three",
+        "  // answers, and the composer takes each through its own prop below.",
+        "  const features = mapLoad(",
+        "    loadStateFromQuery(useCategoryFeatures(categoryId)),",
+        "    (result) => result.features,",
+        "  );",
         "  // ONE queue: the bag the composer publishes from is the bag the grid draws.",
-        "  const images = useUploadQueue({ max: GALLERY_MAX });",
+        "  const images = useUploadQueue({ target: GALLERY_TARGET, max: GALLERY_MAX });",
     ]
     if currencies:
         body += [
@@ -3230,9 +3270,11 @@ def render_listing_compose_page_tsx(pairs: tuple = ()) -> str:
         ]
     body += [
         "      <ListingComposerPage",
-        "        features={features.data ?? []}",
-        "        featuresLoading={features.isFetching}",
-        "        featuresError={features.error}",
+        "        // Rows only when ready; loading and failure travel in their own",
+        "        // props, so an empty list here never stands for either of them.",
+        "        features={loadedRowsOrEmpty(features)}",
+        '        featuresLoading={features.status === "loading"}',
+        '        {...(features.status === "failed" ? { featuresError: features.error } : {})}',
         "        category={category}",
         "        onCategoryChange={setCategory}",
         "        renderCategoryPicker={({ value, setCategory: choose }) => (",
@@ -3286,6 +3328,12 @@ def render_listing_compose_page_tsx(pairs: tuple = ()) -> str:
         "",
         "/** The storefront's photo count — see LISTING_GALLERY_MAX in stapel-tools. */",
         f"const GALLERY_MAX = {LISTING_GALLERY_MAX};",
+        "/** Where the photos go: the asset type the generated backend lists in",
+        " * STAPEL_CDN[\"ASSET_TYPES\"] — see LISTING_IMAGE_ASSET_TYPE in stapel-tools. */",
+        "const GALLERY_TARGET: CdnUploadTarget = {",
+        '  kind: "image",',
+        f'  assetType: "{LISTING_IMAGE_ASSET_TYPE}",',
+        "};",
         "",
         *body,
     ]

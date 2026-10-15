@@ -33,10 +33,12 @@ _IS_PROD = DJANGO_ENV == "prod"
 # stapel-create-project (SEC-6) writes a freshly generated random value into
 # .env at project creation; this fallback only matters for a hand-copied
 # .env.example, and DJANGO_ENV=prod refuses to boot on it (see guard_secret
-# below) instead of silently running with a guessable key.
+# below) instead of silently running with a guessable key. Seeded into
+# os.environ, not just this module: stapel-core's config.E001 resolves the
+# required key from the environment.
+if not os.environ.get("SECRET_KEY") and not _IS_PROD:
+    os.environ["SECRET_KEY"] = "django-insecure-{{slug}}-dev-only"
 SECRET_KEY = os.getenv("SECRET_KEY", "")
-if not SECRET_KEY and not _IS_PROD:
-    SECRET_KEY = "django-insecure-{{slug}}-dev-only"
 
 DEBUG = os.getenv("DEBUG", "false" if _IS_PROD else "true").lower() in ("true", "1", "yes")
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "" if _IS_PROD else "*").split(",")
