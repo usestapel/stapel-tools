@@ -42,13 +42,12 @@ is decided by the scaffold from the pairs' own declarations.
   stapel-core's manifest reader refuses such a row at boot, which made every
   project installing the library fail `manage.py check`. The CONFIG.MD parser
   can now collect such rows instead of stopping at the first one.
-- The generated projects' stapel-core pin stays at 0.91.0 for now
-  (`stapel-core>=0.91.0,<0.92`, the next-minor ceiling every stapel-*
-  requirement uses): the core that accepts `settings` ships as 0.92.1, which
-  the index does not serve yet, and 0.92.0 still accepts only `env` and
-  `vault`. Until the pin moves to 0.92.1 (`>=0.92.1,<0.93`), the `settings`
-  rows stapel-cdn, stapel-vocabularies and stapel-agent ship fail
-  `manage.py check`.
+- Generated projects require `stapel-core>=0.92.1,<0.93` (pin 0.92.1, verified
+  with `pip index versions stapel-core`; the next-minor ceiling every stapel-*
+  requirement uses). 0.92.1 is the first core whose config manifest reader
+  accepts the `settings` source; under `>=0.91.0,<0.92` the `settings` rows
+  stapel-cdn, stapel-vocabularies and stapel-agent ship failed
+  `manage.py check` on every fresh project.
 
 ## [0.71.0] — 2026-10-15
 

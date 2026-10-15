@@ -58,8 +58,8 @@ STAPEL_LIBS = {
         # `stapel_core.jwt.E001`). The scaffold emits that setting, so it may
         # not pin a core that has never heard of it — the project would boot
         # with a socket every browser is turned away from.
-        "pin": "0.91.0",
-        "ahead_of_pypi": False,  # PyPI 0.91.0 @ 2026-10-15
+        "pin": "0.92.1",
+        "ahead_of_pypi": False,  # PyPI 0.92.1 @ 2026-10-15 (pip index versions; accepts the `settings` CONFIG.MD source)
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
