@@ -478,6 +478,15 @@ STAPEL_LIBS = {
 # and because the nav mirror below is what the drift gate checks. Splitting it
 # into a second registry would mean two places to pin one package.
 #
+# `embeds` is the same kind of MANUALLY PINNED MIRROR, of the `embeds` key of
+# that pair's `nav-manifest.json` (composition spec §3): the chrome-shaped
+# components a pair offers to a shell slot. Gated by the same script; a pair
+# that offers none carries no key, exactly as its manifest does.
+#
+# 2026-10-15 (stapel-tools 0.72.0): the composition train — `npm view
+# @stapel/<key>-react version` -> notifications 0.13.0 and translate 0.3.0
+# (the minors that publish `embeds`), workspaces 0.21.0, auth 0.26.0.
+#
 # Pins re-verified 2026-09-14 (stapel-tools 0.67.2) against `npm view
 # @stapel/<key>-react version --prefer-online` for every entry, clearing the
 # whole backlog the `--registry` gate had been naming on every daily run:
@@ -551,7 +560,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.25.0",
+        "version": "0.26.0",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
@@ -924,7 +933,7 @@ FRONTEND_REACT_LIBS = {
     },
     "translate": {
         "package": "@stapel/translate-react",
-        "version": "0.2.0",
+        "version": "0.3.0",
         "provider": "TranslateProvider",
         "create_runtime": "createTranslateRuntime",
         "register_i18n": "registerTranslateI18n",
@@ -940,6 +949,16 @@ FRONTEND_REACT_LIBS = {
                 "requiresAuth": True,
                 "surface": "member",
                 "order": 40,
+            },
+        ],
+        "embeds": [
+            {
+                "id": "translate.language_switcher",
+                "slot": "topbar.end",
+                "component": {"export": "LanguageSwitcher", "subpath": "default"},
+                "order": 40,
+                "surface": "any",
+                "props": {"compact": True},
             },
         ],
     },
@@ -1118,7 +1137,7 @@ FRONTEND_REACT_LIBS = {
     },
     "notifications": {
         "package": "@stapel/notifications-react",
-        "version": "0.12.0",
+        "version": "0.13.0",
         "provider": "NotificationsProvider",
         "create_runtime": "createNotificationsRuntime",
         "register_i18n": "registerNotificationsI18n",
@@ -1145,6 +1164,18 @@ FRONTEND_REACT_LIBS = {
                 "menuVisibleDefault": True,
                 "requiresAuth": True,
                 "order": 30,
+            },
+        ],
+        # The bell in the top bar. Member-only (an unread count needs a
+        # session) and it opens the feed entry above.
+        "embeds": [
+            {
+                "id": "notifications.bell",
+                "slot": "topbar.end",
+                "component": {"export": "NotificationBell", "subpath": "default"},
+                "order": 20,
+                "surface": "member",
+                "opens": "notifications.feed",
             },
         ],
     },
@@ -1227,7 +1258,7 @@ FRONTEND_REACT_LIBS = {
     },
     "recordings": {
         "package": "@stapel/recordings-react",
-        "version": "0.11.0",
+        "version": "0.11.1",  # npm view @stapel/recordings-react version -> 0.11.1 (2026-10-15)
         "provider": "RecordingsProvider",
         "create_runtime": "createRecordingsRuntime",
         "register_i18n": "registerRecordingsI18n",
@@ -1401,7 +1432,7 @@ FRONTEND_REACT_LIBS = {
     },
     "workspaces": {
         "package": "@stapel/workspaces-react",
-        "version": "0.20.0",
+        "version": "0.21.0",
         "provider": "WorkspacesProvider",
         "create_runtime": "createWorkspacesRuntime",
         "register_i18n": "registerWorkspacesI18n",
@@ -1764,7 +1795,11 @@ FRONTEND_REACT_CORE_DEPS = {
     # floors underneath still hold, and nothing in 0.23.0…0.26.1 is a major
     # (the package's CHANGELOG carries no "Major Changes" heading at all), so
     # the surfaces the generated container binds are unchanged.
-    "@stapel/core": "0.29.0",
+    #
+    # 0.30.0 (2026-10-15): `npm view @stapel/core version` -> 0.30.0, the
+    # minor that ships `SHELL_SLOT_IDS` and the `NavEmbed` type the pairs'
+    # manifests now carry under `embeds`; `@stapel/shell-react` 0.20.0 peers it.
+    "@stapel/core": "0.30.0",
     "@tanstack/react-query": "5.102.8",
 }
 # Only pulled in when >=1 selected module's registry entry has
@@ -1859,7 +1894,11 @@ FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
 # 0.19.0 (2026-09-18): same stale-pin backlog as the `@stapel/tokens-antd`
 # bump above — `npm view @stapel/shell-react version` -> 0.19.0, additive
 # over 0.18.1 (no "Major Changes" heading), peers unchanged.
-FRONTEND_SHELL_REACT_VERSION = "0.19.1"
+#
+# 0.20.0 (2026-10-15): `npm view @stapel/shell-react version` -> 0.20.0, the
+# minor where both chromes take `slots` and `SHELL_TEMPLATES` /
+# `shell-templates.json` ship (FRONTEND_SHELL_SLOTS_FLOOR below).
+FRONTEND_SHELL_REACT_VERSION = "0.20.0"
 
 # The first `@stapel/shell-react` release that themes ITSELF and reads the
 # container's staff answer. Two facts, one release, because they are one
@@ -1955,6 +1994,18 @@ def shell_has_theme_control(version: str | None = None) -> bool:
 def shell_has_phone_chrome(version: str | None = None) -> bool:
     """Does the pinned shell take `phoneChrome` and `navBadges`?"""
     return _shell_at_least(FRONTEND_SHELL_PHONE_CHROME_FLOOR, version)
+
+
+# The first release where `AppShell` and `PublicShell` take
+# `slots?: Partial<Record<ShellSlotId, ReactNode>>` (composition spec §2).
+# Below it the container emits no `embeds.generated.tsx` and passes no
+# `slots`, whatever the plan resolved.
+FRONTEND_SHELL_SLOTS_FLOOR = "0.20.0"
+
+
+def shell_has_slots(version: str | None = None) -> bool:
+    """Does the pinned shell take `slots`?"""
+    return _shell_at_least(FRONTEND_SHELL_SLOTS_FLOOR, version)
 
 # The source-agnostic image renderer — added whenever a media source is wired
 # (cdn, or a profiles avatar), so <Image meta={...image}> can render the
@@ -2604,6 +2655,9 @@ def _write_frontend_scaffold(
     want_auth: bool | None = None,
     want_landing: bool = False,
     theme: str | None = None,
+    shell: str | None = None,
+    slots: dict[str, str] | None = None,
+    auth_model: str | None = None,
 ):
     """``frontend/`` — Vite + React + TypeScript, wired into the dev/prod
     compose + nginx canon (§57 owner directive). See
@@ -2663,6 +2717,38 @@ def _write_frontend_scaffold(
     app_route_present = auth_wired or bool(route_plan["app_children"])
     shell_react_needed = bool(nav_pairs) or app_route_present
 
+    # Composition spec §4: the installed pairs' embeds resolved onto the
+    # chosen template. Emitted only where a chrome exists to receive them and
+    # the pinned shell takes `slots`; otherwise the container stays as it was.
+    from ._shell_slots import plan_slots
+    from ._shell_templates import DEFAULT_SHELL_TEMPLATE
+
+    slot_plan = plan_slots(
+        shell or DEFAULT_SHELL_TEMPLATE, react_entries,
+        auth_gated=auth_wired, overrides=slots,
+    )
+    slot_notes = list(slot_plan.notes)
+    emit_embeds = (
+        routing_active and app_route_present and shell_has_slots()
+        and bool(slot_plan.filled)
+    )
+    embed_slots: dict[str, str] = {}
+    embeds_source = None
+    if emit_embeds:
+        embeds_source, open_notes = F.render_embeds_generated_tsx(
+            slot_plan.filled, F.nav_entry_paths(route_plan),
+        )
+        slot_notes.extend(open_notes)
+        embed_slots = {slot: F.slot_component_name(slot) for slot in slot_plan.filled}
+    else:
+        for slot, embeds in slot_plan.filled.items():
+            for embed in embeds:
+                slot_notes.append(
+                    f"embed {embed['id']} is not mounted in {slot}: "
+                    + ("the pinned @stapel/shell-react takes no slots"
+                       if app_route_present else "this project renders no shell")
+                )
+
     frontend = project_dir / "frontend"
     package_json = _render_frontend_package_json(
         r(F.PACKAGE_JSON), react_entries,
@@ -2713,7 +2799,12 @@ def _write_frontend_scaffold(
                 F.render_nav_generated_ts(nav_pairs, auth_wired=auth_wired),
             )
             _write(frontend / "stapel.nav.json", F.STAPEL_NAV_JSON)
-            _write(frontend / "src" / "__tests__" / "nav.test.ts", F.NAV_GATE_TEST_TS)
+            _write(
+                frontend / "src" / "__tests__" / "nav.test.ts",
+                F.NAV_GATE_EMBEDS_TEST_TS if embeds_source else F.NAV_GATE_TEST_TS,
+            )
+            if embeds_source:
+                _write(frontend / "src" / "embeds.generated.tsx", embeds_source)
         # One landing page per container-owned section the selection needs
         # (`/app/account`, `/app/admin`). Without them the admin-level screens
         # gdpr and video declare are orphans and disappear silently.
@@ -2735,7 +2826,7 @@ def _write_frontend_scaffold(
         _write(frontend / "src" / "routes.tsx", F.render_routes_tsx(
             route_plan, auth_wired=auth_wired, want_landing=bool(want_landing),
             app_route_present=app_route_present, has_cdn=has_cdn,
-            pairs=pair_keys,
+            pairs=pair_keys, embed_slots=embed_slots or None,
         ))
         # The mount pass's own files. The monolith had none of them: it mounted
         # every nav entry bare, so nine published screens that REQUIRE a prop
@@ -2772,6 +2863,27 @@ def _write_frontend_scaffold(
     from ._theme_presets import render_theme_json
 
     _write(frontend / "stapel.theme.json", render_theme_json(ctx["title"], theme))
+    # The composition as this scaffold understood it — what Studio's run view
+    # reads, and what the generated nav gate checks the slots against.
+    mounted = slot_plan.filled if embeds_source else {}
+    composition = {
+        "shell": {
+            "template": slot_plan.template,
+            "slots": {slot: [e["id"] for e in embeds] for slot, embeds in mounted.items()},
+            "overrides": dict(slot_plan.overrides),
+            "dropped": [
+                *slot_plan.dropped,
+                *(e["id"] for embeds in slot_plan.filled.values() for e in embeds
+                  if not embeds_source),
+            ],
+        },
+        "auth": {"model": auth_model, "gated": auth_wired},
+        "theme": theme or "default",
+        "modules": list(feature_libs),
+    }
+    _write(frontend / "stapel.composition.json", json.dumps(composition, indent=2) + "\n")
+    for note in slot_notes:
+        print(f"  note: {note}")
     _write(frontend / "eslint.config.js", F.ESLINT_CONFIG_JS)
     _write(frontend / ".gitignore", F.GITIGNORE)
     _write(frontend / "Dockerfile", F.DOCKERFILE)
@@ -2826,7 +2938,7 @@ def _billing_dev_hatch_needed(
     return supplied == default
 
 
-def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False, auth_comp=None, theme: str | None = None):
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False, auth_comp=None, theme: str | None = None, shell: str | None = None, slots: dict[str, str] | None = None):
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
         MONOLITH_COMPOSE_LOCAL,
@@ -2943,6 +3055,9 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         want_auth=want_auth,
         want_landing=want_landing,
         theme=theme,
+        shell=shell,
+        slots=slots,
+        auth_model=auth_comp.model if auth_comp is not None else None,
     )
     _write_deploy_scripts(project_dir)
     _write_agents_and_checks(
@@ -3512,6 +3627,8 @@ def create_project(
     auth_kinds: list[str] | str | None = None,
     posture: str | None = None,
     theme: str | None = None,
+    shell: str | None = None,
+    slots: dict[str, str] | None = None,
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
@@ -3623,6 +3740,33 @@ def create_project(
             want_auth = auth_comp.has_login_route
     module_config = merge_auth_axes(module_config, auth_comp)
 
+    # The shell composition is checked here, before anything is written, with
+    # the same inputs the frontend scaffold will plan from.
+    if shell is not None or slots:
+        if project_type != "monolith":
+            print(
+                f"Error: --shell/--slot compose the generated SPA's chrome; "
+                f"{project_type} has none",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+    if project_type == "monolith":
+        from ._shell_slots import plan_slots
+        from ._shell_templates import DEFAULT_SHELL_TEMPLATE
+
+        selected = _expand_with_requires([m for m in modules if m != "core"])
+        wants_auth = ("auth" in selected) if want_auth is None else bool(want_auth)
+        try:
+            plan_slots(
+                shell or DEFAULT_SHELL_TEMPLATE,
+                _frontend_react_entries(selected),
+                auth_gated=wants_auth and "auth" in selected,
+                overrides=slots,
+            )
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
     from ._gdpr_owners import inject_derived_data_owners
 
     module_config = inject_derived_data_owners(module_config, [*modules, "core"])
@@ -3709,7 +3853,7 @@ def create_project(
 
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only, want_auth=want_auth, want_landing=want_landing, auth_comp=auth_comp, theme=theme)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only, want_auth=want_auth, want_landing=want_landing, auth_comp=auth_comp, theme=theme, shell=shell, slots=slots)
     elif project_type == "minimal":
         _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"], module_config=module_config, auth_comp=auth_comp)
         use_submodules = False  # minimal uses pip
@@ -3945,7 +4089,28 @@ def main():
              "each passes @stapel/tokens' contrast gate) or a path to a "
              "theme file copied as is. Monolith only.",
     )
+    from ._shell_templates import SHELL_TEMPLATES
+
+    parser.add_argument(
+        "--shell", choices=list(SHELL_TEMPLATES), default=None,
+        help="Shell template of the generated SPA (default topbar-sidenav: "
+             "top bar plus side menu). topbar-only and sidenav-only are "
+             "named but queued for the monolith. Monolith only.",
+    )
+    parser.add_argument(
+        "--slot", action="append", metavar="SLOT=EMBED|none", default=None,
+        help="Resolve a shell slot: the embed id that fills it (when two "
+             "modules claim a single-capacity slot), or none to silence it. "
+             "Repeatable, e.g. --slot topbar.end=none. Monolith only.",
+    )
     args = parser.parse_args()
+    from ._shell_slots import parse_slot_args
+
+    try:
+        slot_choices = parse_slot_args(args.slot) or None
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     module_config = None
     if args.module_config:
@@ -4024,6 +4189,8 @@ def main():
         auth_kinds=args.auth_kinds,
         posture=args.posture,
         theme=args.theme,
+        shell=args.shell,
+        slots=slot_choices,
     )
 
 

@@ -386,3 +386,70 @@ def test_the_live_mirror_is_in_sync(gate):
     script's own contract), so this is a gate on a developer machine and in CI
     — where the workflow fetches the checkout — and inert elsewhere."""
     assert gate.check() == 0
+
+
+EMBED = {
+    "id": "demo.bell",
+    "slot": "topbar.end",
+    "component": {"export": "DemoBell", "subpath": "default"},
+    "order": 20,
+    "surface": "member",
+    "opens": "demo.screen",
+}
+
+
+def _pair_with_embeds(root: Path, embeds: list | None) -> None:
+    pkg_dir = root / "stapel-react" / "packages" / "demo-react"
+    pkg_dir.mkdir(parents=True)
+    data = {"package": "@stapel/demo-react", "version": "1.2.3", "entries": [ENTRY]}
+    if embeds is not None:
+        data["embeds"] = embeds
+    (pkg_dir / "nav-manifest.json").write_text(json.dumps(data, indent=2) + "\n")
+
+
+def _demo_registry(monkeypatch, embeds: list | None) -> None:
+    info = {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
+    if embeds is not None:
+        info["embeds"] = embeds
+    _registry(monkeypatch, {"demo": info})
+
+
+def test_mirrored_embeds_the_real_manifest_lacks_FAIL(gate, tmp_path, monkeypatch, capsys):
+    _pair_with_embeds(tmp_path, None)
+    _demo_registry(monkeypatch, [EMBED])
+    assert gate.check(tmp_path) == 1
+    assert '"embeds" differ' in capsys.readouterr().out
+
+
+def test_equal_embeds_pass(gate, tmp_path, monkeypatch):
+    _pair_with_embeds(tmp_path, [EMBED])
+    _demo_registry(monkeypatch, [dict(reversed(list(EMBED.items())))])
+    assert gate.check(tmp_path) == 0
+
+
+def test_real_embeds_the_mirror_lacks_FAIL(gate, tmp_path, monkeypatch, capsys):
+    """Inversion check 6 (composition spec §5): a pair offering an embed the
+    registry never mirrored is a slot no generated shell fills."""
+    _pair_with_embeds(tmp_path, [EMBED])
+    _demo_registry(monkeypatch, None)
+    assert gate.check(tmp_path) == 1
+    out = capsys.readouterr().out
+    assert "demo.bell" in out and '"embeds" differ' in out
+
+
+def test_differing_embeds_FAIL(gate, tmp_path, monkeypatch):
+    _pair_with_embeds(tmp_path, [EMBED])
+    _demo_registry(monkeypatch, [{**EMBED, "order": 30}])
+    assert gate.check(tmp_path) == 1
+
+
+def test_every_mirrored_embed_targets_a_shell_slot():
+    from stapel_tools._shell_templates import SHELL_SLOT_IDS
+    from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+    embeds = [e for info in FRONTEND_REACT_LIBS.values() for e in info.get("embeds", ())]
+    assert embeds
+    for embed in embeds:
+        assert embed["slot"] in SHELL_SLOT_IDS, embed["id"]
+        assert isinstance(embed["component"]["export"], str), embed["id"]
+        assert embed["component"]["export"], embed["id"]

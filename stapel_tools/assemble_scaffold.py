@@ -214,6 +214,8 @@ def assemble_scaffold(
     python: str | None = None,
     verify: bool = True,
     env_preset: str = "standalone",
+    shell: str | None = None,
+    slots: dict[str, str] | None = None,
 ) -> AssembleResult:
     """Assemble a project from a slug + a flat list of Stapel lib keys, then
     statically verify it. See module docstring for the full contract.
@@ -222,6 +224,9 @@ def assemble_scaffold(
     boot-smoke gate today (R3/§44 shipped there first); ``monolith``/
     ``microservices`` still run ``manage.py check`` but the boot-smoke gate is
     reported as skipped for them (a follow-up gap, not silently green).
+
+    ``shell``/``slots`` are the composition's shell template and slot choices
+    (``--shell``/``--slot`` of ``stapel-create-project``; monolith only).
     """
     libs = list(libs or [])
     output_dir = Path(output_dir) if output_dir is not None else Path.cwd()
@@ -283,6 +288,8 @@ def assemble_scaffold(
         init_git=False,
         module_config=config,
         env_preset=env_preset,
+        shell=shell,
+        slots=slots,
     )
 
     # Aggregate the connected libs' CONFIG.MD registries into the project's own
@@ -402,7 +409,24 @@ def main(argv: list[str] | None = None) -> int:
         "project — no real sender/studio-OAuth infra exists yet). Monolith "
         "only today (--type monolith).",
     )
+    parser.add_argument(
+        "--shell", default=None,
+        help="Shell template of the generated SPA (stapel-create-project "
+        "--shell). Monolith only.",
+    )
+    parser.add_argument(
+        "--slot", action="append", metavar="SLOT=EMBED|none", default=None,
+        help="Shell slot choice, repeatable (stapel-create-project --slot).",
+    )
     args = parser.parse_args(argv)
+
+    from ._shell_slots import parse_slot_args
+
+    try:
+        slots = parse_slot_args(args.slot) or None
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
     config = None
     if args.config:
@@ -423,6 +447,8 @@ def main(argv: list[str] | None = None) -> int:
         python=args.python,
         verify=not args.no_verify,
         env_preset=args.env_preset,
+        shell=args.shell,
+        slots=slots,
     )
 
     print(

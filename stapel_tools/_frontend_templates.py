@@ -1161,6 +1161,7 @@ def monolith_mount_plan(route_plan: dict, *, pairs: tuple = ()) -> dict:
 def render_routes_tsx(
     route_plan: dict, *, auth_wired: bool, want_landing: bool, app_route_present: bool,
     has_cdn: bool = False, pairs: tuple = (),
+    embed_slots: dict[str, str] | None = None,
 ) -> str:
     """``frontend/src/routes.tsx`` — react-router v7's ``createBrowserRouter``
     (v7 ships v6-future behaviour as ITS OWN default; there is no
@@ -1190,7 +1191,12 @@ def render_routes_tsx(
     profiles is selected) — wired with the ``avatarUrlFor`` stopgap prop the
     same way ``render_modules_tsx`` wires its own (dead, but kept in sync)
     copy.
+
+    ``embed_slots`` (``{slotId: ComponentName}``, from
+    ``embeds.generated.tsx``) becomes the chrome's ``slots`` prop; empty or
+    absent leaves the output exactly as it was before slots existed.
     """
+    embed_slots = embed_slots if app_route_present else None
     absolute_routes = route_plan["absolute_routes"]
     app_children = route_plan["app_children"]
     # A second gate over the admin section: "/app" establishes a session,
@@ -1232,6 +1238,9 @@ def render_routes_tsx(
     if app_route_present:
         lines.append('import { AppShell } from "@stapel/shell-react/default";')
         lines.append('import { RESOLVED_NAV } from "./nav.generated.js";')
+    if embed_slots:
+        names = ", ".join(sorted(set(embed_slots.values())))
+        lines.append(f'import {{ {names} }} from "./embeds.generated.js";')
     if auth_wired:
         lines.append('import { ProtectedRoute } from "./ProtectedRoute.js";')
     if admin_gated:
@@ -1261,6 +1270,9 @@ def render_routes_tsx(
     # the contract that is actually installable.
     self_theming = shell_self_themes()
     shell_props = "" if self_theming else ' mode="light"'
+    slots_prop = _slots_prop(embed_slots)
+    if slots_prop:
+        shell_props += f" {slots_prop}"
     staff_prop = auth_wired and self_theming
     # Counts for the destinations this container actually mounts. Both facts
     # the chrome cannot read for itself — the session and the unread count —
@@ -1311,6 +1323,8 @@ def render_routes_tsx(
             lines.append("      staff={user?.is_staff === true}")
         if badge_sources:
             lines.extend(_nav_badges_lines(badge_sources, "      "))
+        if slots_prop:
+            lines.append(f"      {slots_prop}")
         lines.append("    />")
         lines.append("  );")
         lines.append("}")
@@ -1384,6 +1398,138 @@ def render_routes_tsx(
     lines.append("]);")
     lines.append("")
     return "\n".join(lines)
+
+
+def _slots_prop(embed_slots: dict[str, str] | None) -> str:
+    """``slots={{ "topbar.end": <TopbarEnd /> }}`` — slot ids are dotted, so
+    every key is quoted."""
+    if not embed_slots:
+        return ""
+    body = ", ".join(
+        f"{json.dumps(slot)}: <{name} />" for slot, name in embed_slots.items()
+    )
+    return f"slots={{{{ {body} }}}}"
+
+
+def _pascal(text: str) -> str:
+    return "".join(
+        part[:1].upper() + part[1:]
+        for part in text.replace("-", ".").replace("_", ".").split(".")
+        if part
+    )
+
+
+def slot_component_name(slot: str) -> str:
+    """``topbar.end`` -> ``TopbarEnd``. The generated nav gate derives the
+    same name from the slot id, so the two must not diverge."""
+    return _pascal(slot)
+
+
+def nav_entry_paths(route_plan: dict) -> dict[str, str]:
+    """Every routed nav entry's absolute path, as the route plan mounts it —
+    ``/login`` stays itself, an ``/app`` child becomes ``/app/<path>``."""
+    paths = {r["entry"]["id"]: r["path"] for r in route_plan["absolute_routes"]}
+    for child in route_plan["app_children"]:
+        paths[child["entry"]["id"]] = f'/app/{child["path"]}'
+    return paths
+
+
+def _jsx_props(props: dict | None) -> str:
+    out = []
+    for name, value in (props or {}).items():
+        if isinstance(value, bool):
+            literal = "true" if value else "false"
+        else:
+            literal = json.dumps(value)
+        out.append(f" {name}={{{literal}}}")
+    return "".join(out)
+
+
+def render_embeds_generated_tsx(
+    filled: dict[str, list[dict]], paths: dict[str, str]
+) -> tuple[str, list[str]]:
+    """``frontend/src/embeds.generated.tsx`` — one component per filled slot
+    (composition spec §4 step 6). Each embed is imported from
+    ``<package>/<subpath>`` and mounted with its declared ``props``; an embed
+    that ``opens`` a nav entry gets ``onOpen`` navigating to that entry's
+    path in this project's route plan.
+
+    Returns the source and the notes for any ``opens`` the plan cannot route
+    (the embed then mounts without ``onOpen`` rather than with a dead link).
+    """
+    notes: list[str] = []
+    imports: dict[str, set[str]] = {}
+    openers: list[str] = []
+    components: list[str] = []
+    needs_navigate = False
+
+    for slot, embeds in filled.items():
+        body: list[str] = []
+        for embed in embeds:
+            comp = embed["component"]
+            imports.setdefault(f'{embed["_package"]}/{comp["subpath"]}', set()).add(
+                comp["export"]
+            )
+            element = f'<{comp["export"]}{_jsx_props(embed.get("props"))} />'
+            target = embed.get("opens")
+            if target:
+                path = paths.get(target)
+                if path is None:
+                    notes.append(
+                        f"embed {embed['id']} opens {target}, which this project "
+                        "does not route; it is mounted without onOpen"
+                    )
+                else:
+                    needs_navigate = True
+                    opener = f'{_pascal(embed["id"])}Embed'
+                    openers.extend([
+                        f"function {opener}(): ReactElement {{",
+                        "  const navigate = useNavigate();",
+                        "  return (",
+                        f'    <{comp["export"]}{_jsx_props(embed.get("props"))}',
+                        "      onOpen={() => {",
+                        f"        void navigate({json.dumps(path)});",
+                        "      }}",
+                        "    />",
+                        "  );",
+                        "}",
+                        "",
+                    ])
+                    element = f"<{opener} />"
+            body.extend([
+                f'      <span data-testid="embed-{embed["id"]}">',
+                f"        {element}",
+                "      </span>",
+            ])
+        components.extend([
+            f"/** The `{slot}` slot. */",
+            f"export function {slot_component_name(slot)}(): ReactElement {{",
+            "  return (",
+            "    <>",
+            *body,
+            "    </>",
+            "  );",
+            "}",
+            "",
+        ])
+
+    lines = [
+        "/**",
+        " * GENERATED — the shell's slot contents for this composition",
+        " * (stapel.composition.json). Each embed is declared by its own pair",
+        " * under `embeds` in its nav manifest; change the selection with",
+        " * --modules / --shell / --slot and re-scaffold rather than editing here.",
+        " */",
+        'import type { ReactElement } from "react";',
+    ]
+    if needs_navigate:
+        lines.append('import { useNavigate } from "react-router";')
+    for module, names in imports.items():
+        lines.append(f'import {{ {", ".join(sorted(names))} }} from "{module}";')
+    lines.append("")
+    lines.extend(openers)
+    lines.extend(components)
+    return "\n".join(lines), notes
 
 
 # ``frontend/src/ProtectedRoute.tsx`` — plain project source (like APP_TSX,
@@ -1541,6 +1687,33 @@ describe("nav gate", () => {
   });
 });
 """
+
+
+# The nav gate plus the slot assertion, used only when the scaffold wrote
+# `embeds.generated.tsx`: every slot the composition fills has its component.
+NAV_GATE_EMBEDS_TEST_TS = NAV_GATE_TEST_TS.replace(
+    'import { router } from "../routes.js";\n',
+    'import { router } from "../routes.js";\n'
+    'import * as embeds from "../embeds.generated.js";\n'
+    'import composition from "../../stapel.composition.json";\n',
+).replace(
+    "    expect(linked.filter((path) => !mounted.has(path))).toEqual([]);\n  });\n",
+    "    expect(linked.filter((path) => !mounted.has(path))).toEqual([]);\n  });\n"
+    "\n"
+    '  it("exports a component for every slot the composition fills", () => {\n'
+    "    const exported: Record<string, unknown> = { ...embeds };\n"
+    "    const component = (slot: string): string =>\n"
+    "      slot\n"
+    "        .split(/[._-]/)\n"
+    "        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))\n"
+    '        .join("");\n'
+    "    const filled = Object.keys(composition.shell.slots);\n"
+    "    expect(filled.length).toBeGreaterThan(0);\n"
+    "    expect(\n"
+    '      filled.filter((slot) => typeof exported[component(slot)] !== "function")\n'
+    "    ).toEqual([]);\n"
+    "  });\n",
+)
 
 
 # The landing page of a selection with no react pair: no i18n engine is

@@ -1,5 +1,55 @@
 # Changelog
 
+## [0.72.0] — 2026-10-15
+
+Minor: the shell is a composition parameter — which chrome the SPA gets and
+what the installed pairs put into its slots (top-bar bell, language switcher)
+is decided by the scaffold from the pairs' own declarations.
+
+- `stapel-create-project --shell topbar-sidenav|topbar-only|sidenav-only`
+  (default `topbar-sidenav`; monolith only). `topbar-only` is refused for
+  the monolith with the queue item named (`monolith --shell topbar-only`;
+  the storefront generator already emits that chrome) and `sidenav-only` is
+  refused as queued. The template table mirrors `@stapel/shell-react`'s
+  `shell-templates.json` and a test compares the two.
+- `--slot SLOT=EMBED|none`, repeatable: picks the embed for a
+  single-capacity slot or silences a slot. A bogus slot lists the
+  template's slots, a bogus embed lists the offered ones, and two embeds on
+  a single-capacity slot without a choice is an error with the pick/none
+  hint — never a silent first-wins. Member-only embeds are dropped, with a
+  printed note, when nothing gates the shell. `assemble_scaffold` takes
+  `shell` and `slots` and passes them through.
+- `FRONTEND_REACT_LIBS` mirrors each pair's `embeds` (notifications' bell,
+  translate's language switcher), and `check_nav_manifest_sync.py` compares
+  them with the real `nav-manifest.json`: an embed on one side only is drift.
+- `frontend/src/embeds.generated.tsx`: one component per filled slot
+  (`TopbarEnd`), each embed imported from its pair and mounted with its
+  declared props; an embed that opens a nav entry navigates to that entry's
+  routed path. `AppChrome` passes them as `slots` when the pinned shell is
+  at or above 0.20.0. A selection that fills no slot gets exactly the
+  container it got before.
+- `frontend/stapel.composition.json` records the composition as the
+  scaffold understood it (template, filled slots, `--slot` choices, dropped
+  embeds, auth model and gate, theme, modules); the generated nav gate
+  checks that every slot it names has a component.
+- Pins: `@stapel/core` 0.30.0, `@stapel/shell-react` 0.20.0,
+  notifications-react 0.13.0, translate-react 0.3.0, workspaces-react
+  0.21.0, auth-react 0.26.0, recordings-react 0.11.1 (the one the
+  stale-pin gate named).
+- `CFG008` (stapel-config-lint, so every library's pre-push and CI via
+  stapel-verify): a CONFIG.MD row whose source is outside `env`, `vault`,
+  `settings` is an error naming the key, the bad value and the accepted set.
+  stapel-core's manifest reader refuses such a row at boot, which made every
+  project installing the library fail `manage.py check`. The CONFIG.MD parser
+  can now collect such rows instead of stopping at the first one.
+- The generated projects' stapel-core pin stays at 0.91.0 for now
+  (`stapel-core>=0.91.0,<0.92`, the next-minor ceiling every stapel-*
+  requirement uses): the core that accepts `settings` ships as 0.92.1, which
+  the index does not serve yet, and 0.92.0 still accepts only `env` and
+  `vault`. Until the pin moves to 0.92.1 (`>=0.92.1,<0.93`), the `settings`
+  rows stapel-cdn, stapel-vocabularies and stapel-agent ship fail
+  `manage.py check`.
+
 ## [0.71.0] — 2026-10-15
 
 Minor: the scaffold assembles a working application from parameters —

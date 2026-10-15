@@ -160,8 +160,19 @@ def _parse_default(value: str) -> Optional[str]:
     return None if token.lower() in _NO_DEFAULT else token
 
 
-def parse_config_md(source: str | Path, *, path_label: str | None = None) -> list[ConfigEntry]:
-    """Parse a CONFIG.MD (path or text) into an ordered list of entries."""
+def parse_config_md(
+    source: str | Path,
+    *,
+    path_label: str | None = None,
+    bad_sources: list[tuple[int, str, str]] | None = None,
+) -> list[ConfigEntry]:
+    """Parse a CONFIG.MD (path or text) into an ordered list of entries.
+
+    A row whose source is outside ``env|vault|settings`` raises
+    ``ConfigManifestError`` — unless *bad_sources* is given, in which case the
+    row is recorded there as ``(line, key, source)`` and skipped, so a linter
+    can report every such row instead of stopping at the first.
+    """
     if isinstance(source, Path):
         text = source.read_text(encoding="utf-8")
         label = path_label or str(source)
@@ -223,6 +234,9 @@ def parse_config_md(source: str | Path, *, path_label: str | None = None) -> lis
             continue
         source_val = _cell(_get("source")).lower()
         if source_val not in _SOURCES:
+            if bad_sources is not None:
+                bad_sources.append((lineno, key, source_val))
+                continue
             raise ConfigManifestError(
                 f"{label}:{lineno}: config key {key!r} has source {source_val!r}; "
                 f"expected one of {', '.join(_SOURCES)}."

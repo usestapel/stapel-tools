@@ -71,6 +71,14 @@ guards is worse than no gate, because it is believed.
   package no longer publishes, and every scaffolded project keeps mounting
   routes for screens that are not there.
 
+``embeds`` are compared on every registered pair, nav or not
+------------------------------------------------------------
+The mirror's ``embeds`` (composition spec §3) against the real file's
+``embeds``, as parsed JSON: absent on both sides is in sync, any other
+difference — including a pair that started offering embeds the registry never
+mirrored — is a **FAILURE**. An embed the mirror lacks is a bell no generated
+shell mounts; one the pair dropped is an import of an export that is gone.
+
 ``--registry`` also walks the WHOLE pin table, not only the nav-mirror one
 --------------------------------------------------------------------------
 Everything above only ever reaches a pair THROUGH its nav mirror — which
@@ -295,6 +303,16 @@ def check(
         mirrored_entries = info.get("nav")
         real = _load_real_manifest(packages, key, info["package"])
         real_published = bool((real or {}).get("entries"))
+        mirrored_embeds = info.get("embeds")
+        real_embeds = (real or {}).get("embeds")
+        if mirrored_embeds != real_embeds:
+            mismatches.append(
+                f"{key}: mirrored \"embeds\" differ from the real "
+                f"{packages / f'{key}-react' / 'nav-manifest.json'} "
+                "(absent on one side counts as a difference):\n"
+                f"  mirror: {json.dumps(mirrored_embeds, indent=2, sort_keys=True)}\n"
+                f"  real:   {json.dumps(real_embeds, indent=2, sort_keys=True)}"
+            )
         if not mirrored_entries:
             # The blind spot this gate had: iterating the MIRRORS meant a pair
             # that grew a nav surface the registry never mirrored was not

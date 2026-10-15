@@ -120,6 +120,13 @@ CFG007  (error) **In a service checkout**, the project mounts Stapel JWT
         already carries one on its star-import (for F403) and honouring it as a
         blanket would switch this rule off exactly where it belongs.
 
+CFG008  (error) A CONFIG.MD row names a source outside ``env``, ``vault``,
+        ``settings``. stapel-core's config manifest reader refuses such a row
+        with ``ConfigManifestError`` at boot, so a library shipping one makes
+        every project that installs it fail ``manage.py check``. The hint
+        names the row's key, the bad value and the accepted set. Runs in every
+        checkout that has a CONFIG.MD, library or project.
+
 ``os.environ.setdefault(...)`` is a write, not a read (manage.py / wsgi set
 DJANGO_SETTINGS_MODULE that way) and is never flagged.
 
@@ -141,7 +148,7 @@ from pathlib import Path
 from typing import Iterable, Optional
 
 from . import escape
-from .config_manifest import CONFIG_MD, ConfigEntry, parse_config_md
+from .config_manifest import _SOURCES, CONFIG_MD, ConfigEntry, parse_config_md
 
 SKIP_DIRS = {
     "__pycache__",
@@ -903,7 +910,18 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
         findings.sort(key=lambda f: (f.path, f.line, f.rule))
         return findings
 
-    entries: list[ConfigEntry] = parse_config_md(config_md)
+    bad_sources: list[tuple[int, str, str]] = []
+    entries: list[ConfigEntry] = parse_config_md(config_md, bad_sources=bad_sources)
+
+    # ------------------------------------------------------------------ CFG008
+    for lineno, key, source in bad_sources:
+        findings.append(Finding(
+            str(config_md), lineno, "CFG008",
+            f"'{key}' declares source {source!r} in {CONFIG_MD}; accepted: "
+            f"{', '.join(_SOURCES)}. stapel-core's config manifest reader "
+            f"refuses any other value at boot, so every project installing "
+            f"this CONFIG.MD fails manage.py check",
+        ))
     declared = {e.key: e for e in entries}
     read_keys = {r.key for r in reads}
     settings_read_keys = {r.key for r in reads if r.in_settings}
