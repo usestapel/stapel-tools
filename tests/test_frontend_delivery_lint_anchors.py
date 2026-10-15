@@ -4,7 +4,7 @@ import re
 import pytest
 
 from stapel_tools import frontend_delivery_lint as fdl
-from tests.test_frontend_delivery_lint import (
+from test_frontend_delivery_lint import (
     CANON_COMPOSE,
     CANON_CONF,
     INCIDENT_FILES,

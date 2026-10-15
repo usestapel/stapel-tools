@@ -664,7 +664,7 @@ FRONTEND_REACT_LIBS = {
     "attributes": {
         # L0 — no client, no provider, no runtime. See the dict docstring.
         "package": "@stapel/attributes-react",
-        "version": "0.17.0",
+        "version": "0.18.0",
         "register_i18n": "registerAttributesI18n",
     },
     "billing": {
@@ -728,7 +728,7 @@ FRONTEND_REACT_LIBS = {
     },
     "categories": {
         "package": "@stapel/categories-react",
-        "version": "0.34.0",
+        "version": "0.35.0",
         "provider": "CategoriesProvider",
         "create_runtime": "createCategoriesRuntime",
         "register_i18n": "registerCategoriesI18n",
@@ -772,7 +772,7 @@ FRONTEND_REACT_LIBS = {
     },
     "chat": {
         "package": "@stapel/chat-react",
-        "version": "0.22.0",
+        "version": "0.23.0",
         "provider": "ChatProvider",
         "create_runtime": "createChatRuntime",
         "register_i18n": "registerChatI18n",
@@ -834,7 +834,7 @@ FRONTEND_REACT_LIBS = {
         # (NAV_ENTRY_MOUNTS route_params), and all three hang from the
         # container-owned `account.root`.
         "package": "@stapel/forms-react",
-        "version": "0.4.0",
+        "version": "0.4.1",
         "provider": "FormsProvider",
         "create_runtime": "createFormsRuntime",
         "register_i18n": "registerFormsI18n",
@@ -955,7 +955,7 @@ FRONTEND_REACT_LIBS = {
         # reads its answer. It reaches a container through the composite
         # seam below, never as a panel tile.
         "package": "@stapel/geo-react",
-        "version": "0.6.0",
+        "version": "0.7.1",
         "provider": "GeoProvider",
         "create_runtime": "createGeoRuntime",
         "register_i18n": "registerGeoI18n",
@@ -968,7 +968,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.38.0",
+        "version": "0.39.0",
         "provider": "ListingsProvider",
         "create_runtime": "createListingsRuntime",
         "register_i18n": "registerListingsI18n",
@@ -1227,7 +1227,7 @@ FRONTEND_REACT_LIBS = {
     },
     "recordings": {
         "package": "@stapel/recordings-react",
-        "version": "0.9.0",
+        "version": "0.11.0",
         "provider": "RecordingsProvider",
         "create_runtime": "createRecordingsRuntime",
         "register_i18n": "registerRecordingsI18n",
