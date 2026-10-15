@@ -2134,8 +2134,12 @@ class TestDevSettingsSatisfyCoreConfigCheck:
     def test_seed_runs_before_base_and_only_when_unset(self, monkeypatch):
         full, prelude = self._prelude()
         assert "if not SECRET_KEY:" not in full
-        monkeypatch.delenv("SECRET_KEY", raising=False)
-        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+        # setenv first so monkeypatch records both keys and the seeded values
+        # are removed again at teardown (delenv of an absent key records
+        # nothing, and a leaked placeholder breaks later boot-smoke tests).
+        for key in ("SECRET_KEY", "JWT_SECRET_KEY"):
+            monkeypatch.setenv(key, "")
+            monkeypatch.delenv(key)
         exec(compile(prelude, "dev.py", "exec"), {})
         import os
 
@@ -2145,7 +2149,8 @@ class TestDevSettingsSatisfyCoreConfigCheck:
     def test_an_exported_secret_wins(self, monkeypatch):
         _, prelude = self._prelude()
         monkeypatch.setenv("SECRET_KEY", "exported")
-        monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+        monkeypatch.setenv("JWT_SECRET_KEY", "")
+        monkeypatch.delenv("JWT_SECRET_KEY")
         exec(compile(prelude, "dev.py", "exec"), {})
         import os
 
