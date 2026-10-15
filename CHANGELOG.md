@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.72.3] — 2026-10-15
+
+Patch: generated projects can build from your own registry's Python base
+instead of Docker Hub.
+
+- `stapel-create-project --base-image REF` (also `$STAPEL_BASE_IMAGE`; the
+  flag wins) sets the `FROM` of every generated Python service Dockerfile,
+  both stages of the libvips template included. `stapel-assemble` takes the
+  same flag. Default unchanged: `python:3.12-slim` / `-trixie`.
+- A custom base is assumed to run as a non-root user (uid 10001), so each
+  rewritten stage opens with `USER root` for the apt lines and the final stage
+  returns to `USER 10001` before the service starts. Without the flag the
+  Dockerfiles are byte-identical. The SPA's node Dockerfile is untouched.
+
 ## [0.72.2] — 2026-10-15
 
 Patch: a generated monolith passes its own Tier-0 gates (eslint with every

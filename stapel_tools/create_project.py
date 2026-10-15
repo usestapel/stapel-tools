@@ -25,6 +25,7 @@ Usage (non-interactive):
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -3627,6 +3628,53 @@ def _write_env_from_ctx(project_dir: Path, ctx: dict):
 # ---------------------------------------------------------------------------
 
 
+BASE_IMAGE_ENV = "STAPEL_BASE_IMAGE"
+_PY_FROM_RE = re.compile(r"^FROM\s+python:\S+(?P<rest>(?:\s+AS\s+\S+)?)\s*$", re.IGNORECASE)
+
+
+def resolve_base_image(base_image: str | None = None) -> str | None:
+    """The ``--base-image`` ref, else ``$STAPEL_BASE_IMAGE``, else ``None``
+    (generated Dockerfiles keep their public ``python:`` default)."""
+    ref = (base_image or os.environ.get(BASE_IMAGE_ENV) or "").strip()
+    if not ref:
+        return None
+    if re.search(r"\s", ref):
+        raise ValueError(f"base image ref must not contain whitespace: {ref!r}")
+    return ref
+
+
+def apply_base_image(project_dir: Path, ref: str) -> list[Path]:
+    """Point every generated Python service Dockerfile at ``ref``.
+
+    A prebuilt base runs as a non-root user (uid 10001), so each rewritten
+    stage starts with ``USER root`` (the apt lines need it) and the final stage
+    drops back to ``USER 10001`` before the service starts. Dockerfiles that
+    do not start from ``python:`` (the SPA's node image) are left alone.
+    """
+    changed: list[Path] = []
+    for path in sorted(project_dir.rglob("Dockerfile")):
+        if "node_modules" in path.parts or ".git" in path.parts:
+            continue
+        lines = path.read_text(encoding="utf-8").splitlines()
+        py_from = [i for i, ln in enumerate(lines) if _PY_FROM_RE.match(ln)]
+        if not py_from:
+            continue
+        last_from = max(i for i, ln in enumerate(lines) if ln.upper().startswith("FROM "))
+        final_is_python = last_from in py_from
+        out: list[str] = []
+        for i, ln in enumerate(lines):
+            m = _PY_FROM_RE.match(ln)
+            if m:
+                out += [f"FROM {ref}{m.group('rest')}", "USER root"]
+            elif final_is_python and i > last_from and ln.startswith("ENV DJANGO_SETTINGS_MODULE"):
+                out += ["USER 10001", ln]
+            else:
+                out.append(ln)
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        changed.append(path)
+    return changed
+
+
 def create_project(
     name: str,
     project_type: str,
@@ -3650,9 +3698,16 @@ def create_project(
     theme: str | None = None,
     shell: str | None = None,
     slots: dict[str, str] | None = None,
+    base_image: str | None = None,
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        base_image_ref = resolve_base_image(base_image)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
     broker = broker or BROKER_DEFAULTS[project_type]
@@ -3907,6 +3962,9 @@ def create_project(
 
     _write_env_from_ctx(project_dir, ctx)
 
+    if base_image_ref:
+        apply_base_image(project_dir, base_image_ref)
+
     if is_git and (project_dir / ".gitmodules").exists():
         subprocess.run(["git", "add", "."], cwd=project_dir, capture_output=True)
         subprocess.run(
@@ -4132,6 +4190,12 @@ def main():
              "modules claim a single-capacity slot), or none to silence it. "
              "Repeatable, e.g. --slot topbar.end=none. Monolith only.",
     )
+    parser.add_argument(
+        "--base-image", metavar="REF", default=None,
+        help="FROM of every generated Python service Dockerfile (also read "
+             f"from ${BASE_IMAGE_ENV}). Default: the public python:3.12-slim "
+             "image. Use it to build from your own registry's base.",
+    )
     args = parser.parse_args()
     from ._shell_slots import parse_slot_args
 
@@ -4220,6 +4284,7 @@ def main():
         theme=args.theme,
         shell=args.shell,
         slots=slot_choices,
+        base_image=args.base_image,
     )
 
 

@@ -216,6 +216,7 @@ def assemble_scaffold(
     env_preset: str = "standalone",
     shell: str | None = None,
     slots: dict[str, str] | None = None,
+    base_image: str | None = None,
 ) -> AssembleResult:
     """Assemble a project from a slug + a flat list of Stapel lib keys, then
     statically verify it. See module docstring for the full contract.
@@ -290,6 +291,7 @@ def assemble_scaffold(
         env_preset=env_preset,
         shell=shell,
         slots=slots,
+        base_image=base_image,
     )
 
     # Aggregate the connected libs' CONFIG.MD registries into the project's own
@@ -418,6 +420,11 @@ def main(argv: list[str] | None = None) -> int:
         "--slot", action="append", metavar="SLOT=EMBED|none", default=None,
         help="Shell slot choice, repeatable (stapel-create-project --slot).",
     )
+    parser.add_argument(
+        "--base-image", metavar="REF", default=None,
+        help="FROM of every generated Python service Dockerfile "
+        "(stapel-create-project --base-image; also $STAPEL_BASE_IMAGE).",
+    )
     args = parser.parse_args(argv)
 
     from ._shell_slots import parse_slot_args
@@ -449,6 +456,7 @@ def main(argv: list[str] | None = None) -> int:
         env_preset=args.env_preset,
         shell=args.shell,
         slots=slots,
+        base_image=args.base_image,
     )
 
     print(
