@@ -3,22 +3,9 @@ must work right after `docker compose up`, zero manual config).
 
 Two pieces:
 
-1. ``DEV_MOCK_OTP_BLOCK`` — spliced into ``config/settings/dev.py`` (monolith
-   /microservices, via new_service.make_context's DEV_MOCK_PROVIDERS token)
-   and into ``config/settings.py``'s local branch (minimal preset) whenever
-   stapel-auth is among the project's modules. Sets
-   ``STAPEL_AUTH["USE_MOCK_SMS_OTP"/"USE_MOCK_EMAIL_OTP"] = True`` — verified
-   against stapel-auth/otp/services.py: both PhoneVerificationService and
-   EmailVerificationService log the code via
-   ``logger.info(f"Mock OTP mode - Verification code for {phone}: {code}")``
-   when the mock flag is set, so registration/login is completable by
-   reading the dev log, no Twilio/SMTP credentials needed. These two keys
-   are booleans, hence in stapel-auth's AppSettings ``no_env`` list (conf.py)
-   — they CANNOT be set via a plain env var, only via the STAPEL_AUTH dict in
-   settings, which is why this is a settings-file block, not an .env line.
-   stapel-notifications needs NO override: EMAIL_PROVIDER/SMS_PROVIDER
-   already default to "mock" (conf.py DEFAULTS) and its own _MockSMSProvider
-   / _MockEmailProvider already log to `logger.info`.
+1. Mock OTP is not written here: the local settings module declares the
+   deployment posture at stage="prototype" (``_auth_model.render_local_posture``)
+   and stapel-auth (>= 0.38) resolves mock delivery from it, logging the code.
 
 2. ``.env.local`` templates — a COMMITTED dev environment file (owner decision
    revising the first §57 cut: a gitignored .env.local never reaches the next
@@ -68,23 +55,6 @@ ENV_LOCAL_BANNER = """\
 #   - stapel-core's prodguard refuses django-insecure-* SECRET_KEY and the
 #     default postgres password at prod boot (ImproperlyConfigured).
 # Generate a real prod env instead (fresh random secrets — see .env.example).
-"""
-
-DEV_MOCK_OTP_BLOCK = """
-
-# ─── Dev-only mock OTP (§57 owner directive item 2) ─────────────────────────
-# Codes are logged, never sent (stapel_auth/otp/services.py: PhoneVerification
-# -/EmailVerificationService both `logger.info` the code in mock mode) — a
-# fresh checkout can complete registration/login by reading this service's
-# log, no Twilio/SMTP credentials needed. USE_MOCK_SMS_OTP/USE_MOCK_EMAIL_OTP
-# are booleans (stapel_auth AppSettings no_env list) — they can only be set
-# here, never via a plain env var. Merges over any STAPEL_AUTH block already
-# rendered above (module_config), rather than clobbering it.
-STAPEL_AUTH = {
-    **globals().get("STAPEL_AUTH", {}),
-    "USE_MOCK_SMS_OTP": True,
-    "USE_MOCK_EMAIL_OTP": True,
-}
 """
 
 # Dev-only escape hatch for stapel-billing (E104): a generated project that

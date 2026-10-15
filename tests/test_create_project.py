@@ -1,10 +1,10 @@
 """Generator tests — per-primitive broker selection (--task-broker)."""
 import json
+import re
+import shutil
 import subprocess
 import sys
 
-import re
-import shutil
 import pytest
 from siblings import requires
 
@@ -683,8 +683,9 @@ class TestModuleConfig:
         proj = self._create(tmp_path, "app", "minimal", self.AUTH_CONFIG)
         settings = (proj / "config" / "settings.py").read_text()
         assert self.AUTH_BLOCK in settings
-        # exactly one block, only the provided keys
-        assert settings.count("STAPEL_AUTH") == 1
+        # exactly one rendered block (the posture spread below merges over it),
+        # only the provided keys
+        assert settings.count("STAPEL_AUTH = {\n") == 1
         assert "AUTH_PHONE_LOGIN" not in settings
         assert "{{STAPEL_MODULE_CONFIG}}" not in settings
 
@@ -732,7 +733,7 @@ class TestModuleConfig:
 
         assert tree(a) == tree(b)
         settings = (a / "config" / "settings.py").read_text()
-        assert "STAPEL_AUTH" not in settings
+        assert "STAPEL_AUTH = {\n" not in settings
         assert "{{STAPEL_MODULE_CONFIG}}" not in settings
 
     def test_config_for_unselected_module_is_hard_error(self, tmp_path):
@@ -1039,7 +1040,9 @@ class TestCdnAutoWiring:
     def test_cdn_requirements_line_present_with_images_extra(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
         reqs = (proj / "svc-app" / "requirements.txt").read_text()
-        assert "stapel-cdn[images]>=0.5.1,<0.6" in reqs
+        pin = STAPEL_LIBS["cdn"]["pin"]
+        major, minor = pin.split(".")[:2]
+        assert f"stapel-cdn[images]>={pin},<{major}.{int(minor) + 1}" in reqs
 
     def test_cdn_dockerfile_gets_libvips_multistage_build(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
@@ -1103,10 +1106,18 @@ class TestCdnAutoWiring:
         of the auto-wiring — same Dockerfile, no STAPEL_CDN/STAPEL_PROFILES
         block, no cdn requirements line, no cdn url mount."""
         from stapel_tools._templates import DOCKERFILE
+        from stapel_tools.create_project import _VENDORED_CORE_COPY
 
         proj = _create(tmp_path, "app", "monolith", modules=["core", "profiles"])
         dockerfile = (proj / "svc-app" / "Dockerfile").read_text()
-        assert dockerfile == DOCKERFILE.replace("{{DIR}}", "svc-app")
+        # pip mode (no submodules): the vendored-core COPY is dropped, nothing else
+        expected = DOCKERFILE.replace("{{DIR}}", "svc-app")
+        assert _VENDORED_CORE_COPY in expected
+        assert dockerfile.replace(
+            "# Stapel libraries, stapel_core included, install from PyPI\n"
+            "# (requirements.txt); no vendored checkout.\n",
+            _VENDORED_CORE_COPY,
+        ) == expected
         settings = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
         assert "STAPEL_CDN" not in settings
         assert "STAPEL_PROFILES" not in settings

@@ -140,13 +140,13 @@ class TestRegistryPins:
         assert "git+" not in reqs
         assert "@v" not in reqs
 
-    def test_ahead_of_pypi_lib_is_not_rendered_as_a_working_git_ref(self, tmp_path):
+    def test_ahead_of_pypi_lib_is_not_rendered_as_a_working_git_ref(self, tmp_path, monkeypatch):
         # vault is ahead of / not yet on PyPI (owner publishes separately) —
         # a `name @ git+...` line would look like a working pin when no vX.Y.Z
         # tag exists upstream for these local-only fixes. The honest,
         # actually-installable-today line is an editable sibling checkout, not
         # a git ref.
-        assert STAPEL_LIBS["vault"]["ahead_of_pypi"] is True
+        monkeypatch.setitem(STAPEL_LIBS, "vault", {**STAPEL_LIBS["vault"], "ahead_of_pypi": True})
         result = assemble_scaffold(
             "app", libs=["vault"], output_dir=tmp_path, verify=False
         )
@@ -358,6 +358,15 @@ class TestAuthSubfeatureAxes:
             )
 
 
+def _range(key: str) -> str:
+    pin = STAPEL_LIBS[key]["pin"]
+    major, minor = pin.split(".")[:2]
+    return f">={pin},<{major}.{int(minor) + 1}"
+
+
+_AUTH_RANGE = _range("auth")
+
+
 class TestAuthPipExtras:
     """§20 visibility gap (owner, 2026-07-11): auth is one PyPI package, but
     axes whose feature needs an external dependency (stapel-auth/pyproject.toml
@@ -376,7 +385,7 @@ class TestAuthPipExtras:
             output_dir=tmp_path, verify=False,
         )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert "stapel-auth[oauth]>=0.5.4,<0.6" in reqs
+        assert f"stapel-auth[oauth]{_AUTH_RANGE}" in reqs
 
     def test_phone_axis_adds_phone_extra(self, tmp_path):
         result = assemble_scaffold(
@@ -385,7 +394,7 @@ class TestAuthPipExtras:
             output_dir=tmp_path, verify=False,
         )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert "stapel-auth[phone]>=0.5.4,<0.6" in reqs
+        assert f"stapel-auth[phone]{_AUTH_RANGE}" in reqs
 
     def test_saml_axis_adds_saml_extra(self, tmp_path):
         result = assemble_scaffold(
@@ -394,7 +403,7 @@ class TestAuthPipExtras:
             output_dir=tmp_path, verify=False,
         )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert "stapel-auth[saml]>=0.5.4,<0.6" in reqs
+        assert f"stapel-auth[saml]{_AUTH_RANGE}" in reqs
 
     def test_multiple_dep_bearing_axes_produce_sorted_deduped_extras(self, tmp_path):
         result = assemble_scaffold(
@@ -407,7 +416,7 @@ class TestAuthPipExtras:
             output_dir=tmp_path, verify=False,
         )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert "stapel-auth[oauth,phone]>=0.5.4,<0.6" in reqs
+        assert f"stapel-auth[oauth,phone]{_AUTH_RANGE}" in reqs
 
     def test_no_dep_bearing_axis_stays_a_bare_pin(self, tmp_path):
         result = assemble_scaffold(
@@ -416,7 +425,7 @@ class TestAuthPipExtras:
             output_dir=tmp_path, verify=False,
         )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert "stapel-auth>=0.5.4,<0.6" in reqs
+        assert f"stapel-auth{_AUTH_RANGE}" in reqs
         assert "stapel-auth[" not in reqs
 
     def test_no_config_at_all_stays_a_bare_pin(self, tmp_path):
@@ -425,7 +434,7 @@ class TestAuthPipExtras:
         # from module_config renders no settings key either).
         result = assemble_scaffold("app", libs=["auth"], output_dir=tmp_path, verify=False)
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert "stapel-auth>=0.5.4,<0.6" in reqs
+        assert f"stapel-auth{_AUTH_RANGE}" in reqs
         assert "stapel-auth[" not in reqs
 
 

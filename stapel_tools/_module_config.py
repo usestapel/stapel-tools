@@ -454,3 +454,17 @@ def load_module_config_file(path: Path) -> dict[str, dict]:
             '{"<module>": {"SETTING_KEY": value, ...}, ...}'
         )
     return data
+
+
+def inject_unbilled_workspaces(
+    module_config: dict[str, dict] | None, selected: list[str],
+) -> dict[str, dict] | None:
+    """Workspaces' plan ceilings fail closed (stapel_workspaces.E011) unless a
+    billing provider is reachable. A selection without billing sells nothing:
+    the generated settings say so (``ALLOW_UNBILLED``) instead of shipping a
+    project that refuses to boot. An explicit value still wins."""
+    if "workspaces" not in selected or "billing" in selected:
+        return module_config
+    merged = {**(module_config or {})}
+    merged["workspaces"] = {"ALLOW_UNBILLED": True, **(merged.get("workspaces") or {})}
+    return merged

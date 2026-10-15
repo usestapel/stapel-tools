@@ -846,7 +846,7 @@ class TestFrontendReactWiring:
         the frontend — has not moved once."""
         import json
 
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "docs", "translate"])
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "docs"])
         frontend = proj / "frontend"
         assert not (frontend / "src" / "modules.tsx").exists()
         app_tsx = (frontend / "src" / "App.tsx").read_text()
@@ -957,7 +957,7 @@ class TestFrontendNavWiring:
         import stapel_tools._frontend_templates as F
         from stapel_tools._compose_templates import render_tokens
 
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "docs", "translate"])
+        proj = _create(tmp_path, "app", "monolith", modules=["core", "docs"])
         frontend = proj / "frontend"
         app_tsx = (frontend / "src" / "App.tsx").read_text()
         expected_app_tsx = render_tokens(F.APP_TSX, {"SLUG": "app", "TITLE": "App"})

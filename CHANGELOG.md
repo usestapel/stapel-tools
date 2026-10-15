@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.71.0] — 2026-10-15
+
+Minor: the scaffold assembles a working application from parameters —
+the auth model, the posture stage and the colour theme are CLI parameters,
+and a `--no-submodules` monolith installs every library from PyPI.
+
+- `stapel-create-project --auth-model none|anonymous|public|internal`,
+  `--auth-kinds phone,email,password,oauth,magic,sso,passkey,qr` and
+  `--posture prototype|live`. The model renders stapel-core's deployment
+  posture (`public_space` / `private_space(door="invite_only")`) into the
+  inherited settings, states every `AUTH_<KIND>_LOGIN` axis when kinds are
+  given (registration doors stay the posture's), brings the auth module,
+  and decides whether the SPA gets `/login` + the `/app` gate.
+- Mock OTP is the posture's, not a per-service flag: the local settings
+  module declares `stage="prototype"` and stapel-auth (>= 0.38) mocks and
+  logs the code there; base/prod declare `live`. `DEV_MOCK_OTP_BLOCK` and
+  every generated `USE_MOCK_*` line are gone. The minimal preset declares
+  `live` under `DJANGO_ENV=prod` and `prototype` otherwise.
+- `--landing`/`--auth` on a project type without a frontend is an error
+  instead of being silently ignored.
+- `--theme default|ocean|forest|crimson|graphite|amber|<path>`. The
+  generated `stapel.theme.json` is now `@stapel/tokens`' own
+  `theme.default.json` (the old inline copy failed the package's contrast
+  gate with 29 errors); each preset swaps only the brand ramp and is checked
+  against the `stapel-tokens` bin in the test suite (0 errors).
+- Python registry pins raised to the current PyPI releases (they were
+  months stale: stapel-auth 0.5.4 against 0.48.0, stapel-core marked
+  unpublished at 0.44.2). 29 of 31 libraries co-resolve at their newest
+  versions; stapel-booking 0.1.4 and stapel-social 0.1.5 carry ceilings on
+  older siblings and do not resolve next to the current ones.
+- A monolith generated with `--no-submodules` lists every selected library,
+  core included, in the service's `requirements.txt` and no longer copies a
+  vendored `stapel_core` that was never checked out.
+- A selection with workspaces and without billing declares
+  `STAPEL_WORKSPACES["ALLOW_UNBILLED"] = True` instead of booting into
+  `stapel_workspaces.E011`.
+- Frontend: `@stapel/translate-react` is a registered pair (language screen
+  under the account section); stale pins raised (`@stapel/core` 0.29.0,
+  `@stapel/cdn-react` 0.8.0, `@stapel/shell-react` 0.19.1).
+- Frontend gates ship with the app: `eslint.config.js` runs the TypeScript
+  layer and every `@stapel/eslint-plugin` rule at error (`npm run lint`,
+  `--max-warnings=0`), and `src/__tests__/nav.test.ts` (`npm test`) fails
+  when a menu destination has no mounted route.
+- The generated landing page, section landings and staff gate read their
+  copy from `src/i18n/keys.ts` through `t()`; they no longer fail
+  `stapel/no-hardcoded-text`.
+- `CFG001` no longer reports host scripts: a file under `tools/`, `e2e/` or
+  `scripts/` that imports no Django, no `stapel_*` library and no
+  first-party module is not Django code; `# stapel: host-script` in the
+  first ten lines exempts a file anywhere.
+- `FED005`: the compose reader resolves YAML anchors, aliases and merge keys
+  (`<<: *a`, `<<: [*a, *b]`; explicit keys win, then earlier sources), so a
+  compose file using them is checked instead of reported as unverified. An
+  undefined alias is still FED005.
+
 ## [0.70.1] — 2026-09-20
 
 Patch: the new hook tests were green on the author's laptop and red on every

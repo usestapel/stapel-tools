@@ -96,7 +96,7 @@ FED005  (error) **Something on the delivery path could not be read, so no
         a variable or is not absolute; a conf that does not parse; a
         server/http-level ``include`` that could contribute locations we never
         saw; a mount whose source is a variable; a compose file that does not
-        parse, or that uses YAML anchors / merge keys / an unresolvable
+        parse, or that uses an undefined YAML alias / an unresolvable
         ``extends`` for a service this gate depends on.
 
         Why error and not a quiet skip: a conservative skip is a
@@ -131,9 +131,12 @@ What this deliberately does NOT check
   runtime dependencies on purpose (see ``config_manifest.py``), so PyYAML is
   not available and this module parses the compose subset it needs with an
   indentation reader: mappings, block sequences, scalars, block scalars,
-  quoted values, ``include:``, and one-level-at-a-time ``extends:``. It does
-  NOT implement anchors, merge keys, flow mappings, or multi-document files —
-  every one of those is reported as FED005 rather than skipped.
+  quoted values, ``include:``, one-level-at-a-time ``extends:``, anchors
+  (``&name``), aliases (``*name``) and merge keys (``<<: *name`` /
+  ``<<: [*a, *b]``; explicit keys win, earlier merge sources win). Merged
+  nodes keep the line numbers of their anchor's definition. It does NOT
+  implement flow mappings or multi-document files, and an undefined alias is
+  an error — each of those is reported as FED005 rather than skipped.
 * Which compose file belongs to which stand. Mounts are unioned across all
   discovered compose files (minus ``*local*`` for FED002), because a stapel
   project's nginx service is routinely assembled from ``include:``d bases plus
@@ -196,6 +199,9 @@ class YamlNode:
     value: Optional[str] = None
     mapping: dict = field(default_factory=dict)
     sequence: list = field(default_factory=list)
+    anchor: Optional[str] = None
+    alias: Optional[str] = None
+    merges: list = field(default_factory=list)
 
     def get(self, key: str) -> Optional["YamlNode"]:
         return self.mapping.get(key)
@@ -220,6 +226,10 @@ class ComposeParseError(ValueError):
 
 _KEY_RE = re.compile(r"^([^\s\"'#][^:]*?)\s*:(?:\s+(.*))?$")
 _BLOCK_SCALARS = {"|", ">", "|-", ">-", "|+", ">+"}
+_NAME = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
+_ANCHOR_RE = re.compile(rf"^&({_NAME})(?:\s+(.*))?$")
+_ALIAS_RE = re.compile(rf"^\*({_NAME})$")
+_MERGE_KEY = "<<"
 
 
 def _strip_comment(text: str) -> str:
@@ -266,6 +276,42 @@ def _physical_lines(src: str) -> list[tuple[int, str, int]]:
     return rows
 
 
+def _split_anchor(value: str) -> tuple[Optional[str], str]:
+    match = _ANCHOR_RE.match(value)
+    if match:
+        return match.group(1), (match.group(2) or "").strip()
+    return None, value
+
+
+def _inline(value: str, number: int, anchor: Optional[str]) -> YamlNode:
+    """A one-line value: an alias or a scalar."""
+    match = _ALIAS_RE.match(value)
+    if match:
+        node = YamlNode(line=number, alias=match.group(1))
+    else:
+        node = YamlNode(line=number, value=_unquote(value))
+    node.anchor = anchor
+    return node
+
+
+def _assign(node: YamlNode, key: str, child: YamlNode) -> None:
+    if key == _MERGE_KEY:
+        node.merges.append(child)
+    else:
+        node.mapping[key] = child
+
+
+def _flow_merges(value: str, number: int) -> list[YamlNode]:
+    """``[*a, *b]`` after a merge key."""
+    nodes = []
+    for part in value[1:-1].split(","):
+        match = _ALIAS_RE.match(part.strip())
+        if not match:
+            raise ComposeParseError(f"line {number}: merge list item is not an alias: {part.strip()!r}")
+        nodes.append(YamlNode(line=number, alias=match.group(1)))
+    return nodes
+
+
 def _parse_rows(rows: list[tuple[int, str, int]], start: int, indent: int) -> tuple[YamlNode, int]:
     node = YamlNode(line=rows[start][2] if start < len(rows) else 0)
     index = start
@@ -283,17 +329,25 @@ def _parse_rows(rows: list[tuple[int, str, int]], start: int, indent: int) -> tu
                 # deeper-indented lines that follow.
                 item = YamlNode(line=number)
                 key = _unquote(match.group(1))
-                value = (match.group(2) or "").strip()
+                anchor, value = _split_anchor((match.group(2) or "").strip())
                 if value:
-                    item.mapping[key] = YamlNode(line=number, value=_unquote(value))
+                    _assign(item, key, _inline(value, number, anchor))
                     child, index = _parse_rows(rows, index, row_indent + 2)
                     item.mapping.update(child.mapping)
+                    item.merges.extend(child.merges)
                 else:
                     child, index = _parse_rows(rows, index, row_indent + 2)
-                    item.mapping[key] = child
+                    child.anchor = anchor
+                    _assign(item, key, child)
                 node.sequence.append(item)
             else:
-                node.sequence.append(YamlNode(line=number, value=_unquote(item_text)))
+                anchor, item_text = _split_anchor(item_text)
+                if item_text:
+                    node.sequence.append(_inline(item_text, number, anchor))
+                else:
+                    child, index = _parse_rows(rows, index, row_indent + 2)
+                    child.anchor = anchor
+                    node.sequence.append(child)
             continue
 
         if text == "-":
@@ -306,35 +360,64 @@ def _parse_rows(rows: list[tuple[int, str, int]], start: int, indent: int) -> tu
         if not match:
             raise ComposeParseError(f"line {number}: not a key or a list item: {text!r}")
         key = _unquote(match.group(1))
-        value = (match.group(2) or "").strip()
+        anchor, value = _split_anchor((match.group(2) or "").strip())
         index += 1
         if value in _BLOCK_SCALARS:
             chunk: list[str] = []
             while index < len(rows) and rows[index][0] > row_indent:
                 chunk.append(rows[index][1])
                 index += 1
-            node.mapping[key] = YamlNode(line=number, value="\n".join(chunk))
+            _assign(node, key, YamlNode(line=number, value="\n".join(chunk), anchor=anchor))
             continue
         if value:
-            node.mapping[key] = YamlNode(line=number, value=_unquote(value))
+            if key == _MERGE_KEY and value.startswith("[") and value.endswith("]"):
+                node.merges.extend(_flow_merges(value, number))
+            else:
+                _assign(node, key, _inline(value, number, anchor))
             continue
         child, index = _parse_rows(rows, index, row_indent + 1)
         child.line = number
-        node.mapping[key] = child
+        child.anchor = anchor
+        _assign(node, key, child)
     return node, index
+
+
+def _resolve(node: YamlNode, anchors: dict) -> YamlNode:
+    """Replace aliases with their anchored nodes and apply merge keys, in
+    document order (an alias must follow its anchor)."""
+    if node.alias is not None:
+        target = anchors.get(node.alias)
+        if target is None:
+            raise ComposeParseError(f"line {node.line}: undefined YAML alias *{node.alias}")
+        return target
+    for key, child in list(node.mapping.items()):
+        node.mapping[key] = _resolve(child, anchors)
+    node.sequence = [_resolve(child, anchors) for child in node.sequence]
+    if node.merges:
+        merged: dict = {}
+        for source in node.merges:
+            source = _resolve(source, anchors)
+            parts = source.sequence if source.sequence and not source.mapping else [source]
+            for part in parts:
+                if part.value is not None or (part.sequence and not part.mapping):
+                    raise ComposeParseError(f"line {source.line}: merge source is not a mapping")
+                for key, child in part.mapping.items():
+                    merged.setdefault(key, child)
+        merged.update(node.mapping)
+        node.mapping = merged
+        node.merges = []
+    if node.anchor is not None:
+        anchors[node.anchor] = node
+    return node
 
 
 def parse_yaml_subset(src: str) -> YamlNode:
     """Parse the compose subset this gate reads. Raises ComposeParseError."""
-    if re.search(r"(^|\s)<<\s*:", src, re.MULTILINE):
-        raise ComposeParseError("YAML merge key `<<:` is not resolved by this reader")
-    if re.search(r"(^|\s)[&*][A-Za-z0-9_][A-Za-z0-9_.-]*(\s|$)", src, re.MULTILINE):
-        raise ComposeParseError("YAML anchors/aliases are not resolved by this reader")
     rows = _physical_lines(src)
     if not rows:
         return YamlNode(line=1)
     root, _ = _parse_rows(rows, 0, 0)
-    return root
+    return _resolve(root, {})
 
 
 # ---------------------------------------------------------------------------

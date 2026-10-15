@@ -769,12 +769,10 @@ class TestUnreadableIsLoud:
         assert len(findings) == 1
         assert "variable" in findings[0].message
 
-    def test_compose_with_yaml_anchors_is_reported(self, tmp_path):
+    def test_compose_with_undefined_yaml_alias_is_reported(self, tmp_path):
         target = project(tmp_path, {
             "nginx/prod.conf": CANON_CONF,
             "docker-compose.prod.yml": (
-                "x-common: &common\n"
-                "  restart: unless-stopped\n"
                 "services:\n"
                 "  nginx:\n"
                 "    <<: *common\n"
@@ -782,7 +780,7 @@ class TestUnreadableIsLoud:
             ),
         })
         findings = by_rule(fdl.lint_project(target), "FED005")
-        assert findings and "merge key" in findings[0].message
+        assert findings and "undefined YAML alias" in findings[0].message
 
     def test_no_root_in_effect_anywhere(self, tmp_path):
         conf = "server {\n  location / {\n    try_files $uri /index.html;\n  }\n}\n"

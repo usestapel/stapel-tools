@@ -39,6 +39,26 @@ stapel-create-project my-app \
 
 Project types: `monolith` (recommended), `microservices`, `minimal` (no Docker, SQLite).
 
+Composition parameters (monolith; `--auth-model`/`--posture` also minimal):
+
+```bash
+stapel-create-project shop --type monolith --title "Shop" --url https://shop.example \
+    --company-name "Acme" --company-email hi@shop.example \
+    --modules workspaces billing notifications \
+    --auth-model public --auth-kinds phone,email,password \
+    --theme ocean --landing --no-submodules
+```
+
+- `--auth-model none|anonymous|public|internal` — who gets an account; renders
+  stapel-core's deployment posture and decides the SPA's `/login` + `/app` gate.
+- `--auth-kinds` — sign-in methods (`phone,email,password,oauth,magic,sso,passkey,qr`).
+- `--posture prototype|live` — stage of the inherited settings (default `live`);
+  local settings are always `prototype`, where OTP is mocked and logged.
+- `--theme default|ocean|forest|crimson|graphite|amber|<path>` — colour theme.
+
+The generated frontend carries its gates: `npm run lint` (every stapel rule at
+error), `npm test` (nav gate), `npm run build`, `npm run gen:tokens:check`.
+
 ### `stapel-new-service` — add a service to an existing project
 
 ```bash

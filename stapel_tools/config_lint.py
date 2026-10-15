@@ -27,6 +27,17 @@ CFG001  (error) A configuration/secret read happens OUTSIDE the settings module
         read elsewhere hides a knob from CONFIG.MD and from ops. Suppress a
         deliberate exception with ``# noqa: CFG001`` on the read's line.
 
+        Scope: Django code only. A file under a ``tools/``, ``e2e/`` or
+        ``scripts/`` directory (any directory component of its path relative
+        to the project root) is a host script, not reported, unless it is
+        Django code: it imports ``django``, ``rest_framework``, ``manage``, a
+        ``stapel_*`` library other than ``stapel_tools``, or a first-party
+        package (a top-level entry of the project root that is not one of
+        those host directories). Relative imports do not count. A file
+        anywhere carrying ``# stapel: host-script`` in its first 10 lines is
+        a host script regardless. Host-script reads still count as reads for
+        the CONFIG.MD rules below.
+
 CFG002  (error) A key IS read in the settings module but has no row in
         CONFIG.MD — an undeclared knob. Add a ``| KEY | env|vault | … |`` row
         (or, if the read is genuinely not configuration, drop it). Skipped with
@@ -189,6 +200,7 @@ class ConfigRead:
     path: str
     line: int
     in_settings: bool
+    host_script: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +220,68 @@ def _walk_py(root: Path) -> Iterable[Path]:
 
 def _is_settings_file(path: Path) -> bool:
     return path.parent.name == "settings" or path.name.startswith("settings")
+
+
+#: directories whose non-Django files are host scripts (CFG001 scope)
+HOST_SCRIPT_DIRS = frozenset({"tools", "e2e", "scripts"})
+HOST_SCRIPT_MARKER = "# stapel: host-script"
+#: imports that make a module Django code
+_DJANGO_ROOTS = frozenset({"django", "rest_framework", "manage"})
+
+
+def _first_party_roots(project: Path) -> frozenset[str]:
+    names: set[str] = set()
+    try:
+        entries = list(project.iterdir())
+    except OSError:
+        return frozenset()
+    for entry in entries:
+        if entry.is_dir():
+            if entry.name not in HOST_SCRIPT_DIRS and entry.name not in SKIP_DIRS:
+                names.add(entry.name)
+        elif entry.suffix == ".py":
+            names.add(entry.stem)
+    return frozenset(names)
+
+
+def _imported_roots(tree: ast.AST) -> set[str]:
+    roots: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            roots.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            roots.add(node.module.split(".")[0])
+    return roots
+
+
+def _is_django_code(tree: ast.AST, first_party: frozenset[str]) -> bool:
+    for root in _imported_roots(tree):
+        if root in _DJANGO_ROOTS or root in first_party:
+            return True
+        if root.startswith("stapel_") and root != "stapel_tools":
+            return True
+    return False
+
+
+def _has_host_marker(src: str) -> bool:
+    return any(
+        line.strip().lower().startswith(HOST_SCRIPT_MARKER)
+        for line in src.splitlines()[:10]
+    )
+
+
+def _is_host_script(
+    py: Path, project: Path, src: str, tree: ast.AST, first_party: frozenset[str]
+) -> bool:
+    if _has_host_marker(src):
+        return True
+    try:
+        parts = py.relative_to(project).parts[:-1]
+    except ValueError:
+        return False
+    if not HOST_SCRIPT_DIRS.intersection(parts):
+        return False
+    return not _is_django_code(tree, first_party)
 
 
 # ---------------------------------------------------------------------------
@@ -669,6 +743,7 @@ def _owner_matches(owner: Optional[str], distribution: str) -> bool:
 
 def collect_reads(project: Path) -> list[ConfigRead]:
     reads: list[ConfigRead] = []
+    first_party = _first_party_roots(project)
     for py in _walk_py(project):
         try:
             src = py.read_text(encoding="utf-8")
@@ -676,6 +751,7 @@ def collect_reads(project: Path) -> list[ConfigRead]:
         except (OSError, SyntaxError, UnicodeDecodeError):
             continue
         in_settings = _is_settings_file(py)
+        host = _is_host_script(py, project, src, tree, first_party)
         for node in ast.walk(tree):
             key: Optional[str] = None
             if isinstance(node, ast.Call):
@@ -683,7 +759,7 @@ def collect_reads(project: Path) -> list[ConfigRead]:
             elif isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
                 key = _reads_in_subscript(node)
             if key:
-                reads.append(ConfigRead(key, str(py), node.lineno, in_settings))
+                reads.append(ConfigRead(key, str(py), node.lineno, in_settings, host))
     return reads
 
 
@@ -708,7 +784,7 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
     # ------------------------------------------------------------------ CFG001
     line_cache: dict[str, list[str]] = {}
     for read in reads:
-        if read.in_settings:
+        if read.in_settings or read.host_script:
             continue
         lines = line_cache.get(read.path)
         if lines is None:

@@ -85,7 +85,14 @@ def make_context(
     function_transport: str = "inprocess",
     task_dispatch: str = "action",
     module_config: dict[str, dict] | None = None,
+    auth_composition=None,
 ) -> dict:
+    from ._auth_model import (
+        merge_auth_axes,
+        render_base_posture,
+        render_local_posture,
+        resolve,
+    )
     from ._module_config import render_settings_block
 
     module = slug.replace("-", "_")
@@ -127,10 +134,16 @@ def make_context(
     # refusing to create it answers 401 to everyone who signed up since.
     # Rendered as a Python literal into settings/base.py, never omitted.
     is_token_issuer = "stapel_auth" in apps
-    dev_mock_providers = ""
-    if "stapel_auth" in apps:
-        from ._local_env_templates import DEV_MOCK_OTP_BLOCK
-        dev_mock_providers = DEV_MOCK_OTP_BLOCK
+    # The deployment posture (stapel-core presets) replaces per-service mock
+    # flags: base.py declares the composition's posture, dev.py re-declares
+    # it at the prototype stage so stapel-auth mocks OTP on this machine only.
+    comp = auth_composition
+    if comp is None and "stapel_auth" in apps:
+        comp = resolve(None, auth_selected=True)
+    if "stapel_auth" not in apps:
+        comp = None
+    module_config = merge_auth_axes(module_config, comp)
+    dev_mock_providers = render_local_posture(comp)
     return {
         "TITLE": title,
         "SLUG": slug,
@@ -143,7 +156,7 @@ def make_context(
         "URL_PREFIX": f"{slug}/",
         "STAPEL_APPS": stapel_apps_block,
         "STAPEL_URL_INCLUDES": url_includes,
-        "STAPEL_MODULE_CONFIG": render_settings_block(module_config),
+        "STAPEL_MODULE_CONFIG": render_settings_block(module_config) + render_base_posture(comp),
         "JWT_CREATE_USERS_FROM_TOKEN": "False" if is_token_issuer else "True",
         "IDENTITY_ROLE": "token ISSUER" if is_token_issuer else "token CONSUMER",
         # Not a render() token (no template spells "{{HAS_CDN}}") — a plain
@@ -724,6 +737,7 @@ def scaffold_service(
     function_transport: Optional[str] = None,
     task_dispatch: Optional[str] = None,
     module_config: Optional[dict[str, dict]] = None,
+    auth_composition=None,
 ):
     """Scaffold a service. stapel_apps — Django app names of Stapel feature
     modules (e.g. ["stapel_auth"]) to wire into INSTALLED_APPS and urls;
@@ -735,6 +749,7 @@ def scaffold_service(
     from ._gdpr_owners import inject_derived_data_owners
     from ._module_config import (
         inject_decodable_image_extensions,
+        inject_unbilled_workspaces,
         validate_module_config,
     )
 
@@ -751,6 +766,7 @@ def scaffold_service(
     # library in the service publishes its own name and subjects. Derived, not
     # asked for — a store missing from the map is silent retention.
     module_config = inject_derived_data_owners(module_config, selected_modules)
+    module_config = inject_unbilled_workspaces(module_config, selected_modules)
     cwd = Path.cwd()
     root = project_root or find_project_root(cwd) or cwd
     if action_transport is None or function_transport is None or task_dispatch is None:
@@ -765,6 +781,7 @@ def scaffold_service(
         function_transport=function_transport,
         task_dispatch=task_dispatch,
         module_config=module_config,
+        auth_composition=auth_composition,
     )
     dir_name = ctx["DIR"]
 

@@ -113,20 +113,18 @@ class TestEnvDevGenerated:
 
 class TestDevMockOtp:
     """Item 2: on a local stand, mock providers by default — email = console
-    /mock (already the case via stapel-notifications' own "mock" provider
-    default), phone/SMS OTP = stapel-auth's mock flow (code logged, never
-    sent). Verified against the ACTUAL keys stapel-auth's otp/services.py
-    reads (USE_MOCK_SMS_OTP / USE_MOCK_EMAIL_OTP, conf.py) — these are
-    booleans in AppSettings' no_env list, so they can ONLY be set via the
-    STAPEL_AUTH settings dict, never a plain env var."""
+    /mock (stapel-notifications' own "mock" provider default), phone/SMS OTP =
+    stapel-auth's mock flow (code logged, never sent). Since stapel-auth 0.38
+    the deployment posture's stage owns the mock keys: the local settings
+    module declares stage="prototype" and no USE_MOCK_* value is written."""
 
-    def test_dev_settings_mocks_otp_when_auth_selected(self, tmp_path):
+    def test_dev_settings_declares_prototype_posture_when_auth_selected(self, tmp_path):
         proj = _create(tmp_path, modules=["core", "auth"])
         dev_settings = (proj / "svc-app" / "config" / "settings" / "dev.py").read_text()
-        assert '"USE_MOCK_SMS_OTP": True' in dev_settings
-        assert '"USE_MOCK_EMAIL_OTP": True' in dev_settings
-        # merges over rather than clobbers any module_config STAPEL_AUTH block
-        assert 'globals().get("STAPEL_AUTH", {})' in dev_settings
+        assert 'public_space(stage="prototype")' in dev_settings
+        assert 'STAPEL_POSTURE = _POSTURE["STAPEL_POSTURE"]' in dev_settings
+        assert '"USE_MOCK_SMS_OTP": True' not in dev_settings
+        assert '"USE_MOCK_EMAIL_OTP": True' not in dev_settings
 
     def test_dev_settings_is_valid_python(self, tmp_path):
         proj = _create(tmp_path, modules=["core", "auth"])
@@ -135,13 +133,19 @@ class TestDevMockOtp:
 
     def test_prod_settings_never_gets_mock_otp(self, tmp_path):
         proj = _create(tmp_path, modules=["core", "auth"])
-        prod_settings = (proj / "svc-app" / "config" / "settings" / "prod.py").read_text()
+        settings_dir = proj / "svc-app" / "config" / "settings"
+        prod_settings = (settings_dir / "prod.py").read_text()
+        base_settings = (settings_dir / "base.py").read_text()
         assert "USE_MOCK_SMS_OTP" not in prod_settings
+        assert "prototype" not in prod_settings
+        # prod inherits base: base declares the live stage
+        assert 'public_space(stage="live")' in base_settings
 
-    def test_no_auth_module_means_no_mock_otp_block(self, tmp_path):
+    def test_no_auth_module_means_no_posture_block(self, tmp_path):
         proj = _create(tmp_path, modules=["core"])
         dev_settings = (proj / "svc-app" / "config" / "settings" / "dev.py").read_text()
         assert "USE_MOCK_SMS_OTP" not in dev_settings
+        assert "STAPEL_POSTURE" not in dev_settings
 
     def test_env_dev_documents_notifications_already_mock_by_default(self, tmp_path):
         """stapel-notifications' own conf.py DEFAULTS already set

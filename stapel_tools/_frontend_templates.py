@@ -48,6 +48,8 @@ PACKAGE_JSON = """\
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run --passWithNoTests",
     "gen:tokens": "stapel-tokens --theme ./stapel.theme.json --out ./src/stapel-tokens --targets core",
     "gen:tokens:check": "stapel-tokens --theme ./stapel.theme.json --out ./src/stapel-tokens --targets core --check"
   },
@@ -56,14 +58,18 @@ PACKAGE_JSON = """\
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.5",
     "@stapel/eslint-plugin": "^0.16.0",
     "@stapel/tokens": "^0.8.1",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
     "eslint": "^9.0.0",
+    "jsdom": "^26.1.0",
     "typescript": "^5.8.3",
-    "vite": "^6.0.0"
+    "typescript-eslint": "^8.71.2",
+    "vite": "^6.0.0",
+    "vitest": "^3.2.7"
   }
 }
 """
@@ -1434,12 +1440,119 @@ STAPEL_NAV_JSON = """\
 # — never guessed here).
 LANDING_PAGE_TSX = """\
 import type { ReactElement } from "react";
+import { useT } from "@stapel/core";
+import { cssVar } from "@stapel/tokens";
+import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
+
+/**
+ * Landing page scaffold (--landing) — replace with your real marketing
+ * page; keep reading colours through `cssVar("<role>")`, never a literal
+ * hex/rgb, and copy through `t()` (src/i18n/keys.ts holds the floor).
+ */
+export function LandingPage(): ReactElement {
+  const t = useT();
+  return (
+    <main
+      style={{
+        fontFamily: "system-ui, sans-serif",
+        minHeight: "100vh",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "1rem",
+        textAlign: "center",
+        padding: "2rem",
+        background: cssVar("surface"),
+        color: cssVar("text"),
+      }}
+      data-testid="page-landing"
+    >
+      <h1 style={{ fontSize: "2.5rem", margin: 0 }}>{t(STOREFRONT_I18N_KEYS.landingTitle)}</h1>
+      <p style={{ color: cssVar("text-muted"), maxWidth: "32rem" }}>
+        {t(STOREFRONT_I18N_KEYS.landingBody)}
+      </p>
+      <a
+        href="{{CTA_HREF}}"
+        style={{
+          padding: "0.75rem 1.5rem",
+          borderRadius: "0.5rem",
+          textDecoration: "none",
+          fontWeight: 600,
+          background: cssVar("brand"),
+          color: cssVar("text-on-accent"),
+        }}
+        data-testid="landing-cta"
+      >
+        {t(STOREFRONT_I18N_KEYS.landingCta)}
+      </a>
+    </main>
+  );
+}
+"""
+
+
+# ``frontend/src/__tests__/nav.test.ts`` — the nav gate: every destination
+# the member menu offers is a mounted route. A nav entry without a route is a
+# tab into a 404; this is the check that the generated route tree and the
+# generated nav agree, run by `npm test`.
+NAV_GATE_TEST_TS = """\
+// @vitest-environment jsdom
+/**
+ * GENERATED — the nav gate: every destination the member menu offers is a
+ * mounted route. Add your own screens to routes.tsx and the nav together.
+ */
+import { describe, expect, it } from "vitest";
+import type { RouteObject } from "react-router";
+import type { ResolvedNavEntry } from "@stapel/shell-react";
+import { RESOLVED_NAV } from "../nav.generated.js";
+import { router } from "../routes.js";
+
+function mountedPaths(routes: readonly RouteObject[], prefix = ""): Set<string> {
+  const out = new Set<string>();
+  for (const route of routes) {
+    const here =
+      route.path === undefined
+        ? prefix
+        : route.path.startsWith("/")
+          ? route.path
+          : `${prefix.replace(/\\/$/, "")}/${route.path}`;
+    if (route.path !== undefined || route.index === true) out.add(here);
+    for (const child of mountedPaths(route.children ?? [], here)) out.add(child);
+  }
+  return out;
+}
+
+function flatten(entries: readonly ResolvedNavEntry[], parent = "/app"): string[] {
+  return entries.flatMap((entry) => {
+    const path = entry.linkPath.startsWith("/")
+      ? entry.linkPath
+      : `${parent}/${entry.linkPath}`;
+    return [path, ...flatten(entry.children ?? [], path)];
+  });
+}
+
+describe("nav gate", () => {
+  it("mounts a route for every menu destination", () => {
+    const mounted = mountedPaths(router.routes);
+    const linked = flatten(RESOLVED_NAV);
+    expect(linked.length).toBeGreaterThan(0);
+    expect(linked.filter((path) => !mounted.has(path))).toEqual([]);
+  });
+});
+"""
+
+
+# The landing page of a selection with no react pair: no i18n engine is
+# installed, so the copy stays inline.
+LANDING_PAGE_STATIC_TSX = """\
+import type { ReactElement } from "react";
 import { cssVar } from "@stapel/tokens";
 
 /**
  * Landing page scaffold (--landing) — replace with your real marketing
  * page; keep reading colours through `cssVar("<role>")`, never a literal
- * hex/rgb (see AGENTS.md §6 "No raw colours").
+ * hex/rgb.
  */
 export function LandingPage(): ReactElement {
   return (
@@ -1457,6 +1570,7 @@ export function LandingPage(): ReactElement {
         background: cssVar("surface"),
         color: cssVar("text"),
       }}
+      data-testid="page-landing"
     >
       <h1 style={{ fontSize: "2.5rem", margin: 0 }}>{{TITLE}}</h1>
       <p style={{ color: cssVar("text-muted"), maxWidth: "32rem" }}>
@@ -1473,6 +1587,7 @@ export function LandingPage(): ReactElement {
           background: cssVar("brand"),
           color: cssVar("text-on-accent"),
         }}
+        data-testid="landing-cta"
       >
         Get started
       </a>
@@ -1480,7 +1595,6 @@ export function LandingPage(): ReactElement {
   );
 }
 """
-
 
 VITE_ENV_D_TS = """\
 /// <reference types="vite/client" />
@@ -1499,64 +1613,10 @@ VITE_ENV_D_TS = """\
 # colorPrimary / a primary button's background) — re-theme by editing the
 # `ramps`/`core` entries below and regenerating (`npm run gen:tokens` in
 # frontend/, or the `tokens-check` pre-commit hook on the next commit).
-THEME_JSON = """\
-{
-  "_comment": "{{TITLE}}'s colour tokens (Sec.68 neutral colour-role dictionary). SOURCE OF TRUTH for every colour this project uses -- code never hardcodes hex/rgb (no-raw-colors). Compiled by @stapel/tokens' own `stapel-tokens` bin (never a vendored copy -- see package.json's gen:tokens scripts + the tokens-check pre-commit hook). Edit `ramps`/`core` below to re-theme; nothing else needs to change.",
-  "ramps": {
-    "brand": {
-      "100": "#eef0fd",
-      "300": "#98a5fa",
-      "400": "#7c8cf8",
-      "500": "#4657d9",
-      "700": "#3948b8",
-      "900": "#232b4d"
-    }
-  },
-  "core": {
-    "surface": { "light": "gray.25", "dark": "gray.950" },
-    "surface-raised": { "light": "gray.25", "dark": "gray.850" },
-    "surface-sunken": { "light": "gray.100", "dark": "gray.900" },
-    "surface-overlay": { "light": "gray.25", "dark": "gray.850" },
+from ._theme_presets import render_theme_json as _render_theme_json  # noqa: E402
 
-    "text": { "light": "gray.900", "dark": "gray.100" },
-    "text-muted": { "light": "gray.600", "dark": "gray.400" },
-    "text-subtle": { "light": "gray.500", "dark": "gray.500" },
-    "text-on-accent": { "light": "gray.25", "dark": "gray.25" },
-
-    "border": { "light": "gray.400", "dark": "gray.700" },
-    "border-subtle": { "light": "gray.300", "dark": "gray.800" },
-    "focus-ring": { "light": "brand.500", "dark": "brand.300" },
-
-    "brand": { "light": "brand.500", "dark": "brand.300" },
-    "brand-hover": { "light": "brand.700", "dark": "brand.100" },
-    "brand-active": { "light": "brand.900", "dark": "brand.100" },
-    "brand-subtle": { "light": "brand.100", "dark": "brand.900" },
-
-    "link": { "light": "brand.500", "dark": "brand.300" },
-    "link-hover": { "light": "brand.700", "dark": "brand.100" },
-
-    "success": { "light": "green.500", "dark": "green.300" },
-    "success-bg": { "light": "green.100", "dark": "green.900" },
-    "success-border": { "light": "green.300", "dark": "green.700" },
-    "success-on": { "light": "gray.25", "dark": "gray.25" },
-
-    "warning": { "light": "amber.500", "dark": "amber.300" },
-    "warning-bg": { "light": "amber.100", "dark": "amber.900" },
-    "warning-border": { "light": "amber.300", "dark": "amber.700" },
-    "warning-on": { "light": "gray.25", "dark": "gray.25" },
-
-    "error": { "light": "red.500", "dark": "red.300" },
-    "error-bg": { "light": "red.100", "dark": "red.900" },
-    "error-border": { "light": "red.300", "dark": "red.700" },
-    "error-on": { "light": "gray.25", "dark": "gray.25" },
-
-    "info": { "light": "blue.500", "dark": "blue.300" },
-    "info-bg": { "light": "blue.100", "dark": "blue.900" },
-    "info-border": { "light": "blue.300", "dark": "blue.700" },
-    "info-on": { "light": "gray.25", "dark": "gray.25" }
-  }
-}
-"""
+# `{{TITLE}}` stays a token: the default-preset theme, rendered per project.
+THEME_JSON = _render_theme_json("{{TITLE}}")
 
 # `reserved-paths.json` lives at the PROJECT root (one level up from
 # frontend/) — stapel/no-reserved-backend-route's zero-config discovery only
@@ -1569,10 +1629,57 @@ THEME_JSON = """\
 # stapel-react/packages/eslint-plugin's README "reserved-paths.json" section
 # for the schema both sides agree on.
 ESLINT_CONFIG_JS = """\
+// GENERATED — the frontend guardrails (@stapel/eslint-plugin) plus the
+// TypeScript parser they need. Every stapel rule runs at ERROR: the strict
+// preset, then any stapel rule still at "warn" (or in no preset) is raised.
+// Project-specific rules belong in an entry you add at the end.
+import js from "@eslint/js";
+import tseslint from "typescript-eslint";
 import stapel from "@stapel/eslint-plugin";
 
-export default [
-  ...stapel.configs.recommended,
+const SOURCE = ["**/*.{ts,tsx,js,jsx,mjs}"];
+
+function raiseToError(value) {
+  if (value === "warn" || value === 1) return "error";
+  if (Array.isArray(value) && (value[0] === "warn" || value[0] === 1)) {
+    return ["error", ...value.slice(1)];
+  }
+  return value;
+}
+
+const strict = stapel.configs.strict.map((block) =>
+  block.rules === undefined
+    ? block
+    : {
+        ...block,
+        rules: Object.fromEntries(
+          Object.entries(block.rules).map(([name, value]) => [
+            name,
+            name.startsWith("stapel/") ? raiseToError(value) : value,
+          ])
+        ),
+      }
+);
+
+const configured = new Set(strict.flatMap((block) => Object.keys(block.rules ?? {})));
+const unconfigured = Object.keys(stapel.rules)
+  .map((name) => `stapel/${name}`)
+  .filter((name) => !configured.has(name));
+
+export default tseslint.config(
+  // JSON is ignored: the preset's raw-token carve-out globs pull
+  // `*.theme.json` into the lint set; generated files are gated by their own
+  // --check.
+  {
+    ignores: ["dist/**", "node_modules/**", "src/stapel-tokens/**", "**/*.json"],
+  },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  ...strict,
+  {
+    files: SOURCE,
+    rules: Object.fromEntries(unconfigured.map((name) => [name, "error"])),
+  },
   {
     settings: {
       stapel: {
@@ -1580,7 +1687,7 @@ export default [
       },
     },
   },
-];
+);
 """
 
 # ``frontend/src/<Section>Section.tsx`` — the landing of a container-owned
@@ -1591,7 +1698,9 @@ export default [
 # storefront's — what belongs on an account landing is product knowledge.
 SECTION_HOME_TSX = """\
 import type { ReactElement } from "react";
+import { useT } from "@stapel/core";
 import { cssVar } from "@stapel/tokens";
+import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
 
 /**
  * GENERATED — the landing of the {{SECTION_LABEL}} section.
@@ -1602,6 +1711,7 @@ import { cssVar } from "@stapel/tokens";
  * beneath it already work.
  */
 export function {{SECTION_COMPONENT}}(): ReactElement {
+  const t = useT();
   return (
     <section
       style={{
@@ -1610,10 +1720,9 @@ export function {{SECTION_COMPONENT}}(): ReactElement {
         color: cssVar("text"),
       }}
     >
-      <h1 style={{ margin: 0 }}>{{SECTION_LABEL}}</h1>
+      <h1 style={{ margin: 0 }}>{t(STOREFRONT_I18N_KEYS.{{SECTION_KEY}}Title)}</h1>
       <p style={{ color: cssVar("text-muted"), maxWidth: "32rem" }}>
-        This section's landing page is yours to compose from the screens in the
-        menu. The screens themselves are already mounted.
+        {t(STOREFRONT_I18N_KEYS.{{SECTION_KEY}}Body)}
       </p>
     </section>
   );
@@ -1630,6 +1739,7 @@ def render_section_home_tsx(root_id: str, children: list[str]) -> str:
     listed = ", ".join(children) if children else "none yet"
     return (
         SECTION_HOME_TSX.replace("{{SECTION_COMPONENT}}", root["_local"])
+        .replace("{{SECTION_KEY}}", root_id.split(".")[0])
         .replace("{{SECTION_LABEL}}", label)
         .replace("{{SECTION_LOWER}}", label.lower())
         .replace("{{SECTION_CHILDREN}}", listed)
@@ -1645,8 +1755,10 @@ def render_section_home_tsx(root_id: str, children: list[str]) -> str:
 # signed-in person they are signed out.
 ADMIN_GATE_APP_TSX = """\
 import type { ReactElement, ReactNode } from "react";
+import { useT } from "@stapel/core";
 import { cssVar } from "@stapel/tokens";
 import { useAuthSessionState } from "@stapel/auth-react";
+import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
 
 /**
  * GENERATED — staff gate for the admin section (`/app/admin/...`).
@@ -1655,6 +1767,7 @@ import { useAuthSessionState } from "@stapel/auth-react";
  */
 export function AdminGate({ children }: { children: ReactNode }): ReactElement {
   const { user } = useAuthSessionState();
+  const t = useT();
   if (user?.is_staff === true) return <>{children}</>;
   return (
     <section
@@ -1665,11 +1778,9 @@ export function AdminGate({ children }: { children: ReactNode }): ReactElement {
       }}
       data-testid="admin-gate-refusal"
     >
-      <h1 style={{ margin: 0 }}>This section is for staff</h1>
+      <h1 style={{ margin: 0 }}>{t(STOREFRONT_I18N_KEYS.adminRefusedTitle)}</h1>
       <p style={{ color: cssVar("text-muted"), maxWidth: "32rem" }}>
-        You are signed in, and this part of the app belongs to the people who
-        operate it. Nothing is wrong with your account. It is listed rather than
-        hidden so that asking for access is possible at all.
+        {t(STOREFRONT_I18N_KEYS.adminRefusedBody)}
       </p>
     </section>
   );
@@ -2034,6 +2145,8 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     # a public DSAR form with no captcha is the pair's own default, and a
     # container cannot invent a provider's widget.
     "account.privacy": {},
+    # translate-react 0.2.0 — LanguageSettingsPane: every prop optional.
+    "account.language": {},
     "admin.privacy": {},
     "public.privacy-request": {},
     # video-react 0.2.1 — ScopeUsagePane/RoomsPane: every prop optional.
@@ -2238,6 +2351,11 @@ def build_public_route_plan(manifests: list[dict]) -> dict:
 # real catalogue AND registers this English floor under the same locale, so a
 # key always resolves to a sentence rather than to a raw key.
 STOREFRONT_I18N_EN: dict[str, str] = {
+    "storefront.landing.title": "Welcome",
+    "storefront.landing.body": (
+        "This is a scaffolded landing page. Replace this copy with your own."
+    ),
+    "storefront.landing.cta": "Get started",
     "storefront.nav.account": "Account",
     "shell.nav.admin": "Admin",
     "storefront.admin.title": "Admin",
@@ -2309,16 +2427,20 @@ def storefront_i18n_symbol(key: str) -> str:
     return head + "".join(word.capitalize() for word in rest)
 
 
-def render_storefront_i18n_ts(locale: str) -> str:
+def render_storefront_i18n_ts(locale: str, *, title: str | None = None) -> str:
     """``src/i18n/keys.ts`` — the container's own key registry, its English
-    floor, and the registrar the app calls once at startup."""
+    floor, and the registrar the app calls once at startup. ``title`` is the
+    landing page's heading (the project's display name)."""
+    copy = dict(STOREFRONT_I18N_EN)
+    if title:
+        copy["storefront.landing.title"] = title
     symbols = "\n".join(
         f'  {storefront_i18n_symbol(key)}: {json.dumps(key)},'
         for key in STOREFRONT_I18N_EN
     )
     entries = "\n".join(
         f'  {json.dumps(key)}: {json.dumps(value)},'
-        for key, value in STOREFRONT_I18N_EN.items()
+        for key, value in copy.items()
     )
     return f'''\
 /**

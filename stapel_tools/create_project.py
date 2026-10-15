@@ -58,8 +58,8 @@ STAPEL_LIBS = {
         # `stapel_core.jwt.E001`). The scaffold emits that setting, so it may
         # not pin a core that has never heard of it — the project would boot
         # with a socket every browser is turned away from.
-        "pin": "0.44.2",
-        "ahead_of_pypi": True,  # released 2026-08-24; PyPI publish pending
+        "pin": "0.91.0",
+        "ahead_of_pypi": False,  # PyPI 0.91.0 @ 2026-10-15
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
@@ -67,8 +67,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Authentication (JWT, OAuth, OTP)",
         "default": True,
-        "pin": "0.5.4",
-        "ahead_of_pypi": False,  # matches PyPI 0.5.4 @ 2026-07-11
+        "pin": "0.48.0",
+        "ahead_of_pypi": False,  # PyPI 0.48.0 @ 2026-10-15
     },
     "billing": {
         "repo": "https://github.com/usestapel/stapel-billing.git",
@@ -76,8 +76,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Billing & subscriptions",
         "default": False,
-        "pin": "0.4.9",
-        "ahead_of_pypi": False,  # matches PyPI 0.4.9 @ 2026-07-11
+        "pin": "0.23.0",
+        "ahead_of_pypi": False,  # PyPI 0.23.0 @ 2026-10-15
     },
     "cdn": {
         "repo": "https://github.com/usestapel/stapel-cdn.git",
@@ -85,8 +85,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "File uploads & CDN",
         "default": False,
-        "pin": "0.5.1",
-        "ahead_of_pypi": False,  # matches PyPI 0.5.1 @ 2026-07-11
+        "pin": "0.28.1",
+        "ahead_of_pypi": False,  # PyPI 0.28.1 @ 2026-10-15
     },
     "notifications": {
         "repo": "https://github.com/usestapel/stapel-notifications.git",
@@ -94,8 +94,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Email/push notifications",
         "default": False,
-        "pin": "0.3.7",
-        "ahead_of_pypi": False,  # matches PyPI 0.3.7 @ 2026-07-11
+        "pin": "0.27.0",
+        "ahead_of_pypi": False,  # PyPI 0.27.0 @ 2026-10-15
     },
     "profiles": {
         "repo": "https://github.com/usestapel/stapel-profiles.git",
@@ -103,8 +103,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "User profiles",
         "default": False,
-        "pin": "0.3.12",
-        "ahead_of_pypi": False,  # matches PyPI 0.3.12 @ 2026-07-11
+        "pin": "0.22.0",
+        "ahead_of_pypi": False,  # PyPI 0.22.0 @ 2026-10-15
     },
     "translate": {
         "repo": "https://github.com/usestapel/stapel-translate.git",
@@ -112,8 +112,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Translations & i18n",
         "default": False,
-        "pin": "0.4.7",
-        "ahead_of_pypi": False,  # matches PyPI 0.4.7 @ 2026-07-11
+        "pin": "0.8.2",
+        "ahead_of_pypi": False,  # PyPI 0.8.2 @ 2026-10-15
     },
     "workspaces": {
         "repo": "https://github.com/usestapel/stapel-workspaces.git",
@@ -121,8 +121,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Workspaces & multi-tenancy",
         "default": False,
-        "pin": "0.4.1",
-        "ahead_of_pypi": False,  # matches PyPI 0.4.1 @ 2026-07-11
+        "pin": "0.34.0",
+        "ahead_of_pypi": False,  # PyPI 0.34.0 @ 2026-10-15
     },
     "gdpr": {
         "repo": "https://github.com/usestapel/stapel-gdpr.git",
@@ -130,8 +130,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "GDPR / data export & deletion",
         "default": False,
-        "pin": "0.3.5",
-        "ahead_of_pypi": False,  # matches PyPI 0.3.5 @ 2026-07-11
+        "pin": "0.8.2",
+        "ahead_of_pypi": False,  # PyPI 0.8.2 @ 2026-10-15
     },
     # --- second onboarding wave (2026-07-11, static-scaffold-and-config.md §2
     # follow-up): 14 sibling checkouts brought into the registry. Dict order
@@ -151,8 +151,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "LLM facade (complete/translate/transcribe/summarize/image)",
         "default": False,
-        "pin": "0.2.7",
-        "ahead_of_pypi": False,  # matches PyPI 0.2.7 @ 2026-07-11
+        "pin": "0.36.0",
+        "ahead_of_pypi": False,  # PyPI 0.36.0 @ 2026-10-15
         "http": True,
         "url_prefix": "agent/",
         "requires": [],
@@ -168,8 +168,8 @@ STAPEL_LIBS = {
         # `stapel-vocabularies` implements — that module floors itself at
         # `stapel-attributes>=0.5`, so the old 0.3.3 pin and a vocabularies
         # selection could not resolve together at pip time.
-        "pin": "0.6.1",
-        "ahead_of_pypi": False,  # matches PyPI 0.6.1 @ 2026-08-31
+        "pin": "0.9.4",
+        "ahead_of_pypi": False,  # PyPI 0.9.4 @ 2026-10-15
         # No models/migrations/views/urls/comm surface of its own (its own
         # __init__.py: "This is an L1 library"). Not a Django app: absent from
         # INSTALLED_APPS, mounted nowhere — a pure pip dependency for
@@ -184,8 +184,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Calendar, events & scheduling",
         "default": False,
-        "pin": "0.3.2",
-        "ahead_of_pypi": False,  # matches PyPI 0.3.2 @ 2026-07-11
+        "pin": "0.8.0",
+        "ahead_of_pypi": False,  # PyPI 0.8.0 @ 2026-10-15
         "http": True,
         "url_prefix": "calendar/",
         "requires": [],
@@ -196,8 +196,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Category tree & feature schema",
         "default": False,
-        "pin": "0.4.1",
-        "ahead_of_pypi": False,  # matches PyPI 0.4.1 @ 2026-07-11
+        "pin": "0.24.0",
+        "ahead_of_pypi": False,  # PyPI 0.24.0 @ 2026-10-15
         "http": True,
         # Onboarded 2026-07-11 assuming the "bakes api/ into its own urls"
         # second-wave shape (like calendar/video) — actually reads the SAME
@@ -215,8 +215,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Chat & messaging (direct/group/support)",
         "default": False,
-        "pin": "0.1.0",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.10.1",
+        "ahead_of_pypi": False,  # PyPI 0.10.1 @ 2026-10-15
         "http": True,
         "url_prefix": "chat/",
         "requires": [],
@@ -227,8 +227,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Currencies & exchange rates",
         "default": False,
-        "pin": "0.1.3",
-        "ahead_of_pypi": False,  # matches PyPI 0.1.3 @ 2026-07-11
+        "pin": "0.1.9",
+        "ahead_of_pypi": False,  # PyPI 0.1.9 @ 2026-10-15
         "http": True,
         "url_prefix": "currencies/",
         "requires": [],
@@ -239,8 +239,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Workspace documents (folders, revisions, snapshot/CRDT collab)",
         "default": False,
-        "pin": "0.3.0",
-        "ahead_of_pypi": False,  # matches PyPI 0.3.0 @ 2026-08-24
+        "pin": "0.10.0",
+        "ahead_of_pypi": False,  # PyPI 0.10.0 @ 2026-10-15
         "http": True,
         "url_prefix": "docs/",
         "requires": [],
@@ -251,8 +251,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Admin-defined forms (schemas, anonymous submissions, response review)",
         "default": False,
-        "pin": "0.2.0",
-        "ahead_of_pypi": False,  # matches PyPI 0.2.0 @ 2026-08-24
+        "pin": "0.6.3",
+        "ahead_of_pypi": False,  # PyPI 0.6.3 @ 2026-10-15
         "http": True,
         "url_prefix": "forms/",
         "requires": ["attributes"],  # pyproject dependency, hard
@@ -263,11 +263,11 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Geographic locations, geofiles & geocoding",
         "default": False,
-        "pin": "0.2.1",
+        "pin": "0.4.1",
         # PyPI has 0.2.1, but the workspace checkout is 0.2.2 with a fix the
         # release lacks and a failing test blocks re-publishing — kept editable
         # (ahead of the last publishable release) until that test is green.
-        "ahead_of_pypi": True,
+        "ahead_of_pypi": False,  # PyPI 0.4.1 @ 2026-10-15
         "http": True,
         "url_prefix": "geo/",
         "requires": [],
@@ -278,8 +278,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Listings & catalog",
         "default": False,
-        "pin": "0.3.1",
-        "ahead_of_pypi": False,  # matches PyPI 0.3.1 @ 2026-07-11
+        "pin": "0.23.1",
+        "ahead_of_pypi": False,  # PyPI 0.23.1 @ 2026-10-15
         "http": True,
         # Same fix/rationale as "categories" above: stapel-listings/urls.py's
         # own docstring says hosts mount it under their own ".../api/"
@@ -293,8 +293,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Mail trap (dev/test outbound email capture)",
         "default": False,
-        "pin": "0.1.2",
-        "ahead_of_pypi": False,  # matches PyPI 0.1.2 @ 2026-07-11
+        "pin": "0.1.8",
+        "ahead_of_pypi": False,  # PyPI 0.1.8 @ 2026-10-15
         "http": True,
         "url_prefix": "mailtrap/",
         "requires": [],
@@ -305,8 +305,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Cross-target moderation (reports, verdicts, sanctions, appeals)",
         "default": False,
-        "pin": "0.1.0",
-        "ahead_of_pypi": False,  # matches PyPI 0.1.0 @ 2026-08-24
+        "pin": "0.8.3",
+        "ahead_of_pypi": False,  # PyPI 0.8.3 @ 2026-10-15
         "http": True,
         "url_prefix": "moderation/",
         "requires": [],
@@ -317,8 +317,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Recording lifecycle, normalization & transcription",
         "default": False,
-        "pin": "0.3.1",
-        "ahead_of_pypi": False,  # matches PyPI 0.3.1 @ 2026-07-11
+        "pin": "0.40.0",
+        "ahead_of_pypi": False,  # PyPI 0.40.0 @ 2026-10-15
         "http": True,
         "url_prefix": "recordings/",
         "requires": [],
@@ -329,8 +329,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Reviews & ratings (target-generic)",
         "default": False,
-        "pin": "0.1.0",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.7.0",
+        "ahead_of_pypi": False,  # PyPI 0.7.0 @ 2026-10-15
         "http": True,
         "url_prefix": "reviews/",
         "requires": [],
@@ -341,8 +341,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Tasks & kanban boards",
         "default": False,
-        "pin": "0.1.2",
-        "ahead_of_pypi": False,  # matches PyPI 0.1.2 @ 2026-07-11
+        "pin": "0.4.0",
+        "ahead_of_pypi": False,  # PyPI 0.4.0 @ 2026-10-15
         "http": True,
         "url_prefix": "tasks/",
         # attributes is a SOFT/optional seam here (features.py: import guarded
@@ -356,8 +356,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Production secret storage (OpenBao/Vault facade)",
         "default": False,
-        "pin": "0.1.0",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.1.4",
+        "ahead_of_pypi": False,  # PyPI 0.1.4 @ 2026-10-15
         # A facade activated via STAPEL_SECRETS_PROVIDER (env), not a Django
         # app: no models/urls of its own. Not mounted in INSTALLED_APPS.
         "http": False,
@@ -370,8 +370,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Video calls (rooms, lobby, LiveKit-backed by default)",
         "default": False,
-        "pin": "0.1.0",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.13.0",
+        "ahead_of_pypi": False,  # PyPI 0.13.0 @ 2026-10-15
         "http": True,
         "url_prefix": "video/",
         "requires": [],
@@ -382,8 +382,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Reference vocabularies (levels, terms, edges) behind ref_select features",
         "default": False,
-        "pin": "0.1.1",
-        "ahead_of_pypi": False,  # matches PyPI 0.1.1 @ 2026-08-31
+        "pin": "0.4.3",
+        "ahead_of_pypi": False,  # PyPI 0.4.3 @ 2026-10-15
         # Its own `urls.py` contributes the `api/v1/` half, so the host mounts
         # it bare under `vocabularies/` — the third-wave shape, not
         # categories' `categories/api/`.
@@ -412,8 +412,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Composite: shop — categories + attributes + listings + reviews (glue: reviews→listings rating projection); likes wait for stapel-engagement",
         "default": False,
-        "pin": "0.1.0",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.2.36",
+        "ahead_of_pypi": False,  # PyPI 0.2.36 @ 2026-10-15
         "http": False,          # mounts no /shop/api/ — glue only
         "django_app": True,     # app slot REQUIRED: Projection glue lives there
         "url_prefix": None,
@@ -426,8 +426,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Composite: classified ads — shop + geo (coordinates are listing fields, no extra glue)",
         "default": False,
-        "pin": "0.1.0",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.11.0",
+        "ahead_of_pypi": False,  # PyPI 0.11.0 @ 2026-10-15
         "http": False,
         "django_app": True,     # reserved glue slot (see shop comment)
         "url_prefix": None,
@@ -439,8 +439,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Composite: bookable resources — calendar + listings",
         "default": False,
-        "pin": "0.1.0",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.1.4",
+        "ahead_of_pypi": False,  # PyPI 0.1.4 @ 2026-10-15
         "http": False,
         "django_app": True,     # reserved glue slot (see shop comment)
         "url_prefix": None,
@@ -452,8 +452,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Composite: social surface — chat + profiles + reviews; likes wait for stapel-engagement",
         "default": False,
-        "pin": "0.1.0",
-        "ahead_of_pypi": True,  # not published to PyPI yet
+        "pin": "0.1.5",
+        "ahead_of_pypi": False,  # PyPI 0.1.5 @ 2026-10-15
         "http": False,
         "django_app": True,     # reserved glue slot (see shop comment)
         "url_prefix": None,
@@ -765,7 +765,7 @@ FRONTEND_REACT_LIBS = {
         # menu item leading nowhere would be worse than its absence
         # (storefront spec §13.6 item 8).
         "package": "@stapel/cdn-react",
-        "version": "0.7.0",
+        "version": "0.8.0",
         "provider": "CdnProvider",
         "create_runtime": "createCdnRuntime",
         "register_i18n": "registerCdnI18n",
@@ -915,6 +915,27 @@ FRONTEND_REACT_LIBS = {
                 "route": {"path": "privacy"},
                 "component": {"export": "PrivacyAdminPane", "subpath": "default/admin"},
                 "placement": {"level": "submenu", "parentId": "admin.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 40,
+            },
+        ],
+    },
+    "translate": {
+        "package": "@stapel/translate-react",
+        "version": "0.2.0",
+        "provider": "TranslateProvider",
+        "create_runtime": "createTranslateRuntime",
+        "register_i18n": "registerTranslateI18n",
+        "nav": [
+            {
+                "id": "account.language",
+                "labelKey": "translate.nav.language",
+                "icon": "MessageOutlined",
+                "route": {"path": "language"},
+                "component": {"export": "LanguageSettingsPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
                 "menuVisibleDefault": True,
                 "requiresAuth": True,
                 "surface": "member",
@@ -1743,7 +1764,7 @@ FRONTEND_REACT_CORE_DEPS = {
     # floors underneath still hold, and nothing in 0.23.0…0.26.1 is a major
     # (the package's CHANGELOG carries no "Major Changes" heading at all), so
     # the surfaces the generated container binds are unchanged.
-    "@stapel/core": "0.26.1",
+    "@stapel/core": "0.29.0",
     "@tanstack/react-query": "5.102.8",
 }
 # Only pulled in when >=1 selected module's registry entry has
@@ -1838,7 +1859,7 @@ FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
 # 0.19.0 (2026-09-18): same stale-pin backlog as the `@stapel/tokens-antd`
 # bump above — `npm view @stapel/shell-react version` -> 0.19.0, additive
 # over 0.18.1 (no "Major Changes" heading), peers unchanged.
-FRONTEND_SHELL_REACT_VERSION = "0.19.0"
+FRONTEND_SHELL_REACT_VERSION = "0.19.1"
 
 # The first `@stapel/shell-react` release that themes ITSELF and reads the
 # container's staff answer. Two facts, one release, because they are one
@@ -2582,6 +2603,7 @@ def _write_frontend_scaffold(
     feature_libs: list[str] | None = None,
     want_auth: bool | None = None,
     want_landing: bool = False,
+    theme: str | None = None,
 ):
     """``frontend/`` — Vite + React + TypeScript, wired into the dev/prod
     compose + nginx canon (§57 owner directive). See
@@ -2663,7 +2685,12 @@ def _write_frontend_scaffold(
         if routing_active and shell_react_needed
         else {"pages": {}, "needs_placeholder": False}
     )
-    container_i18n = bool(mount_files["pages"]) or mount_files["needs_placeholder"]
+    # The container's own copy (section landings, staff gate, landing page,
+    # placeholder) reads src/i18n/keys.ts through the pairs' i18n engine.
+    container_i18n = bool(react_entries) and bool(
+        mount_files["pages"] or mount_files["needs_placeholder"]
+        or want_landing or (routing_active and route_plan["container_roots"])
+    )
     if react_entries:
         _write(
             frontend / "src" / "modules.tsx",
@@ -2686,6 +2713,7 @@ def _write_frontend_scaffold(
                 F.render_nav_generated_ts(nav_pairs, auth_wired=auth_wired),
             )
             _write(frontend / "stapel.nav.json", F.STAPEL_NAV_JSON)
+            _write(frontend / "src" / "__tests__" / "nav.test.ts", F.NAV_GATE_TEST_TS)
         # One landing page per container-owned section the selection needs
         # (`/app/account`, `/app/admin`). Without them the admin-level screens
         # gdpr and video declare are orphans and disappear silently.
@@ -2718,9 +2746,10 @@ def _write_frontend_scaffold(
         mounts = F.monolith_mount_plan(route_plan, pairs=pair_keys)
         if mounts["pages"] or mounts["needs_placeholder"]:
             _write(frontend / "src" / "NavPlaceholder.tsx", F.NAV_PLACEHOLDER_TSX)
+        if container_i18n:
             _write(
                 frontend / "src" / "i18n" / "keys.ts",
-                F.render_storefront_i18n_ts("en"),
+                F.render_storefront_i18n_ts("en", title=ctx["title"]),
             )
         for rel, content in mounts["pages"].items():
             _write(frontend / rel, content)
@@ -2729,7 +2758,8 @@ def _write_frontend_scaffold(
         if want_landing:
             cta_href = "/login" if auth_wired else "/app"
             _write(frontend / "src" / "LandingPage.tsx", render_tokens(
-                F.LANDING_PAGE_TSX, {**render_ctx, "CTA_HREF": cta_href},
+                F.LANDING_PAGE_TSX if container_i18n else F.LANDING_PAGE_STATIC_TSX,
+                {**render_ctx, "CTA_HREF": cta_href},
             ))
     else:
         _write(frontend / "src" / "main.tsx", F.MAIN_TSX)
@@ -2739,7 +2769,9 @@ def _write_frontend_scaffold(
             _write(frontend / "src" / "App.tsx", r(F.APP_TSX))
 
     _write(frontend / "src" / "vite-env.d.ts", F.VITE_ENV_D_TS)
-    _write(frontend / "stapel.theme.json", r(F.THEME_JSON))
+    from ._theme_presets import render_theme_json
+
+    _write(frontend / "stapel.theme.json", render_theme_json(ctx["title"], theme))
     _write(frontend / "eslint.config.js", F.ESLINT_CONFIG_JS)
     _write(frontend / ".gitignore", F.GITIGNORE)
     _write(frontend / "Dockerfile", F.DOCKERFILE)
@@ -2794,7 +2826,7 @@ def _billing_dev_hatch_needed(
     return supplied == default
 
 
-def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False):
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False, auth_comp=None, theme: str | None = None):
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
         MONOLITH_COMPOSE_LOCAL,
@@ -2910,6 +2942,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         feature_libs=feature_libs,
         want_auth=want_auth,
         want_landing=want_landing,
+        theme=theme,
     )
     _write_deploy_scripts(project_dir)
     _write_agents_and_checks(
@@ -2975,6 +3008,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         function_transport=function_transport,
         task_dispatch=task_dispatch,
         module_config=module_config,
+        auth_composition=auth_comp,
     )
 
     # cdn auto-wiring (cdn-scaffold-autowire.md): the [images] extra (pyvips)
@@ -3004,7 +3038,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     )
 
 
-def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None, module_config: dict | None = None):
+def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None, module_config: dict | None = None, auth_comp=None):
     from ._minimal_templates import (
         MINIMAL_BILLING_UNCONFIGURED_BLOCK,
         MINIMAL_BOOT_SMOKE_SETTINGS,
@@ -3055,15 +3089,25 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
         if STAPEL_LIBS[key].get("http", True)
     )
 
-    # NOTE: the dev-only mock-OTP default (§57 item 2) is monolith-only for
-    # now (see _create_monolith / new_service.make_context's
-    # DEV_MOCK_PROVIDERS) — it hangs off the dev/prod settings-module split
-    # (config/settings/dev.py vs prod.py) that the docker compose dev canon
-    # (§57 items 1/3/7) is built around. minimal has one settings.py with a
-    # DJANGO_ENV runtime branch, not a dev/prod module split, and injecting
-    # STAPEL_AUTH here unconditionally would also collide with the
-    # module_config-rendered STAPEL_AUTH block (A5) — left as a follow-up
-    # gap, not silently wired.
+    # One settings.py with a DJANGO_ENV branch: the posture is live under
+    # DJANGO_ENV=prod and prototype otherwise (stapel-auth then mocks OTP and
+    # logs the code), unless --posture prototype declares it everywhere.
+    from ._auth_model import render_base_posture
+    from ._auth_model import resolve as resolve_auth_model
+    from ._module_config import inject_unbilled_workspaces
+
+    module_config = inject_unbilled_workspaces(module_config, feature_modules)
+    if auth_comp is None and "auth" in feature_modules:
+        auth_comp = resolve_auth_model(None, auth_selected=True)
+    if "auth" not in feature_modules:
+        auth_comp = None
+    posture_block = render_base_posture(
+        auth_comp,
+        stage_expr=(
+            None if auth_comp is None or auth_comp.stage == "prototype"
+            else '"live" if _IS_PROD else "prototype"'
+        ),
+    )
     # Identity trust decided from the ROLE, exactly as new_service.make_context
     # does for the service presets (#349): a project that installs stapel_auth
     # IS the token issuer and must refuse an unknown subject; one that does not
@@ -3076,7 +3120,7 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
         "MODULE_CAP": module_cap,
         "STAPEL_APPS": stapel_apps_block,
         "STAPEL_URL_INCLUDES": url_includes,
-        "STAPEL_MODULE_CONFIG": render_settings_block(module_config),
+        "STAPEL_MODULE_CONFIG": render_settings_block(module_config) + posture_block,
         "JWT_CREATE_USERS_FROM_TOKEN": "False" if is_token_issuer else "True",
         "IDENTITY_ROLE": "token ISSUER" if is_token_issuer else "token CONSUMER",
     }
@@ -3393,6 +3437,30 @@ def _setup_pip_deps(
     reqs.write_text("\n".join(lines) + "\n")
 
 
+_VENDORED_CORE_COPY = (
+    "# stapel_core is vendored as a git submodule at the project root\n"
+    "COPY stapel_core ./stapel_core\n"
+)
+
+
+def _setup_monolith_pip_deps(
+    service_dir: Path, modules: list[str], module_config: dict[str, dict] | None,
+):
+    """Monolith without submodules: every selected library, core included,
+    is a pinned PyPI requirement of the service, and the image does not copy
+    a vendored stapel_core that was never checked out."""
+    _setup_pip_deps(service_dir, modules, module_config)
+    dockerfile = service_dir / "Dockerfile"
+    if dockerfile.exists():
+        text = dockerfile.read_text()
+        if _VENDORED_CORE_COPY in text:
+            dockerfile.write_text(text.replace(
+                _VENDORED_CORE_COPY,
+                "# Stapel libraries, stapel_core included, install from PyPI\n"
+                "# (requirements.txt); no vendored checkout.\n",
+            ))
+
+
 def _write_env_from_ctx(project_dir: Path, ctx: dict):
     env_example = project_dir / ".env.example"
     if not env_example.exists():
@@ -3440,6 +3508,10 @@ def create_project(
     env_preset: str = "standalone",
     want_auth: bool | None = None,
     want_landing: bool = False,
+    auth_model: str | None = None,
+    auth_kinds: list[str] | str | None = None,
+    posture: str | None = None,
+    theme: str | None = None,
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
@@ -3495,6 +3567,62 @@ def create_project(
     # (stapel-studio's scaffold-assembly task calls assemble_scaffold with
     # config=None and had no map to hand over, so every gdpr project it tried
     # to generate was refused).
+    if project_type != "monolith" and (want_landing or want_auth):
+        print(
+            "Error: --landing/--auth wire the generated SPA's routes; only "
+            f"monolith projects have a frontend ({project_type} has none). "
+            "Sign-in on a minimal project is the backend's: --auth-model.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    if theme is not None:
+        if project_type != "monolith":
+            print(f"Error: --theme styles the generated SPA; {project_type} has none", file=sys.stderr)
+            sys.exit(1)
+        from ._theme_presets import render_theme_json
+
+        try:
+            render_theme_json(title, theme)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
+
+    # The auth model is a composition, not a pile of flags: it decides the
+    # posture (base settings), the local prototype stage (mock OTP), the login
+    # axes and whether the SPA gets a sign-in route. A model that needs
+    # accounts brings the auth module with it.
+    from ._auth_model import merge_auth_axes
+    from ._auth_model import resolve as resolve_auth_model
+
+    if project_type == "microservices" and (auth_model or auth_kinds or posture):
+        print(
+            "Error: --auth-model/--auth-kinds/--posture apply to monolith/minimal "
+            "projects; microservices declare the posture per service",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    try:
+        auth_comp = resolve_auth_model(
+            auth_model, auth_kinds, posture,
+            auth_selected="auth" in _expand_with_requires([m for m in modules if m != "core"]),
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if auth_comp is not None and auth_comp.needs_auth_module and "auth" not in modules:
+        modules = [*modules, "auth"]
+    if auth_comp is not None and auth_model is not None:
+        if want_auth and not auth_comp.has_login_route:
+            print(
+                f"Error: --auth wires a sign-in route; --auth-model {auth_comp.model} has none",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        if want_auth is None:
+            want_auth = auth_comp.has_login_route
+    module_config = merge_auth_axes(module_config, auth_comp)
+
     from ._gdpr_owners import inject_derived_data_owners
 
     module_config = inject_derived_data_owners(module_config, [*modules, "core"])
@@ -3581,9 +3709,9 @@ def create_project(
 
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only, want_auth=want_auth, want_landing=want_landing)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only, want_auth=want_auth, want_landing=want_landing, auth_comp=auth_comp, theme=theme)
     elif project_type == "minimal":
-        _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"], module_config=module_config)
+        _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"], module_config=module_config, auth_comp=auth_comp)
         use_submodules = False  # minimal uses pip
     elif project_type == "microservices":
         _create_microservices(project_dir, ctx, broker=broker, task_broker=task_broker)
@@ -3599,6 +3727,8 @@ def create_project(
     if use_submodules and is_git:
         service_dir = ctx["service_dir_name"] if project_type == "monolith" else ""
         _setup_submodules(project_dir, modules, is_git, service_dir=service_dir)
+    elif project_type == "monolith":
+        _setup_monolith_pip_deps(project_dir / ctx["service_dir_name"], modules, module_config)
     else:
         _setup_pip_deps(project_dir, modules, module_config)
 
@@ -3785,6 +3915,36 @@ def main():
              "'auth' module is selected (its runtime still wires into "
              "modules.tsx as usual — just no /login route/ProtectedRoute).",
     )
+    parser.add_argument(
+        "--auth-model", choices=["none", "anonymous", "public", "internal"],
+        help="Who gets an account: none (no accounts, no sign-in route), "
+             "anonymous (guest sessions only), public (street "
+             "self-registration, stapel-core public_space posture) or "
+             "internal (in-house tool: registration closed, accounts created "
+             "inside, password sign-in; private_space posture). Default: "
+             "public when the auth module is selected. Brings the auth "
+             "module and the /login route with it.",
+    )
+    parser.add_argument(
+        "--auth-kinds", metavar="KINDS",
+        help="Comma list of sign-in methods for public/internal: "
+             "phone,email,password,oauth,magic,sso,passkey,qr. Every login "
+             "axis is then stated (unlisted ones off). Default: the "
+             "library's for public, password,email for internal.",
+    )
+    parser.add_argument(
+        "--posture", choices=["prototype", "live"],
+        help="Posture stage of the inherited settings (default live). The "
+             "local settings are always prototype: OTP is mocked and logged "
+             "there, never on a live deployment.",
+    )
+    parser.add_argument(
+        "--theme", metavar="PRESET|PATH",
+        help="Colour theme of the generated SPA (frontend/stapel.theme.json): "
+             "a preset (default, ocean, forest, crimson, graphite, amber; "
+             "each passes @stapel/tokens' contrast gate) or a path to a "
+             "theme file copied as is. Monolith only.",
+    )
     args = parser.parse_args()
 
     module_config = None
@@ -3860,6 +4020,10 @@ def main():
         env_preset=args.env_preset,
         want_auth=args.auth,
         want_landing=args.landing,
+        auth_model=args.auth_model,
+        auth_kinds=args.auth_kinds,
+        posture=args.posture,
+        theme=args.theme,
     )
 
 
