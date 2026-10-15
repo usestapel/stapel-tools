@@ -38,7 +38,9 @@ and a `--no-submodules` monolith installs every library from PyPI.
   `stapel_workspaces.E011`.
 - Frontend: `@stapel/translate-react` is a registered pair (language screen
   under the account section); stale pins raised (`@stapel/core` 0.29.0,
-  `@stapel/cdn-react` 0.8.0, `@stapel/shell-react` 0.19.1).
+  `@stapel/cdn-react` 0.8.0, `@stapel/shell-react` 0.19.1, attributes-react
+  0.18.0, categories-react 0.35.0, chat-react 0.23.0, forms-react 0.4.1,
+  geo-react 0.7.1, listings-react 0.39.0, recordings-react 0.11.0).
 - Frontend gates ship with the app: `eslint.config.js` runs the TypeScript
   layer and every `@stapel/eslint-plugin` rule at error (`npm run lint`,
   `--max-warnings=0`), and `src/__tests__/nav.test.ts` (`npm test`) fails
