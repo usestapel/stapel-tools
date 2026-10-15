@@ -478,9 +478,72 @@ INTERNAL_IPS = ["127.0.0.1", "localhost"]
 """
 
 TEST_SETTINGS = """\
-from stapel_core.templates import strict_template_variables
+\"\"\"Hermetic test settings: sqlite in memory, in-process comm, file mailtrap.
 
-from .local import *  # noqa
+The suite runs against nothing but the virtualenv. It layers over base, not
+over local/dev: those carry the compose PostgreSQL credentials (a sandboxed
+run answers `password authentication failed`, and a least-privilege role
+cannot create the test database either) and django-debug-toolbar, whose SQL
+panel imports GeoDjango at startup.
+
+Tests that need PostgreSQL carry the `pg` marker and are skipped unless
+STAPEL_TEST_DB points at a server:
+
+    STAPEL_TEST_DB=postgres://user:pass@host:5432/dbname python -m pytest -m pg
+\"\"\"
+import os
+from urllib.parse import urlparse
+
+# Not a "django-insecure-" value: pytest-django runs with DEBUG=False, and the
+# JWT provider refuses well-known placeholder secrets outside DEBUG.
+os.environ.setdefault("SECRET_KEY", "{{SLUG}}-test-only-not-a-deployment-secret-0123456789")
+os.environ.setdefault("JWT_SECRET_KEY", os.environ["SECRET_KEY"])
+
+from stapel_core.templates import strict_template_variables  # noqa: E402
+
+from .base import *  # noqa: E402,F401,F403
+
+DEBUG = True
+FRONTEND_URL = FRONTEND_URL or "http://localhost"  # noqa: F405
+
+_TEST_DB = os.environ.get("STAPEL_TEST_DB", "")
+if _TEST_DB.startswith(("postgres://", "postgresql://")):
+    _parsed = urlparse(_TEST_DB)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": (_parsed.path or "/").lstrip("/") or "{{SLUG}}_test",
+            "USER": _parsed.username or "",
+            "PASSWORD": _parsed.password or "",
+            "HOST": _parsed.hostname or "",
+            "PORT": str(_parsed.port or ""),
+        }
+    }
+else:
+    DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "{{SLUG}}-test",
+    }
+}
+SESSION_ENGINE = "django.contrib.sessions.backends.cache"
+CHANNEL_LAYERS = {"default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}}
+
+# Every Action, Function and Task in the test process; no broker.
+STAPEL_COMM = {
+    **STAPEL_COMM,  # noqa: F405
+    "ACTION_TRANSPORT": "inprocess",
+    "FUNCTION_TRANSPORT": "inprocess",
+    "TASK_DISPATCH": "action",
+}
+CELERY_TASK_ALWAYS_EAGER = True
+CELERY_TASK_EAGER_PROPAGATES = True
+
+# Outbound mail lands in var/mailtrap/ as JSON (tests/harness reads it).
+MAILTRAP_DIR = BASE_DIR / "var" / "mailtrap"  # noqa: F405
+EMAIL_BACKEND = "tests.harness.mailtrap.FileMailtrapBackend"
 
 # A missing template variable renders as a visible marker here instead of
 # Django's default empty string.
@@ -502,7 +565,7 @@ from .local import *  # noqa
 # library's docs/templates.json, asserted in CI
 # (stapel_tools.template_contract.declared_for).
 TEMPLATES = strict_template_variables(TEMPLATES)  # noqa: F405
-"""
+{{DEV_MOCK_PROVIDERS}}"""
 
 
 PROD_SETTINGS = """\
@@ -614,6 +677,38 @@ python_files = tests.py test_*.py *_test.py
 python_classes = Test* *Tests
 python_functions = test_*
 testpaths = apps tests
+markers =
+    pg: needs PostgreSQL; skipped unless STAPEL_TEST_DB is a postgres:// URL
+"""
+
+# Collection hook appended to the service conftest: `pg` tests skip on the
+# default sqlite profile instead of failing against a server nobody started.
+PG_MARKER_CONFTEST = """\
+
+
+def pytest_collection_modifyitems(config, items):
+    import os
+
+    if os.environ.get("STAPEL_TEST_DB", "").startswith(("postgres://", "postgresql://")):
+        return
+    skip = pytest.mark.skip(reason="pg: set STAPEL_TEST_DB=postgres://... to run")
+    for item in items:
+        if "pg" in item.keywords:
+            item.add_marker(skip)
+"""
+
+# The opt-in PostgreSQL profile's own proof that it reaches PostgreSQL.
+TEST_PG_PROFILE_PY = """\
+\"\"\"The `pg` profile: skipped on sqlite, run with STAPEL_TEST_DB set.\"\"\"
+import pytest
+
+
+@pytest.mark.pg
+@pytest.mark.django_db
+def test_pg_profile_reaches_postgresql():
+    from django.db import connection
+
+    assert connection.vendor == "postgresql"
 """
 
 SVC_PYPROJECT = """\

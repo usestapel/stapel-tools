@@ -34,6 +34,7 @@ from ._templates import (
     LOCAL_SETTINGS,
     MANAGE_PY,
     MODELS_PY,
+    PG_MARKER_CONFTEST,
     PROD_SETTINGS,
     PYTEST_INI,
     REQUIREMENTS_TXT,
@@ -41,6 +42,7 @@ from ._templates import (
     SVC_MAKEFILE,
     SVC_PYPROJECT,
     TEST_MODELS_PY,
+    TEST_PG_PROFILE_PY,
     TEST_SETTINGS,
     URLS_PY,
     VERSION_TXT,
@@ -255,7 +257,7 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         "def api_client():\n"
         "    from rest_framework.test import APIClient\n\n"
         "    return APIClient()\n"
-    )
+    ) + PG_MARKER_CONFTEST
     files = {
         root / d / "manage.py": render(MANAGE_PY, ctx),
         root / d / "version.txt": VERSION_TXT,
@@ -276,8 +278,7 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / "config" / "settings" / "dev.py": render(DEV_SETTINGS, ctx),
         root / d / "config" / "settings" / "local.py": render(LOCAL_SETTINGS, ctx),
         root / d / "config" / "settings" / "prod.py": render(PROD_SETTINGS, ctx),
-        # Tests run on this one (pytest.ini) — local plus the
-        # missing-template-variable marker.
+        # Tests run on this one (pytest.ini): hermetic, over base.
         root / d / "config" / "settings" / "test.py": render(TEST_SETTINGS, ctx),
         # Boot-smoke gate (R3/§44, `make boot-smoke` — part of `make
         # controls`): the service-dir counterpart of the minimal preset's
@@ -299,6 +300,7 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / "apps" / m / "tests" / "test_models.py": render(TEST_MODELS_PY, ctx),
         root / d / "pytest.ini": render(PYTEST_INI, ctx),
         root / d / "conftest.py": service_conftest,
+        root / d / "tests" / "test_pg_profile.py": TEST_PG_PROFILE_PY,
         root / d / "var" / "mailtrap" / ".gitkeep": "",
         root / f"{d}.yml": render(SERVICE_YML, ctx),
     }

@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.72.1] — 2026-10-15
+
+Patch: a generated service's own test suite runs with no services.
+
+- `config/settings/test.py` no longer star-imports `local`. It layers over
+  `base` with sqlite in memory, locmem cache, in-process comm (Actions,
+  Functions, Tasks), eager Celery and the file mailtrap backend, plus the
+  local posture's prototype stage. Before, it inherited the compose
+  PostgreSQL credentials, so `pytest` in a sandbox failed with `password
+  authentication failed` (and a NOCREATEDB role could not create the test
+  database), and it loaded django-debug-toolbar, which imports GeoDjango.
+- A `pg` marker is registered in the generated `pytest.ini`; the service
+  conftest skips `pg` tests unless `STAPEL_TEST_DB` is a `postgres://` URL,
+  which also points the suite at that server. `tests/test_pg_profile.py` is
+  the profile's own check that it reaches PostgreSQL.
+- Already shipped in 0.72.0: the stapel-core requirement
+  `stapel-core>=0.92.1,<0.93` (T13) and `CFG008`.
+
 ## [0.72.0] — 2026-10-15
 
 Minor: the shell is a composition parameter — which chrome the SPA gets and
