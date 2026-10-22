@@ -218,7 +218,14 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # The cache (django-redis) is reached on migrate: treenode refreshes its
+      # cached tree in post_migrate, as on a real stack.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
     env:
+      REDIS_URL: redis://127.0.0.1:6379/0
       POSTGRES_HOST: 127.0.0.1
       POSTGRES_PORT: "5432"
       POSTGRES_USER: stapel
