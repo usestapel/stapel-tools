@@ -21,6 +21,12 @@ from their pairs' `embeds`, and an intake can ask about slots from one function.
   a shared slot, which `none` cannot say); unknown members are refused.
 - Pins follow npm: auth-react 0.27.0, workspaces-react 0.22.1, cdn-react
   0.8.2, listings-react 0.40.1, categories-react 0.35.1.
+- `SCH004` (schema-wire lint, warning; `--strict` promotes): an enum
+  component carrying a drf-spectacular collision name (`StatusD41Enum`: the
+  property camelized plus three hash characters), recognised by shape and by a
+  referencing property of that prefix. Such a name moves with unrelated edits
+  and breaks a client's `Schemas["StatusD41Enum"]`; pin it in the contract
+  harness (`ENUM_NAME_OVERRIDES`).
 
 ## [0.72.8] — 2026-10-22
 

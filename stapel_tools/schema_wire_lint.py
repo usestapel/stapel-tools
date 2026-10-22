@@ -108,6 +108,23 @@ SCH003  (error) A method decorated with ``@extend_schema`` declares an ARRAY
         contradiction (``stapel-workspaces``' audit endpoint is exactly
         this, and is correct).
 
+SCH004  (warning, during the sweep) An enum component carries a
+        drf-spectacular COLLISION NAME — ``StatusD41Enum``, ``TypeE3eEnum``:
+        the property name camelized plus the first three characters of the
+        choice-set hash. Spectacular falls back to that name when one property
+        name carries several choice sets across several components, so the
+        name depends on every other field of that name in the document and on
+        the generator's version. A generated client's type is renamed by an
+        unrelated edit (a new ``status`` field elsewhere) or a clean
+        environment, and a hand-written ``Schemas["StatusD41Enum"]`` breaks.
+        Recognised by shape AND provenance: the prefix must equal a property
+        that references the component, so ``ServiceFeeEnum`` on
+        ``service_fee`` is not mistaken for a hash. The fix is a name pinned
+        in the contract harness (``ENUM_NAME_OVERRIDES``), ideally from the
+        model's ``TextChoices`` so the schema and the model cannot disagree.
+        Warning while the four libraries that carry one are swept;
+        ``--strict`` promotes it.
+
 What these rules provably CANNOT catch
 ---------------------------------------
 * **A declared object whose FIELDS are wrong.** ``responses=IssueSerializer``
@@ -833,11 +850,73 @@ def lint_source_file(path: Path) -> list:
 # ---------------------------------------------------------------------------
 
 
+_COLLISION_ENUM = re.compile(r"^(?P<prefix>[A-Z].*?)(?P<hash>[0-9A-F][0-9a-f]{2})Enum$")
+
+
+def _camelize(name: str) -> str:
+    return "".join(part[:1].upper() + part[1:] for part in re.split(r"[_\W]+", name) if part)
+
+
+def _enum_referrers(schemas: dict) -> dict:
+    """Enum component name → the property names that ``$ref`` it."""
+    found: dict = {}
+
+    def walk(node, prop=None):
+        if isinstance(node, dict):
+            ref = node.get("$ref")
+            if prop and isinstance(ref, str) and ref.startswith("#/components/schemas/"):
+                found.setdefault(ref.rsplit("/", 1)[-1], set()).add(prop)
+            for key, value in node.items():
+                if key == "properties" and isinstance(value, dict):
+                    for name, sub in value.items():
+                        walk(sub, name)
+                elif key in ("items", "allOf", "oneOf", "anyOf", "additionalProperties"):
+                    walk(value, prop)
+                elif key not in ("$ref",):
+                    walk(value, None)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, prop)
+
+    walk(schemas)
+    return found
+
+
+def collision_named_enums(document: dict) -> list:
+    """``[(component, sorted property names)]`` for every enum component whose
+    name is spectacular's hash-suffixed collision fallback."""
+    schemas = ((document or {}).get("components") or {}).get("schemas") or {}
+    if not isinstance(schemas, dict):
+        return []
+    referrers = _enum_referrers(schemas)
+    hits = []
+    for name in sorted(schemas):
+        match = _COLLISION_ENUM.match(name)
+        if not match or "enum" not in (schemas[name] or {}):
+            continue
+        props = sorted(p for p in referrers.get(name, ()) if _camelize(p) == match["prefix"])
+        if props:
+            hits.append((name, props))
+    return hits
+
+
 def lint_library(library: Path) -> list:
     violations: list = []
     document_path = schema_path(library)
     document = _read_document(document_path)
     operations = declared_json_operations(document) if document else []
+
+    for name, props in collision_named_enums(document):
+        violations.append(Violation(
+            str(document_path), 1, "SCH004",
+            f"enum component {name} is drf-spectacular's collision name for "
+            f"property {props[0]!r}: it changes whenever another field of that "
+            f"name appears or the generator changes, renaming the generated "
+            f"client's type under an unrelated edit. Pin it in the contract "
+            f"harness (spectacular_settings.ENUM_NAME_OVERRIDES), from the "
+            f"model's TextChoices where one exists",
+            level="warning",
+        ))
 
     wire_tests: list = []
     for module in _test_modules(library):

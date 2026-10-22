@@ -774,3 +774,74 @@ class TestWiring:
             assert escape.RULE_REGISTRY[rule].linter == "stapel-schema-lint"
         assert escape.RULE_REGISTRY["SCH003"].honors_noqa is True
         assert escape.RULE_REGISTRY["SCH001"].honors_noqa is False
+
+
+# ---------------------------------------------------------------------------
+# SCH004 — collision-named enum components
+# ---------------------------------------------------------------------------
+
+def _enum_doc():
+    """The shape stapel-listings' docs/schema.json had: one ``status`` name over
+    two choice sets in two components, resolved as ``StatusD41Enum``."""
+    return {
+        "openapi": "3.0.3",
+        "paths": {},
+        "components": {"schemas": {
+            "Listing": {"type": "object", "properties": {
+                "status": {"$ref": "#/components/schemas/StatusD41Enum"},
+                "service_fee": {"$ref": "#/components/schemas/ServiceFeeEnum"},
+                "kind": {"allOf": [{"$ref": "#/components/schemas/TypeE3eEnum"}]},
+            }},
+            "Check": {"type": "object", "properties": {
+                "type": {"oneOf": [{"$ref": "#/components/schemas/TypeE3eEnum"},
+                                   {"$ref": "#/components/schemas/NullEnum"}]},
+                "status": {"$ref": "#/components/schemas/CheckStatusEnum"},
+            }},
+            "StatusD41Enum": {"type": "string", "enum": ["draft", "published"]},
+            "TypeE3eEnum": {"type": "string", "enum": ["bool"]},
+            "ServiceFeeEnum": {"type": "string", "enum": ["low", "high"]},
+            "CheckStatusEnum": {"type": "string", "enum": ["ok", "failed"]},
+            "NullEnum": {"enum": [None]},
+        }},
+    }
+
+
+def test_sch004_names_collision_enums_by_shape_and_provenance():
+    hits = swl.collision_named_enums(_enum_doc())
+
+    # TypeE3eEnum: referenced by `type` (Check) and `kind` (Listing); the
+    # prefix is matched against the property that carries it.
+    assert hits == [("StatusD41Enum", ["status"]), ("TypeE3eEnum", ["type"])]
+
+
+def test_sch004_ignores_a_name_that_only_looks_hashed():
+    doc = _enum_doc()
+    doc["components"]["schemas"]["ServiceFeeEnum"]["enum"] = ["fee"]
+    # "Fee" is three hex-looking letters, but the property is service_fee →
+    # "ServiceFee", not "Service" + hash.
+    names = [name for name, _ in swl.collision_named_enums(doc)]
+    assert "ServiceFeeEnum" not in names
+
+
+def test_sch004_is_a_warning_on_the_library(tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "schema.json").write_text(json.dumps(_enum_doc()))
+
+    found = [v for v in swl.lint_library(tmp_path) if v.rule == "SCH004"]
+
+    assert [v.level for v in found] == ["warning", "warning"]
+    assert "StatusD41Enum" in found[0].message
+    assert "ENUM_NAME_OVERRIDES" in found[0].message
+
+
+def test_sch004_is_silent_on_pinned_names(tmp_path):
+    doc = _enum_doc()
+    schemas = doc["components"]["schemas"]
+    schemas["ListingStatusEnum"] = schemas.pop("StatusD41Enum")
+    schemas["BoolTypeEnum"] = schemas.pop("TypeE3eEnum")
+    text = json.dumps(doc).replace("StatusD41Enum", "ListingStatusEnum").replace(
+        "TypeE3eEnum", "BoolTypeEnum")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "schema.json").write_text(text)
+
+    assert [v for v in swl.lint_library(tmp_path) if v.rule == "SCH004"] == []
