@@ -724,8 +724,22 @@ services:
       - "${HTTP_PORT:-80}:80"
     volumes:
       - ./service-configs/nginx:/etc/nginx/conf.d:ro
-      - static-content:/staticfiles:ro
-      - media-content:/media:ro
+      # nocopy on every volume the backend writes: Docker seeds an empty
+      # volume from the first container that mounts it, and nginx:alpine
+      # ships a root-owned /media (cdrom, floppy, usb). Started first, nginx
+      # left the backend (uid 10001) unable to create MEDIA_ROOT/<slug>.
+      - type: volume
+        source: static-content
+        target: /staticfiles
+        read_only: true
+        volume:
+          nocopy: true
+      - type: volume
+        source: media-content
+        target: /media
+        read_only: true
+        volume:
+          nocopy: true
 {{FRONTEND_NGINX_MOUNTS}}
 {{FRONTEND_NGINX_DEPENDS}}
 
@@ -1109,8 +1123,22 @@ services:
       - "${HTTP_PORT:-80}:80"
     volumes:
       - ./service-configs/nginx:/etc/nginx/conf.d:ro
-      - static-content:/staticfiles:ro
-      - media-content:/media:ro
+      # nocopy on every volume the backend writes: Docker seeds an empty
+      # volume from the first container that mounts it, and nginx:alpine
+      # ships a root-owned /media (cdrom, floppy, usb). Started first, nginx
+      # left the backend (uid 10001) unable to create MEDIA_ROOT/<slug>.
+      - type: volume
+        source: static-content
+        target: /staticfiles
+        read_only: true
+        volume:
+          nocopy: true
+      - type: volume
+        source: media-content
+        target: /media
+        read_only: true
+        volume:
+          nocopy: true
 {{FRONTEND_NGINX_MOUNTS}}
 {{FRONTEND_NGINX_DEPENDS}}
 

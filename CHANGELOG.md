@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.72.6] — 2026-10-22
+
+Patch: a generated project's backend boots no matter which container starts
+first.
+
+- nginx mounts `static-content` and `media-content` with `nocopy` (monolith
+  and microservices `docker-compose.base.yml`). Docker seeds an empty named
+  volume from the first container that mounts it; nginx:alpine has a
+  root-owned `/media` (cdrom, floppy, usb), so when nginx started first the
+  backend (uid 10001) could not create `MEDIA_ROOT/<slug>` and every boot
+  died in `migrate` on core `storage.E002`. Test: the nginx side of every
+  volume a backend mounts carries `nocopy` (red on 0.72.5).
+
 ## [0.72.5] — 2026-10-22
 
 Patch: the 0.72.4 content, publishable.
