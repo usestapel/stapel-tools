@@ -121,6 +121,12 @@ jobs:
       - name: The suite declares its own siblings (SIB001-006)
         run: python -m stapel_tools.sibling_lint .
 
+      # Every composite's INSTALLED preset.py equals STAPEL_LIBS: apps and
+      # their order, URL mounts, the SETTINGS_DEFAULTS shape the generated
+      # settings merge, and a backend for every frontend-composite pair.
+      - name: Composite presets equal the registry (stapel-preset-gate)
+        run: python -m stapel_tools.preset_gate
+
       - name: Tests with coverage
         # Strict siblings: a DECLARED sibling that is missing FAILS instead of
         # skipping. A quiet skip here would mean the install step above did not
@@ -182,6 +188,90 @@ jobs:
                   yaml.safe_load(base.read_text())
               print("OK", name)
           PY
+
+  # ─── Every composite, generated and gated as a real project ──────────────
+  # One matrix leg per composite (shop, classified, booking, social), each
+  # generated as a minimal and a monolith project (the scaffold Studio calls).
+  # The union of their requirements is installed in ONE pip resolution — the
+  # registry pins must resolve jointly — and every project's own gates run:
+  # manage.py check (monolith: base and dev tiers), boot-smoke, migrate plus
+  # the bootstrap seeds (minimal on SQLite, monolith on the postgres service),
+  # the generated pytest suite, ruff. Release-gating: publish.yml's ci-gate
+  # waits for this whole run to be green.
+  composites:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        composite: [shop, classified, booking, social]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: stapel
+          POSTGRES_PASSWORD: stapel
+          POSTGRES_DB: stapel_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U stapel"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: stapel
+      POSTGRES_PASSWORD: stapel
+      POSTGRES_DB: stapel_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install tools (+ libvips wheels for stapel-cdn's image checks)
+        run: pip install -e . "pyvips[binary]" --quiet
+      - name: Generate, install jointly, boot, gate
+        run: >-
+          python scripts/composite_gates.py --migrate all
+          --out "$RUNNER_TEMP/composites" ${{ matrix.composite }}
+
+  # The same four composites' generated FRONTENDS: the monolith's SPA, pinned
+  # to what npm serves, installed, linted and built. modules.tsx carries the
+  # mandate seam and the listings photo resolver; a type error there is red
+  # here, not in a client's first build.
+  composite-frontends:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        composite: [shop, classified, booking, social]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: pip install -e . --quiet
+      - name: Generate the monolith
+        run: |
+          stapel-create-project fe --type monolith --title "Fe" \
+            --url https://fe.example --company-name Acme \
+            --company-email hi@fe.example \
+            --modules ${{ matrix.composite }} \
+            --no-git --no-submodules --output-dir "$RUNNER_TEMP"
+      - name: Pin to npm, install, lint, build
+        working-directory: ${{ runner.temp }}/fe/frontend
+        run: |
+          python "$GITHUB_WORKSPACE/scripts/check_npm_peer_graph.py"
+          python "$GITHUB_WORKSPACE/scripts/e2e_npm_pins.py" package.json
+          npm install --no-audit --no-fund
+          npm run gen:tokens
+          npm run lint
+          npm run build
 
   # ─── A tag without a release is not a release ─────────────────────────────
   # The one wave step nobody had been watching. Three ways this stayed

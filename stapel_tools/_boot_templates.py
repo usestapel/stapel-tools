@@ -166,7 +166,7 @@ optional "superuser" ensure_superuser
 # optional: a failed collectstatic serves unstyled admin pages. Making this
 # fatal takes the whole API down over one asset.
 optional "collectstatic" python manage.py collectstatic --noinput --clear --verbosity 0
-
+{{BOOTSTRAP_SEED}}
 bootstrap_done
 """
 

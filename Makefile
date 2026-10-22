@@ -32,9 +32,12 @@ PYTHON ?= python
 # unversioned, so every fresh clone silently has no hooks at all, and an
 # inactive hook is indistinguishable from a passing one until a branch cut
 # from an ancient base lands and reverts a week of work.
-.PHONY: check lint test nav-sync sibling-lint peer-graph hooks-doctor
+# `preset-gate` holds every composite's installed preset.py equal to
+# STAPEL_LIBS (apps, order, mounts, defaults shape, frontend pairs). It reads
+# the INSTALLED composites, so it needs the `test` extra.
+.PHONY: check lint test nav-sync sibling-lint peer-graph hooks-doctor preset-gate composite-gates
 
-check: hooks-doctor lint sibling-lint nav-sync test
+check: hooks-doctor lint sibling-lint nav-sync preset-gate test
 
 hooks-doctor:
 	@$(PYTHON) -m stapel_tools.hooks doctor || { \
@@ -52,6 +55,14 @@ sibling-lint:
 
 nav-sync:
 	$(PYTHON) scripts/check_nav_manifest_sync.py
+
+preset-gate:
+	$(PYTHON) -m stapel_tools.preset_gate
+
+# Heavy (installs every composite's requirements and runs each generated
+# project's gates); CI's `composites` job runs it. Not part of `check`.
+composite-gates:
+	$(PYTHON) scripts/composite_gates.py
 
 peer-graph:
 	$(PYTHON) scripts/check_npm_peer_graph.py

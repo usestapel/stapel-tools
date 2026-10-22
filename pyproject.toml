@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.72.9"
+version = "0.72.10"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -84,6 +84,21 @@ test = [
     # actually RUN on a runner. `[binary]` pulls the manylinux/macOS wheels
     # that bundle libvips, so this needs no apt step.
     "pyvips[binary]",
+    # The four composites: stapel-preset-gate reads their INSTALLED preset.py
+    # (tests/test_scaffold_wiring.py holds each equal to STAPEL_LIBS), and the
+    # live tests boot each one's generated project, which imports every member.
+    # Floors are the releases whose presets equal this registry.
+    "stapel-shop>=0.2.37,<1",
+    "stapel-classified>=0.11.1,<1",
+    "stapel-booking>=0.1.6,<1",
+    "stapel-social>=0.1.8,<1",
+    # Members the live tests and the preset-gate inversion name directly.
+    "stapel-listings>=0.26.0,<1",  # noqa: SIB005 - named by the preset-gate inversion test
+    "stapel-moderation>=0.8.4,<1",  # noqa: SIB005 - imported by the generated project under test
+    "stapel-search>=0.18.2,<1",  # noqa: SIB005 - imported by the generated project under test
+    # A generated chat project serves its socket through stapel-realtime's
+    # Channels stack; `manage.py check` imports chat's consumers.
+    "stapel-realtime[channels,redis]>=0.2.3,<1",  # noqa: SIB005 - imported by the generated project under test
 ]
 
 # Auto-loaded by pytest in any environment where stapel-tools is installed —
@@ -128,6 +143,7 @@ stapel-registry-check = "stapel_tools.registry_check:main"
 stapel-verify = "stapel_tools.verify:main"
 stapel-release-manifest = "stapel_tools.release:main"
 stapel-new-service = "stapel_tools.new_service:main"
+stapel-preset-gate = "stapel_tools.preset_gate:main"
 stapel-new-module = "stapel_tools.new_module:main"
 stapel-new-library = "stapel_tools.new_library:main"
 stapel-new-react-lib = "stapel_tools.new_react_lib:main"

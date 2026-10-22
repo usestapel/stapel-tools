@@ -112,7 +112,9 @@ class TestRequiresTopology:
 
     def test_categories_and_listings_require_attributes(self):
         assert STAPEL_LIBS["categories"]["requires"] == ["attributes"]
-        assert STAPEL_LIBS["listings"]["requires"] == ["attributes"]
+        # listings also needs the categories.features provider to publish
+        # (AUDIT-BRICKS-2 BK-1).
+        assert STAPEL_LIBS["listings"]["requires"] == ["attributes", "categories"]
 
     def test_expand_pulls_in_hard_requires(self):
         # Requesting only "categories" must yield attributes too, in

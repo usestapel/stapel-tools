@@ -721,8 +721,8 @@ services:
     command: >
       bash -c "
         docker-entrypoint.sh postgres &
-        until pg_isready -U $${POSTGRES_USER:-stapel}; do sleep 1; done
-        /usr/local/bin/ensure-databases.sh
+        until pg_isready -h 127.0.0.1 -U $${POSTGRES_USER:-stapel}; do sleep 1; done
+        until /usr/local/bin/ensure-databases.sh; do sleep 1; done
         wait
       "
     healthcheck:
@@ -832,8 +832,8 @@ services:
     command: >
       bash -c "
         docker-entrypoint.sh postgres &
-        until pg_isready -U $${POSTGRES_USER:-stapel}; do sleep 1; done
-        /usr/local/bin/ensure-databases.sh
+        until pg_isready -h 127.0.0.1 -U $${POSTGRES_USER:-stapel}; do sleep 1; done
+        until /usr/local/bin/ensure-databases.sh; do sleep 1; done
         wait
       "
     healthcheck:
@@ -1127,8 +1127,8 @@ services:
     command: >
       bash -c "
         docker-entrypoint.sh postgres &
-        until pg_isready -U $${POSTGRES_USER:-stapel}; do sleep 1; done
-        /usr/local/bin/ensure-databases.sh
+        until pg_isready -h 127.0.0.1 -U $${POSTGRES_USER:-stapel}; do sleep 1; done
+        until /usr/local/bin/ensure-databases.sh; do sleep 1; done
         wait
       "
     healthcheck:
@@ -1338,9 +1338,15 @@ def nginx_local_backend_locations(prefixes: list[str]) -> str:
     for prefix in prefixes:
         modifier, path = _nginx_location_path(prefix)
         head = f"location {modifier} {path} {{" if modifier else f"location {path} {{"
+        upgrade = (
+            "        proxy_http_version 1.1;\n"
+            "        proxy_set_header Upgrade $http_upgrade;\n"
+            "        proxy_set_header Connection \"upgrade\";\n"
+        ) if prefix.startswith("ws/") else ""
         blocks.append(
             f"    {head}\n"
             "        proxy_pass $stapel_backend;\n"
+            f"{upgrade}"
             "        proxy_set_header Host $http_host;\n"
             "        proxy_set_header X-Real-IP $remote_addr;\n"
             "        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
@@ -1366,10 +1372,16 @@ def nginx_prod_backend_location(prefix: str, upstream_service: str) -> str:
         f"\n  {head}\n"
         f"    set {var} {upstream_service}:8000;\n"
         f"    proxy_pass http://{var};\n"
-        f"    proxy_set_header Host $http_host;\n"
-        f"    proxy_set_header X-Real-IP $remote_addr;\n"
-        f"    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
-        f"    proxy_set_header X-Forwarded-Proto $scheme;\n"
-        f"    proxy_redirect off;\n"
-        f"  }}\n"
+        + (
+            "    proxy_http_version 1.1;\n"
+            "    proxy_set_header Upgrade $http_upgrade;\n"
+            "    proxy_set_header Connection \"upgrade\";\n"
+            if prefix.startswith("ws/") else ""
+        )
+        + "    proxy_set_header Host $http_host;\n"
+        "    proxy_set_header X-Real-IP $remote_addr;\n"
+        "    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n"
+        "    proxy_set_header X-Forwarded-Proto $scheme;\n"
+        "    proxy_redirect off;\n"
+        "  }\n"
     )

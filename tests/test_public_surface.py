@@ -594,13 +594,15 @@ class TestProjectFiles:
 
     def test_video_absent_means_no_ws_or_rtc_leakage(self):
         """A storefront that never installs the video pair must not carry
-        video's proxy surfaces (or any `ws: true` rule at all — nothing else
-        registers a websocket target)."""
+        video's proxy surfaces. Every `ws: true` rule it does carry is the
+        socket of a pair it installs (chat, notifications: /ws/<mod>/)."""
         plan = _plan()
         vite = plan["files"]["vite.config.ts"]
         reserved = json.loads(plan["files"]["reserved-paths.json"])["reservedPathPrefixes"]
         assert "video" not in vite
-        assert "ws: true" not in vite
+        for line in vite.splitlines():
+            if "ws: true" in line:
+                assert '"/ws/' in line and "video" not in line, line
         assert "/ws/video" not in reserved
         assert "/rtc" not in reserved
 

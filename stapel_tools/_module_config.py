@@ -468,3 +468,38 @@ def inject_unbilled_workspaces(
     merged = {**(module_config or {})}
     merged["workspaces"] = {"ALLOW_UNBILLED": True, **(merged.get("workspaces") or {})}
     return merged
+
+
+def inject_listings_auto_approve(
+    module_config: dict[str, dict] | None, selected: list[str],
+) -> dict[str, dict] | None:
+    """stapel-listings holds a published listing at its ``"pre"`` moderation
+    gate until a ``moderation.completed`` verdict arrives. A selection without
+    stapel-moderation has nothing that ever delivers one, so every listing
+    would stay PENDING and never go public (AUDIT-BRICKS-2 BK-2: a booking
+    resource never bookable). Such a selection approves on publish, the
+    setting listings documents for exactly this deployment. An explicit value
+    still wins."""
+    if "listings" not in selected or "moderation" in selected:
+        return module_config
+    merged = {**(module_config or {})}
+    merged["listings"] = {"AUTO_APPROVE_ON_PUBLISH": True, **(merged.get("listings") or {})}
+    return merged
+
+
+def inject_search_backend_for_sqlite(
+    module_config: dict[str, dict] | None, selected: list[str],
+) -> dict[str, dict] | None:
+    """stapel-search's default backend is PostgreSQL's (trigram arm), and
+    ``stapel_search.E003`` refuses it on any other database. The minimal
+    preset runs on SQLite, so it gets the backend stapel-search ships for
+    SQLite (``typo_tolerance: False``, said rather than degraded). An explicit
+    value still wins."""
+    if "search" not in selected:
+        return module_config
+    merged = {**(module_config or {})}
+    merged["search"] = {
+        "BACKEND": "stapel_search.backends.naive.NaiveSearchBackend",
+        **(merged.get("search") or {}),
+    }
+    return merged

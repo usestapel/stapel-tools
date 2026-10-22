@@ -378,7 +378,7 @@ SPECTACULAR_SETTINGS = get_spectacular_settings(
     description="{{TITLE}} service API",
     version="1.0.0",
 )
-"""
+{{STAPEL_WIRING}}"""
 
 DEV_SETTINGS = """\
 import os
@@ -430,7 +430,7 @@ if not STAPEL_WS_ALLOWED_ORIGINS:  # type: ignore[name-defined]  # noqa: F405
         "http://localhost:8000",  # runserver, when the SPA is served by Django
         "http://localhost",       # the local compose stack's nginx
     ]
-
+{{STAPEL_DEV_WIRING}}
 # Local machine: run Celery tasks INLINE (no broker/worker required for the
 # local stack to be complete — a lib's .delay() executes eagerly; errors are
 # recorded on the result, never turned into a request 500).

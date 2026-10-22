@@ -1,5 +1,79 @@
 # Changelog
 
+## [0.72.10] — 2026-10-22
+
+Patch: a selected composite, socket module, beat module or gdpr is wired by
+the scaffold, and every composite preset is held equal to the registry
+(AUDIT-BRICKS-2, the scaffold half Brigade AC deferred).
+
+- Composite `preset.SETTINGS_DEFAULTS` reach the generated settings (SO-1).
+  The settings import each selected composite's preset at load time and merge
+  it two levels deep under any explicit `STAPEL_<MOD>` value; later composites
+  refine earlier ones (shop then classified). social's reviews `TARGET_TYPES`
+  `profile` entry, which no generated app had, is now live.
+- `stapel-preset-gate` (new CLI, `make preset-gate`, a CI step): each
+  installed composite preset equals `STAPEL_LIBS` — INSTALLED_APPS and their
+  order, URL mounts, the SETTINGS_DEFAULTS shape — and every
+  `FRONTEND_COMPOSITES` pair has a backend in the composite's selection. What
+  it flagged was fixed at the source: stapel-shop 0.2.37 and stapel-booking
+  0.1.6 mount categories and listings under `<mod>/api/` (BK-3), booking adds
+  `stapel_categories` and auto-approves on publish (BK-1/2), stapel-social
+  0.1.8 adds `stapel_realtime`, stapel-classified 0.11.1 follows the emitted
+  order.
+- Registry: `listings` requires `categories` (publish calls
+  `categories.features`); `classified` mounts `classified/api/` and requires
+  vocabularies, search and moderation; new key `companions` selects the
+  backend of every frontend pair a composite installs beyond its members
+  (auth, cdn, profiles, currencies, search, vocabularies, chat), so the
+  storefront pages have something to call (SE-1, SO-3); `vocabularies` sorts
+  first of the attribute consumers, `moderation` and `search` after the
+  modules whose facts they listen to.
+- `STAPEL_LIBS["search"]` (stapel-search 0.18.2, mounted `search/`) and
+  `STAPEL_LIBS["realtime"]` (0.2.3, `[channels,redis]`). The minimal (SQLite)
+  preset gets search's SQLite backend; a selection with listings and no
+  moderation sets `AUTO_APPROVE_ON_PUBLISH` (both overridable).
+- Chat and video select stapel-realtime, and its selection wires the socket
+  (CH-8): `ASGI_APPLICATION` and a `config/asgi.py` built by
+  `build_websocket_application`, the `channels` signal transport,
+  `CHANNEL_LAYERS` (redis on the service tier, in-memory on minimal),
+  `STAPEL_REALTIME` origins and `URL_PREFIX`, `daphne` (prod `RUN_CMD`; the
+  dev tier installs the daphne app so `runserver` serves ASGI), and `/ws/<mod>/`
+  proxy rules with the upgrade headers in local nginx, prod nginx and Vite.
+  chat, docs and notifications declare their socket paths next to video's.
+- `CELERY_BEAT_SCHEDULE` from `stapel_moderation.beat` and
+  `stapel_search.tasks` when those are selected, plus core's taskstore sweep
+  on the service tier (MD-1); celery joins the minimal requirements then.
+- `stapel_gdpr.guards.AccountClosureGuardMiddleware` appended to MIDDLEWARE
+  when gdpr is selected (GD-3).
+- Pins: core 0.94.0, auth 0.49.0, billing 0.24.1, cdn 0.30.0 (core 0.94's lifecycle.E001 refuses 0.29),
+  notifications 0.28.1, profiles 0.22.1, translate 0.8.5, workspaces 0.37.0,
+  gdpr 0.9.0, agent 0.38.1, attributes 0.9.5, categories 0.25.0, chat 0.11.0,
+  listings 0.27.0, moderation 0.8.4, recordings 0.42.0, reviews 0.8.0,
+  vocabularies 0.4.4, shop 0.2.37, classified 0.11.1, booking 0.1.6,
+  social 0.1.8.
+- Live-run defects from the Tier 0 composite e2e (Brigade Y):
+  - the local compose `db` service ensures the service databases against the
+    REAL server (`pg_isready -h 127.0.0.1`; the initdb temp server answers on
+    the socket only and was killed mid-script) and retries the script (D9);
+  - bootstrap seeds reference data: `load_default_currencies` when currencies
+    is selected, `load_catalog --seed-if-empty` from a generated starter tree
+    (`fixtures/catalog/`, one per composite) when categories is (D14);
+  - the generated `modules.tsx` mounts `MandateProvider` with the storefront's
+    session-derived source when auth is selected without workspaces, so the
+    listings composer, "my listings", favourites and calendar RSVP are no
+    longer permanently disabled (D1), and the listings runtime gets
+    `resolveImage: listingImageFor` (`src/lib/cdn.ts`, the 720 preview tier)
+    so photos render (D4);
+  - the derived gdpr `DATA_OWNERS` map reads the expanded selection, so a
+    composite's members' stores are listed (gdpr.E002/E010).
+- CI matrix `composites` (`scripts/composite_gates.py`), one leg per
+  composite: generated as a minimal and a monolith project, the union of their
+  requirements installed in one resolution, and each project's check
+  (monolith: base and dev), boot-smoke, migrate plus the bootstrap seeds
+  (monolith on a postgres service), pytest and ruff run. CI matrix
+  `composite-frontends`: each composite's generated SPA installed from npm,
+  linted and built.
+
 ## [0.72.9] — 2026-10-22
 
 Patch: the account menu and the workspace switcher are placed by the scaffold

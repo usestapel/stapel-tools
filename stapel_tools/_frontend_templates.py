@@ -354,11 +354,37 @@ def render_cdn_lib_ts(slug: str) -> str:
  * GENERATED — stapel-cdn URL resolution (cdn auto-wiring). See this file's
  * generator, _frontend_templates.render_cdn_lib_ts, for the full rationale.
  */
+import type {{ StapelImage }} from "@stapel/image";
+
 export function avatarUrlFor(ref: string): string {{
   // `ref` is format-validated server-side (stapel-profiles'
   // validate_cdn_reference, "<type>/<hash>") before it is ever stored.
   const [type, hash] = ref.split("/", 2);
   return `/media/{slug}/${{type}}/${{hash}}/160w.webp`;
+}}
+
+/**
+ * The `resolveImage` @stapel/listings-react's runtime takes: a listing's
+ * `images` are opaque `<type>/<hash>` references, and only the deployment
+ * knows where its CDN serves them. Same server-side template as above
+ * (`Image.get_variant_url`): the 720 preview tier, w-branch, which every
+ * stored photo has (stapel-cdn's default PREVIEW_SIZES). No ladder: `url` is
+ * the display URL `<Image>` loads when `variants` is empty.
+ */
+export function listingImageFor(ref: string): StapelImage | undefined {{
+  const [type, hash] = ref.split("/", 2);
+  if (!type || !hash) return undefined;
+  return {{
+    source: "cdn",
+    url: `/media/{slug}/${{type}}/${{hash}}/720w.webp`,
+    mime: "image/webp",
+    width: null,
+    height: null,
+    aspect: null,
+    square: false,
+    preview_b64: null,
+    variants: [],
+  }};
 }}
 '''
 
@@ -505,6 +531,14 @@ def render_modules_tsx(
     # Cross-pair seams (`vocabularies` -> attributes' VocabularyClientProvider).
     seams = seam_pairs(entries)
     seam_imports = _seam_import_names(seams)
+    # The mandate seam (@stapel/core `MandateProvider`). listings-react's
+    # composer, "my listings", favourites and calendar-react's RSVP read
+    # `useMandate()`, which answers `unavailable` with no provider: every
+    # Publish and Save stayed disabled. workspaces-react derives the axis
+    # from a workspace membership; without it a signed-in person is the one
+    # member there is (src/mandateSource.ts, the storefront's source).
+    keys = {e["key"] for e in entries}
+    mandate_wired = "auth" in keys and "workspaces" not in keys
 
     lines: list[str] = [
         "/**",
@@ -516,7 +550,11 @@ def render_modules_tsx(
         " * by editing this file's shape.",
         " */",
         'import type { ReactElement, ReactNode } from "react";',
-        'import { createI18n, createStapelQueryClient, StapelProvider } from "@stapel/core";',
+        (
+            'import { createI18n, createStapelQueryClient, MandateProvider, StapelProvider } from "@stapel/core";'
+            if mandate_wired
+            else 'import { createI18n, createStapelQueryClient, StapelProvider } from "@stapel/core";'
+        ),
     ]
     if container_i18n:
         # The CONTAINER's own copy — the sentences on the named placeholder
@@ -546,15 +584,29 @@ def render_modules_tsx(
         lines.append(f'import {{ {", ".join(names)} }} from "{e["package"]}";')
         if e.get("default_component"):
             lines.append(f'import {{ {e["default_component"]} }} from "{e["package"]}/default";')
+    cdn_helpers = []
     if needs_cdn_avatar_helper:
-        lines.append('import { avatarUrlFor } from "./lib/cdn.js";')
+        cdn_helpers.append("avatarUrlFor")
+    if has_cdn and any(e["key"] == "listings" for e in entries):
+        cdn_helpers.append("listingImageFor")
+    if cdn_helpers:
+        lines.append(f'import {{ {", ".join(cdn_helpers)} }} from "./lib/cdn.js";')
+    if mandate_wired:
+        lines.append('import { useStorefrontMandateSource } from "./mandateSource.js";')
     lines.append("")
     lines.append('const query = createStapelQueryClient({ cacheVersion: "0.0.0" });')
     lines.append('const i18n = createI18n({ locale: "en" });')
     lines.append("")
     for e in entries:
         key = e["key"]
-        if e.get("create_runtime"):
+        if e.get("create_runtime") and key == "listings" and has_cdn:
+            # Photos: the pair draws "photo unavailable" without a resolver,
+            # and only this deployment knows where its CDN serves a ref.
+            lines.append(
+                f'const {key}Runtime = {e["create_runtime"]}'
+                f'({{ baseUrl: {json.dumps(pair_base_url(e))}, resolveImage: listingImageFor }});'
+            )
+        elif e.get("create_runtime"):
             lines.append(
                 f'const {key}Runtime = {e["create_runtime"]}'
                 f'({{ baseUrl: {json.dumps(pair_base_url(e))} }});'
@@ -631,7 +683,10 @@ def render_modules_tsx(
     for e in seams:
         lines.append(f'{indent}<{e["seam"]["provider"]} value={{{e["key"]}Client}}>')
         indent += "  "
-    lines.append(f"{indent}{{children}}")
+    if mandate_wired:
+        lines.append(f"{indent}<MandateGateway>{{children}}</MandateGateway>")
+    else:
+        lines.append(f"{indent}{{children}}")
     for e in reversed(seams):
         indent = indent[:-2]
         lines.append(f'{indent}</{e["seam"]["provider"]}>')
@@ -642,6 +697,14 @@ def render_modules_tsx(
     lines.append("  );")
     lines.append("}")
     lines.append("")
+    if mandate_wired:
+        lines.append("/** The mandate seam, inside every provider: it reads the session")
+        lines.append(" * manager the auth runtime registers. */")
+        lines.append("function MandateGateway({ children }: { children: ReactNode }): ReactElement {")
+        lines.append("  const source = useStorefrontMandateSource();")
+        lines.append("  return <MandateProvider source={source}>{children}</MandateProvider>;")
+        lines.append("}")
+        lines.append("")
 
     defaults = [e for e in entries if e.get("default_component")]
     lines.append("/**")

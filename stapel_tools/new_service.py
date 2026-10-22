@@ -146,6 +146,16 @@ def make_context(
         comp = None
     module_config = merge_auth_axes(module_config, comp)
     dev_mock_providers = render_local_posture(comp)
+    from ._wiring import (
+        boot_smoke_extra,
+        keys_for_apps,
+        realtime_selected,
+        render_bootstrap_seed,
+        render_dev_wiring,
+        render_wiring,
+    )
+
+    selected_keys = keys_for_apps(apps)
     return {
         "TITLE": title,
         "SLUG": slug,
@@ -173,6 +183,14 @@ def make_context(
         "FUNCTION_TRANSPORT": function_transport,
         "TASK_DISPATCH": task_dispatch,
         "DEV_MOCK_PROVIDERS": dev_mock_providers,
+        # Selection-derived wiring (_wiring): composite defaults, realtime,
+        # beat schedule, required middleware — at the end of base.py.
+        "STAPEL_WIRING": render_wiring(selected_keys, flavor="monolith"),
+        "STAPEL_DEV_WIRING": render_dev_wiring(selected_keys),
+        # Plain string flag (see HAS_CDN): the realtime config/asgi.py.
+        "HAS_REALTIME": "true" if realtime_selected(selected_keys) else "",
+        "BOOT_SMOKE_EXTRA": boot_smoke_extra(selected_keys),
+        "BOOTSTRAP_SEED": render_bootstrap_seed(selected_keys),
     }
 
 
@@ -238,6 +256,7 @@ def write_file(path: Path, content: str):
 def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
     from ._harness_templates import HARNESS_CONFTEST_FIXTURES, harness_files
     from ._templates import DOCKERFILE_CDN
+    from ._wiring import ASGI_REALTIME_PY
 
     d = ctx["DIR"]
     m = ctx["MODULE"]
@@ -266,7 +285,10 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / "Dockerfile": render(dockerfile_template, ctx),
         root / d / "config" / "__init__.py": CONFIG_INIT_PY,
         root / d / "config" / "celery.py": render(CELERY_APP_PY, ctx),
-        root / d / "config" / "asgi.py": render(ASGI_PY, ctx),
+        root / d / "config" / "asgi.py": (
+            ASGI_REALTIME_PY.format(settings="config.settings.base")
+            if ctx.get("HAS_REALTIME") else render(ASGI_PY, ctx)
+        ),
         root / d / "config" / "wsgi.py": render(WSGI_PY, ctx),
         root / d / "config" / "urls.py": render(URLS_PY, ctx),
         # Byte-identical to scripts/service_schema_health.py; the boot-contract
@@ -283,7 +305,7 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         # Boot-smoke gate (R3/§44, `make boot-smoke` — part of `make
         # controls`): the service-dir counterpart of the minimal preset's
         # config/settings_boot_smoke.py.
-        root / d / "config" / "settings" / "boot_smoke.py": BOOT_SMOKE_SETTINGS,
+        root / d / "config" / "settings" / "boot_smoke.py": BOOT_SMOKE_SETTINGS + ctx.get("BOOT_SMOKE_EXTRA", ""),
         # Ruff config (this service's own controls surface — svc-<slug>/Makefile
         # below, delegated into from the project root Makefile for monolith).
         root / d / "pyproject.toml": SVC_PYPROJECT,

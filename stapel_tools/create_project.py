@@ -59,8 +59,8 @@ STAPEL_LIBS = {
         # `stapel_core.jwt.E001`). The scaffold emits that setting, so it may
         # not pin a core that has never heard of it — the project would boot
         # with a socket every browser is turned away from.
-        "pin": "0.92.1",
-        "ahead_of_pypi": False,  # PyPI 0.92.1 @ 2026-10-15 (pip index versions; accepts the `settings` CONFIG.MD source)
+        "pin": "0.94.0",
+        "ahead_of_pypi": False,  # PyPI 0.94.0 @ 2026-10-22
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
@@ -68,8 +68,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Authentication (JWT, OAuth, OTP)",
         "default": True,
-        "pin": "0.48.0",
-        "ahead_of_pypi": False,  # PyPI 0.48.0 @ 2026-10-15
+        "pin": "0.49.0",
+        "ahead_of_pypi": False,  # PyPI 0.49.0 @ 2026-10-22
     },
     "billing": {
         "repo": "https://github.com/usestapel/stapel-billing.git",
@@ -77,8 +77,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Billing & subscriptions",
         "default": False,
-        "pin": "0.23.0",
-        "ahead_of_pypi": False,  # PyPI 0.23.0 @ 2026-10-15
+        "pin": "0.24.1",
+        "ahead_of_pypi": False,  # PyPI 0.24.1 @ 2026-10-22
     },
     "cdn": {
         "repo": "https://github.com/usestapel/stapel-cdn.git",
@@ -86,8 +86,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "File uploads & CDN",
         "default": False,
-        "pin": "0.28.1",
-        "ahead_of_pypi": False,  # PyPI 0.28.1 @ 2026-10-15
+        "pin": "0.30.0",
+        "ahead_of_pypi": False,  # PyPI 0.30.0 @ 2026-10-22 (answers user.deletion_cancelled: core 0.94 lifecycle.E001)
     },
     "notifications": {
         "repo": "https://github.com/usestapel/stapel-notifications.git",
@@ -95,8 +95,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Email/push notifications",
         "default": False,
-        "pin": "0.27.0",
-        "ahead_of_pypi": False,  # PyPI 0.27.0 @ 2026-10-15
+        "pin": "0.28.1",
+        "ahead_of_pypi": False,  # PyPI 0.28.1 @ 2026-10-22
     },
     "profiles": {
         "repo": "https://github.com/usestapel/stapel-profiles.git",
@@ -104,8 +104,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "User profiles",
         "default": False,
-        "pin": "0.22.0",
-        "ahead_of_pypi": False,  # PyPI 0.22.0 @ 2026-10-15
+        "pin": "0.22.1",
+        "ahead_of_pypi": False,  # PyPI 0.22.1 @ 2026-10-22
     },
     "translate": {
         "repo": "https://github.com/usestapel/stapel-translate.git",
@@ -113,8 +113,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Translations & i18n",
         "default": False,
-        "pin": "0.8.2",
-        "ahead_of_pypi": False,  # PyPI 0.8.2 @ 2026-10-15
+        "pin": "0.8.5",
+        "ahead_of_pypi": False,  # PyPI 0.8.5 @ 2026-10-22
     },
     "workspaces": {
         "repo": "https://github.com/usestapel/stapel-workspaces.git",
@@ -122,8 +122,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Workspaces & multi-tenancy",
         "default": False,
-        "pin": "0.34.0",
-        "ahead_of_pypi": False,  # PyPI 0.34.0 @ 2026-10-15
+        "pin": "0.37.0",
+        "ahead_of_pypi": False,  # PyPI 0.37.0 @ 2026-10-22
     },
     "gdpr": {
         "repo": "https://github.com/usestapel/stapel-gdpr.git",
@@ -131,8 +131,12 @@ STAPEL_LIBS = {
         "required": False,
         "description": "GDPR / data export & deletion",
         "default": False,
-        "pin": "0.8.2",
-        "ahead_of_pypi": False,  # PyPI 0.8.2 @ 2026-10-15
+        # Appended to MIDDLEWARE after authentication (gdpr.W015): without it
+        # an account in its closure grace period keeps every endpoint outside
+        # stapel-gdpr with a token minted before the closure.
+        "middleware": ["stapel_gdpr.guards.AccountClosureGuardMiddleware"],
+        "pin": "0.9.0",
+        "ahead_of_pypi": False,  # PyPI 0.9.0 @ 2026-10-22
     },
     # --- second onboarding wave (2026-07-11, static-scaffold-and-config.md §2
     # follow-up): 14 sibling checkouts brought into the registry. Dict order
@@ -152,8 +156,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "LLM facade (complete/translate/transcribe/summarize/image)",
         "default": False,
-        "pin": "0.36.0",
-        "ahead_of_pypi": False,  # PyPI 0.36.0 @ 2026-10-15
+        "pin": "0.38.1",
+        "ahead_of_pypi": False,  # PyPI 0.38.1 @ 2026-10-22
         "http": True,
         "url_prefix": "agent/",
         "requires": [],
@@ -169,8 +173,8 @@ STAPEL_LIBS = {
         # `stapel-vocabularies` implements — that module floors itself at
         # `stapel-attributes>=0.5`, so the old 0.3.3 pin and a vocabularies
         # selection could not resolve together at pip time.
-        "pin": "0.9.4",
-        "ahead_of_pypi": False,  # PyPI 0.9.4 @ 2026-10-15
+        "pin": "0.9.5",
+        "ahead_of_pypi": False,  # PyPI 0.9.5 @ 2026-10-22
         # No models/migrations/views/urls/comm surface of its own (its own
         # __init__.py: "This is an L1 library"). Not a Django app: absent from
         # INSTALLED_APPS, mounted nowhere — a pure pip dependency for
@@ -178,6 +182,30 @@ STAPEL_LIBS = {
         "http": False,
         "django_app": False,
         "requires": [],
+    },
+    "vocabularies": {
+        "repo": "https://github.com/usestapel/stapel-vocabularies.git",
+        "dir": "stapel_vocabularies",
+        # Sorted FIRST of the attribute consumers, not alphabetically: its
+        # AppConfig.ready() registers the VocabularyResolver stapel-attributes
+        # validates ref_select configs with, and Django runs ready() in
+        # INSTALLED_APPS order (the classified preset states the same order).
+        "required": False,
+        "description": "Reference vocabularies (levels, terms, edges) behind ref_select features",
+        "default": False,
+        "pin": "0.4.4",
+        "ahead_of_pypi": False,  # PyPI 0.4.4 @ 2026-10-22
+        # Its own `urls.py` contributes the `api/v1/` half, so the host mounts
+        # it bare under `vocabularies/` — the third-wave shape, not
+        # categories' `categories/api/`.
+        "http": True,
+        "url_prefix": "vocabularies/",
+        # pyproject.toml: `stapel-attributes>=0.5,<1.0`. A FLOOR, not a
+        # preference — the `VocabularyResolver` protocol this module
+        # implements lives in L1, and without it every `ref_select` feature
+        # in the deployment refuses to save while the term endpoints keep
+        # answering.
+        "requires": ["attributes"],
     },
     "calendar": {
         "repo": "https://github.com/usestapel/stapel-calendar.git",
@@ -197,8 +225,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Category tree & feature schema",
         "default": False,
-        "pin": "0.24.0",
-        "ahead_of_pypi": False,  # PyPI 0.24.0 @ 2026-10-15
+        "pin": "0.25.0",
+        "ahead_of_pypi": False,  # PyPI 0.25.0 @ 2026-10-22
         "http": True,
         # Onboarded 2026-07-11 assuming the "bakes api/ into its own urls"
         # second-wave shape (like calendar/video) — actually reads the SAME
@@ -209,6 +237,28 @@ STAPEL_LIBS = {
         # checkout's actual urls.py, not just this registry's prior entry.
         "url_prefix": "categories/api/",
         "requires": ["attributes"],  # pyproject dependency, hard
+        # A starter tree (fixtures/catalog/, written by the scaffold) so the
+        # first publish has a category; a no-op once the catalog has rows.
+        "seed": ["python manage.py load_catalog --seed-if-empty"],
+    },
+    # The WebSocket substrate (stapel-realtime): a Django app with checks and
+    # two comm Functions, no models and no urls of its own. Selected through
+    # the "requires" of every module that SERVES a socket (chat, video); the
+    # [channels,redis] extras are what a socket-serving host installs, and
+    # `_wiring.render_wiring` emits CHANNEL_LAYERS, the signal transport and
+    # the origin allowlist, and the ASGI router, whenever it is selected.
+    "realtime": {
+        "repo": "https://github.com/usestapel/stapel-realtime.git",
+        "dir": "stapel_realtime",
+        "required": False,
+        "description": "WebSocket substrate (consumers, origin guard, channel-layer transport)",
+        "default": False,
+        "pin": "0.2.3",
+        "ahead_of_pypi": False,  # PyPI 0.2.3 @ 2026-10-22
+        "http": False,
+        "url_prefix": None,
+        "extras": ["channels", "redis"],
+        "requires": [],
     },
     "chat": {
         "repo": "https://github.com/usestapel/stapel-chat.git",
@@ -216,11 +266,13 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Chat & messaging (direct/group/support)",
         "default": False,
-        "pin": "0.10.1",
-        "ahead_of_pypi": False,  # PyPI 0.10.1 @ 2026-10-15
+        "pin": "0.11.0",
+        "ahead_of_pypi": False,  # PyPI 0.11.0 @ 2026-10-22
         "http": True,
         "url_prefix": "chat/",
-        "requires": [],
+        # Its sockets are built on stapel-realtime (stapel_chat.E010/E011 refuse
+        # to boot without it, its channel layer and a socket router).
+        "requires": ["realtime"],
     },
     "currencies": {
         "repo": "https://github.com/usestapel/stapel-currencies.git",
@@ -233,6 +285,9 @@ STAPEL_LIBS = {
         "http": True,
         "url_prefix": "currencies/",
         "requires": [],
+        # Reference data a fresh app needs before the composer can price
+        # anything (idempotent: a no-op once the table has rows).
+        "seed": ["python manage.py load_default_currencies"],
     },
     "docs": {
         "repo": "https://github.com/usestapel/stapel-docs.git",
@@ -279,14 +334,18 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Listings & catalog",
         "default": False,
-        "pin": "0.23.1",
-        "ahead_of_pypi": False,  # PyPI 0.23.1 @ 2026-10-15
+        "pin": "0.27.0",
+        "ahead_of_pypi": False,  # PyPI 0.27.0 @ 2026-10-22
         "http": True,
         # Same fix/rationale as "categories" above: stapel-listings/urls.py's
         # own docstring says hosts mount it under their own ".../api/"
         # prefix (no internal "api/" segment) — mismount fix, 2026-07-20.
         "url_prefix": "listings/api/",
-        "requires": ["attributes"],  # pyproject dependency, hard
+        # attributes: pyproject dependency, hard. categories: publish calls the
+        # `categories.features` comm Function (CATEGORY_FEATURES_FUNCTION) and
+        # answers 500 (FunctionNotRegistered) without a provider, so a
+        # selection of listings that leaves categories out cannot publish.
+        "requires": ["attributes", "categories"],
     },
     "mailtrap": {
         "repo": "https://github.com/usestapel/stapel-mailtrap.git",
@@ -300,26 +359,14 @@ STAPEL_LIBS = {
         "url_prefix": "mailtrap/",
         "requires": [],
     },
-    "moderation": {
-        "repo": "https://github.com/usestapel/stapel-moderation.git",
-        "dir": "stapel_moderation",
-        "required": False,
-        "description": "Cross-target moderation (reports, verdicts, sanctions, appeals)",
-        "default": False,
-        "pin": "0.8.3",
-        "ahead_of_pypi": False,  # PyPI 0.8.3 @ 2026-10-15
-        "http": True,
-        "url_prefix": "moderation/",
-        "requires": [],
-    },
     "recordings": {
         "repo": "https://github.com/usestapel/stapel-recordings.git",
         "dir": "stapel_recordings",
         "required": False,
         "description": "Recording lifecycle, normalization & transcription",
         "default": False,
-        "pin": "0.40.0",
-        "ahead_of_pypi": False,  # PyPI 0.40.0 @ 2026-10-15
+        "pin": "0.42.0",
+        "ahead_of_pypi": False,  # PyPI 0.42.0 @ 2026-10-22
         "http": True,
         "url_prefix": "recordings/",
         "requires": [],
@@ -330,8 +377,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Reviews & ratings (target-generic)",
         "default": False,
-        "pin": "0.7.0",
-        "ahead_of_pypi": False,  # PyPI 0.7.0 @ 2026-10-15
+        "pin": "0.8.0",
+        "ahead_of_pypi": False,  # PyPI 0.8.0 @ 2026-10-22
         "http": True,
         "url_prefix": "reviews/",
         "requires": [],
@@ -375,27 +422,44 @@ STAPEL_LIBS = {
         "ahead_of_pypi": False,  # PyPI 0.13.0 @ 2026-10-15
         "http": True,
         "url_prefix": "video/",
-        "requires": [],
+        # The lobby socket speaks the realtime v1 envelope (hard dependency).
+        "requires": ["realtime"],
     },
-    "vocabularies": {
-        "repo": "https://github.com/usestapel/stapel-vocabularies.git",
-        "dir": "stapel_vocabularies",
+    # stapel-search: the index behind the `search` pair every storefront
+    # composite installs. Mounted bare: its own urls.py carries `api/v1/`.
+    # stapel-geo is a PIP dependency of it (the geohash arithmetic), never an
+    # app it installs, so it is not in "requires". Placed after the modules
+    # whose facts its ready() subscribes to (one Action per registered source).
+    "search": {
+        "repo": "https://github.com/usestapel/stapel-search.git",
+        "dir": "stapel_search",
         "required": False,
-        "description": "Reference vocabularies (levels, terms, edges) behind ref_select features",
+        "description": "Search index, facets, geo radius and ranking",
         "default": False,
-        "pin": "0.4.3",
-        "ahead_of_pypi": False,  # PyPI 0.4.3 @ 2026-10-15
-        # Its own `urls.py` contributes the `api/v1/` half, so the host mounts
-        # it bare under `vocabularies/` — the third-wave shape, not
-        # categories' `categories/api/`.
+        "pin": "0.18.2",
+        "ahead_of_pypi": False,  # PyPI 0.18.2 @ 2026-10-22
         "http": True,
-        "url_prefix": "vocabularies/",
-        # pyproject.toml: `stapel-attributes>=0.5,<1.0`. A FLOOR, not a
-        # preference — the `VocabularyResolver` protocol this module
-        # implements lives in L1, and without it every `ref_select` feature
-        # in the deployment refuses to save while the term endpoints keep
-        # answering.
+        "url_prefix": "search/",
         "requires": ["attributes"],
+        # Beat entries the generated settings merge into CELERY_BEAT_SCHEDULE
+        # (stapel_search.W003); importable before Django is ready.
+        "beat": ("stapel_search.tasks", "get_search_beat_schedule"),
+    },
+    "moderation": {
+        "repo": "https://github.com/usestapel/stapel-moderation.git",
+        "dir": "stapel_moderation",
+        "required": False,
+        "description": "Cross-target moderation (reports, verdicts, sanctions, appeals)",
+        "default": False,
+        "pin": "0.8.4",
+        "ahead_of_pypi": False,  # PyPI 0.8.4 @ 2026-10-22
+        "http": True,
+        "url_prefix": "moderation/",
+        "requires": [],
+        # After the modules whose facts its ready() subscribes to (one Action
+        # per target type's intake_events). The beat module imports settings
+        # and nothing else, so the settings file can call it (W004).
+        "beat": ("stapel_moderation.beat", "get_moderation_beat_schedule"),
     },
     # ── Composites (projections-and-composition §3/§4) ─────────────────────
     # A composite writes NO business logic: an INSTALLED_APPS/urls/config
@@ -413,26 +477,39 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Composite: shop — categories + attributes + listings + reviews (glue: reviews→listings rating projection); likes wait for stapel-engagement",
         "default": False,
-        "pin": "0.2.36",
-        "ahead_of_pypi": False,  # PyPI 0.2.36 @ 2026-10-15
+        "pin": "0.2.37",
+        "ahead_of_pypi": False,  # PyPI 0.2.37 @ 2026-10-22
         "http": False,          # mounts no /shop/api/ — glue only
+        "composite": True,
         "django_app": True,     # app slot REQUIRED: Projection glue lives there
         "url_prefix": None,
+        # "requires" is the preset's own member set (stapel_shop.preset
+        # INSTALLED_APPS; tests/test_preset_registry.py holds them equal).
         "requires": ["categories", "attributes", "listings", "reviews"],
+        # "companions": the backend half of every pair FRONTEND_COMPOSITES
+        # installs that is not a preset member. Selected with the composite
+        # so the storefront's pages have something to call (SE-1, SO-3);
+        # not members, so a hand-wired host copying the preset can skip them.
+        "companions": ["auth", "cdn", "currencies", "profiles", "search", "vocabularies"],
         # "engagement" joins requires when the module exists (minor bump).
     },
     "classified": {
         "repo": "https://github.com/usestapel/stapel-classified.git",
         "dir": "stapel_classified",
         "required": False,
-        "description": "Composite: classified ads — shop + geo (coordinates are listing fields, no extra glue)",
+        "description": "Composite: classified ads — shop + geo + search + moderation + vocabularies",
         "default": False,
-        "pin": "0.11.0",
-        "ahead_of_pypi": False,  # PyPI 0.11.0 @ 2026-10-15
-        "http": False,
+        "pin": "0.11.1",
+        "ahead_of_pypi": False,  # PyPI 0.11.1 @ 2026-10-22
+        # Since stapel-classified 0.2.0 the composite mounts a surface of its
+        # own (the conversation<->listing join and its cards) under
+        # classified/api/ (its urls.py contributes v1/).
+        "http": True,
+        "composite": True,
         "django_app": True,     # reserved glue slot (see shop comment)
-        "url_prefix": None,
-        "requires": ["shop", "geo"],
+        "url_prefix": "classified/api/",
+        "requires": ["shop", "geo", "vocabularies", "search", "moderation"],
+        "companions": ["auth", "cdn", "chat", "currencies", "profiles"],
     },
     "booking": {
         "repo": "https://github.com/usestapel/stapel-booking.git",
@@ -440,12 +517,14 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Composite: bookable resources — calendar + listings",
         "default": False,
-        "pin": "0.1.4",
-        "ahead_of_pypi": False,  # PyPI 0.1.4 @ 2026-10-15
+        "pin": "0.1.6",
+        "ahead_of_pypi": False,  # PyPI 0.1.6 @ 2026-10-22
         "http": False,
+        "composite": True,
         "django_app": True,     # reserved glue slot (see shop comment)
         "url_prefix": None,
-        "requires": ["calendar", "listings"],
+        "requires": ["calendar", "categories", "listings"],
+        "companions": ["auth", "cdn", "profiles", "search", "vocabularies"],
     },
     "social": {
         "repo": "https://github.com/usestapel/stapel-social.git",
@@ -453,12 +532,14 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Composite: social surface — chat + profiles + reviews; likes wait for stapel-engagement",
         "default": False,
-        "pin": "0.1.5",
-        "ahead_of_pypi": False,  # PyPI 0.1.5 @ 2026-10-15
+        "pin": "0.1.8",
+        "ahead_of_pypi": False,  # PyPI 0.1.8 @ 2026-10-22
         "http": False,
+        "composite": True,
         "django_app": True,     # reserved glue slot (see shop comment)
         "url_prefix": None,
         "requires": ["chat", "profiles", "reviews"],
+        "companions": ["auth", "cdn"],
     },
 }
 
@@ -2177,9 +2258,13 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9\-]", "-", name.lower()).strip("-")
 
 
-def _expand_with_requires(modules: list[str]) -> list[str]:
+def _expand_with_requires(modules: list[str], *, companions: bool = True) -> list[str]:
     """Transitive closure of each module's hard ``requires`` (e.g. categories
     -> attributes), then re-ordered to STAPEL_LIBS registry order.
+
+    A composite's ``companions`` (the backend of every frontend pair it
+    installs beyond its own members) join the closure too, unless
+    ``companions=False`` — the preset gate asks for the member set alone.
 
     A hard requires is a real pyproject dependency (categories/listings on
     attributes) — without this expansion a project that only requested
@@ -2194,7 +2279,9 @@ def _expand_with_requires(modules: list[str]) -> list[str]:
     while changed:
         changed = False
         for key in list(needed):
-            for dep in STAPEL_LIBS.get(key, {}).get("requires", []):
+            info = STAPEL_LIBS.get(key, {})
+            deps = [*info.get("requires", []), *(info.get("companions", []) if companions else [])]
+            for dep in deps:
                 if dep not in needed:
                     needed.add(dep)
                     changed = True
@@ -2546,7 +2633,26 @@ def _reserved_paths_manifest(slug: str, feature_libs: list[str]) -> dict:
         for sub in subs:
             if sub not in prefixes:
                 prefixes.append(sub)
-    return {"slug": slug, "fixed": fixed, "modules": modules, "prefixes": prefixes}
+    # Socket routes live under the fleet's /ws/<mod>/ convention, outside the
+    # module's own namespace (reserved_paths._MODULE_EXTRA_SURFACES, the same
+    # declaration the storefront proxy reads). Proxied with the upgrade
+    # headers; served only when the project runs the ASGI app (realtime).
+    from .reserved_paths import _module_extra_entries
+
+    sockets: list[str] = []
+    extras: list[str] = []
+    for key in feature_libs:
+        for entry in _module_extra_entries(key):
+            extras.append(entry["path"])
+            if entry["ws"] and entry["path"].startswith("ws/"):
+                sockets.append(f"{entry['path']}/")
+    for sock in sockets:
+        if sock not in prefixes:
+            prefixes.append(sock)
+    return {
+        "slug": slug, "fixed": fixed, "modules": modules, "prefixes": prefixes,
+        "sockets": sockets, "extras": extras,
+    }
 
 
 def _reserved_backend_prefixes(slug: str, feature_libs: list[str]) -> list[str]:
@@ -2593,6 +2699,11 @@ def _eslint_reserved_path_prefixes(slug: str, feature_libs: list[str]) -> list[s
             entry = f"/{sub[:-1] if sub.endswith('/') else sub}"
             if entry not in prefixes:
                 prefixes.append(entry)
+    # Every extra surface a selected module declares (/ws/chat, /rtc...), the
+    # same entries `stapel-reserved-paths --check` re-renders.
+    for extra in manifest["extras"]:
+        if f"/{extra}" not in prefixes:
+            prefixes.append(f"/{extra}")
     return prefixes
 
 
@@ -2625,7 +2736,8 @@ def _vite_proxy_rules(prefixes: list[str]) -> str:
         # EXCEPT the one dotted, extension-terminated surface (schema.json),
         # which is a single file and must not carry a trailing slash.
         key = prefix if prefix.endswith(".json") else f"{prefix}/"
-        lines.append(f'        "/{key}": {{ target: backendTarget, changeOrigin: true }},')
+        ws = ", ws: true" if prefix.startswith("ws/") else ""
+        lines.append(f'        "/{key}": {{ target: backendTarget, changeOrigin: true{ws} }},')
     return "\n".join(lines)
 
 
@@ -2745,7 +2857,8 @@ def _write_frontend_scaffold(
     # ProfileSettings when profiles-react is ALSO selected. Absent when cdn
     # isn't selected — byte-identical regression.
     has_cdn = "cdn" in feature_libs
-    needs_cdn_avatar_lib = has_cdn and "profiles" in feature_libs
+    # Written for listings too: its runtime takes `listingImageFor` as resolveImage.
+    needs_cdn_avatar_lib = has_cdn and bool({"profiles", "listings"} & set(feature_libs))
     if want_auth is None:
         want_auth = "auth" in feature_libs
     auth_wired = bool(want_auth) and any(e["key"] == "auth" for e in react_entries)
@@ -2833,6 +2946,11 @@ def _write_frontend_scaffold(
 
     if needs_cdn_avatar_lib:
         _write(frontend / "src" / "lib" / "cdn.ts", F.render_cdn_lib_ts(ctx["slug"]))
+    # The mandate source modules.tsx mounts (auth without workspaces): the
+    # storefront's, since the derivation is the same one.
+    react_keys = {e["key"] for e in react_entries}
+    if "auth" in react_keys and "workspaces" not in react_keys:
+        _write(frontend / "src" / "mandateSource.ts", F.render_mandate_source_ts())
 
     if routing_active:
         _write(frontend / "src" / "main.tsx", F.render_main_tsx(
@@ -3264,6 +3382,7 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     from ._auth_model import render_base_posture
     from ._auth_model import resolve as resolve_auth_model
     from ._module_config import inject_unbilled_workspaces
+    from ._wiring import asgi_py, render_wiring
 
     module_config = inject_unbilled_workspaces(module_config, feature_modules)
     if auth_comp is None and "auth" in feature_modules:
@@ -3290,6 +3409,7 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
         "STAPEL_APPS": stapel_apps_block,
         "STAPEL_URL_INCLUDES": url_includes,
         "STAPEL_MODULE_CONFIG": render_settings_block(module_config) + posture_block,
+        "STAPEL_WIRING": render_wiring(feature_modules, flavor="minimal"),
         "JWT_CREATE_USERS_FROM_TOKEN": "False" if is_token_issuer else "True",
         "IDENTITY_ROLE": "token ISSUER" if is_token_issuer else "token CONSUMER",
     }
@@ -3339,6 +3459,9 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     # dummy-DB overlay over this project's own settings; see its docstring.
     _write(project_dir / "config" / "settings_boot_smoke.py", MINIMAL_BOOT_SMOKE_SETTINGS)
     _write(project_dir / "config" / "urls.py", r(MINIMAL_URLS))
+    asgi = asgi_py(feature_modules, settings_module="config.settings")
+    if asgi is not None:
+        _write(project_dir / "config" / "asgi.py", asgi)
     _write(project_dir / "config" / "wsgi.py",
            "import os\n\n"
            "from django.core.wsgi import get_wsgi_application\n\n"
@@ -3514,11 +3637,14 @@ def _extras_for_lib(key: str, module_config: dict[str, dict] | None) -> list[str
     either, so an extra it would need is not claimed here). Sorted,
     de-duplicated; empty for a lib with no entry in ``PIP_EXTRA_AXES`` or
     when none of its dependency-bearing axes were turned on."""
+    # A registry entry's own "extras" are unconditional (stapel-realtime's
+    # [channels,redis]: a host that selected it serves sockets).
+    always = set(STAPEL_LIBS.get(key, {}).get("extras", []))
     axis_map = PIP_EXTRA_AXES.get(key)
     if not axis_map or not module_config:
-        return []
+        return sorted(always)
     config = module_config.get(key) or {}
-    extras = {extra for axis, extra in axis_map.items() if config.get(axis)}
+    extras = always | {extra for axis, extra in axis_map.items() if config.get(axis)}
     return sorted(extras)
 
 
@@ -3554,6 +3680,66 @@ def _append_cdn_pip_requirement(reqs_path: Path):
     )
     with reqs_path.open("a", encoding="utf-8") as f:
         f.write(comment + entry + "\n")
+
+
+#: The ASGI server a socket-serving project runs: prod RUN_CMD, and in dev the
+#: `daphne` app turns `runserver` into it (_wiring.REALTIME_DEV).
+_DAPHNE_REQUIREMENT = "daphne>=4,<5"
+_DAPHNE_RUN_CMD = "RUN_CMD=daphne -b 0.0.0.0 -p 8000 config.asgi:application"
+
+
+def _write_starter_catalog(
+    project_dir: Path, ctx: dict, feature_libs: list[str], project_type: str,
+) -> None:
+    """``fixtures/catalog/`` under the service's BASE_DIR: the starter tree
+    ``load_catalog --seed-if-empty`` (a bootstrap step) loads into an empty
+    catalog, so a fresh app has a category to publish into."""
+    from ._wiring import starter_catalog
+
+    files = starter_catalog(feature_libs)
+    if files is None:
+        return
+    base = project_dir / ctx["service_dir_name"] if project_type == "monolith" else project_dir
+    for name, data in files.items():
+        _write(base / "fixtures" / "catalog" / name, json.dumps(data, indent=2) + "\n")
+
+
+def _append_wiring_requirements(
+    project_dir: Path, ctx: dict, feature_libs: list[str], project_type: str,
+) -> None:
+    """Requirements and run command the selection-derived wiring implies
+    (:mod:`stapel_tools._wiring`): an ASGI server when stapel-realtime is
+    selected (the sockets are not served by gunicorn's WSGI worker), and
+    celery on the minimal preset when a module's beat schedule is written
+    into settings (the helpers build celery crontabs)."""
+    from ._wiring import beat_sources, realtime_selected
+
+    if project_type == "monolith":
+        reqs = project_dir / ctx["service_dir_name"] / "requirements.txt"
+    else:
+        reqs = project_dir / "requirements.txt"
+    if not reqs.exists():
+        return
+    lines = reqs.read_text().splitlines()
+    added = []
+    if realtime_selected(feature_libs) and _DAPHNE_REQUIREMENT not in lines:
+        added += ["# ASGI server for the WebSocket routes (config/asgi.py)", _DAPHNE_REQUIREMENT]
+    if project_type == "minimal" and beat_sources(feature_libs) and not any(
+        line.startswith("celery") for line in lines
+    ):
+        added += ["# The beat schedule in settings is built from celery crontabs", "celery>=5.3"]
+    if added:
+        reqs.write_text("\n".join([*lines, *added]) + "\n")
+    if project_type == "monolith" and realtime_selected(feature_libs):
+        env_example = project_dir / ".env.example"
+        if env_example.exists():
+            text = env_example.read_text()
+            env_example.write_text(re.sub(
+                r"^RUN_CMD=gunicorn config\.wsgi:application.*$",
+                "# daphne, not gunicorn: stapel-realtime's sockets need the ASGI app\n"
+                + _DAPHNE_RUN_CMD,
+                text, count=1, flags=re.M,
+            ))
 
 
 def _setup_pip_deps(
@@ -3934,7 +4120,12 @@ def create_project(
 
     from ._gdpr_owners import inject_derived_data_owners
 
-    module_config = inject_derived_data_owners(module_config, [*modules, "core"])
+    # Over the EXPANDED selection: a composite's members and companions own
+    # stores too (chat, media, profile, reviews under `--modules social gdpr`),
+    # and an owner the map leaves out is gdpr.E002/E010.
+    module_config = inject_derived_data_owners(
+        module_config, [*_expand_with_requires([m for m in modules if m != "core"]), "core"],
+    )
 
     # A library that raises a boot-fatal check when a setting is missing is
     # dead on arrival if the scaffold installs the app and emits nothing —
@@ -3944,7 +4135,9 @@ def create_project(
     # with no module_config at all: "supplied nothing" is the failing case.
     from ._module_config import check_required_settings
 
-    check_required_settings([*modules, "core"], module_config)
+    check_required_settings(
+        [*_expand_with_requires([m for m in modules if m != "core"]), "core"], module_config,
+    )
 
     slug = _slugify(name)
     project_dir = output_dir / name
@@ -4019,6 +4212,15 @@ def create_project(
 
         module_config = inject_decodable_image_extensions(module_config, feature_only)
 
+    # Selection-derived settings no module can default for itself: listings
+    # with no moderation approves on publish; search on the SQLite preset uses
+    # the backend search ships for SQLite. Explicit values still win.
+    from ._module_config import inject_listings_auto_approve, inject_search_backend_for_sqlite
+
+    module_config = inject_listings_auto_approve(module_config, feature_only)
+    if project_type == "minimal":
+        module_config = inject_search_backend_for_sqlite(module_config, feature_only)
+
     feature_apps = [
         STAPEL_LIBS[key]["dir"] for key in modules
         if key != "core" and STAPEL_LIBS[key].get("django_app", True)
@@ -4048,6 +4250,10 @@ def create_project(
         _setup_monolith_pip_deps(project_dir / ctx["service_dir_name"], modules, module_config)
     else:
         _setup_pip_deps(project_dir, modules, module_config)
+
+    if project_type in ("monolith", "minimal"):
+        _append_wiring_requirements(project_dir, ctx, feature_only, project_type)
+        _write_starter_catalog(project_dir, ctx, feature_only, project_type)
 
     _write_env_from_ctx(project_dir, ctx)
 

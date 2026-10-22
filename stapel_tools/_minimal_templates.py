@@ -248,7 +248,7 @@ STAPEL_SERVICES = [{"name": "{{title}}", "prefix": ""}]
 
 # Dev-only outbound mail: writes to the console instead of hitting SMTP.
 EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
-"""
+{{STAPEL_WIRING}}"""
 
 MINIMAL_BOOT_SMOKE_SETTINGS = """\
 \"\"\"Boot-smoke settings (R3/§44) — `make boot-smoke`, part of `make controls`.

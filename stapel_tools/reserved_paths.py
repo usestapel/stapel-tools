@@ -71,6 +71,11 @@ _MODULE_SUB_SURFACES = ("api", "swagger", "schema.json", "admin")
 # fleet root (LiveKit's own protocol expects `/rtc` exactly, not a
 # subtree) and is itself a websocket handshake.
 _MODULE_EXTRA_SURFACES: dict[str, dict] = {
+    # Each socket path is the module's own routing.websocket_urlpatterns
+    # prefix, served by the ASGI router stapel-realtime builds.
+    "chat": {"ws_prefixes": ["ws/chat"]},
+    "docs": {"ws_prefixes": ["ws/docs"]},
+    "notifications": {"ws_prefixes": ["ws/notifications"]},
     "video": {
         "ws_prefixes": ["ws/video"],
         "extra_paths": [{"path": "rtc", "ws": True, "exact": True}],
