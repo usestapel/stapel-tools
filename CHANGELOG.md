@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.72.8] — 2026-10-22
+
+Patch: a generated project's root `.gitignore` ignores `var/`.
+
+- `var/` holds runtime output (the file mailtrap writes `var/mailtrap/`) and
+  scratch files of a coding session; an `add -A` commit took probe files from
+  `svc-*/var/` into a task branch. Test: the generated `.gitignore` names
+  `var/` (red on 0.72.7).
+
 ## [0.72.7] — 2026-10-22
 
 Patch: a generated project's root `.gitignore` keeps frontend tool output out

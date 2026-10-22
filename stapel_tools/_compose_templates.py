@@ -1087,6 +1087,8 @@ staticfiles/
 node_modules/
 .pnpm-store/
 *.tsbuildinfo
+# Runtime output (file mailtrap, scratch files of a coding session).
+var/
 """
 
 MICRO_COMPOSE_BASE = """\
