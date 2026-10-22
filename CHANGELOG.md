@@ -27,6 +27,25 @@ from their pairs' `embeds`, and an intake can ask about slots from one function.
   referencing property of that prefix. Such a name moves with unrelated edits
   and breaks a client's `Schemas["StatusD41Enum"]`; pin it in the contract
   harness (`ENUM_NAME_OVERRIDES`).
+- `SIB007` (sibling lint, error): a CONFIG.MD row source the declared
+  `stapel-core` floor cannot read. Core parses `settings` rows only from
+  0.92.1; three libraries shipped them with lower floors, so a resolver could
+  install a core whose `manage.py check` raised `ConfigManifestError`.
+- `CFG009` (config lint, warning during the sweep): a library row that says
+  `env` for a key its `AppSettings` never reads from the environment (a
+  container default, refused by core's `conf.E002`, or an
+  `import_strings`/`no_env` key, ignored with `conf.W001`). 148 rows across 21
+  libraries on 2026-10-22.
+- `CFG010` (config lint, warning): a key a library offers in
+  `AppSettings(defaults=...)` with no row in its CONFIG.MD section, so the
+  project registry never shows it (313 across 15 libraries).
+- The project CONFIG.MD keeps two libraries' knobs of one name
+  (`ALLOW_ANONYMOUS_WRITES` of listings and reviews, five `SCOPE_PROVIDER`s):
+  rows are keyed by owner, not by name, so the second one is no longer dropped.
+- Scaffolded nginx (prod and local) answers 404 for
+  `/media/<slug>/protected/` and `/media/<slug>/private/`: stapel-cdn's clean
+  copies of watermarked images and its non-image originals are served only
+  through signed links. The public media route served the whole volume.
 
 ## [0.72.8] — 2026-10-22
 

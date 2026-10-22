@@ -86,6 +86,13 @@ SIB006  (error) A committed ``docs/errors.json`` entry whose ``owner`` is
         there: every module stands on it and re-publishes its shared vocabulary
         on purpose.
 
+SIB007  (error) ``CONFIG.MD`` declares a row source that the declared
+        ``stapel-core`` floor cannot parse. core's manifest reader accepted
+        only ``env|vault`` before 0.92.1 and raises ``ConfigManifestError``
+        on ``settings`` there, so a library shipping ``settings`` rows with a
+        lower floor lets a resolver install a core whose ``manage.py check``
+        refuses every project that installs the library.
+
 The ``STAPEL_TEST_STRICT_SIBLINGS`` contract (what SIB004 is asking for)
 -----------------------------------------------------------------------
 Every stapel library's suite honours one environment variable:
@@ -565,6 +572,12 @@ _MSG_005 = (
     "an extra that stops describing the suite stops being read. Remove it, or "
     "write the test that needs it"
 )
+_MSG_007 = (
+    "CONFIG.MD declares source `{source}` (first at line {row}) but "
+    "pyproject.toml allows stapel-core {floor}; core reads `{source}` rows "
+    "only from {needed} and raises ConfigManifestError below it. Raise the "
+    "floor to stapel-core>={needed}"
+)
 _MSG_006 = (
     "docs/errors.json publishes `{code}`, owned by `{owner}` — a foreign "
     "module's key. The codegen reads the error registry of the interpreter it "
@@ -644,6 +657,76 @@ def _errors_json_violations(project: Path, self_modules: set) -> list:
     return out
 
 
+#: CONFIG.MD row source -> the first stapel-core release whose manifest
+#: reader accepts it.
+CONFIG_SOURCE_SINCE = {"settings": (0, 92, 1)}
+
+_VERSION = re.compile(r"(\d+)(?:\.(\d+))?(?:\.(\d+))?")
+
+
+def _version_tuple(text: str) -> tuple:
+    match = _VERSION.match(text.strip())
+    if not match:
+        return (0, 0, 0)
+    return tuple(int(part or 0) for part in match.groups())
+
+
+def core_floor(project: Path) -> Optional[tuple]:
+    """Lowest stapel-core the runtime dependencies allow; ``None`` when the
+    package does not depend on stapel-core (or is stapel-core)."""
+    try:
+        data = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
+        return None
+    table = data.get("project") or {}
+    if normalize_dist(str(table.get("name") or "")) == "stapel-core":
+        return None
+    for spec in table.get("dependencies") or []:
+        if not isinstance(spec, str):
+            continue
+        name, _ = _requirement_name(spec)
+        if name != "stapel-core":
+            continue
+        floors = [
+            _version_tuple(m.group(2))
+            for m in re.finditer(r"(>=|==|~=|>)\s*([0-9][0-9.]*)", spec.split(";")[0])
+        ]
+        return max(floors) if floors else (0, 0, 0)
+    return None
+
+
+def _config_source_violations(project: Path) -> list:
+    """SIB007 — CONFIG.MD row sources the declared core floor cannot read."""
+    path = project / "CONFIG.MD"
+    if not path.is_file():
+        return []
+    floor = core_floor(project)
+    if floor is None:
+        return []
+    first_row: dict = {}
+    for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        cells = [c.strip().strip("`") for c in raw.strip().strip("|").split("|")]
+        if len(cells) < 2 or not raw.strip().startswith("|"):
+            continue
+        source = cells[1].lower()
+        if source in CONFIG_SOURCE_SINCE:
+            first_row.setdefault(source, lineno)
+    out = []
+    for source, row in sorted(first_row.items()):
+        needed = CONFIG_SOURCE_SINCE[source]
+        if floor >= needed:
+            continue
+        out.append(Violation(
+            str(path), row, "SIB007",
+            _MSG_007.format(
+                source=source, row=row,
+                floor=">=" + ".".join(map(str, floor)) if floor != (0, 0, 0) else "at any version",
+                needed=".".join(map(str, needed)),
+            ),
+        ))
+    return out
+
+
 def lint_project(project: Path, notes: Optional[list] = None) -> list:
     """Lint one repository. Returns violations sorted by (path, line, rule)."""
     project = Path(project).resolve()
@@ -718,6 +801,13 @@ def lint_project(project: Path, notes: Optional[list] = None) -> list:
 
     # SIB006 — the committed error catalogue describes the module, not the venv.
     for violation in _errors_json_violations(project, self_modules):
+        source_of.setdefault(
+            violation.path, Path(violation.path).read_text(encoding="utf-8").splitlines()
+        )
+        violations.append(violation)
+
+    # SIB007 — the manifest a core older than the floor would refuse.
+    for violation in _config_source_violations(project):
         source_of.setdefault(
             violation.path, Path(violation.path).read_text(encoding="utf-8").splitlines()
         )

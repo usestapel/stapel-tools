@@ -668,3 +668,55 @@ def test_this_repo_declares_its_own_siblings():
     root = Path(__file__).resolve().parent.parent
     violations = [v for v in lint_project(root) if v.level == "error"]
     assert violations == [], "\n".join(str(v) for v in violations)
+
+
+# ---------------------------------------------------------------------------
+# SIB007 — CONFIG.MD sources the declared core floor cannot read
+# ---------------------------------------------------------------------------
+
+_SETTINGS_ROW_MD = """\
+# CONFIG.MD — stapel-thing
+
+## stapel-thing
+
+| Key | Source | Purpose | Required | Default |
+|-----|--------|---------|----------|---------|
+| MAX_SIZE | env | a cap | no | `10` |
+| WATERMARKS | settings | per-site marks | no | `{}` |
+"""
+
+
+def test_sib007_a_settings_row_under_an_old_core_floor(tmp_path):
+    """stapel-cdn 0.28.1 verbatim: `settings` rows, core floor 0.85.1."""
+    _project(tmp_path, deps=["stapel-core>=0.85.1,<1.0"])
+    _write(tmp_path, "CONFIG.MD", _SETTINGS_ROW_MD)
+    violations = lint_project(tmp_path)
+    assert _codes(violations) == ["SIB007"]
+    assert violations[0].line == 8
+    assert ">=0.92.1" in violations[0].message
+
+
+def test_sib007_silent_at_the_floor_that_reads_settings(tmp_path):
+    _project(tmp_path, deps=["stapel-core>=0.92.1,<1.0"])
+    _write(tmp_path, "CONFIG.MD", _SETTINGS_ROW_MD)
+    assert _codes(lint_project(tmp_path)) == []
+
+
+def test_sib007_an_unbounded_core_dependency_is_flagged(tmp_path):
+    _project(tmp_path, deps=["stapel-core"])
+    _write(tmp_path, "CONFIG.MD", _SETTINGS_ROW_MD)
+    violations = lint_project(tmp_path)
+    assert _codes(violations) == ["SIB007"]
+    assert "at any version" in violations[0].message
+
+
+def test_sib007_env_and_vault_rows_need_no_floor(tmp_path):
+    _project(tmp_path, deps=["stapel-core>=0.30.0,<1.0"])
+    _write(tmp_path, "CONFIG.MD", _SETTINGS_ROW_MD.replace("| settings |", "| env |"))
+    assert _codes(lint_project(tmp_path)) == []
+
+
+def test_sib007_core_itself_is_exempt(tmp_path):
+    _project(tmp_path, name="stapel-core")
+    _write(tmp_path, "CONFIG.MD", _SETTINGS_ROW_MD)
+    assert _codes(lint_project(tmp_path)) == []

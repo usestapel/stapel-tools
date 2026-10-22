@@ -74,6 +74,16 @@ server {
         alias /staticfiles/;
     }
 
+    # stapel-cdn keeps the clean copies and originals of watermarked images
+    # under <slug>/protected/ and non-image originals (documents, voice
+    # notes) under <slug>/private/ (STAPEL_CDN PROTECTED_MEDIA_PREFIX /
+    # PRIVATE_MEDIA_PREFIX, defaults here). They are served only through
+    # signed links, never from the public media route. A regex location
+    # wins over the /media/ prefix below.
+    location ~ ^/media/[^/]+/(protected|private)/ {
+        return 404;
+    }
+
     location /media/ {
         alias /media/;
     }
@@ -264,6 +274,16 @@ server {
     location /staticfiles/ {
         proxy_pass $stapel_backend;
         proxy_set_header Host $http_host;
+    }
+
+    # stapel-cdn keeps the clean copies and originals of watermarked images
+    # under <slug>/protected/ and non-image originals (documents, voice
+    # notes) under <slug>/private/ (STAPEL_CDN PROTECTED_MEDIA_PREFIX /
+    # PRIVATE_MEDIA_PREFIX, defaults here). They are served only through
+    # signed links, never from the public media route. A regex location
+    # wins over the /media/ prefix below.
+    location ~ ^/media/[^/]+/(protected|private)/ {
+        return 404;
     }
 
     location /media/ {

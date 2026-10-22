@@ -127,6 +127,25 @@ CFG008  (error) A CONFIG.MD row names a source outside ``env``, ``vault``,
         names the row's key, the bad value and the accepted set. Runs in every
         checkout that has a CONFIG.MD, library or project.
 
+CFG009  (warning) **In a library checkout**, a CONFIG.MD row owned by this
+        library says source ``env`` for a key its ``AppSettings`` never reads
+        from the environment: a container-shaped default (core refuses a bare
+        env string for it, ``stapel_core.conf.E002``), or a key declared
+        ``no_env`` / ``import_strings`` / ``resolvers`` without
+        ``env_overridable``/``env_enum`` (core ignores the variable,
+        ``stapel_core.conf.W001``). An operator following the row writes a
+        variable that crashes the boot or does nothing. The row's source is
+        ``settings``. Warning-level while the fleet corrects its rows (148
+        across 21 libraries on 2026-10-22); promote to error after.
+
+CFG010  (warning) **In a library checkout**, a key the library offers (a top
+        level key of the dict handed to ``AppSettings(defaults=...)``) that
+        has no row in its own section of CONFIG.MD. The project CONFIG.MD a
+        scaffold aggregates is built from these sections, so the knob is
+        invisible to whoever configures the deployment (stapel-listings'
+        ``REQUIRE_LOCATION_ON_PUBLISH`` refused publishes nobody was told
+        about). Warning-level while the fleet backfills its rows.
+
 ``os.environ.setdefault(...)`` is a write, not a read (manage.py / wsgi set
 DJANGO_SETTINGS_MODULE that way) and is never flagged.
 
@@ -416,6 +435,76 @@ def collect_offered_knobs(project: Path) -> dict[str, tuple[str, int]]:
                 if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
                     offered.setdefault(key_node.value, (str(py), key_node.lineno))
     return offered
+
+
+_CONTAINER_CALLS = {"tuple", "list", "set", "frozenset", "dict"}
+
+
+def _is_container_node(node: Optional[ast.AST], constants: dict[str, ast.AST]) -> bool:
+    if isinstance(node, ast.Name) and node.id in constants:
+        node = constants[node.id]
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict, ast.ListComp,
+                         ast.SetComp, ast.DictComp)):
+        return True
+    return isinstance(node, ast.Call) and _callee_name(node.func) in _CONTAINER_CALLS
+
+
+def _string_items(node: Optional[ast.AST], constants: dict[str, ast.AST]) -> set[str]:
+    if isinstance(node, ast.Name) and node.id in constants:
+        node = constants[node.id]
+    if isinstance(node, ast.Dict):
+        return set(_dict_string_keys(node))
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return {
+            e.value for e in node.elts
+            if isinstance(e, ast.Constant) and isinstance(e.value, str)
+        }
+    return set()
+
+
+def collect_env_closed_knobs(project: Path) -> dict[str, str]:
+    """Namespace keys an ``AppSettings`` never takes from the environment,
+    mapped to the reason (``container`` or ``closed``)."""
+    closed: dict[str, str] = {}
+    for py in _walk_py(project):
+        try:
+            tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        constants: dict[str, ast.AST] = {}
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                    and isinstance(node.targets[0], ast.Name):
+                constants[node.targets[0].id] = node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                    and node.value is not None:
+                constants[node.target.id] = node.value
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or _callee_name(node.func) != "AppSettings":
+                continue
+            kwargs = {kw.arg: kw.value for kw in node.keywords if kw.arg}
+            defaults = kwargs.get("defaults")
+            if defaults is None and len(node.args) >= 2:
+                defaults = node.args[1]
+            if isinstance(defaults, ast.Name):
+                defaults = constants.get(defaults.id)
+            if not isinstance(defaults, ast.Dict):
+                continue
+            reopened = _string_items(kwargs.get("env_overridable"), constants) \
+                | _string_items(kwargs.get("env_enum"), constants)
+            shut = _string_items(kwargs.get("no_env"), constants) | (
+                (_string_items(kwargs.get("import_strings"), constants)
+                 | _string_items(kwargs.get("resolvers"), constants)) - reopened
+            )
+            for key_node, value_node in zip(defaults.keys, defaults.values):
+                if not (isinstance(key_node, ast.Constant) and isinstance(key_node.value, str)):
+                    continue
+                key = key_node.value
+                if key in shut:
+                    closed.setdefault(key, "closed")
+                elif _is_container_node(value_node, constants):
+                    closed.setdefault(key, "container")
+    return closed
 
 
 def collect_key_consumption(
@@ -984,6 +1073,47 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
                 f"setting anywhere — only in this table. A knob documented as "
                 f"switchable that was never introduced cannot be switched. Add "
                 f"it to the owning namespace's defaults, or drop the row",
+            ))
+
+    # ------------------------------------------------------------------ CFG009
+    if distribution:
+        env_closed = collect_env_closed_knobs(project)
+        for entry in entries:
+            if entry.source != "env" or not _owner_matches(entry.owner, distribution):
+                continue
+            reason = env_closed.get(entry.key)
+            if reason is None:
+                continue
+            why = (
+                "its default is a container, and stapel-core refuses a bare "
+                "environment string for it (stapel_core.conf.E002)"
+                if reason == "container" else
+                "its AppSettings declares it no_env / import_strings / "
+                "resolvers, so stapel-core ignores the variable "
+                "(stapel_core.conf.W001)"
+            )
+            findings.append(Finding(
+                str(config_md), entry.line, "CFG009",
+                f"'{entry.key}' is documented with source env in "
+                f"{distribution}'s {CONFIG_MD}, but the library never reads it "
+                f"from the environment: {why}. Set the row's source to "
+                f"settings",
+                level="warning",
+            ))
+
+    # ------------------------------------------------------------------ CFG010
+    if distribution:
+        documented = {e.key for e in entries if _owner_matches(e.owner, distribution)}
+        for key, (path, line) in sorted(collect_offered_knobs(project).items()):
+            if key in documented:
+                continue
+            findings.append(Finding(
+                path, line, "CFG010",
+                f"'{key}' is a setting {distribution} offers (AppSettings "
+                f"defaults) with no row in its {CONFIG_MD} section, so the "
+                f"project registry a scaffold aggregates never shows it. Add "
+                f"| {key} | env|settings | purpose | required | default |",
+                level="warning",
             ))
 
     _ = settings_read_keys  # (kept for readability of the two key sets)

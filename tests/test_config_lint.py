@@ -527,3 +527,28 @@ def test_a_nested_member_does_not_shadow_another_lib_top_level_key(tmp_path):
         ("stapel-alpha", None),
         ("stapel-beta", '`STAPEL_BETA["CONTACTS"]`'),
     ]
+
+
+def test_two_libraries_knobs_of_one_name_are_both_registered(tmp_path):
+    """listings and reviews both offer ALLOW_ANONYMOUS_WRITES, each read from
+    its own STAPEL_<MOD>. Keyed by name alone, the second lib's row was dropped
+    from the project registry; a row its own owner re-documents is still
+    written once."""
+    from stapel_tools.config_manifest import collect_lib_entries, render_config_md
+
+    table = "| Key | Source | Purpose | Required | Default |\n|--|--|--|--|--|\n"
+    for lib, body in (
+        ("listings", f"## stapel-listings\n\n{table}| ALLOW_ANONYMOUS_WRITES | env | guests sell | no | False |\n"
+                     f"| ALLOW_ANONYMOUS_WRITES | env | duplicate row | no | False |\n"),
+        ("reviews", f"## stapel-reviews\n\n{table}| ALLOW_ANONYMOUS_WRITES | env | guests review | no | False |\n"),
+    ):
+        d = tmp_path / f"stapel-{lib}"
+        d.mkdir()
+        (d / CONFIG_MD_FILENAME).write_text(body)
+
+    entries, _ = collect_lib_entries(["listings", "reviews"], workspace_root=tmp_path)
+    rows = [(e.owner, e.purpose) for e in entries if e.key == "ALLOW_ANONYMOUS_WRITES"]
+    assert rows == [("stapel-listings", "guests sell"), ("stapel-reviews", "guests review")]
+    text = render_config_md(entries)
+    assert text.index("## stapel-listings") < text.index("guests sell") < text.index("## stapel-reviews")
+    assert "guests review" in text

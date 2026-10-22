@@ -300,7 +300,7 @@ def collect_lib_entries(
     ``stapel-<lib>``) + the list of libs that ship no CONFIG.MD yet."""
     entries: list[ConfigEntry] = []
     missing: list[str] = []
-    seen: set[tuple[Optional[str], str]] = set()
+    seen: set[tuple[Optional[str], Optional[str], str]] = set()
     for lib in libs:
         path = locate_lib_config_md(lib, workspace_root)
         if path is None:
@@ -309,13 +309,15 @@ def collect_lib_entries(
         for entry in parse_config_md(path):
             if entry.owner is None:
                 entry.owner = f"stapel-{lib}"
-            # Keyed by (sub-section, key): a NESTED block's member may share a
-            # name with a top-level key of another lib without either shadowing
-            # the other — `POLICIES` under STAPEL_PROFILES["CONTACTS"] is not
-            # the same knob as a `POLICIES` some other namespace owns.
-            ident = (entry.namespace, entry.key)
+            # Keyed by (owner, sub-section, key): two libraries' knobs of one
+            # name are two knobs, each resolved in its own STAPEL_<MOD>
+            # (listings' and reviews' ALLOW_ANONYMOUS_WRITES, five libraries'
+            # SCOPE_PROVIDER). Keyed by name alone, the second lib's row was
+            # dropped from the project registry. A row re-documented under the
+            # SAME owner is still written once (first wins).
+            ident = (entry.owner, entry.namespace, entry.key)
             if ident in seen:
-                continue  # first declaring lib wins (core before features)
+                continue
             seen.add(ident)
             entries.append(entry)
     return entries, missing
