@@ -844,7 +844,7 @@ FRONTEND_REACT_LIBS = {
         # (NAV_ENTRY_MOUNTS route_params), and all three hang from the
         # container-owned `account.root`.
         "package": "@stapel/forms-react",
-        "version": "0.4.1",
+        "version": "0.4.2",
         "provider": "FormsProvider",
         "create_runtime": "createFormsRuntime",
         "register_i18n": "registerFormsI18n",

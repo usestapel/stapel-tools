@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.72.5] — 2026-10-22
+
+Patch: the 0.72.4 content, publishable.
+
+- `FRONTEND_REACT_LIBS["forms"]` pins `@stapel/forms-react` 0.4.2, the
+  version npm serves (the stale-pin gate held 0.72.4 back from PyPI).
+
 ## [0.72.4] — 2026-10-22
 
 Patch: a project generated with `--base-image` boots and passes its own
