@@ -484,6 +484,12 @@ STAPEL_LIBS = {
 # components a pair offers to a shell slot. Gated by the same script; a pair
 # that offers none carries no key, exactly as its manifest does.
 #
+# 2026-10-22 (stapel-tools 0.72.9): the slot-embeds train — `npm view
+# @stapel/<key>-react version` -> auth 0.27.0 (`auth.account_menu`),
+# workspaces 0.22.1 (`workspaces.switcher`, `shell_provider`; 0.22.1 is the
+# first to ship its nav-manifest.json), cdn 0.8.2, listings 0.40.1 and
+# categories 0.35.1 (docs/llms trains of the same day).
+#
 # 2026-10-15 (stapel-tools 0.72.0): the composition train — `npm view
 # @stapel/<key>-react version` -> notifications 0.13.0 and translate 0.3.0
 # (the minors that publish `embeds`), workspaces 0.21.0, auth 0.26.0.
@@ -561,7 +567,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.26.0",
+        "version": "0.27.0",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
@@ -670,6 +676,19 @@ FRONTEND_REACT_LIBS = {
                 "order": 44,
             },
         ],
+        # The account control at the trailing edge of the top bar. Member-only;
+        # it opens the container-owned account section when the project routes
+        # one, and offers sign-out alone when it does not.
+        "embeds": [
+            {
+                "id": "auth.account_menu",
+                "slot": "topbar.end",
+                "component": {"export": "AccountMenu", "subpath": "default"},
+                "order": 90,
+                "surface": "member",
+                "opens": "account.root",
+            },
+        ],
     },
     "attributes": {
         # L0 — no client, no provider, no runtime. See the dict docstring.
@@ -738,7 +757,7 @@ FRONTEND_REACT_LIBS = {
     },
     "categories": {
         "package": "@stapel/categories-react",
-        "version": "0.35.0",
+        "version": "0.35.1",
         "provider": "CategoriesProvider",
         "create_runtime": "createCategoriesRuntime",
         "register_i18n": "registerCategoriesI18n",
@@ -775,7 +794,7 @@ FRONTEND_REACT_LIBS = {
         # menu item leading nowhere would be worse than its absence
         # (storefront spec §13.6 item 8).
         "package": "@stapel/cdn-react",
-        "version": "0.8.0",
+        "version": "0.8.2",
         "provider": "CdnProvider",
         "create_runtime": "createCdnRuntime",
         "register_i18n": "registerCdnI18n",
@@ -988,7 +1007,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.39.0",
+        "version": "0.40.1",
         # Declared an OPTIONAL peer, but `/default`'s ListingPrice imports it
         # statically, so a bundle without the package fails `vite build`
         # ("formatMoney" is not exported by __vite-optional-peer-dep). The
@@ -1439,7 +1458,7 @@ FRONTEND_REACT_LIBS = {
     },
     "workspaces": {
         "package": "@stapel/workspaces-react",
-        "version": "0.21.0",
+        "version": "0.22.1",
         "provider": "WorkspacesProvider",
         "create_runtime": "createWorkspacesRuntime",
         "register_i18n": "registerWorkspacesI18n",
@@ -1523,6 +1542,19 @@ FRONTEND_REACT_LIBS = {
                 "order": 0,
             },
         ],
+        # The switcher right after the brand. It and the five account screens
+        # above read ONE selection, so the container mounts
+        # `shell_provider` around the member shell whenever this pair is in.
+        "embeds": [
+            {
+                "id": "workspaces.switcher",
+                "slot": "topbar.start",
+                "component": {"export": "WorkspaceSwitcher", "subpath": "default"},
+                "order": 10,
+                "surface": "member",
+            },
+        ],
+        "shell_provider": "WorkspaceSelectionProvider",
     },
 }
 # ---------------------------------------------------------------------------
@@ -4242,10 +4274,12 @@ def main():
              "named but queued for the monolith. Monolith only.",
     )
     parser.add_argument(
-        "--slot", action="append", metavar="SLOT=EMBED|none", default=None,
+        "--slot", action="append", metavar="SLOT=EMBED[,EMBED]|none", default=None,
         help="Resolve a shell slot: the embed id that fills it (when two "
              "modules claim a single-capacity slot), or none to silence it. "
-             "Repeatable, e.g. --slot topbar.end=none. Monolith only.",
+             "Repeatable, e.g. --slot topbar.end=none, or a comma list to "
+             "keep a subset: --slot topbar.end=notifications.bell,auth.account_menu. "
+             "Monolith only.",
     )
     parser.add_argument(
         "--base-image", metavar="REF", default=None,

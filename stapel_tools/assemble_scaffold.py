@@ -417,7 +417,7 @@ def main(argv: list[str] | None = None) -> int:
         "--shell). Monolith only.",
     )
     parser.add_argument(
-        "--slot", action="append", metavar="SLOT=EMBED|none", default=None,
+        "--slot", action="append", metavar="SLOT=EMBED[,EMBED]|none", default=None,
         help="Shell slot choice, repeatable (stapel-create-project --slot).",
     )
     parser.add_argument(

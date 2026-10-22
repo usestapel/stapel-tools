@@ -403,6 +403,38 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
 
+      # Tier 0 slot composition: ONE scaffold call assembles the shell from the
+      # pairs' own `embeds` (auth + workspaces + notifications on
+      # topbar-sidenav: the switcher at topbar.start, the bell and the account
+      # menu at topbar.end) and the generated app lints, builds and passes its
+      # own nav gate (every slot in stapel.composition.json has a component)
+      # with no hand edits. The pins are installed as the registry serves them
+      # (no fallback), so an unpublished pair is red here, not a surprise later.
+      - name: Slot-composed app builds from the manifests (Tier 0)
+        run: |
+          stapel-create-project slots --type monolith --title "Slots" \
+            --url https://slots.example --company-name Acme \
+            --company-email hi@slots.example \
+            --modules auth workspaces notifications \
+            --auth-model public --auth-kinds email \
+            --shell topbar-sidenav --no-git --no-submodules \
+            --output-dir "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/slots/frontend"
+          python - <<'PY'
+          import json
+          shell = json.load(open("stapel.composition.json"))["shell"]
+          print(shell)
+          assert shell["slots"] == {
+              "topbar.start": ["workspaces.switcher"],
+              "topbar.end": ["notifications.bell", "auth.account_menu"],
+          }, shell
+          PY
+          npm install --no-audit --no-fund
+          npm run gen:tokens
+          npm run lint
+          npm run build
+          npx vitest run --pool=threads --maxWorkers=2
+
       - name: Compose validity + live nginx circuit (redirect-port regression)
         working-directory: ${{ runner.temp }}/e2e
         run: |

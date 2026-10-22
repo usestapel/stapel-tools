@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.72.9] — 2026-10-22
+
+Patch: the account menu and the workspace switcher are placed by the scaffold
+from their pairs' `embeds`, and an intake can ask about slots from one function.
+
+- Registry mirrors `auth.account_menu` (`topbar.end`, member, opens
+  `account.root`) and `workspaces.switcher` (`topbar.start`, member). With
+  auth + workspaces + notifications on `topbar-sidenav` the generated
+  `embeds.generated.tsx` fills `topbar.start` with the switcher and
+  `topbar.end` with the bell then the account menu, `onOpen` routed to
+  `/app/notifications` and `/app/account`; no file is edited by hand.
+- New registry field `shell_provider`: a selected pair's provider wraps the
+  "/app" chrome inside the session gate. Workspaces sets
+  `WorkspaceSelectionProvider`, so the switcher and the five workspace screens
+  read one selection (they used to say "choose a workspace" forever).
+- `_shell_slots.offer_slots()`: what the installed pairs offer a template,
+  with `conflicts` on contested single-capacity slots; `plan_slots` runs on it.
+- `--slot <slot>=a,b` keeps that subset of a slot's embeds (hiding one embed of
+  a shared slot, which `none` cannot say); unknown members are refused.
+- Pins follow npm: auth-react 0.27.0, workspaces-react 0.22.1, cdn-react
+  0.8.2, listings-react 0.40.1, categories-react 0.35.1.
+
 ## [0.72.8] — 2026-10-22
 
 Patch: a generated project's root `.gitignore` ignores `var/`.

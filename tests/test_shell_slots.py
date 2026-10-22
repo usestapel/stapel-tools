@@ -204,13 +204,21 @@ class TestEmission:
         assert embeds.index("embed-notifications.bell") < embeds.index("embed-translate.language_switcher")
 
         routes = (front / "src" / "routes.tsx").read_text()
-        assert 'import { TopbarEnd } from "./embeds.generated.js";' in routes
-        assert 'slots={{ "topbar.end": <TopbarEnd /> }}' in routes
+        assert 'import { TopbarEnd, TopbarStart } from "./embeds.generated.js";' in routes
+        assert (
+            'slots={{ "topbar.start": <TopbarStart />, "topbar.end": <TopbarEnd /> }}'
+            in routes
+        )
 
         composition = json.loads((front / "stapel.composition.json").read_text())
         assert composition["shell"] == {
             "template": "topbar-sidenav",
-            "slots": {"topbar.end": ["notifications.bell", "translate.language_switcher"]},
+            "slots": {
+                "topbar.start": ["workspaces.switcher"],
+                "topbar.end": [
+                    "notifications.bell", "translate.language_switcher", "auth.account_menu",
+                ],
+            },
             "overrides": {},
             "dropped": [],
         }
@@ -233,7 +241,7 @@ class TestEmission:
     def test_selection_without_embeds_keeps_the_container_byte_identical(self, tmp_path):
         import stapel_tools._frontend_templates as F
 
-        modules = ["core", "auth", "billing", "workspaces", "gdpr"]
+        modules = ["core", "billing", "gdpr"]
         front = _create(tmp_path, modules=modules) / "frontend"
         assert not (front / "src" / "embeds.generated.tsx").exists()
         routes = (front / "src" / "routes.tsx").read_text()
@@ -243,24 +251,27 @@ class TestEmission:
         from stapel_tools.create_project import _frontend_react_entries
 
         entries = _frontend_react_entries(modules[1:])
-        nav_pairs = F.nav_wired_pairs(entries, auth_wired=True)
+        nav_pairs = F.nav_wired_pairs(entries, auth_wired=False)
         expected = F.render_routes_tsx(
-            F.build_nav_route_plan(nav_pairs), auth_wired=True, want_landing=False,
+            F.build_nav_route_plan(nav_pairs), auth_wired=False, want_landing=False,
             app_route_present=True, has_cdn=False, pairs=tuple(e["key"] for e in entries),
         )
         assert routes == expected
 
+        from stapel_tools.create_project import _frontend_react_entries as entries_for
+
+        assert not any(e.get("embeds") for e in entries_for(modules[1:]))
+
     def test_slot_none_emits_nothing(self, tmp_path):
         import json
 
-        front = _create(
-            tmp_path, modules=ACCEPTANCE, slots={"topbar.end": "none"},
-        ) / "frontend"
+        silence = {"topbar.start": "none", "topbar.end": "none"}
+        front = _create(tmp_path, modules=ACCEPTANCE, slots=silence) / "frontend"
         assert not (front / "src" / "embeds.generated.tsx").exists()
         assert "slots=" not in (front / "src" / "routes.tsx").read_text()
         composition = json.loads((front / "stapel.composition.json").read_text())
         assert composition["shell"]["slots"] == {}
-        assert composition["shell"]["overrides"] == {"topbar.end": "none"}
+        assert composition["shell"]["overrides"] == silence
 
     def test_member_bell_dropped_without_auth(self, tmp_path, capsys):
         import json
@@ -284,3 +295,131 @@ class TestEmission:
         front = _create(tmp_path, modules=ACCEPTANCE) / "frontend"
         assert not (front / "src" / "embeds.generated.tsx").exists()
         assert "slots=" not in (front / "src" / "routes.tsx").read_text()
+
+
+class TestManifestAssembly:
+    """One scaffold call, three pairs, no hand edits: every slot's contents
+    are the pairs' own `embeds` declarations (the registry mirror of each
+    `nav-manifest.json`, drift-gated by scripts/check_nav_manifest_sync.py)."""
+
+    MODULES = ["core", "auth", "workspaces", "notifications"]
+
+    def _expected_slots(self):
+        from stapel_tools.create_project import FRONTEND_REACT_LIBS
+
+        declared: dict[str, list[dict]] = {}
+        for key in ("auth", "workspaces", "notifications"):
+            for embed in FRONTEND_REACT_LIBS[key]["embeds"]:
+                declared.setdefault(embed["slot"], []).append(embed)
+        return {
+            slot: [e["id"] for e in sorted(embeds, key=lambda e: (e["order"], e["id"]))]
+            for slot, embeds in declared.items()
+        }
+
+    def test_slots_come_from_the_manifests(self, tmp_path):
+        import json
+
+        front = _create(tmp_path, modules=self.MODULES, shell="topbar-sidenav") / "frontend"
+        composition = json.loads((front / "stapel.composition.json").read_text())
+        expected = self._expected_slots()
+        assert composition["shell"]["slots"] == expected
+        # Pinned too, so a mirror edit that empties a pair cannot pass by
+        # agreeing with itself.
+        assert expected == {
+            "topbar.start": ["workspaces.switcher"],
+            "topbar.end": ["notifications.bell", "auth.account_menu"],
+        }
+
+        embeds = (front / "src" / "embeds.generated.tsx").read_text()
+        assert 'import { AccountMenu } from "@stapel/auth-react/default";' in embeds
+        assert 'import { WorkspaceSwitcher } from "@stapel/workspaces-react/default";' in embeds
+        assert "export function TopbarStart(): ReactElement" in embeds
+        # account.root is routed (workspaces hangs its screens from it), so the
+        # menu's `opens` resolves and it gets a working "Account" item.
+        assert 'void navigate("/app/account");' in embeds
+        assert 'void navigate("/app/notifications");' in embeds
+        assert embeds.index("embed-notifications.bell") < embeds.index("embed-auth.account_menu")
+
+    def test_the_selection_provider_wraps_the_member_shell(self, tmp_path):
+        front = _create(tmp_path, modules=self.MODULES) / "frontend"
+        routes = (front / "src" / "routes.tsx").read_text()
+        assert 'import { WorkspaceSelectionProvider } from "@stapel/workspaces-react";' in routes
+        assert (
+            "<ProtectedRoute>\n"
+            "        <WorkspaceSelectionProvider><AppChrome /></WorkspaceSelectionProvider>\n"
+            "      </ProtectedRoute>"
+        ) in routes
+
+    def test_without_workspaces_no_selection_provider(self, tmp_path):
+        front = _create(tmp_path, modules=["core", "auth", "notifications"]) / "frontend"
+        routes = (front / "src" / "routes.tsx").read_text()
+        assert "WorkspaceSelectionProvider" not in routes
+        embeds = (front / "src" / "embeds.generated.tsx").read_text()
+        # No account section is routed here: the menu mounts without onOpen
+        # (sign-out only) rather than with a dead link.
+        assert "<AccountMenu />" in embeds and "/app/account" not in embeds
+
+    def test_offer_lists_what_the_intake_asks_about(self):
+        from stapel_tools._shell_slots import offer_slots
+        from stapel_tools.create_project import _frontend_react_entries
+
+        offer = offer_slots(
+            "topbar-sidenav", _frontend_react_entries(["auth", "workspaces", "notifications"]),
+            auth_gated=True,
+        )
+        assert [e["id"] for e in offer.embeds] == [
+            "workspaces.switcher", "notifications.bell", "auth.account_menu",
+        ]
+        assert offer.conflicts == {}
+        assert offer.exclusive == ["topbar.center"]
+
+    def test_offer_names_a_contested_exclusive_slot(self):
+        from stapel_tools._shell_slots import offer_slots
+
+        pairs = [
+            {"package": "@x/a", "embeds": [
+                {"id": "a.search", "slot": "topbar.center", "order": 1,
+                 "component": {"export": "A", "subpath": "default"}}]},
+            {"package": "@x/b", "embeds": [
+                {"id": "b.search", "slot": "topbar.center", "order": 2,
+                 "component": {"export": "B", "subpath": "default"}}]},
+        ]
+        offer = offer_slots("topbar-sidenav", pairs, auth_gated=True)
+        assert offer.conflicts == {"topbar.center": ["a.search", "b.search"]}
+
+
+class TestSlotSubset:
+    """`--slot <slot>=a,b` keeps that subset — hiding one embed of a shared
+    slot, which `none` (the whole slot) cannot say."""
+
+    def _pairs(self):
+        from stapel_tools.create_project import _frontend_react_entries
+
+        return _frontend_react_entries(["auth", "workspaces", "notifications", "translate"])
+
+    def test_subset_keeps_declared_order(self):
+        plan = plan_slots(
+            "topbar-sidenav", self._pairs(), auth_gated=True,
+            overrides={"topbar.end": "auth.account_menu,notifications.bell"},
+        )
+        assert [e["id"] for e in plan.slots["topbar.end"]] == [
+            "notifications.bell", "auth.account_menu",
+        ]
+
+    def test_unknown_member_of_a_subset_is_refused(self):
+        with pytest.raises(ValueError, match="'bogus.embed' is not offered for topbar.end"):
+            plan_slots(
+                "topbar-sidenav", self._pairs(), auth_gated=True,
+                overrides={"topbar.end": "notifications.bell,bogus.embed"},
+            )
+
+    def test_cli_subset_reaches_the_composition(self, tmp_path):
+        import json
+
+        front = _create(
+            tmp_path, modules=["core", "auth", "workspaces", "notifications"],
+            slots={"topbar.end": "auth.account_menu"},
+        ) / "frontend"
+        composition = json.loads((front / "stapel.composition.json").read_text())
+        assert composition["shell"]["slots"]["topbar.end"] == ["auth.account_menu"]
+        assert "NotificationBell" not in (front / "src" / "embeds.generated.tsx").read_text()

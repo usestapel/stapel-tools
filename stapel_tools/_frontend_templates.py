@@ -1196,8 +1196,14 @@ def render_routes_tsx(
     ``embed_slots`` (``{slotId: ComponentName}``, from
     ``embeds.generated.tsx``) becomes the chrome's ``slots`` prop; empty or
     absent leaves the output exactly as it was before slots existed.
+
+    A selected pair's ``shell_provider`` (registry field) wraps the "/app"
+    chrome, inside the session gate: state the member area shares — the
+    active workspace the switcher writes and the workspace screens read —
+    lives above every screen and every slot of the shell.
     """
     embed_slots = embed_slots if app_route_present else None
+    shell_providers = _shell_providers(pairs) if app_route_present else []
     absolute_routes = route_plan["absolute_routes"]
     app_children = route_plan["app_children"]
     # A second gate over the admin section: "/app" establishes a session,
@@ -1242,6 +1248,8 @@ def render_routes_tsx(
     if embed_slots:
         names = ", ".join(sorted(set(embed_slots.values())))
         lines.append(f'import {{ {names} }} from "./embeds.generated.js";')
+    for package, name in shell_providers:
+        lines.append(f'import {{ {name} }} from "{package}";')
     if auth_wired:
         lines.append('import { ProtectedRoute } from "./ProtectedRoute.js";')
     if admin_gated:
@@ -1361,9 +1369,10 @@ def render_routes_tsx(
         lines.append("  {")
         lines.append('    path: "/app",')
         if auth_wired:
-            chrome = (
+            chrome = _wrap_providers(
                 "<AppChrome />" if chrome_component
-                else f"<AppShell nav={{RESOLVED_NAV}}{shell_props} />"
+                else f"<AppShell nav={{RESOLVED_NAV}}{shell_props} />",
+                shell_providers,
             )
             lines.append("    element: (")
             lines.append("      <ProtectedRoute>")
@@ -1375,9 +1384,10 @@ def render_routes_tsx(
             # default (`staff` absent means false) is then the honest answer.
             # A badge source can still put the chrome behind a component: a
             # count is not a session.
-            element = (
+            element = _wrap_providers(
                 "<AppChrome />" if chrome_component
-                else f"<AppShell nav={{RESOLVED_NAV}}{shell_props} />"
+                else f"<AppShell nav={{RESOLVED_NAV}}{shell_props} />",
+                shell_providers,
             )
             lines.append(f"    element: {element},")
         if app_children:
@@ -1399,6 +1409,25 @@ def render_routes_tsx(
     lines.append("]);")
     lines.append("")
     return "\n".join(lines)
+
+
+def _shell_providers(pairs) -> list[tuple[str, str]]:
+    """``(package, export)`` of every selected pair's ``shell_provider``, in
+    selection order (the first wraps outermost)."""
+    from .create_project import FRONTEND_REACT_LIBS
+
+    out: list[tuple[str, str]] = []
+    for key in pairs:
+        entry = FRONTEND_REACT_LIBS.get(key) or {}
+        if entry.get("shell_provider"):
+            out.append((entry["package"], entry["shell_provider"]))
+    return out
+
+
+def _wrap_providers(element: str, providers: list[tuple[str, str]]) -> str:
+    for _package, name in reversed(providers):
+        element = f"<{name}>{element}</{name}>"
+    return element
 
 
 def _slots_prop(embed_slots: dict[str, str] | None) -> str:
