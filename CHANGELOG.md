@@ -20,7 +20,7 @@ from their pairs' `embeds`, and an intake can ask about slots from one function.
 - `--slot <slot>=a,b` keeps that subset of a slot's embeds (hiding one embed of
   a shared slot, which `none` cannot say); unknown members are refused.
 - Pins follow npm: auth-react 0.27.0, workspaces-react 0.22.1, cdn-react
-  0.8.2, listings-react 0.40.1, categories-react 0.35.1.
+  0.8.2, listings-react 0.41.0, categories-react 0.36.0.
 - `SCH004` (schema-wire lint, warning; `--strict` promotes): an enum
   component carrying a drf-spectacular collision name (`StatusD41Enum`: the
   property camelized plus three hash characters), recognised by shape and by a

@@ -487,8 +487,8 @@ STAPEL_LIBS = {
 # 2026-10-22 (stapel-tools 0.72.9): the slot-embeds train — `npm view
 # @stapel/<key>-react version` -> auth 0.27.0 (`auth.account_menu`),
 # workspaces 0.22.1 (`workspaces.switcher`, `shell_provider`; 0.22.1 is the
-# first to ship its nav-manifest.json), cdn 0.8.2, listings 0.40.1 and
-# categories 0.35.1 (docs/llms trains of the same day).
+# first to ship its nav-manifest.json), cdn 0.8.2, listings 0.41.0 and
+# categories 0.36.0 (the docs/llms and stable-enum-name trains of the same day).
 #
 # 2026-10-15 (stapel-tools 0.72.0): the composition train — `npm view
 # @stapel/<key>-react version` -> notifications 0.13.0 and translate 0.3.0
@@ -757,7 +757,7 @@ FRONTEND_REACT_LIBS = {
     },
     "categories": {
         "package": "@stapel/categories-react",
-        "version": "0.35.1",
+        "version": "0.36.0",
         "provider": "CategoriesProvider",
         "create_runtime": "createCategoriesRuntime",
         "register_i18n": "registerCategoriesI18n",
@@ -1007,7 +1007,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.40.1",
+        "version": "0.41.0",
         # Declared an OPTIONAL peer, but `/default`'s ListingPrice imports it
         # statically, so a bundle without the package fails `vite build`
         # ("formatMoney" is not exported by __vite-optional-peer-dep). The
