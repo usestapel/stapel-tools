@@ -387,3 +387,19 @@ def test_modules_tsx_mounts_the_mandate_and_resolves_photos(tmp_path, key):
 def test_workspaces_keeps_its_own_mandate(tmp_path):
     proj = _create(tmp_path, "fews", "monolith", ["auth", "workspaces"])
     assert "MandateGateway" not in (proj / "frontend" / "src" / "modules.tsx").read_text()
+
+
+def test_category_page_fills_the_listing_grid(tmp_path):
+    proj = _create(tmp_path, "cg", "monolith", ["shop"])
+    page = (proj / "frontend" / "src" / "pages" / "CategoryPageRoute.tsx").read_text()
+    assert 'import { ListingBoardPane } from "@stapel/listings-react/default";' in page
+    assert "renderListings={(category) =>" in page
+    assert "categoryIds={[String(category.id)]}" in page
+
+
+def test_calendar_gets_the_viewer_and_a_people_provider(tmp_path):
+    proj = _create(tmp_path, "cv", "monolith", ["booking"])
+    page = (proj / "frontend" / "src" / "pages" / "CalendarRoute.tsx").read_text()
+    assert "useAuthSessionState()" in page
+    assert "<CalendarPeopleProvider" in page
+    assert "{...(viewerId !== undefined ? { viewerId } : {})}" in page

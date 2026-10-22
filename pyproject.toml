@@ -96,6 +96,9 @@ test = [
     "stapel-listings>=0.26.0,<1",  # noqa: SIB005 - named by the preset-gate inversion test
     "stapel-moderation>=0.8.4,<1",  # noqa: SIB005 - imported by the generated project under test
     "stapel-search>=0.18.2,<1",  # noqa: SIB005 - imported by the generated project under test
+    # Companions a composite selects (the storefront pairs' backends).
+    "stapel-currencies>=0.1.9,<1",  # noqa: SIB005 - imported by the generated project under test
+    "stapel-vocabularies>=0.4.4,<1",  # noqa: SIB005 - imported by the generated project under test
     # A generated chat project serves its socket through stapel-realtime's
     # Channels stack; `manage.py check` imports chat's consumers.
     "stapel-realtime[channels,redis]>=0.2.3,<1",  # noqa: SIB005 - imported by the generated project under test

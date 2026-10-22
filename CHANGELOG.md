@@ -64,8 +64,18 @@ the scaffold, and every composite preset is held equal to the registry
     longer permanently disabled (D1), and the listings runtime gets
     `resolveImage: listingImageFor` (`src/lib/cdn.ts`, the 720 preview tier)
     so photos render (D4);
+  - `/c/:slug` fills `renderListings` with listings-react 0.42's
+    `ListingBoardPane` (the public board narrowed by stapel-listings 0.27's
+    `?category_id=`) whenever listings is installed (D5);
+  - `/app/calendar` hands the signed-in user's id to `<Calendar viewerId>`
+    (which passes it to its EventSheet) inside a `CalendarPeopleProvider`
+    that names the viewer, so RSVP and edit are no longer hidden;
   - the derived gdpr `DATA_OWNERS` map reads the expanded selection, so a
     composite's members' stores are listed (gdpr.E002/E010).
+- npm pair pins follow what npm serves: auth-react 0.28.0, calendar-react
+  0.9.1, chat-react 0.23.1, listings-react 0.42.0, moderation-react 0.4.0,
+  notifications-react 0.13.1, recordings-react 0.11.2, reviews-react 0.9.0,
+  workspaces-react 0.23.0 (nav mirrors unchanged).
 - CI matrix `composites` (`scripts/composite_gates.py`), one leg per
   composite: generated as a minimal and a monolith project, the union of their
   requirements installed in one resolution, and each project's check

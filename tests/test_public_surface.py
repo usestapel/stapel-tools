@@ -328,7 +328,8 @@ class TestPageWrappers:
     def test_string_param_refuses_the_empty_string(self):
         src = _plan()["files"]["src/pages/CategoryPageRoute.tsx"]
         assert "slug.length === 0" in src
-        assert "<CategoryPage slug={slug} />" in src
+        # listings is installed, so the grid slot is filled (ListingBoardPane).
+        assert "<CategoryPage slug={slug} renderListings={(category) =>" in src
 
     def test_search_adapter_comes_from_the_pairs_own_router_subpath(self):
         """@stapel/search-react keeps react-router out of its main entry on

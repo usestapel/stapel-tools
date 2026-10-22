@@ -648,7 +648,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.27.0",
+        "version": "0.28.0",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
@@ -802,7 +802,7 @@ FRONTEND_REACT_LIBS = {
     },
     "calendar": {
         "package": "@stapel/calendar-react",
-        "version": "0.9.0",
+        "version": "0.9.1",
         "provider": "CalendarProvider",
         "create_runtime": "createCalendarRuntime",
         "register_i18n": "registerCalendarI18n",
@@ -882,7 +882,7 @@ FRONTEND_REACT_LIBS = {
     },
     "chat": {
         "package": "@stapel/chat-react",
-        "version": "0.23.0",
+        "version": "0.23.1",
         "provider": "ChatProvider",
         "create_runtime": "createChatRuntime",
         "register_i18n": "registerChatI18n",
@@ -1088,7 +1088,7 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.41.0",
+        "version": "0.42.0",
         # Declared an OPTIONAL peer, but `/default`'s ListingPrice imports it
         # statically, so a bundle without the package fails `vite build`
         # ("formatMoney" is not exported by __vite-optional-peer-dep). The
@@ -1173,7 +1173,7 @@ FRONTEND_REACT_LIBS = {
         # they belong inside another pair's screen and nowhere a generator
         # can put them.
         "package": "@stapel/moderation-react",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "provider": "ModerationProvider",
         "create_runtime": "createModerationRuntime",
         "register_i18n": "registerModerationI18n",
@@ -1244,7 +1244,7 @@ FRONTEND_REACT_LIBS = {
     },
     "notifications": {
         "package": "@stapel/notifications-react",
-        "version": "0.13.0",
+        "version": "0.13.1",
         "provider": "NotificationsProvider",
         "create_runtime": "createNotificationsRuntime",
         "register_i18n": "registerNotificationsI18n",
@@ -1365,7 +1365,7 @@ FRONTEND_REACT_LIBS = {
     },
     "recordings": {
         "package": "@stapel/recordings-react",
-        "version": "0.11.1",  # npm view @stapel/recordings-react version -> 0.11.1 (2026-10-15)
+        "version": "0.11.2",  # npm view @stapel/recordings-react version -> 0.11.1 (2026-10-15)
         "provider": "RecordingsProvider",
         "create_runtime": "createRecordingsRuntime",
         "register_i18n": "registerRecordingsI18n",
@@ -1422,7 +1422,7 @@ FRONTEND_REACT_LIBS = {
         # No nav manifest either — reviews render inside a listing page and a
         # seller page, never on a route of their own (§13.8 item 11).
         "package": "@stapel/reviews-react",
-        "version": "0.8.4",
+        "version": "0.9.0",
         "provider": "ReviewsProvider",
         "create_runtime": "createReviewsRuntime",
         "register_i18n": "registerReviewsI18n",
@@ -1539,7 +1539,7 @@ FRONTEND_REACT_LIBS = {
     },
     "workspaces": {
         "package": "@stapel/workspaces-react",
-        "version": "0.22.1",
+        "version": "0.23.0",
         "provider": "WorkspacesProvider",
         "create_runtime": "createWorkspacesRuntime",
         "register_i18n": "registerWorkspacesI18n",

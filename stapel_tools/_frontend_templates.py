@@ -1198,9 +1198,11 @@ def monolith_mount_plan(route_plan: dict, *, pairs: tuple = ()) -> dict:
             local_imports.add(name)
             elements[entry["id"]] = f"<{name} />"
             continue
-        if mount.get("route_params") or mount.get("adapter"):
+        if mount.get("route_params") or mount.get("adapter") or (
+            mount.get("viewer") in pairs
+        ):
             name = _wrapper_name(entry)
-            pages[f"src/pages/{name}.tsx"] = render_nav_page_wrapper_tsx(entry, mount)
+            pages[f"src/pages/{name}.tsx"] = render_nav_page_wrapper_tsx(entry, mount, pairs=tuple(pairs))
             line = f'import {{ {name} }} from "./pages/{name}.js";'
             if line not in wrapper_imports:
                 wrapper_imports.append(line)
@@ -2401,7 +2403,20 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     "profiles.public": {"route_params": {"userId": "string"}},
     # categories-react 0.2.0
     "categories.catalog": {},
-    "categories.category": {"route_params": {"slug": "string"}},
+    "categories.category": {
+        "route_params": {"slug": "string"},
+        # The page leaves the listing grid to its container (a named
+        # placeholder otherwise). listings-react 0.42 ships the default one,
+        # over the public board narrowed by stapel-listings 0.27's
+        # `?category_id=` filter; filled whenever listings is installed.
+        "slot_fills": {
+            "renderListings": {
+                "pair": "listings",
+                "import": ("ListingBoardPane", "@stapel/listings-react/default"),
+                "jsx": "(category) => (\n        <ListingBoardPane categoryIds={[String(category.id)]} hrefFor={(id) => `/l/${id}`} />\n      )",
+            },
+        },
+    },
     # chat-react 0.2.0 — ConversationListPanel: limit/openHref/onOpen, all
     # optional.
     "chat.conversations": {},
@@ -2452,7 +2467,11 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     # `viewerId` is among them, so owner-only controls stay hidden until a
     # host supplies one; that is the pair's own designed degradation, not a
     # slot this generator can fill from a session it does not read.
-    "calendar.month": {},
+    # With auth installed the signed-in user's id is the `viewerId` (Calendar
+    # hands it on to its EventSheet): without it RSVP and edit stay hidden for
+    # everyone. A `CalendarPeopleProvider` names the viewer instead of
+    # printing their id; other people stay ids until a directory exists.
+    "calendar.month": {"viewer": "auth"},
     "calendar.availability": {},
     # forms-react 0.3.1 — `workspaceId` is optional on all three (the runtime's
     # active selection answers it, which is exactly what the routable case
@@ -3075,7 +3094,7 @@ def _wrapper_name(entry: dict) -> str:
 
 
 def render_nav_page_wrapper_tsx(
-    entry: dict, mount: dict, options: dict | None = None
+    entry: dict, mount: dict, options: dict | None = None, pairs: tuple = ()
 ) -> str:
     """``src/pages/<Export>Route.tsx`` — the one-file binding between a route
     and a component that needs something the ROUTE knows.
@@ -3113,10 +3132,26 @@ def render_nav_page_wrapper_tsx(
     if adapter:
         hook, adapter_subpath = adapter
         lines.append(f'import {{ {hook} }} from "{pkg}/{adapter_subpath}";')
+    # Slots another installed pair fills (`slot_fills`), each with its import.
+    fills = {
+        prop: fill for prop, fill in (mount.get("slot_fills") or {}).items()
+        if fill["pair"] in pairs
+    }
+    for fill in fills.values():
+        export, module = fill["import"]
+        lines.append(f'import {{ {export} }} from "{module}";')
+    viewer = mount.get("viewer") in pairs
+    if viewer:
+        lines.append('import { useAuthSessionState } from "@stapel/auth-react";')
+        lines.append(f'import {{ CalendarPeopleProvider }} from "{pkg}";')
     if params:
         lines.append('import { RouteParamProblem } from "../NavPlaceholder.js";')
     lines.append("")
     lines.append(f"export function {name}(): ReactElement {{")
+    if viewer:
+        lines.append("  const { user } = useAuthSessionState();")
+        lines.append("  const viewerId = user === null ? undefined : String(user.id);")
+        lines.append("  const viewerName = user === null ? undefined : (user.email ?? user.username);")
     props: list[str] = []
     if params:
         lines.append("  const params = useParams();")
@@ -3140,8 +3175,21 @@ def render_nav_page_wrapper_tsx(
         props.append("adapter={adapter}")
     for prop, option in option_props.items():
         props.append(f"{prop}={json.dumps(options[option])}")
+    for prop, fill in fills.items():
+        props.append(f"{prop}={{{fill['jsx']}}}")
+    if viewer:
+        props.append("{...(viewerId !== undefined ? { viewerId } : {})}")
     rendered_props = (" " + " ".join(props)) if props else ""
-    lines.append(f"  return <{comp}{rendered_props} />;")
+    if viewer:
+        lines.append("  return (")
+        lines.append("    <CalendarPeopleProvider")
+        lines.append("      resolveUserName={(id) => (id === viewerId ? viewerName ?? undefined : undefined)}")
+        lines.append("    >")
+        lines.append(f"      <{comp}{rendered_props} />")
+        lines.append("    </CalendarPeopleProvider>")
+        lines.append("  );")
+    else:
+        lines.append(f"  return <{comp}{rendered_props} />;")
     lines.append("}")
     lines.append("")
     return "\n".join(lines)
@@ -3518,10 +3566,12 @@ def public_mount_plan(
             local_imports.add(name)
             elements[entry["id"]] = f"<{name} />"
             continue
-        if mount.get("route_params") or mount.get("adapter"):
+        if mount.get("route_params") or mount.get("adapter") or (
+            mount.get("viewer") in pairs
+        ):
             name = _wrapper_name(entry)
             pages[f"src/pages/{name}.tsx"] = render_nav_page_wrapper_tsx(
-                entry, mount, options
+                entry, mount, options, pairs=tuple(pairs)
             )
             line = f'import {{ {name} }} from "./pages/{name}.js";'
             if line not in wrapper_imports:

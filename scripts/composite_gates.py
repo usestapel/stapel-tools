@@ -59,13 +59,15 @@ def _gates(proj: Path, project_type: str, key: str, migrate: bool) -> list[tuple
     from stapel_tools.assemble_scaffold import _load_dotenv
     from stapel_tools.create_project import _expand_with_requires
 
-    # The project's env files, under the runner's own POSTGRES_*/REDIS_URL:
-    # a CI service is reached at 127.0.0.1, not at the compose name `db`.
+    # The project's env files. The runner's own POSTGRES_*/REDIS_URL apply to
+    # the boot steps only (a CI service is reached at 127.0.0.1, not at the
+    # compose name `db`); the check tiers keep the project's own values, which
+    # is what prodguard grades.
     dotenv = _load_dotenv(proj)
     runner = {k: v for k, v in os.environ.items() if k.startswith(("POSTGRES_", "REDIS_URL"))}
     env = {
         **{k: v for k, v in os.environ.items() if k != "DJANGO_SETTINGS_MODULE"},
-        **dotenv, **runner, "PYTHONDONTWRITEBYTECODE": "1",
+        **dotenv, "PYTHONDONTWRITEBYTECODE": "1",
     }
     results = []
     if project_type == "monolith":
@@ -81,7 +83,7 @@ def _gates(proj: Path, project_type: str, key: str, migrate: bool) -> list[tuple
     if migrate:
         # Boot: the schema migrates (system checks run first, as in
         # bootstrap.sh), then the seeds bootstrap.sh runs load reference data.
-        boot_env = {**env, "DJANGO_SETTINGS_MODULE": tiers[0][1]}
+        boot_env = {**env, **runner, "DJANGO_SETTINGS_MODULE": tiers[0][1]}
         if project_type == "monolith":
             boot_env["DJANGO_SETTINGS_MODULE"] = "config.settings.dev"
         results.append(("migrate", _run([PY, "manage.py", "migrate", "--noinput"], svc, boot_env)))
@@ -116,6 +118,17 @@ def main(argv: list[str] | None = None) -> int:
 
     types = [t for t in args.types.split(",") if t]
     projects = [(key, t, _generate(out, key, t)) for key in keys for t in types]
+    def regenerate() -> None:
+        # Generation reads installed libraries (gdpr's DATA_OWNERS is derived
+        # from the owners they declare), so once the requirements are in, the
+        # projects are generated again against what is installed — the way a
+        # host with its libraries installed generates them.
+        import shutil
+
+        for i, (key, t, proj) in enumerate(projects):
+            shutil.rmtree(proj)
+            projects[i] = (key, t, _generate(out, key, t))
+
     if not args.no_install:
         req_args = []
         for _key, t, proj in projects:
@@ -126,6 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         if proc.returncode:
             print("FAIL: the generated requirements do not resolve jointly")
             return 1
+        regenerate()
 
     failed = 0
     for key, t, proj in projects:
