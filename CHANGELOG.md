@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.72.7] — 2026-10-22
+
+Patch: a generated project's root `.gitignore` keeps frontend tool output out
+of commits.
+
+- Ignores `node_modules/`, `.pnpm-store/` and `*.tsbuildinfo`. pnpm creates
+  `.pnpm-store/` at the root of a bind-mounted checkout when its cache lives on
+  another filesystem (a controls run in a container), and `tsc -b` writes
+  `frontend/tsconfig.tsbuildinfo`; an `add -A` checkpoint committed 24k store
+  files. Test: the generated `.gitignore` names all three (red on 0.72.6).
+
 ## [0.72.6] — 2026-10-22
 
 Patch: a generated project's backend boots no matter which container starts

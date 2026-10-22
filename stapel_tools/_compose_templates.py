@@ -1082,6 +1082,11 @@ htmlcov/
 media/
 staticfiles/
 .DS_Store
+# Frontend tool output: pnpm puts its store at the root of a bind mount whose
+# cache dir is on another filesystem; tsc -b writes build info beside tsconfig.
+node_modules/
+.pnpm-store/
+*.tsbuildinfo
 """
 
 MICRO_COMPOSE_BASE = """\
