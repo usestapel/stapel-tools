@@ -3643,33 +3643,90 @@ def resolve_base_image(base_image: str | None = None) -> str | None:
     return ref
 
 
+#: The uid a prebuilt stapel base runs the service as.
+RUNTIME_UID = "10001"
+
+#: What the service writes at run time, relative to its WORKDIR: the settings
+#: defaults (``BASE_DIR / "var"``) and the compose mount points of the shared
+#: static/media volumes. An empty named volume inherits the owner of its mount
+#: point IN THE IMAGE, so these must exist there, owned by the runtime uid.
+RUNTIME_WRITABLE = ("var", "staticfiles", "media")
+
+_COPY_RE = re.compile(r"^COPY\s+", re.IGNORECASE)
+_WORKDIR_RE = re.compile(r"^WORKDIR\s+(?P<dir>\S+)\s*$", re.IGNORECASE)
+
+
+def tiered_base_image(ref: str, dockerfile: Path, text: str) -> str:
+    """``ref`` moved to the stapel base tier this service needs.
+
+    The tier is stapel-image-lint's own answer (``service_need``, the IMG002
+    rule): stapel-cdn[images] / recordings / video -> media-base, torch & co ->
+    ml-base, on the same tag. Only ever raised, never lowered. A ref that is
+    not a stapel base, or is pinned by digest (a digest names one image, not
+    a tier), is returned unchanged.
+    """
+    from . import image_lint
+
+    current = image_lint.stapel_base_name(ref)
+    if current is None or "@" in ref:
+        return ref
+    need, _how = image_lint.service_need(dockerfile, text)
+    want = image_lint.RANK_BASE[image_lint.NEED_RANK[need]]
+    if image_lint.BASE_RANK[want] <= image_lint.BASE_RANK[current]:
+        return ref
+    head, _, last = ref.rpartition("/")
+    _, sep, tag = last.partition(":")
+    return f"{head}/{want}{sep}{tag}"
+
+
 def apply_base_image(project_dir: Path, ref: str) -> list[Path]:
     """Point every generated Python service Dockerfile at ``ref``.
 
+    A stapel base ``ref`` is moved per service to the tier its requirements
+    need (``tiered_base_image``), so the scaffold never emits a FROM its own
+    image lint rejects (IMG002).
+
     A prebuilt base runs as a non-root user (uid 10001), so each rewritten
     stage starts with ``USER root`` (the apt lines need it) and the final stage
-    drops back to ``USER 10001`` before the service starts. Dockerfiles that
-    do not start from ``python:`` (the SPA's node image) are left alone.
+    drops back to ``USER 10001`` before the service starts. Everything the
+    final stage copies lands owned by that uid, and ``RUNTIME_WRITABLE`` is
+    created owned by it, so collectstatic and uploads can write (core
+    ``storage.E002`` otherwise refuses start). Dockerfiles that do not start
+    from ``python:`` (the SPA's node image) are left alone.
     """
     changed: list[Path] = []
     for path in sorted(project_dir.rglob("Dockerfile")):
         if "node_modules" in path.parts or ".git" in path.parts:
             continue
-        lines = path.read_text(encoding="utf-8").splitlines()
+        text = path.read_text(encoding="utf-8")
+        lines = text.splitlines()
         py_from = [i for i, ln in enumerate(lines) if _PY_FROM_RE.match(ln)]
         if not py_from:
             continue
+        service_ref = tiered_base_image(ref, path, text)
         last_from = max(i for i, ln in enumerate(lines) if ln.upper().startswith("FROM "))
         final_is_python = last_from in py_from
+        chown = f"--chown={RUNTIME_UID}:{RUNTIME_UID}"
+        workdir = "/app"
         out: list[str] = []
         for i, ln in enumerate(lines):
             m = _PY_FROM_RE.match(ln)
+            in_final = final_is_python and i > last_from
             if m:
-                out += [f"FROM {ref}{m.group('rest')}", "USER root"]
-            elif final_is_python and i > last_from and ln.startswith("ENV DJANGO_SETTINGS_MODULE"):
-                out += ["USER 10001", ln]
-            else:
-                out.append(ln)
+                out += [f"FROM {service_ref}{m.group('rest')}", "USER root"]
+                continue
+            if in_final and _WORKDIR_RE.match(ln):
+                workdir = _WORKDIR_RE.match(ln).group("dir").rstrip("/") or "/"
+            if in_final and _COPY_RE.match(ln) and "--chown" not in ln:
+                ln = _COPY_RE.sub(f"COPY {chown} ", ln, count=1)
+            if in_final and ln.startswith("ENV DJANGO_SETTINGS_MODULE"):
+                dirs = " ".join(f"{workdir}/{d}" for d in RUNTIME_WRITABLE)
+                out += [
+                    f"RUN install -d -o {RUNTIME_UID} -g {RUNTIME_UID} {dirs} "
+                    f"&& chown {RUNTIME_UID}:{RUNTIME_UID} {workdir}",
+                    f"USER {RUNTIME_UID}",
+                ]
+            out.append(ln)
         path.write_text("\n".join(out) + "\n", encoding="utf-8")
         changed.append(path)
     return changed

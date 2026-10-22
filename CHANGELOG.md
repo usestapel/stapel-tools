@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.72.4] — 2026-10-22
+
+Patch: a project generated with `--base-image` boots and passes its own
+image lint.
+
+- Ownership: the base drops to `USER 10001`, but every `COPY` landed
+  root:root, so the service could not create `STATIC_ROOT` (core
+  `storage.E002`). The final stage now copies with `--chown=10001:10001` and
+  creates `<WORKDIR>/var`, `staticfiles` and `media` owned by uid 10001 (the
+  settings defaults and the compose volume mount points; an empty named
+  volume inherits its mount point's owner).
+- Tier: a stapel base ref (`.../stapel-images/python-base:<tag>`) moves per
+  service to the tier its requirements need — the same `service_need` rule
+  `stapel-image-lint` IMG002 applies (stapel-cdn[images], recordings, video
+  -> `media-base`; torch & co -> `ml-base`), on the same tag. Never lowered;
+  digest refs and non-stapel refs are kept as given.
+
 ## [0.72.3] — 2026-10-15
 
 Patch: generated projects can build from your own registry's Python base
