@@ -17,8 +17,8 @@ step.
   ship (VERDICT-D10 fork 4): `pytest_plugins = ["stapel_auth.testing"]` when
   auth is selected, nothing otherwise. Driven by a registry field
   (`STAPEL_LIBS[key]["pytest_plugin"]`), no `pytest11` entry point.
-- Pins: stapel-core 0.95.0, stapel-auth 0.50.0 (the releases the two items
-  above call).
+- Pins: stapel-core 0.95.0, stapel-auth 0.50.1 (the releases the two items
+  above call; auth 0.50.0 was tagged and never published).
 
 ## [0.72.10] — 2026-10-22
 

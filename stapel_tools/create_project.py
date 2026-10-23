@@ -72,8 +72,8 @@ STAPEL_LIBS = {
         # unique_phone / signed_in_client / otp_limiter_off (0.50.0), listed in
         # the service conftest's pytest_plugins.
         "pytest_plugin": "stapel_auth.testing",
-        "pin": "0.50.0",
-        "ahead_of_pypi": False,  # PyPI 0.50.0 @ 2026-10-23
+        "pin": "0.50.1",
+        "ahead_of_pypi": False,  # PyPI 0.50.1 @ 2026-10-23
     },
     "billing": {
         "repo": "https://github.com/usestapel/stapel-billing.git",
