@@ -1,0 +1,3 @@
+{"version": 1, "task": "ci-frontend-repo", "criteria": [
+  {"id": "C1", "pages": [{"route": "/login", "testids": ["storefront-home"]}]}
+]}

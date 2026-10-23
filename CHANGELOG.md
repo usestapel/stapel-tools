@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.75.0] — 2026-10-23
+
+Minor: the UI wiring check speaks protocol 2 (new result fields, exit 3), and
+its make target takes `API_BASE`.
+
+- The request check verifies the full path, base included. A request under
+  another base is red (`… is under /api, not the canon /<slug>/api`); 0.74.0
+  matched only the path after `/api` and passed it. Paths are evaluated from
+  their constant parts: string and template literals, `+`, module and
+  imported consts, object-literal members, `import.meta.env.*` from the
+  frontend's `.env` files (Vite's production precedence) with `??`/`||`
+  defaults, helpers that prefix a parameter, and clients created with a
+  `baseURL`/`baseUrl`/`prefixUrl`.
+- A `base` check per page: every API path in the page's scope sits under the
+  canon (`--api-base`, the manifest's `api_base`, the bases of its requests),
+  a base a `@stapel/*-react` pair declares, or a module mount from
+  `reserved-paths.json` (a bare `/api` is no module's). The scaffold passes
+  `API_BASE ?= /<slug>/api` (monolith) and `/api` (minimal).
+- A handler that is a prop of its component is followed one level up: green
+  when some `<Component prop=…>` passes it (the request is then searched from
+  that module too), red when the component is rendered and nobody passes it.
+- A request a `@stapel/*-react` pair issues passes when the pair's
+  `manifest.json` declares the operation (method and path).
+- UNVERIFIABLE, never green: a base built from a runtime value, a handler from
+  `{...spread}` props, a handler prop of a component rendered nowhere, a pair
+  with no `manifest.json`. The result carries `unverifiable` (count and per
+  criterion); exit 3 when nothing failed but something was unverifiable.
+- An action whose testid is not rendered still gets its request checked from
+  the page module.
+- The minimal preset writes the script and the target over `frontend/`
+  (without one: exit 2, `no frontend at …`); `stapel-frontend-repo-init
+  --surface public` writes the script and a `Makefile` with the target
+  (`--frontend .`) into a split-repo frontend, and its eslint config ignores
+  the script. CI runs both on every composite.
+- The script is stamped (stapel-tools version, protocol, sha256 of the shipped
+  text). `ui_wiring.backfill_decision()` is the policy for callers that write
+  it into existing projects: write when absent, keep a pristine script of the
+  current protocol, upgrade a pristine older one, refuse an edited one or one
+  newer than the caller.
+
 ## [0.74.0] — 2026-10-23
 
 Minor: the generated monolith carries a new root script and make target.

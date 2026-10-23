@@ -4561,7 +4561,8 @@ export default tseslint.config(
   // and then the TypeScript rules try to read `{{ … }}` as a block with a
   // dangling expression. Ignoring them here is the local fix; the preset
   // narrowing its carve-out to source files is the upstream one.
-  {{ ignores: ["dist/**", "node_modules/**", "src/stapel-tokens/**", "**/*.json"] }},
+  // scripts/ui-wiring.mjs is a node script (stapel-tools), not app source.
+  {{ ignores: ["dist/**", "node_modules/**", "src/stapel-tokens/**", "**/*.json", "scripts/ui-wiring.mjs"] }},
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...stapel.configs.recommended,

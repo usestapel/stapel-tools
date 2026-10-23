@@ -69,12 +69,21 @@ from pathlib import Path
 from typing import Optional
 
 from . import _frontend_templates as F
+from . import ui_wiring
 from ._frontend_templates import (
     DOCKERIGNORE,
     FRONTEND_PUBLISH_SH,
     detect_package_manager,
     render_dockerfile,
 )
+
+# The container's own controls. The API canon is left to the manifest: a
+# split-repo frontend talks to several services, each under its own prefix
+# (reserved-paths.json lists the module mounts the base check accepts).
+PUBLIC_MAKEFILE_HEAD = """\
+# Frontend controls (stapel-frontend-repo-init). `make frontend-wiring
+# MANIFEST=<file|dir> API_BASE=/<service>/api` needs `npm install` first.
+"""
 
 # GitLab. Mirrors what the backend repos in this fleet already use.
 GITLAB_CI_JOB = """\
@@ -280,6 +289,9 @@ def public_source_plan(
         "src/StorefrontHome.tsx": F.STOREFRONT_HOME_TSX,
         "src/AccountHome.tsx": F.ACCOUNT_HOME_TSX,
         "src/i18n/keys.ts": F.render_storefront_i18n_ts(locale),
+        # The static UI wiring check over this repo's src/ (`make frontend-wiring`).
+        ui_wiring.SCRIPT_PATH: ui_wiring.script_source(),
+        "Makefile": PUBLIC_MAKEFILE_HEAD + ui_wiring.makefile_block(frontend="."),
         "README.md": render_public_readme(
             name=name, title=title, pairs=pairs, locale=locale, realtime=realtime
         ),

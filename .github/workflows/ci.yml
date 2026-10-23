@@ -300,6 +300,33 @@ jobs:
             echo "a manifest naming an absent testid passed" >&2; exit 1
           fi
           grep -q '^UI_WIRING_RESULT {"ok":false' red.out
+      # The other two presets. A split-repo frontend (microservices) is a
+      # public surface with its own Makefile (--frontend .); a minimal project
+      # carries the target over frontend/, where the same surface lands, and
+      # says so when there is none. Their install is not exercised here: the
+      # TypeScript compiler is the monolith's, installed above.
+      - name: frontend-wiring on the split-repo surface and the minimal preset
+        working-directory: ${{ runner.temp }}
+        env:
+          UI_WIRING_TYPESCRIPT: ${{ runner.temp }}/fe/frontend/node_modules/typescript
+          FIX: ${{ github.workspace }}/tests/fixtures/ui_wiring
+        run: |
+          stapel-frontend-repo-init fe-repo --surface public --preset ${{ matrix.composite }} --ci none
+          make -C fe-repo frontend-wiring MANIFEST="$FIX/repo-green.json" API_BASE=/svc/api
+          if make -C fe-repo frontend-wiring MANIFEST="$FIX/generated-red.json" > repo-red.out; then
+            echo "split-repo: a manifest naming an absent testid passed" >&2; exit 1
+          fi
+          grep -q '^UI_WIRING_RESULT {"ok":false' repo-red.out
+          stapel-create-project mini --type minimal --title "Mini" \
+            --url https://mini.example --company-name Acme \
+            --company-email hi@mini.example --modules ${{ matrix.composite }} \
+            --no-git --no-submodules --output-dir "$RUNNER_TEMP"
+          if make -C mini frontend-wiring MANIFEST="$FIX/repo-green.json" > mini-none.out; then
+            echo "minimal: no frontend, and the check passed" >&2; exit 1
+          fi
+          grep -q '^UI_WIRING_RESULT {"ok":false,"error":"no frontend at' mini-none.out
+          stapel-frontend-repo-init mini/frontend --surface public --preset ${{ matrix.composite }} --ci none
+          make -C mini frontend-wiring MANIFEST="$FIX/repo-green.json"
 
   # ─── A tag without a release is not a release ─────────────────────────────
   # The one wave step nobody had been watching. Three ways this stayed

@@ -3201,7 +3201,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     # the minimal preset's own Makefile.
     _write(project_dir / "Makefile", render_tokens(MONOLITH_MAKEFILE, {
         "TITLE": ctx["title"], "DIR_NAME": dir_name,
-    }) + ui_wiring.MAKEFILE_BLOCK)
+    }) + ui_wiring.makefile_block(api_base=f"/{slug}/api"))
     _write(project_dir / ui_wiring.SCRIPT_PATH, ui_wiring.script_source())
     _write_shared_infra(project_dir, frontends)
     # Before scaffold_service: the service Dockerfile COPYs the step runner,
@@ -3488,7 +3488,12 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     # _minimal_templates.MINIMAL_CONFTEST's docstring). A small non-harness
     # smoke test (AUTH_USER_MODEL + admin mount) ships instead so `make test`
     # has something real to collect out of the box.
-    _write(project_dir / "Makefile", r(MINIMAL_MAKEFILE))
+    # The UI wiring check reads frontend/ (a public surface written there by
+    # stapel-frontend-repo-init); without one it exits 2 and says so. The
+    # project app is mounted at /api/ (MINIMAL_URLS).
+    from . import ui_wiring
+    _write(project_dir / "Makefile", r(MINIMAL_MAKEFILE) + ui_wiring.makefile_block(api_base="/api"))
+    _write(project_dir / ui_wiring.SCRIPT_PATH, ui_wiring.script_source())
     _write(project_dir / "pyproject.toml", MINIMAL_PYPROJECT)
     _write(project_dir / "tests" / "__init__.py", "")
     _write(project_dir / "tests" / "conftest.py", r(MINIMAL_CONFTEST))
