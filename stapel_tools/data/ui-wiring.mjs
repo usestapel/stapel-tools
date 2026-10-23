@@ -6,7 +6,8 @@
 // A manifest names, per criterion, the pages of the SPA: route, h1, testids and
 // actions ({testid, handler: click|submit|change, request: {method, path}}).
 // Read with the TypeScript compiler API over <frontend>/src (tests excluded):
-//   route    a `path` property / attribute equal to the route (params as wildcards)
+//   route    a router route object (`path` beside element/Component/lazy/children)
+//            or <Route path> equal to the route (params as wildcards)
 //   testid   rendered by exactly one module (data-testid literal)
 //   h1       the module of the page's first testid renders <h1> or an antd Title of level 1
 //   handler  the action's element carries onClick/to/href (click), onSubmit/onFinish
@@ -146,13 +147,18 @@ function scan(ts, file, root) {
       if (name === "data-testid" && value !== undefined) {
         mod.testids.push({ id: value, line: lineOf(node), element: jsxElementOf(ts, node) });
       }
-      if (name === "path" && value !== undefined) mod.routes.push(value);
+      if (name === "path" && value !== undefined) {
+        const owner = jsxElementOf(ts, node);
+        if (owner && /(^|\.)Route$/.test(owner.tagName.getText(sf))) mod.routes.push(value);
+      }
     }
     if (ts.isPropertyAssignment(node)) {
       const key = node.name && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))
         ? node.name.text : "";
       const value = literalText(node.initializer);
-      if (key === "path" && value !== undefined) mod.routes.push(value);
+      if (key === "path" && value !== undefined && isRouteObject(ts, node.parent)) {
+        mod.routes.push(value);
+      }
       if (key === "data-testid" && value !== undefined) {
         mod.testids.push({ id: value, line: lineOf(node), element: undefined });
       }
@@ -170,6 +176,16 @@ function scan(ts, file, root) {
   };
   visit(sf);
   return mod;
+}
+
+// A react-router route object: `path` beside what the router renders (a nav
+// manifest entry carries a path too, and declares no route).
+const ROUTE_KEYS = new Set(["element", "Component", "lazy", "children", "index", "loader"]);
+
+function isRouteObject(ts, objectLiteral) {
+  if (!objectLiteral || !ts.isObjectLiteralExpression(objectLiteral)) return false;
+  return objectLiteral.properties.some((p) => p.name
+    && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) && ROUTE_KEYS.has(p.name.text));
 }
 
 function jsxElementOf(ts, attributeNode) {

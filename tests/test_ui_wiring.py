@@ -216,6 +216,23 @@ def test_missing_ambiguous_testids_and_a_missing_h1_are_red(tmp_path):
     assert result["failed"] == 4
 
 
+def test_a_nav_entry_is_not_a_route(tmp_path):
+    fe = _frontend(tmp_path, {
+        "nav.generated.ts": 'export const nav = [{ path: "/orders", label: "Orders" }];\n',
+        "orders/Page.tsx": 'export const P = () => <main data-testid="page-orders"><h1>x</h1></main>;\n',
+    })
+    rc, out, _ = _run(tmp_path, fe, {"C5": {"pages": [
+        {"route": "/orders", "h1": True, "testids": ["page-orders"]}]}})
+    assert rc == 1
+    assert "FAIL C5 /orders route: no route object or <Route> declares this path" in out
+    (fe / "src" / "routes.tsx").write_text(
+        'import { Route } from "react-router";\n'
+        'export const r = <Route path="/orders" element={null} />;\n')
+    rc, out, _ = _run(tmp_path, fe, {"C5": {"pages": [
+        {"route": "/orders", "h1": True, "testids": ["page-orders"]}]}})
+    assert rc == 0, out
+
+
 def test_an_empty_manifest_cannot_run(tmp_path):
     fe = _frontend(tmp_path, {"routes.tsx": ROUTES})
     rc, out, result = _run(tmp_path, fe, {"C1": {"pages": []}})
