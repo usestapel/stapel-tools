@@ -127,12 +127,23 @@ jobs:
       - name: Composite presets equal the registry (stapel-preset-gate)
         run: python -m stapel_tools.preset_gate
 
+      # tests/test_ui_wiring.py runs scripts/ui-wiring.mjs under node with the
+      # TypeScript compiler API; on CI a missing node or typescript fails it.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # A tool for the test, outside any generated frontend (the peer-graph and
+      # npm-pins gates guard the generated project's own install further down).
+      - name: TypeScript for the ui-wiring tests
+        run: npm --prefix "$RUNNER_TEMP/ts" add --no-save --no-audit --no-fund typescript@5.8.3
+
       - name: Tests with coverage
         # Strict siblings: a DECLARED sibling that is missing FAILS instead of
         # skipping. A quiet skip here would mean the install step above did not
         # do what it says — the other half of the same defect class.
         env:
           STAPEL_TEST_STRICT_SIBLINGS: "1"
+          UI_WIRING_TYPESCRIPT: ${{ runner.temp }}/ts/node_modules/typescript
         run: |
           pytest tests/ \
             --cov=stapel_tools \
@@ -279,6 +290,16 @@ jobs:
           npm run gen:tokens
           npm run lint
           npm run build
+      # The generated frontend-wiring target on the real install: a rendered
+      # testid is green, an absent one is red with a result line.
+      - name: frontend-wiring (green and red manifest)
+        working-directory: ${{ runner.temp }}/fe
+        run: |
+          make frontend-wiring MANIFEST="$GITHUB_WORKSPACE/tests/fixtures/ui_wiring/generated-green.json"
+          if make frontend-wiring MANIFEST="$GITHUB_WORKSPACE/tests/fixtures/ui_wiring/generated-red.json" > red.out; then
+            echo "a manifest naming an absent testid passed" >&2; exit 1
+          fi
+          grep -q '^UI_WIRING_RESULT {"ok":false' red.out
 
   # ─── A tag without a release is not a release ─────────────────────────────
   # The one wave step nobody had been watching. Three ways this stayed

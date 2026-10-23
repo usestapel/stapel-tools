@@ -1,0 +1,3 @@
+{"version": 1, "task": "ci-generated-project", "criteria": [
+  {"id": "C1", "pages": [{"testids": ["no-such-testid"]}]}
+]}

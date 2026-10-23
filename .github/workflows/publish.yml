@@ -141,9 +141,18 @@ jobs:
       - name: The suite declares its own siblings (SIB001-006)
         run: python -m stapel_tools.sibling_lint .
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # A tool for the test, outside any generated frontend (the peer-graph and
+      # npm-pins gates guard the generated project's own install further down).
+      - name: TypeScript for the ui-wiring tests
+        run: npm --prefix "$RUNNER_TEMP/ts" add --no-save --no-audit --no-fund typescript@5.8.3
+
       - name: Tests
         env:
           STAPEL_TEST_STRICT_SIBLINGS: "1"
+          UI_WIRING_TYPESCRIPT: ${{ runner.temp }}/ts/node_modules/typescript
         run: pytest tests/
 
       - name: Smoke-generate every project type

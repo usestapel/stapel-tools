@@ -3109,6 +3109,7 @@ def _billing_dev_hatch_needed(
 
 
 def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False, auth_comp=None, theme: str | None = None, shell: str | None = None, slots: dict[str, str] | None = None):
+    from . import ui_wiring
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
         MONOLITH_COMPOSE_LOCAL,
@@ -3200,7 +3201,8 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     # the minimal preset's own Makefile.
     _write(project_dir / "Makefile", render_tokens(MONOLITH_MAKEFILE, {
         "TITLE": ctx["title"], "DIR_NAME": dir_name,
-    }))
+    }) + ui_wiring.MAKEFILE_BLOCK)
+    _write(project_dir / ui_wiring.SCRIPT_PATH, ui_wiring.script_source())
     _write_shared_infra(project_dir, frontends)
     # Before scaffold_service: the service Dockerfile COPYs the step runner,
     # and _update_prometheus appends this service's scrape job to the file

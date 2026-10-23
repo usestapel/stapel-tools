@@ -1,0 +1,3 @@
+{"version": 1, "task": "ci-generated-project", "criteria": [
+  {"id": "C1", "pages": [{"route": "/app", "testids": ["nav-placeholder"]}]}
+]}

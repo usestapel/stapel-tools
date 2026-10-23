@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.74.0] — 2026-10-23
+
+Minor: the generated monolith carries a new root script and make target.
+
+- Static UI wiring check (VERDICT-D10 fork 1a). The monolith scaffold writes
+  `scripts/ui-wiring.mjs` and a root `frontend-wiring` target
+  (`MANIFEST ?= contracts/ui`, a file or a directory of manifests). A manifest
+  names, per acceptance criterion, the SPA pages a feature renders: route, h1,
+  `data-testid` values and actions (`{testid, handler, request: {method,
+  path}}`). The script reads `frontend/src` with the TypeScript compiler API
+  from `frontend/node_modules` (about a second, nothing built): red when a
+  testid is not rendered by exactly one module, an action's element has no
+  handler (click: `onClick`/`to`/`href` or a submit button in a form with
+  `onSubmit`/`onFinish`), or neither its module nor one it imports (two hops)
+  holds the request path (after its `/api` segment) with the method. Every
+  run ends in a `UI_WIRING_RESULT <json>` line; exit 2 when it could not
+  check anything. `stapel_tools.ui_wiring` exposes the script, the make block,
+  `manifest()` and `parse_result()` for callers that backfill older projects.
+
 ## [0.73.0] — 2026-10-23
 
 Minor: the boot-contract meta-gate gains a check, so a project that
