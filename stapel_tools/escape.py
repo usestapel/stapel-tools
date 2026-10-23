@@ -153,7 +153,7 @@ def _register(linter: str, honors_noqa: bool, construct: str, *ids: str) -> None
 _register(
     "stapel-lint", True, "the reported line",
     "R001", "R002", "R003", "R004", "R005", "R006", "R007", "R008",
-    "R009", "R010", "R011", "R012",
+    "R009", "R010", "R011", "R012", "R013",
 )
 # R100 is a repo-level README check (i18n-shipping.md §4) with nothing to
 # annotate a single line of — deliberately unregistered, so a noqa marker

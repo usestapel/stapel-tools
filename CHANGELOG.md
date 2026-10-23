@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.76.0] — 2026-10-23
+
+Minor: a new error-level rule in `stapel-lint`.
+
+- **R013** reports a list endpoint that answers a hand-built page envelope
+  with nothing bounding the rows: a `get`/`list` of a view class without a
+  `pagination_class` (on the class or a base in the same module) that builds
+  `{"results": …}` / `{"items": …}`, where the method has no slice and no
+  `limit`/`anchor`/`cursor`/`page_size`/`paginat…` name. It looks paginated
+  and returns the whole table, with no anchor for the next page; the fix is
+  `AnchorPagination` (`stapel_core.django.api.pagination`). Decorators are
+  not read (an inline OpenAPI schema's `items` is not a body), nor is a dict
+  with a `type` key. Not seen: a bound inside a service the view calls (`#
+  noqa: R013` on the reported line or the `def`, with the reason), and a bare
+  `many=True` list. Measured on every `stapel-*` library: 3 hand-built
+  envelopes, all exempt (1 paginated, 2 bounded by `limit`), 0 reports.
+  Registered in `escape.RULE_REGISTRY`.
+
 ## [0.75.0] — 2026-10-23
 
 Minor: the UI wiring check speaks protocol 2 (new result fields, exit 3), and

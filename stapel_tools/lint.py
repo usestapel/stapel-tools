@@ -19,6 +19,10 @@ R010  Cyrillic in a comment, a docstring or an identifier — source is English-
 R011  One word carrying both Latin and Cyrillic letters — a homoglyph
 R012  handle_exception() branching on a rest_framework.exceptions type — that
       refusal belongs to the fleet's EXCEPTION_HANDLER, not to one view
+R013  A list endpoint (get/list of a view without pagination_class) that
+      answers a hand-built page envelope ({"results": …} / {"items": …}) with
+      no bound in the method — the whole table on one request; use
+      AnchorPagination
 R100  README must link both language docs when i18n artifacts exist (i18n-shipping.md §4) — WARNING
 
 Levels
@@ -840,6 +844,99 @@ def _r012_declared(lines: list[str], method: ast.AST) -> bool:
     return False
 
 
+# ---------------------------------------------------------------------------
+# R013 — a list endpoint answering a hand-built, unbounded page envelope
+# ---------------------------------------------------------------------------
+#
+# The fleet paginates lists through one mechanism, stapel-core's
+# AnchorPagination (`pagination_class`, or `self.paginate_queryset` +
+# `get_paginated_response`). A view that assembles `{"results": rows,
+# "count": n}` by hand looks paginated on the wire and is not: nothing bounds
+# `rows`, so the endpoint returns the whole table on one request and the
+# client has no anchor to ask for the next page.
+#
+# What the rule cannot see: a bound applied inside a service the view calls
+# (only the method body is read), and a bare `many=True` list with no
+# envelope (vocabularies and per-parent lists are legitimately unpaginated).
+
+#: Keys that make a dict literal a page envelope.
+R013_ENVELOPE_KEYS = frozenset({"results", "items"})
+
+#: Handler names that answer a collection.
+R013_METHODS = frozenset({"get", "list"})
+
+#: A word in the method that means the author bounded the rows.
+_R013_BOUND = re.compile(r"limit|anchor|cursor|page_size|paginat", re.I)
+
+
+def _r013_bounded(method: ast.AST) -> bool:
+    for node in _r013_body(method):
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+            return True
+        if isinstance(node, ast.Name) and _R013_BOUND.search(node.id):
+            return True
+        if isinstance(node, ast.Attribute) and _R013_BOUND.search(node.attr):
+            return True
+        if isinstance(node, ast.keyword) and node.arg and _R013_BOUND.search(node.arg):
+            return True
+        if (isinstance(node, ast.Constant) and isinstance(node.value, str)
+                and _R013_BOUND.fullmatch(node.value)):
+            return True
+    return False
+
+
+def _r013_body(method: ast.AST) -> Iterator[ast.AST]:
+    """Every node of the method body; decorators (inline OpenAPI schemas with
+    an ``items`` key) are not the answer."""
+    for statement in method.body:
+        yield from ast.walk(statement)
+
+
+def _r013_envelope(method: ast.AST):
+    for node in _r013_body(method):
+        if not isinstance(node, ast.Dict):
+            continue
+        keys = {k.value for k in node.keys
+                if isinstance(k, ast.Constant) and isinstance(k.value, str)}
+        if "type" in keys:  # a JSON schema fragment, not a response body
+            continue
+        hit = sorted(keys & R013_ENVELOPE_KEYS)
+        if hit:
+            return node, hit[0]
+    return None
+
+
+def check_r013(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violation]:
+    """A view's ``get``/``list`` answering ``{"results": …}`` with nothing bounding it."""
+    from .schema_wire_lint import _paginated
+
+    classes = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+    for classdef in classes.values():
+        if _paginated(classdef, classes):
+            continue
+        for item in classdef.body:
+            if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if item.name not in R013_METHODS:
+                continue
+            found = _r013_envelope(item)
+            if found is None or _r013_bounded(item):
+                continue
+            node, key = found
+            if _noqa(lines, node.lineno, "R013") or _noqa(lines, item.lineno, "R013"):
+                continue
+            yield Violation(
+                path, node.lineno, "R013",
+                f"{classdef.name}.{item.name} answers a hand-built page envelope "
+                f"('{key}') with nothing bounding the rows — the whole table on "
+                f"one request, and no anchor for the next page. Declare "
+                f"pagination_class = AnchorPagination (stapel_core.django.api."
+                f"pagination) and return self.get_paginated_response(...) over "
+                f"self.paginate_queryset(...); if the rows are bounded elsewhere, "
+                f"say so with '# noqa: R013' and the reason",
+            )
+
+
 def rules_for_file(path: str):
     basename = os.path.basename(path)
     is_view = "views" in basename
@@ -848,7 +945,8 @@ def rules_for_file(path: str):
 
     checkers = []
     if is_view:
-        checkers += [check_r001, check_r003, check_r005, check_r006, check_r007]
+        checkers += [check_r001, check_r003, check_r005, check_r006, check_r007,
+                     check_r013]
     if is_serializer and "admin" not in path:
         checkers += [check_r002]
     if is_dto:

@@ -369,7 +369,8 @@ R004 `@dataclass` without docstring, R005 hardcoded error string, R006 `StapelRe
 R007 documented endpoint without `@flow_step`, R008 (warning) lifecycle/security flag in
 `get_or_create(defaults=…)`, R009 synchronous `call()` of a long-running operation,
 R010/R011 Cyrillic and mixed-script identifiers, R012 `handle_exception` branching on a
-`rest_framework.exceptions` type.
+`rest_framework.exceptions` type, R013 a list endpoint answering a hand-built, unbounded page
+envelope.
 
 **R012** — that refusal belongs to the fleet's `EXCEPTION_HANDLER`
 (`stapel_core.django.api.errors.stapel_exception_handler`, which since core
@@ -386,6 +387,16 @@ Django's `PermissionDenied`, and it does not see a refusal intercepted in
 a deployment whose effective `EXCEPTION_HANDLER` is not core's — is
 `stapel_core.error_envelope.W001` (stapel-core 0.61.1), a Django system check,
 because only a booted process knows the effective value.
+
+**R013** — a `get`/`list` of a view class without a `pagination_class` (on the
+class or a base in the same module) builds `{"results": …}` or `{"items": …}`
+by hand, and nothing in the method bounds the rows (no slice, no `limit`,
+`anchor`, `cursor`, `page_size` or `paginat…` name). It looks paginated on the
+wire and returns the whole table. The canon is `AnchorPagination`
+(`stapel_core.django.api.pagination`). It cannot see a bound applied inside a
+service the view calls (say so with `# noqa: R013` and the reason, on the
+reported line or the `def`), and it does not report a bare `many=True` list:
+vocabularies and per-parent lists are legitimately unpaginated.
 
 Suppress per-line: `# noqa: R001`. R012 also takes a method-scoped
 `# stapel: owns-refusal` for a view that genuinely owns a DRF refusal — write
