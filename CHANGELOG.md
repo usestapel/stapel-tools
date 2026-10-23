@@ -39,6 +39,8 @@ its make target takes `API_BASE`.
   it into existing projects: write when absent, keep a pristine script of the
   current protocol, upgrade a pristine older one, refuse an edited one or one
   newer than the caller.
+- Pin: `@stapel/auth-react` 0.28.1, what npm serves (the e2e nav-mirror gate
+  was red on the stale 0.28.0).
 
 ## [0.74.0] — 2026-10-23
 

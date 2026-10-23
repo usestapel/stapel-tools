@@ -652,7 +652,7 @@ STAPEL_LIBS = {
 FRONTEND_REACT_LIBS = {
     "auth": {
         "package": "@stapel/auth-react",
-        "version": "0.28.0",
+        "version": "0.28.1",
         "provider": "AuthProvider",
         "create_runtime": "createAuthRuntime",
         "register_i18n": "registerAuthI18n",
