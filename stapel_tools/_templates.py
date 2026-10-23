@@ -378,6 +378,12 @@ SPECTACULAR_SETTINGS = get_spectacular_settings(
     description="{{TITLE}} service API",
     version="1.0.0",
 )
+
+# The project's own seed commands, run in order by `manage.py run_seeds` (the
+# `optional "seeds"` step of bootstrap.sh, after the library seeds). Each one
+# is a management command and must be idempotent: bootstrap runs it on every
+# start.
+STAPEL_SEEDS: list[str] = []
 {{STAPEL_WIRING}}"""
 
 DEV_SETTINGS = """\

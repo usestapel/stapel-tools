@@ -167,6 +167,11 @@ optional "superuser" ensure_superuser
 # fatal takes the whole API down over one asset.
 optional "collectstatic" python manage.py collectstatic --noinput --clear --verbosity 0
 {{BOOTSTRAP_SEED}}
+# optional: the project's own seeds (settings.STAPEL_SEEDS, idempotent). An
+# empty list runs nothing; a failed or unknown seed degrades the boot and is
+# named in the log.
+optional "seeds" python manage.py run_seeds
+
 bootstrap_done
 """
 
@@ -333,6 +338,7 @@ VERIFY_BOOT_CONTRACT_SH = """\
 #   6. the compose fragment chains bootstrap.sh into the server with &&
 #   7. config/schema_health.py matches scripts/service_schema_health.py
 #   8. config/urls.py registers the schema probe
+#   9. the project's seeds run: an `optional "seeds"` step calls run_seeds
 #
 # Reports every violation, then exits non-zero. Not `set -e`: a linter that
 # stops at the first finding makes you run it once per defect.
@@ -391,6 +397,9 @@ for s in $services; do
         bad "${SERVICE_PREFIX}${s}/bootstrap.sh: blanket 'set -e' - it makes cosmetic steps fatal; classify each step with require/optional instead"
     grep -qE '^[[:space:]]*require[[:space:]]+"migrations"' "$boot" ||
         bad "${SERVICE_PREFIX}${s}/bootstrap.sh: migrations are not a require step"
+    # 9. settings.STAPEL_SEEDS is dead config without the step that reads it
+    grep -qE '^[[:space:]]*optional[[:space:]]+"seeds"[[:space:]]+python manage\\.py run_seeds' "$boot" ||
+        bad "${SERVICE_PREFIX}${s}/bootstrap.sh: no 'optional \\"seeds\\" python manage.py run_seeds' step (settings.STAPEL_SEEDS would never run)"
 
     # 4. no step escapes the verbs. Every manage.py invocation must be an
     #    argument to require/optional, or inside a function that is (a

@@ -155,6 +155,7 @@ class TestBootContractRuns:
             '  migrate) [ "$3" = "--check" ] && exit "${CHECK_RC:-0}"; exit "${MIGRATE_RC:-0}" ;;\n'
             '  createsuperuser) exit "${SUPERUSER_RC:-0}" ;;\n'
             '  collectstatic) exit "${STATIC_RC:-0}" ;;\n'
+            '  run_seeds) exit "${SEEDS_RC:-0}" ;;\n'
             "esac\nexit 0\n"
         )
         for f in binaries.iterdir():
@@ -192,6 +193,18 @@ class TestBootContractRuns:
         result = runner(STATIC_RC="1")
         assert result.returncode == 0, result.stderr
         assert "DEGRADED" in result.stdout
+
+    def test_project_seeds_run_after_the_library_seeds(self, runner):
+        result = runner()
+        assert result.returncode == 0, result.stderr
+        steps = [ln for ln in result.stdout.splitlines() if "step:" in ln]
+        assert steps[-1].endswith("step: seeds"), steps
+
+    def test_failed_seeds_only_degrade(self, runner):
+        # An unknown or failing seed is ugly, not wrong: the service still serves.
+        result = runner(SEEDS_RC="1")
+        assert result.returncode == 0, result.stderr
+        assert "DEGRADED: seeds failed" in result.stderr
 
     def test_success_on_an_unmigrated_schema_is_not_expressible(self, runner):
         # Every step "passed"; the end-state assertion still refuses.
@@ -244,6 +257,15 @@ class TestMetaGate:
         boot = project / "svc-app" / "bootstrap.sh"
         boot.write_text(boot.read_text().replace('require "migrations"', 'optional "migrations"'))
         assert "migrations are not a require step" in _gate(project).stderr
+
+    def test_seeds_step_removed(self, project):
+        boot = project / "svc-app" / "bootstrap.sh"
+        boot.write_text(
+            "\n".join(ln for ln in boot.read_text().splitlines() if "run_seeds" not in ln)
+        )
+        result = _gate(project)
+        assert result.returncode == 1
+        assert "settings.STAPEL_SEEDS would never run" in result.stderr
 
     def test_step_smuggled_past_the_verbs(self, project):
         boot = project / "svc-app" / "bootstrap.sh"

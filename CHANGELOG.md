@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.73.0] — 2026-10-23
+
+Minor: the boot-contract meta-gate gains a check, so a project that
+regenerates `scripts/verify_boot_contract.sh` also needs the new bootstrap
+step.
+
+- Project seeds are declared and run (VERDICT-D10 fork 3). The generated
+  `config/settings/base.py` carries `STAPEL_SEEDS: list[str] = []`, and
+  `bootstrap.sh` ends its steps with `optional "seeds" python manage.py
+  run_seeds` (stapel-core 0.95.0), after the library seeds. An empty list
+  runs nothing; an unknown or failing seed degrades the boot and is named.
+  `verify_boot_contract.sh` check 9 fails a service whose bootstrap lost the
+  step (`STAPEL_SEEDS` would never run).
+- The service `conftest.py` registers the test helpers the selected modules
+  ship (VERDICT-D10 fork 4): `pytest_plugins = ["stapel_auth.testing"]` when
+  auth is selected, nothing otherwise. Driven by a registry field
+  (`STAPEL_LIBS[key]["pytest_plugin"]`), no `pytest11` entry point.
+- Pins: stapel-core 0.95.0, stapel-auth 0.50.0 (the releases the two items
+  above call).
+
 ## [0.72.10] — 2026-10-22
 
 Patch: a selected composite, socket module, beat module or gdpr is wired by

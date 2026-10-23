@@ -59,8 +59,9 @@ STAPEL_LIBS = {
         # `stapel_core.jwt.E001`). The scaffold emits that setting, so it may
         # not pin a core that has never heard of it — the project would boot
         # with a socket every browser is turned away from.
-        "pin": "0.94.0",
-        "ahead_of_pypi": False,  # PyPI 0.94.0 @ 2026-10-22
+        # 0.95.0: `manage.py run_seeds`, which the generated bootstrap.sh calls.
+        "pin": "0.95.0",
+        "ahead_of_pypi": False,  # PyPI 0.95.0 @ 2026-10-23
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
@@ -68,8 +69,11 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Authentication (JWT, OAuth, OTP)",
         "default": True,
-        "pin": "0.49.0",
-        "ahead_of_pypi": False,  # PyPI 0.49.0 @ 2026-10-22
+        # unique_phone / signed_in_client / otp_limiter_off (0.50.0), listed in
+        # the service conftest's pytest_plugins.
+        "pytest_plugin": "stapel_auth.testing",
+        "pin": "0.50.0",
+        "ahead_of_pypi": False,  # PyPI 0.50.0 @ 2026-10-23
     },
     "billing": {
         "repo": "https://github.com/usestapel/stapel-billing.git",

@@ -152,6 +152,7 @@ def make_context(
         realtime_selected,
         render_bootstrap_seed,
         render_dev_wiring,
+        render_pytest_plugins,
         render_wiring,
     )
 
@@ -191,6 +192,8 @@ def make_context(
         "HAS_REALTIME": "true" if realtime_selected(selected_keys) else "",
         "BOOT_SMOKE_EXTRA": boot_smoke_extra(selected_keys),
         "BOOTSTRAP_SEED": render_bootstrap_seed(selected_keys),
+        # Plain string (see HAS_CDN): appended to the service conftest.
+        "PYTEST_PLUGINS": render_pytest_plugins(selected_keys),
     }
 
 
@@ -276,7 +279,7 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         "def api_client():\n"
         "    from rest_framework.test import APIClient\n\n"
         "    return APIClient()\n"
-    ) + PG_MARKER_CONFTEST
+    ) + PG_MARKER_CONFTEST + ctx.get("PYTEST_PLUGINS", "")
     files = {
         root / d / "manage.py": render(MANAGE_PY, ctx),
         root / d / "version.txt": VERSION_TXT,

@@ -279,6 +279,28 @@ def seed_commands(libs: list[str]) -> list[str]:
     return [cmd for k in reg if k in libs for cmd in reg[k].get("seed", [])]
 
 
+def testing_plugins(libs: list[str]) -> list[str]:
+    """The ``<brick>.testing`` plugin modules the selected modules ship."""
+    reg = _libs()
+    return [reg[k]["pytest_plugin"] for k in reg if k in libs and reg[k].get("pytest_plugin")]
+
+
+def render_pytest_plugins(libs: list[str]) -> str:
+    """The service conftest's ``pytest_plugins`` header (empty for none).
+
+    Explicit registration: a brick's test helpers enter a project's suite only
+    through this line, never through a ``pytest11`` entry point.
+    """
+    plugins = testing_plugins(libs)
+    if not plugins:
+        return ""
+    names = ", ".join(f'"{p}"' for p in plugins)
+    return (
+        "\n\n# Test helpers the installed modules ship (their `testing` modules).\n"
+        f"pytest_plugins = [{names}]\n"
+    )
+
+
 def render_bootstrap_seed(libs: list[str]) -> str:
     """``optional`` bootstrap steps for each selected module's idempotent seed
     (reference data a fresh app needs: currencies, a starter category tree)."""
