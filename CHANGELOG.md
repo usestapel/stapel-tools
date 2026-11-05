@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.79.0] — 2026-11-05
+
+Minor: a scaffolded shop lists a category from search; R013 and the
+ui-wiring stamp stop trusting what they read.
+
+- **`/c/:slug` lists search results as `ListingFeedCard` (T15).** When the
+  selection holds both search and listings, `CategoryPage.renderListings`
+  is filled with search-react's `SearchPage` scoped to the category
+  (`defaultType="listing"`, `defaultCategory=<id>`), each hit drawn as
+  listings-react's `ListingFeedCard` from its stored card. Listings without
+  search keeps the `ListingBoardPane` fill. `NAV_ENTRY_MOUNTS` `slot_fills`
+  take a list of alternatives (`pairs`, `imports`, `type_imports`, `hooks`,
+  `helpers`, `jsx`); a fill's hooks run before any early return.
+- **`stapel-preset-gate`: a composite selecting search ships a source
+  (SH1).** A composite whose selection holds the `search` pair (member or
+  companion) must ship `SETTINGS_DEFAULTS["STAPEL_SEARCH"]["SOURCES"]`, each
+  value an importable attribute; otherwise the host boots with
+  `stapel_search.W001` and an empty search page.
+- **R013 follows the bound to the enveloped value (AU3-18).** A slice, a
+  `limit=`-style keyword or a paginate call counts only inside the expression
+  placed under `results`/`items`, followed through local assignments; a
+  `limit` or slice elsewhere in the method no longer silences the rule. A
+  handler with a lookup kwarg (`get(self, request, pk)`) is a detail view and
+  is skipped, so a cart's `items` is no longer reported.
+- **The ui-wiring stamp is checked against released shas (AU3-19).**
+  `inspect_script` calls a script pristine only when its body hashes to a
+  sha in `ui_wiring.RELEASED_SCRIPTS`, shipped in this package; an edited
+  script whose stamp was recomputed is refused. A test holds the shipped
+  script to the table.
+- Pins: stapel-shop 0.2.39 and stapel-booking 0.1.7 (the `listing` search
+  source), stapel-notifications 0.29.0 (dedup keys) with stapel-core 0.95.3, the
+  floor it requires. Test-extra floors move
+  to shop 0.2.39 and booking 0.1.7.
+
 ## [0.78.0] — 2026-11-05
 
 Minor: a generated project's images can build on the shared fleet runtime.

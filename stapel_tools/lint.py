@@ -21,8 +21,8 @@ R012  handle_exception() branching on a rest_framework.exceptions type — that
       refusal belongs to the fleet's EXCEPTION_HANDLER, not to one view
 R013  A list endpoint (get/list of a view without pagination_class) that
       answers a hand-built page envelope ({"results": …} / {"items": …}) with
-      no bound in the method — the whole table on one request; use
-      AnchorPagination
+      no bound on the enveloped value — the whole table on one request; use
+      AnchorPagination. Handlers with a lookup kwarg (detail views) are skipped
 R100  README must link both language docs when i18n artifacts exist (i18n-shipping.md §4) — WARNING
 
 Levels
@@ -855,9 +855,17 @@ def _r012_declared(lines: list[str], method: ast.AST) -> bool:
 # `rows`, so the endpoint returns the whole table on one request and the
 # client has no anchor to ask for the next page.
 #
+# The bound must reach the value placed in the envelope (a slice, a
+# `limit=`-style keyword or a paginate call in its expression, followed
+# through local assignments); a bound elsewhere in the method does not count.
+# A handler with a lookup kwarg (`get(self, request, pk)`) answers one object
+# and is out of scope (AU3-18).
+#
 # What the rule cannot see: a bound applied inside a service the view calls
-# (only the method body is read), and a bare `many=True` list with no
-# envelope (vocabularies and per-parent lists are legitimately unpaginated).
+# without a bound-shaped argument (only the method body is read), a bare
+# `many=True` list with no envelope (vocabularies and per-parent lists are
+# legitimately unpaginated), and an unbounded list nested under a parent
+# lookup (`get(self, request, post_id)`), which the detail exemption skips.
 
 #: Keys that make a dict literal a page envelope.
 R013_ENVELOPE_KEYS = frozenset({"results", "items"})
@@ -865,24 +873,77 @@ R013_ENVELOPE_KEYS = frozenset({"results", "items"})
 #: Handler names that answer a collection.
 R013_METHODS = frozenset({"get", "list"})
 
-#: A word in the method that means the author bounded the rows.
-_R013_BOUND = re.compile(r"limit|anchor|cursor|page_size|paginat", re.I)
+#: A word that means the author bounded the rows — as a keyword argument
+#: (``limit=50``), a called function (``paginate_queryset``) or a string
+#: (``query_params.get("limit")``) inside the expression that builds them.
+_R013_BOUND = re.compile(r"limit|anchor|cursor|page_size|paginat|islice", re.I)
 
 
-def _r013_bounded(method: ast.AST) -> bool:
+def _r013_assignments(method: ast.AST) -> dict[str, list[ast.AST]]:
+    """``name -> [right-hand sides]`` for every local assignment in the body.
+
+    A tuple target maps each of its names to the whole right-hand side:
+    ``rows, count = services.page(limit=50)`` bounds ``rows``.
+    """
+    found: dict[str, list[ast.AST]] = {}
+
+    def targets(target):
+        if isinstance(target, ast.Name):
+            yield target.id
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                yield from targets(element)
+        elif isinstance(target, ast.Starred):
+            yield from targets(target.value)
+
     for node in _r013_body(method):
+        if isinstance(node, ast.Assign):
+            pairs = [(t, node.value) for t in node.targets]
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)) and node.value is not None:
+            pairs = [(node.target, node.value)]
+        else:
+            continue
+        for target, value in pairs:
+            for name in targets(target):
+                found.setdefault(name, []).append(value)
+    return found
+
+
+def _r013_value_bounded(value: ast.AST, assignments: dict, seen: set | None = None) -> bool:
+    """Does a bound reach ``value`` — the expression placed in the envelope?
+
+    Followed through local assignments, so ``rows = qs[:50]`` then
+    ``{"results": rows}`` is bounded, and a slice or a ``limit`` elsewhere in
+    the method is not (AU3-18).
+    """
+    seen = set() if seen is None else seen
+    for node in ast.walk(value):
         if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
             return True
-        if isinstance(node, ast.Name) and _R013_BOUND.search(node.id):
-            return True
-        if isinstance(node, ast.Attribute) and _R013_BOUND.search(node.attr):
-            return True
-        if isinstance(node, ast.keyword) and node.arg and _R013_BOUND.search(node.arg):
-            return True
+        if isinstance(node, ast.Call):
+            func = node.func
+            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", "")
+            if name and _R013_BOUND.search(name):
+                return True
+            if any(k.arg and _R013_BOUND.search(k.arg) for k in node.keywords):
+                return True
         if (isinstance(node, ast.Constant) and isinstance(node.value, str)
                 and _R013_BOUND.fullmatch(node.value)):
             return True
+        if isinstance(node, ast.Name) and node.id not in seen and node.id in assignments:
+            seen.add(node.id)
+            if any(_r013_value_bounded(rhs, assignments, seen) for rhs in assignments[node.id]):
+                return True
     return False
+
+
+def _r013_detail(method: ast.AST) -> bool:
+    """A handler with a lookup kwarg (``get(self, request, pk)``) answers ONE
+    object; a collection inside it (a cart's lines) is that object, not a page
+    of a table. ``*args``/``**kwargs`` alone are not a lookup."""
+    args = method.args
+    named = [a.arg for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]]
+    return len(named) > 2
 
 
 def _r013_body(method: ast.AST) -> Iterator[ast.AST]:
@@ -902,7 +963,11 @@ def _r013_envelope(method: ast.AST):
             continue
         hit = sorted(keys & R013_ENVELOPE_KEYS)
         if hit:
-            return node, hit[0]
+            values = dict(zip(
+                (k.value if isinstance(k, ast.Constant) else None for k in node.keys),
+                node.values,
+            ))
+            return node, hit[0], values[hit[0]]
     return None
 
 
@@ -919,10 +984,14 @@ def check_r013(tree: ast.Module, lines: list[str], path: str) -> Iterator[Violat
                 continue
             if item.name not in R013_METHODS:
                 continue
-            found = _r013_envelope(item)
-            if found is None or _r013_bounded(item):
+            if _r013_detail(item):
                 continue
-            node, key = found
+            found = _r013_envelope(item)
+            if found is None:
+                continue
+            node, key, value = found
+            if _r013_value_bounded(value, _r013_assignments(item)):
+                continue
             if _noqa(lines, node.lineno, "R013") or _noqa(lines, item.lineno, "R013"):
                 continue
             yield Violation(

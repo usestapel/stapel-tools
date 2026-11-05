@@ -2448,15 +2448,70 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     "categories.category": {
         "route_params": {"slug": "string"},
         # The page leaves the listing grid to its container (a named
-        # placeholder otherwise). listings-react 0.42 ships the default one,
-        # over the public board narrowed by stapel-listings 0.27's
-        # `?category_id=` filter; filled whenever listings is installed.
+        # placeholder otherwise). A list of alternatives: the first whose
+        # pairs are all installed fills the slot.
+        #
+        # 1. search + listings (T15): the category's search results drawn as
+        #    `ListingFeedCard`s. Every composite that selects search ships the
+        #    `listing` source (stapel-preset-gate, SH1), so the doc type is a
+        #    fact of the selection, not a guess. The hit's stored card is
+        #    mapped onto the listing card the feed card reads.
+        # 2. listings alone: listings-react 0.42's `ListingBoardPane` over
+        #    the public board narrowed by stapel-listings 0.27's
+        #    `?category_id=` filter.
         "slot_fills": {
-            "renderListings": {
-                "pair": "listings",
-                "import": ("ListingBoardPane", "@stapel/listings-react/default"),
-                "jsx": "(category) => (\n        <ListingBoardPane categoryIds={[String(category.id)]} hrefFor={(id) => `/l/${id}`} />\n      )",
-            },
+            "renderListings": [
+                {
+                    "pairs": ("search", "listings"),
+                    "imports": (
+                        ("SearchPage", "@stapel/search-react/default"),
+                        ("useRouterSearchParams", "@stapel/search-react/router"),
+                        ("ListingFeedCard", "@stapel/listings-react/default"),
+                    ),
+                    "type_imports": (
+                        ("SearchItem", "@stapel/search-react"),
+                        ("ListingCard", "@stapel/listings-react"),
+                    ),
+                    "hooks": ("const searchAdapter = useRouterSearchParams();",),
+                    "helpers": (
+                        "/** A search hit's stored card as the listing card `ListingFeedCard` draws. */",
+                        "function listingCardFromHit(item: SearchItem): ListingCard {",
+                        "  const card = item.card;",
+                        "  const images = Array.isArray(card.images)",
+                        "    ? card.images.filter((ref): ref is string => typeof ref === \"string\")",
+                        "    : [];",
+                        "  return {",
+                        "    id: Number(item.key),",
+                        "    title: typeof card.title === \"string\" ? card.title : \"\",",
+                        "    price: typeof card.price === \"string\" ? card.price : null,",
+                        "    currency: typeof card.currency === \"string\" ? card.currency : \"\",",
+                        "    images,",
+                        "    features_title: [],",
+                        "    features_badges: [],",
+                        "    location_label: typeof card.location_label === \"string\" ? card.location_label : \"\",",
+                        "    is_favorited: null,",
+                        "  };",
+                        "}",
+                    ),
+                    "jsx": (
+                        "(category) => (\n"
+                        "        <SearchPage\n"
+                        "          adapter={searchAdapter}\n"
+                        "          defaultType=\"listing\"\n"
+                        "          defaultCategory={String(category.id)}\n"
+                        "          categoryFilter={false}\n"
+                        "          searchBox={false}\n"
+                        "          renderCard={(item) => <ListingFeedCard listing={listingCardFromHit(item)} href={`/l/${item.key}`} />}\n"
+                        "        />\n"
+                        "      )"
+                    ),
+                },
+                {
+                    "pairs": ("listings",),
+                    "imports": (("ListingBoardPane", "@stapel/listings-react/default"),),
+                    "jsx": "(category) => (\n        <ListingBoardPane categoryIds={[String(category.id)]} hrefFor={(id) => `/l/${id}`} />\n      )",
+                },
+            ],
         },
     },
     # chat-react 0.2.0 — ConversationListPanel: limit/openHref/onOpen, all
@@ -3178,6 +3233,21 @@ def _page_slot_components(entry_id: str, page_embeds: dict[str, list[dict]]) -> 
     return lines
 
 
+def _chosen_slot_fills(mount: dict, pairs) -> dict[str, dict]:
+    """``{slot prop: fill}`` — per slot the first alternative in the mount's
+    ``slot_fills`` whose ``pairs`` are all installed (a single dict is a
+    one-alternative list)."""
+    chosen: dict[str, dict] = {}
+    for prop, alternatives in (mount.get("slot_fills") or {}).items():
+        if isinstance(alternatives, dict):
+            alternatives = [alternatives]
+        for fill in alternatives:
+            if all(pair in pairs for pair in fill["pairs"]):
+                chosen[prop] = fill
+                break
+    return chosen
+
+
 def render_nav_page_wrapper_tsx(
     entry: dict, mount: dict, options: dict | None = None, pairs: tuple = (),
     page_embeds: dict[str, list[dict]] | None = None,
@@ -3235,14 +3305,20 @@ def render_nav_page_wrapper_tsx(
     if adapter:
         hook, adapter_subpath = adapter
         lines.append(f'import {{ {hook} }} from "{pkg}/{adapter_subpath}";')
-    # Slots another installed pair fills (`slot_fills`), each with its import.
-    fills = {
-        prop: fill for prop, fill in (mount.get("slot_fills") or {}).items()
-        if fill["pair"] in pairs
-    }
+    # Slots other installed pairs fill (`slot_fills`): per slot the first
+    # alternative whose pairs are all installed, with its imports.
+    fills = _chosen_slot_fills(mount, pairs)
+    fill_imports: dict[str, set[str]] = {}
+    fill_type_imports: dict[str, set[str]] = {}
     for fill in fills.values():
-        export, module = fill["import"]
-        lines.append(f'import {{ {export} }} from "{module}";')
+        for export, module in fill.get("imports", ()):
+            fill_imports.setdefault(module, set()).add(export)
+        for export, module in fill.get("type_imports", ()):
+            fill_type_imports.setdefault(module, set()).add(export)
+    for module, names in fill_imports.items():
+        lines.append(f'import {{ {", ".join(sorted(names))} }} from "{module}";')
+    for module, names in fill_type_imports.items():
+        lines.append(f'import type {{ {", ".join(sorted(names))} }} from "{module}";')
     viewer = mount.get("viewer") in pairs
     if viewer:
         lines.append('import { useAuthSessionState } from "@stapel/auth-react";')
@@ -3252,7 +3328,15 @@ def render_nav_page_wrapper_tsx(
     lines.append("")
     if page_embeds:
         lines.extend(_page_slot_components(entry["id"], page_embeds))
+    for fill in fills.values():
+        if fill.get("helpers"):
+            lines.extend(fill["helpers"])
+            lines.append("")
     lines.append(f"export function {name}(): ReactElement {{")
+    # A fill's hooks run first, before any early return (rules of hooks).
+    for fill in fills.values():
+        for hook_line in fill.get("hooks", ()):
+            lines.append(f"  {hook_line}")
     if viewer:
         lines.append("  const { user } = useAuthSessionState();")
         lines.append("  const viewerId = user === null ? undefined : String(user.id);")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.78.0"
+version = "0.79.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -89,10 +89,11 @@ test = [
     # The four composites: stapel-preset-gate reads their INSTALLED preset.py
     # (tests/test_scaffold_wiring.py holds each equal to STAPEL_LIBS), and the
     # live tests boot each one's generated project, which imports every member.
-    # Floors are the releases whose presets equal this registry.
-    "stapel-shop>=0.2.37,<1",
+    # Floors are the releases whose presets equal this registry (shop 0.2.39
+    # and booking 0.1.7 ship the `listing` search source the gate requires).
+    "stapel-shop>=0.2.39,<1",
     "stapel-classified>=0.11.1,<1",
-    "stapel-booking>=0.1.6,<1",
+    "stapel-booking>=0.1.7,<1",
     "stapel-social>=0.1.8,<1",
     # Members the live tests and the preset-gate inversion name directly.
     "stapel-listings>=0.26.0,<1",  # noqa: SIB005 - named by the preset-gate inversion test

@@ -555,3 +555,45 @@ def test_the_backfill_keeps_upgrades_or_refuses():
     newer = ui_wiring.script_source().replace(" ui-wiring protocol 2 ", " ui-wiring protocol 9 ", 1)
     refused = ui_wiring.backfill_decision(newer)
     assert refused.action == "refuse" and refused.current.protocol == 9
+
+
+# AU3-19: the stamp is checked against shas this package ships ──────────────
+
+
+def _restamp(text: str) -> str:
+    """Edit-and-re-stamp, the way anyone outside Studio could: the sha in the
+    stamp is recomputed over the edited body, so the file certifies itself."""
+    import hashlib
+    import re
+
+    match = re.search(r"^// stapel-tools (\S+) ui-wiring protocol (\d+) sha256 [0-9a-f]{64}$",
+                      text, re.M)
+    body = text[:match.start()] + text[match.end() + 1:]
+    sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    stamp = f"// stapel-tools {match[1]} ui-wiring protocol {match[2]} sha256 {sha}"
+    return text[:match.start()] + stamp + text[match.end():]
+
+
+def test_a_re_stamped_edited_script_is_not_pristine():
+    forged = _restamp(
+        ui_wiring.script_source().replace("process.exit(failed ? 1", "process.exit(0 ? 1"))
+    stamp = ui_wiring.inspect_script(forged)
+    assert stamp.pristine is False
+    decision = ui_wiring.backfill_decision(forged)
+    assert decision.action == "refuse"
+    assert "not a stapel-tools release" in decision.reason
+
+
+def test_the_shipped_script_is_a_registered_release():
+    """Changing data/ui-wiring.mjs without registering its sha would make every
+    project this release scaffolds read as edited to the next stapel-tools."""
+    import hashlib
+
+    raw = (ROOT / "stapel_tools" / "data" / "ui-wiring.mjs").read_text(encoding="utf-8")
+    sha = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    assert ui_wiring.RELEASED_SCRIPTS[sha][1] == ui_wiring.PROTOCOL
+
+
+def test_a_released_body_under_a_wrong_protocol_claim_is_not_pristine():
+    lied = ui_wiring.script_source().replace(" ui-wiring protocol 2 ", " ui-wiring protocol 1 ", 1)
+    assert ui_wiring.inspect_script(lied).pristine is False

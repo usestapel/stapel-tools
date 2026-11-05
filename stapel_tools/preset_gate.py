@@ -18,7 +18,10 @@ nothing. This gate holds the two equal:
   the shape the generated settings merge at runtime (``_wiring``), so the
   scaffold's defaults ARE the preset's;
 * FRONTEND_COMPOSITES: every pair a frontend preset installs has its backend
-  in the composite's selection (members plus companions).
+  in the composite's selection (members plus companions);
+* search sources: a composite whose selection holds the ``search`` pair ships
+  ``SETTINGS_DEFAULTS["STAPEL_SEARCH"]["SOURCES"]``, each naming an importable
+  source (otherwise stapel_search.W001 and an empty search page).
 
 The presets are read from the INSTALLED packages, so the gate checks the
 versions this environment resolved — in CI, the declared ``test`` extra.
@@ -113,6 +116,43 @@ def preset_drift(key: str, preset: ModuleType | object) -> list[str]:
                 findings.append(f"{key}: SETTINGS_DEFAULTS key {name!r} is not a STAPEL_<MOD> name")
             elif not isinstance(value, dict):
                 findings.append(f"{key}: SETTINGS_DEFAULTS[{name!r}] is not a dict")
+        findings.extend(_search_source_drift(key, defaults))
+    return findings
+
+
+def _search_source_drift(key: str, defaults: dict) -> list[str]:
+    """A composite that selects the ``search`` pair (member or companion) ships
+    a source: stapel-search ships ``BUILTIN_SOURCES = {}``, so without
+    ``STAPEL_SEARCH["SOURCES"]`` the host boots with ``stapel_search.W001`` and
+    its search page answers nothing (SH1). Each value must name an importable
+    attribute; it is not called (a source factory needs the app registry)."""
+    from .create_project import _expand_with_requires
+
+    if "search" not in _expand_with_requires([key]):
+        return []
+    sources = (defaults.get("STAPEL_SEARCH") or {}).get("SOURCES") if isinstance(
+        defaults.get("STAPEL_SEARCH"), dict) else None
+    if not isinstance(sources, dict) or not any(sources.values()):
+        return [
+            f"{key}: selects the search pair but its preset ships no "
+            "SETTINGS_DEFAULTS['STAPEL_SEARCH']['SOURCES'] — the host boots with "
+            "stapel_search.W001 and the search page is empty (declare the "
+            "composite's corpus, as stapel-classified's search_sources does)"
+        ]
+    findings = []
+    for doc_type, path in sources.items():
+        if path is None:
+            continue
+        module_name, _, attr = str(path).rpartition(".")
+        try:
+            resolved = getattr(importlib.import_module(module_name), attr, None)
+        except ImportError:
+            resolved = None
+        if resolved is None:
+            findings.append(
+                f"{key}: STAPEL_SEARCH['SOURCES'][{doc_type!r}] = {path!r} does not "
+                "resolve (stapel_search.E004 at boot)"
+            )
     return findings
 
 

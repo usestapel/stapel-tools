@@ -88,3 +88,58 @@ def test_noqa_on_the_line_or_the_method_silences_and_is_registered(tmp_path):
     assert _scan(tmp_path, on_line) == []
     assert _scan(tmp_path, on_def) == []
     assert RULE_REGISTRY["R013"].linter == "stapel-lint"
+
+
+# ── AU3-18: the bound must reach the value in the envelope ───────────
+
+
+def test_a_bound_elsewhere_in_the_method_does_not_bound_the_envelope(tmp_path):
+    """False negative: a slice and a ``limit`` name that never touch the rows."""
+    source = (
+        "class PartListView(StapelAPIView):\n"
+        "    def get(self, request):\n"
+        "        limit = int(request.query_params.get('limit', 20))\n"
+        "        recent = Part.objects.order_by('-id')[:5]\n"
+        "        parts = Part.objects.all()\n"
+        "        return self.serialized_response({'results': parts, 'recent': recent})\n"
+    )
+    assert [v.line for v in _scan(tmp_path, source)] == [6]
+
+
+def test_a_bound_on_the_assigned_rows_is_followed(tmp_path):
+    source = (
+        "class PartListView(StapelAPIView):\n"
+        "    def get(self, request):\n"
+        "        limit = int(request.query_params.get('limit', 20))\n"
+        "        qs = Part.objects.all()\n"
+        "        parts = list(qs[:limit])\n"
+        "        return self.serialized_response({'results': parts})\n"
+    )
+    assert _scan(tmp_path, source) == []
+
+
+def test_paginate_queryset_on_the_rows_is_a_bound(tmp_path):
+    source = (
+        "class PartListView(StapelAPIView):\n"
+        "    def get(self, request):\n"
+        "        page = self.paginator.paginate_queryset(Part.objects.all(), request)\n"
+        "        return self.serialized_response({'results': page})\n"
+    )
+    assert _scan(tmp_path, source) == []
+
+
+def test_a_detail_view_with_a_lookup_kwarg_is_out_of_scope(tmp_path):
+    """False positive: a cart's lines are the cart, not a page of a table."""
+    source = (
+        "class CartView(StapelAPIView):\n"
+        "    def get(self, request, cart_id):\n"
+        "        cart = services.get_cart(cart_id)\n"
+        "        return self.serialized_response({'id': cart.id, 'items': cart.lines})\n"
+    )
+    assert _scan(tmp_path, source) == []
+
+
+def test_args_and_kwargs_alone_are_not_a_lookup(tmp_path):
+    source = UNBOUNDED.replace("def get(self, request):",
+                               "def get(self, request, *args, **kwargs):")
+    assert len(_scan(tmp_path, source)) == 1

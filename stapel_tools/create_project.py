@@ -60,8 +60,8 @@ STAPEL_LIBS = {
         # not pin a core that has never heard of it — the project would boot
         # with a socket every browser is turned away from.
         # 0.95.0: `manage.py run_seeds`, which the generated bootstrap.sh calls.
-        "pin": "0.95.0",
-        "ahead_of_pypi": False,  # PyPI 0.95.0 @ 2026-10-23
+        "pin": "0.95.3",
+        "ahead_of_pypi": False,  # PyPI 0.95.3 @ 2026-11-05
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
@@ -99,8 +99,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Email/push notifications",
         "default": False,
-        "pin": "0.28.3",
-        "ahead_of_pypi": False,  # PyPI 0.28.3 @ 2026-11-05
+        "pin": "0.29.0",
+        "ahead_of_pypi": False,  # PyPI 0.29.0 @ 2026-11-05
     },
     "profiles": {
         "repo": "https://github.com/usestapel/stapel-profiles.git",
@@ -508,8 +508,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Composite: shop — categories + attributes + listings + reviews (glue: reviews→listings rating projection); likes wait for stapel-engagement",
         "default": False,
-        "pin": "0.2.38",
-        "ahead_of_pypi": False,  # PyPI 0.2.38 @ 2026-11-05
+        "pin": "0.2.39",
+        "ahead_of_pypi": False,  # PyPI 0.2.39 @ 2026-11-05
         "http": False,          # mounts no /shop/api/ — glue only
         "composite": True,
         "django_app": True,     # app slot REQUIRED: Projection glue lives there
@@ -548,8 +548,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Composite: bookable resources — calendar + listings",
         "default": False,
-        "pin": "0.1.6",
-        "ahead_of_pypi": False,  # PyPI 0.1.6 @ 2026-10-22
+        "pin": "0.1.7",
+        "ahead_of_pypi": False,  # PyPI 0.1.7 @ 2026-11-05
         "http": False,
         "composite": True,
         "django_app": True,     # reserved glue slot (see shop comment)

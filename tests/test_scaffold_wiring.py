@@ -123,6 +123,32 @@ class TestPresetGate:
         assert any("lacks ['stapel_categories']" in f for f in findings)
         assert any("'listings/', the registry at 'listings/api/'" in f for f in findings)
 
+    def test_a_composite_selecting_search_must_ship_a_source(self):
+        """SH1 inversion: a composite that lists the `search` pair (member or
+        companion) with no STAPEL_SEARCH["SOURCES"] boots with
+        stapel_search.W001 and an empty search page."""
+        members = _expand_with_requires(["shop"], companions=False)
+        apps = [STAPEL_LIBS[m]["dir"] for m in members if STAPEL_LIBS[m].get("django_app", True)]
+        urls = [("categories/api/", "stapel_categories.urls"),
+                ("listings/api/", "stapel_listings.urls"), ("reviews/", "stapel_reviews.urls")]
+        no_source = types.SimpleNamespace(INSTALLED_APPS=apps, URL_INCLUDES=urls,
+                                          SETTINGS_DEFAULTS={})
+        findings = preset_drift("shop", no_source)
+        assert any("['STAPEL_SEARCH']['SOURCES']" in f and "W001" in f for f in findings), findings
+        dangling = types.SimpleNamespace(
+            INSTALLED_APPS=apps, URL_INCLUDES=urls,
+            SETTINGS_DEFAULTS={"STAPEL_SEARCH": {"SOURCES": {"listing": "stapel_shop.nowhere.source"}}},
+        )
+        assert any("does not resolve" in f for f in preset_drift("shop", dangling))
+        sourced = types.SimpleNamespace(
+            INSTALLED_APPS=apps, URL_INCLUDES=urls,
+            SETTINGS_DEFAULTS={"STAPEL_SEARCH": {"SOURCES": {"listing": "os.path.join"}}},
+        )
+        assert preset_drift("shop", sourced) == []
+
+    def test_a_composite_without_search_needs_no_source(self):
+        assert "search" not in _expand_with_requires(["social"])
+
     def test_the_gate_sees_an_order_drift(self):
         members = _expand_with_requires(["social"], companions=False)
         apps = [STAPEL_LIBS[m]["dir"] for m in members if STAPEL_LIBS[m].get("django_app", True)]
@@ -389,12 +415,50 @@ def test_workspaces_keeps_its_own_mandate(tmp_path):
     assert "MandateGateway" not in (proj / "frontend" / "src" / "modules.tsx").read_text()
 
 
-def test_category_page_fills_the_listing_grid(tmp_path):
-    proj = _create(tmp_path, "cg", "monolith", ["shop"])
+@pytest.mark.parametrize("key", ["shop", "booking", "classified"])
+def test_category_page_lists_search_results_as_feed_cards(tmp_path, key):
+    """T15: with search installed (every composite listing it ships the
+    `listing` source, SH1) `/c/:slug` lists search results as ListingFeedCard,
+    never "Slot renderListings is not filled"."""
+    proj = _create(tmp_path, f"cg{key}", "monolith", [key])
     page = (proj / "frontend" / "src" / "pages" / "CategoryPageRoute.tsx").read_text()
-    assert 'import { ListingBoardPane } from "@stapel/listings-react/default";' in page
+    assert 'import { ListingFeedCard } from "@stapel/listings-react/default";' in page
+    assert 'import { SearchPage } from "@stapel/search-react/default";' in page
+    assert 'import { useRouterSearchParams } from "@stapel/search-react/router";' in page
     assert "renderListings={(category) =>" in page
+    assert 'defaultType="listing"' in page
+    assert "defaultCategory={String(category.id)}" in page
+    assert "<ListingFeedCard listing={listingCardFromHit(item)} href={`/l/${item.key}`} />" in page
+    assert "function listingCardFromHit(item: SearchItem): ListingCard" in page
+    assert "ListingBoardPane" not in page
+    # The hook runs before any early return (rules of hooks).
+    body = page[page.index("export function CategoryPageRoute"):]
+    assert body.index("useRouterSearchParams()") < body.index("return <RouteParamProblem")
+
+
+def test_pins_carry_the_listing_search_source():
+    """SH1: the releases whose presets ship STAPEL_SEARCH["SOURCES"]."""
+    assert _v(STAPEL_LIBS["shop"]["pin"]) >= (0, 2, 39)
+    assert _v(STAPEL_LIBS["booking"]["pin"]) >= (0, 1, 7)
+    # Dedup keys on notification requests.
+    assert _v(STAPEL_LIBS["notifications"]["pin"]) >= (0, 29, 0)
+
+
+def test_category_page_without_search_fills_the_board(tmp_path):
+    from stapel_tools import _frontend_templates as F
+
+    entry = {
+        "id": "categories.category",
+        "_package": "@stapel/categories-react",
+        "component": {"export": "CategoryPage", "subpath": "default"},
+    }
+    mount = F.NAV_ENTRY_MOUNTS["categories.category"]
+    page = F.render_nav_page_wrapper_tsx(entry, mount, pairs=("categories", "listings"))
+    assert 'import { ListingBoardPane } from "@stapel/listings-react/default";' in page
     assert "categoryIds={[String(category.id)]}" in page
+    assert "SearchPage" not in page
+    bare = F.render_nav_page_wrapper_tsx(entry, mount, pairs=("categories",))
+    assert "renderListings" not in bare
 
 
 def test_calendar_gets_the_viewer_and_a_people_provider(tmp_path):

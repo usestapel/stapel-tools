@@ -17,6 +17,9 @@ frontend's own lint, build and test sets stay as generated.
 Versions. A generated project carries no stapel-tools dependency, so the only
 statement of which checker it runs is the script itself: line 2 stamps the
 stapel-tools version, the output protocol and the sha256 of the shipped text.
+The stamp is not trusted on its own (it lives in the file it certifies): a
+script is pristine only when its body hashes to a sha in
+:data:`RELEASED_SCRIPTS`, the table of released texts this package ships.
 :func:`backfill_decision` is the policy a caller that writes the script into
 an existing project applies (Studio's ui leg): keep a pristine script of the
 current protocol (the project's pin), upgrade a pristine one of an older
@@ -44,6 +47,17 @@ ERROR_TAG = "UI_WIRING_ERROR"
 #: Output protocol. 1: 0.74.0 (path after ``/api`` only, PASS/FAIL).
 #: 2: full request path with its base, ``base`` check, UNVERIFIABLE (exit 3).
 PROTOCOL = 2
+
+#: sha256 of every script text a stapel-tools release shipped, with the first
+#: release that shipped it and its protocol. A project's script is pristine
+#: only when its body hashes to one of these: the stamp's own sha is checked
+#: too, but the stamp lives in the file it certifies, so on its own anyone who
+#: edits the script can re-stamp it (AU3-19). A change to data/ui-wiring.mjs
+#: registers its new sha here (tests/test_ui_wiring.py holds the shipped text
+#: to this table).
+RELEASED_SCRIPTS: dict[str, tuple[str, int]] = {
+    "d6e8e747fef4017c12a96e665a98c53e8d60aff56d10d86501747c05d50a0310": ("0.75.0", 2),
+}
 
 #: The 0.74.0 script carried no stamp; its text is known.
 _UNSTAMPED = {
@@ -107,19 +121,29 @@ def script_source() -> str:
 
 @dataclass(frozen=True)
 class ScriptStamp:
-    """What a project's script is: ``pristine`` False means edited or unknown."""
+    """What a project's script is: ``pristine`` False means edited or unknown.
+
+    ``self_consistent``: the stamp's sha matches the body — which proves only
+    that whoever last wrote the file also wrote the stamp."""
 
     version: str
     protocol: int
     pristine: bool
+    self_consistent: bool = False
 
 
 def inspect_script(text: str) -> ScriptStamp:
-    """Read the stamp of a project's script and check the text against it."""
+    """Read the stamp of a project's script and check the text against the
+    released shas this package ships (:data:`RELEASED_SCRIPTS`)."""
     match = _STAMP_RE.search(text or "")
     if match:
         body = text[:match.start()] + text[match.end() + 1:]
-        return ScriptStamp(match["version"], int(match["protocol"]), _sha(body) == match["sha"])
+        sha = _sha(body)
+        protocol = int(match["protocol"])
+        released = RELEASED_SCRIPTS.get(sha)
+        consistent = sha == match["sha"]
+        pristine = consistent and released is not None and released[1] == protocol
+        return ScriptStamp(match["version"], protocol, pristine, consistent)
     known = _UNSTAMPED.get(_sha(text or ""))
     if known:
         return ScriptStamp(known[0], known[1], True)
@@ -143,6 +167,10 @@ def backfill_decision(existing: str | None) -> Backfill:
         return Backfill("write", f"the project has no checker; writing stapel-tools {mine}")
     stamp = inspect_script(existing)
     theirs = f"{stamp.version} (protocol {stamp.protocol})"
+    if not stamp.pristine and stamp.self_consistent and stamp.protocol > PROTOCOL:
+        return Backfill("refuse", (
+            f"the project's checker is stapel-tools {theirs}, newer than the caller's "
+            f"{mine}: upgrade the caller's stapel-tools, its parser predates that output"), stamp)
     if not stamp.pristine:
         return Backfill("refuse", (
             f"{SCRIPT_PATH} is not a stapel-tools release (stamp {theirs}, text edited): "
@@ -194,7 +222,8 @@ def manifest(task: str, criteria: dict[str, dict], *, api_base: str = "") -> dic
 
 
 __all__ = [
-    "ERROR_TAG", "MAKEFILE_BLOCK", "MAKE_TARGET", "MANIFEST_DIR", "PROTOCOL", "RESULT_TAG",
+    "ERROR_TAG", "MAKEFILE_BLOCK", "MAKE_TARGET", "MANIFEST_DIR", "PROTOCOL", "RELEASED_SCRIPTS",
+    "RESULT_TAG",
     "SCRIPT_PATH", "Backfill", "ScriptStamp", "backfill_decision", "inspect_script",
     "makefile_block", "manifest", "parse_result", "script_source",
 ]
