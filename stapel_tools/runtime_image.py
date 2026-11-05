@@ -48,7 +48,8 @@ FLEET_REGISTRY = "registry.gitlab.com/stapel-studio/stapel-images"
 
 #: One stapel-images pipeline tag. stapel-runtime and node-build of that
 #: pipeline carry it together: one base date per host.
-FLEET_IMAGE_TAG: Optional[str] = None
+#: stapel-images pipeline 3032494082 (stapel-tools 778a112 closure).
+FLEET_IMAGE_TAG: Optional[str] = "20261105-325a4c29"
 
 #: Overrides FLEET_IMAGE_TAG (CI builds against its own pipeline's tag).
 FLEET_TAG_ENV = "STAPEL_FLEET_IMAGE_TAG"

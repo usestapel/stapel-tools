@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.78.0] — 2026-11-05
+
+Minor: a generated project's images can build on the shared fleet runtime.
+
+- **`--image-base fleet|upstream`** (`create_project(image_base=, fleet_tag=)`).
+  `upstream`, the default, leaves every generated Dockerfile as it was.
+  `fleet` builds the backend `FROM stapel-images/stapel-runtime:<tag>`, which
+  carries the catalog's pinned stapel closure, so the project's own
+  `pip install -r requirements.txt` is a no-op (pins match) or a thin delta;
+  the cdn variant's vips-builder stage is gone (the runtime is on media-base).
+  The frontend builds on `node-build:<tag>` and its `export` stage is
+  `FROM alpine:3.24.3` holding only `dist/` and the publish step, so no
+  `node_modules` ships. Both images use one dated tag (`--fleet-tag`,
+  `$STAPEL_FLEET_IMAGE_TAG`, default `20261105-325a4c29`); a moving tag,
+  a missing tag, or `--base-image` together with `fleet` is refused.
+  `stapel-new-service` in a fleet project follows the project's tag.
+- **IMG005** (`stapel-image-lint --preview [--base-tag TAG]`,
+  `image_lint.lint_preview_dockerfile` / `lint_preview_project` for the
+  preview sanitizer): every `FROM` is an earlier stage, a stapel-images image
+  on a dated tag, `scratch`, or a pinned `alpine:X.Y.Z` stage that installs
+  nothing; all fleet references share one tag, equal to `--base-tag` when
+  given. An error, and `# noqa` does not apply. `stapel-runtime` grades as a
+  media-tier base for IMG001-IMG003.
+- **`stapel-runtime-image`**: `emit` writes the runtime closure (each
+  composite scaffolded as Studio does, the union with stapel libraries pinned
+  `==`); `check --manifest` compares requirements to a runtime manifest
+  offline; `dry-run` runs `pip install --dry-run`; `thin-check` builds a
+  composite's images and fails on backend unique layers over 300 MB, a
+  non-empty dry-run inside the runtime, or `node_modules` in the export
+  image. On stapel-images pipeline 3032494082 all four composites passed with
+  backend unique 0.1 MB over a 1312 MB runtime, a 10-11 MB export image and
+  0 installs; the upstream shop images still build (backend 538 MB, export
+  601 MB).
+- Tests: `tests/test_runtime_image.py`, including `test_preview_image_is_thin`
+  (runs only with `STAPEL_IMAGE_BUILD_TESTS=1` on CI or a stand runner).
+
 ## [0.77.1] — 2026-11-05
 
 Patch: an anonymous shopper can add to a stapel-orders cart.
