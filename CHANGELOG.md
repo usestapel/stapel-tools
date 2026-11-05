@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.77.1] — 2026-11-05
+
+Patch: an anonymous shopper can add to a stapel-orders cart.
+
+- **A guest is minted at the add.** stapel-orders keys carts on the
+  stapel-auth guest account, so a visitor with no session got 401 on the
+  first add-to-cart. A backend module now declares its guest-keyed writes in
+  `STAPEL_LIBS[key]["elevation_actions"]` (orders: `orders.add_to_cart`), and
+  when such a module is selected with guest sessions on (auth model `public`
+  or `anonymous`, `AUTH_ANONYMOUS` not closed by `--module-config`), the
+  generated `modules.tsx` exports `AUTO_ANONYMOUS_ACTIONS`, passes it to
+  `createAuthRuntime({ autoAnonymous })` and mounts `@stapel/core`'s
+  `ElevationProvider` with the auth runtime's source. A control that runs its
+  write through `useElevation(<action>).run(...)` mints the guest at the
+  click (`POST /anonymous/`, never on render). No such module, an internal
+  deployment or a closed guest axis: the file is unchanged.
+- **The minimal preset reads the session cookie.** Its `REST_FRAMEWORK`
+  replaces core's dict and named no authenticator, so every module view saw
+  a stapel-auth session (a guest's included) as no credentials (403).
+  `DEFAULT_AUTHENTICATION_CLASSES` is now `JWTCookieAuthentication` plus
+  `SessionAuthentication` for the admin's browsable API.
+- Test: a generated auth+orders project answers a no-session add with 401,
+  mints a guest, and the guest's add lands in its cart (`stapel-orders`
+  joins the `test` extra).
+
 ## [0.77.0] — 2026-11-05
 
 Minor: scoped page embeds and fresher scaffold templates.

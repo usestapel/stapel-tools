@@ -485,6 +485,12 @@ STAPEL_LIBS = {
         # requires shop, so a companion here would put a cart into every
         # classified project. Select it explicitly: --modules shop orders.
         "beat": ("stapel_orders.beat", "get_orders_beat_schedule"),
+        # Guest-admitting writes that may mint a guest session at the moment
+        # they are taken (core's elevation seam; see _auto_anonymous_actions).
+        # The cart is keyed on the guest account (SPEC-STAPEL-ORDERS §1), so
+        # an anonymous add with no session is a 401 unless the SPA mints one.
+        # The name is owned by @stapel/orders-react (ORDERS_ELEVATION_ACTIONS).
+        "elevation_actions": ("orders.add_to_cart",),
     },
     # ── Composites (projections-and-composition §3/§4) ─────────────────────
     # A composite writes NO business logic: an INSTALLED_APPS/urls/config
@@ -2835,6 +2841,30 @@ def _render_frontend_package_json(
     return json.dumps(pkg, indent=2) + "\n"
 
 
+def _auto_anonymous_actions(
+    feature_libs: list[str] | None, auth_comp, module_config: dict | None,
+) -> tuple[str, ...]:
+    """The elevation actions the generated SPA lets mint a guest session.
+
+    A backend module that keys rows on the guest account (a stapel-auth
+    guest is authenticated) declares its guest-admitting writes in
+    ``STAPEL_LIBS[key]["elevation_actions"]``; the SPA's auth runtime then
+    mints a guest at the moment of that act (``POST /anonymous/``, never on
+    render). Empty unless guest sessions exist in this deployment: an auth
+    model of ``public`` or ``anonymous`` with ``AUTH_ANONYMOUS`` left on.
+    """
+    if auth_comp is None or auth_comp.model not in ("public", "anonymous"):
+        return ()
+    if ((module_config or {}).get("auth") or {}).get("AUTH_ANONYMOUS", True) is False:
+        return ()
+    actions: list[str] = []
+    for key in feature_libs or ():
+        for action in (STAPEL_LIBS.get(key) or {}).get("elevation_actions", ()):
+            if action not in actions:
+                actions.append(action)
+    return tuple(actions)
+
+
 def _write_frontend_scaffold(
     project_dir: Path, ctx: dict, backend_upstream_default: str,
     backend_prefixes: list[str] | None = None,
@@ -2845,6 +2875,7 @@ def _write_frontend_scaffold(
     shell: str | None = None,
     slots: dict[str, str] | None = None,
     auth_model: str | None = None,
+    auto_anonymous_actions: tuple[str, ...] = (),
 ):
     """``frontend/`` — Vite + React + TypeScript, wired into the dev/prod
     compose + nginx canon (§57 owner directive). See
@@ -2986,6 +3017,7 @@ def _write_frontend_scaffold(
             F.render_modules_tsx(
                 react_entries, has_cdn=has_cdn, shell_react=shell_react_needed,
                 container_i18n=container_i18n,
+                auto_anonymous_actions=auto_anonymous_actions,
             ),
         )
 
@@ -3285,6 +3317,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         shell=shell,
         slots=slots,
         auth_model=auth_comp.model if auth_comp is not None else None,
+        auto_anonymous_actions=_auto_anonymous_actions(feature_libs, auth_comp, module_config),
     )
     _write_deploy_scripts(project_dir)
     _write_agents_and_checks(

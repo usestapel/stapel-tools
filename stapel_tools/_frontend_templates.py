@@ -467,7 +467,7 @@ def pair_base_url(entry: dict) -> str:
 
 def render_modules_tsx(
     entries: list[dict], *, has_cdn: bool = False, shell_react: bool = False,
-    container_i18n: bool = False,
+    container_i18n: bool = False, auto_anonymous_actions: tuple[str, ...] = (),
 ) -> str:
     """Generates ``frontend/src/modules.tsx`` — the DATA-DRIVEN registry of
     every selected ``@stapel/<module>-react`` pair (create_project.py's
@@ -539,6 +539,18 @@ def render_modules_tsx(
     # member there is (src/mandateSource.ts, the storefront's source).
     keys = {e["key"] for e in entries}
     mandate_wired = "auth" in keys and "workspaces" not in keys
+    # The elevation seam (@stapel/core `ElevationProvider`, fed by
+    # @stapel/auth-react's `autoAnonymous`): a listed act mints a guest
+    # session when it is taken, so a guest-keyed write (the stapel-orders
+    # cart) is not a 401 for a visitor who never pressed "continue as guest".
+    # The list comes from create_project._auto_anonymous_actions.
+    elevation_wired = "auth" in keys and bool(auto_anonymous_actions)
+    core_names = ["createI18n", "createStapelQueryClient"]
+    if elevation_wired:
+        core_names.append("ElevationProvider")
+    if mandate_wired:
+        core_names.append("MandateProvider")
+    core_names.append("StapelProvider")
 
     lines: list[str] = [
         "/**",
@@ -550,11 +562,7 @@ def render_modules_tsx(
         " * by editing this file's shape.",
         " */",
         'import type { ReactElement, ReactNode } from "react";',
-        (
-            'import { createI18n, createStapelQueryClient, MandateProvider, StapelProvider } from "@stapel/core";'
-            if mandate_wired
-            else 'import { createI18n, createStapelQueryClient, StapelProvider } from "@stapel/core";'
-        ),
+        f'import {{ {", ".join(core_names)} }} from "@stapel/core";',
     ]
     if container_i18n:
         # The CONTAINER's own copy — the sentences on the named placeholder
@@ -597,9 +605,25 @@ def render_modules_tsx(
     lines.append('const query = createStapelQueryClient({ cacheVersion: "0.0.0" });')
     lines.append('const i18n = createI18n({ locale: "en" });')
     lines.append("")
+    if elevation_wired:
+        lines.append("/**")
+        lines.append(" * Acts that mint a guest session when an anonymous visitor takes them")
+        lines.append(" * (`useElevation(<action>).run(write)`); every other act keeps its wall.")
+        lines.append(" * Generated from the selected backend modules' guest-keyed writes.")
+        lines.append(" */")
+        lines.append(
+            f"export const AUTO_ANONYMOUS_ACTIONS = {_ts_string_array(list(auto_anonymous_actions))} as const;"
+        )
+        lines.append("")
     for e in entries:
         key = e["key"]
-        if e.get("create_runtime") and key == "listings" and has_cdn:
+        if e.get("create_runtime") and key == "auth" and elevation_wired:
+            lines.append(
+                f'const {key}Runtime = {e["create_runtime"]}'
+                f'({{ baseUrl: {json.dumps(pair_base_url(e))}, '
+                'autoAnonymous: { actions: AUTO_ANONYMOUS_ACTIONS } });'
+            )
+        elif e.get("create_runtime") and key == "listings" and has_cdn:
             # Photos: the pair draws "photo unavailable" without a resolver,
             # and only this deployment knows where its CDN serves a ref.
             lines.append(
@@ -683,10 +707,16 @@ def render_modules_tsx(
     for e in seams:
         lines.append(f'{indent}<{e["seam"]["provider"]} value={{{e["key"]}Client}}>')
         indent += "  "
+    if elevation_wired:
+        lines.append(f"{indent}<ElevationProvider source={{authRuntime.elevation}}>")
+        indent += "  "
     if mandate_wired:
         lines.append(f"{indent}<MandateGateway>{{children}}</MandateGateway>")
     else:
         lines.append(f"{indent}{{children}}")
+    if elevation_wired:
+        indent = indent[:-2]
+        lines.append(f"{indent}</ElevationProvider>")
     for e in reversed(seams):
         indent = indent[:-2]
         lines.append(f'{indent}</{e["seam"]["provider"]}>')

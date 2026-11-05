@@ -211,6 +211,14 @@ REST_FRAMEWORK = {
     # 403, 404, 405 and 429 in DRF's bare {"detail": ...} shape while every
     # other service answers the envelope (stapel_core.error_envelope.W001).
     "EXCEPTION_HANDLER": "stapel_core.django.api.errors.stapel_exception_handler",
+    # Same reason: core's dict names the JWT cookie authenticator, and without
+    # it every module view sees the stapel-auth session (a guest's included)
+    # as no credentials at all, so a signed-in cart add is a 403. Session
+    # authentication stays for the admin's browsable API.
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "stapel_core.django.jwt.authentication.JWTCookieAuthentication",
+        "rest_framework.authentication.SessionAuthentication",
+    ],
 }
 
 SPECTACULAR_SETTINGS = {

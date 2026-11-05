@@ -403,3 +403,112 @@ def test_calendar_gets_the_viewer_and_a_people_provider(tmp_path):
     assert "useAuthSessionState()" in page
     assert "<CalendarPeopleProvider" in page
     assert "{...(viewerId !== undefined ? { viewerId } : {})}" in page
+
+
+# ─── OR-S5: an anonymous add-to-cart on a scaffolded shop ───────────────────
+#
+# stapel-orders keys carts on request.user and admits a stapel-auth guest
+# (authenticated). A visitor with no session therefore needs a guest minted
+# before the add: the SPA's auth runtime does it at the act (core's
+# elevation seam), and the backend must read that guest's cookie.
+
+
+def _modules_tsx(proj):
+    return (proj / "frontend" / "src" / "modules.tsx").read_text()
+
+
+def test_shop_with_orders_mints_a_guest_at_add_to_cart(tmp_path):
+    modules = _modules_tsx(_create(tmp_path, "ea", "monolith", ["shop", "orders"]))
+    assert 'export const AUTO_ANONYMOUS_ACTIONS = ["orders.add_to_cart"] as const;' in modules
+    assert (
+        'const authRuntime = createAuthRuntime({ baseUrl: "/auth/api/v1/", '
+        "autoAnonymous: { actions: AUTO_ANONYMOUS_ACTIONS } });"
+    ) in modules
+    assert "<ElevationProvider source={authRuntime.elevation}>" in modules
+    assert "</ElevationProvider>" in modules
+    core_import = next(line for line in modules.splitlines() if line.endswith('from "@stapel/core";'))
+    assert "ElevationProvider" in core_import
+
+
+def test_no_guest_keyed_write_no_elevation(tmp_path):
+    modules = _modules_tsx(_create(tmp_path, "eb", "monolith", ["shop"]))
+    assert "ElevationProvider" not in modules
+    assert "autoAnonymous" not in modules
+    assert "AUTO_ANONYMOUS_ACTIONS" not in modules
+
+
+def _create_with(tmp_path, name, modules, **kw):
+    create_project(
+        name=name, project_type="monolith", title=name, url="https://x.dev",
+        company_name="X", company_email="x@x.dev", modules=["core", *modules],
+        output_dir=tmp_path, use_submodules=False, init_git=False, **kw,
+    )
+    return tmp_path / name
+
+
+def test_internal_deployment_mints_no_guest(tmp_path):
+    """Inversion: no guest sessions (AUTH_ANONYMOUS off) means no minting."""
+    proj = _create_with(tmp_path, "ec", ["shop", "orders"], auth_model="internal")
+    assert "ElevationProvider" not in _modules_tsx(proj)
+
+
+def test_guest_axis_closed_by_module_config_mints_no_guest(tmp_path):
+    proj = _create_with(
+        tmp_path, "ed", ["shop", "orders", "auth"],
+        module_config={"auth": {"AUTH_ANONYMOUS": False}},
+    )
+    assert "ElevationProvider" not in _modules_tsx(proj)
+
+
+_ADD_PROBE = r"""
+import json, os, sys
+os.environ["DJANGO_SETTINGS_MODULE"] = "config.settings"
+sys.path.insert(0, os.getcwd())
+import django
+django.setup()
+from django.core.management import call_command
+call_command("migrate", verbosity=0)
+from stapel_core.comm.registry import function_registry
+from stapel_orders.registry import register_purchasable_type
+# A host's own product type, the way a custom app registers one.
+register_purchasable_type("part", {"resolve": "probe.purchasables"})
+function_registry.register("probe.purchasables", lambda payload: {
+    k: {"title": "Brake pad", "price": "12.50", "currency": "USD", "available": True,
+        "max_quantity": None, "seller_id": "s1", "image": None, "url": "/parts/" + k}
+    for k in payload["keys"] if k == "1"})
+from django.test import Client
+H = {"HTTP_X_REQUESTED_WITH": "XMLHttpRequest"}
+LINE = {"purchasable_type": "part", "purchasable_key": "1", "quantity": 1}
+c = Client()
+out = {"no_session_add": c.post("/orders/api/v1/cart/lines/", LINE,
+                                content_type="application/json", **H).status_code}
+out["mint"] = c.post("/auth/api/v1/anonymous/", {"device_id": "probe-device-0123456789"},
+                     content_type="application/json", **H).status_code
+add = c.post("/orders/api/v1/cart/lines/", LINE, content_type="application/json", **H)
+out["guest_add"] = add.status_code
+out["guest_lines"] = (add.json() if add.status_code == 200 else {}).get("line_count")
+out["guest_cart"] = c.get("/orders/api/v1/cart/", **H).json().get("line_count")
+print("RESULT " + json.dumps(out))
+"""
+
+
+@requires("stapel_orders", "stapel_auth")
+def test_anonymous_add_on_a_scaffolded_project(tmp_path):
+    """The client's path, hermetically: no session -> 401; the guest the SPA
+    mints at the act (POST /anonymous/) -> the add lands in that guest's
+    cart. The minimal preset carries the same auth+orders wiring with sqlite."""
+    proj = _create(tmp_path, "addprobe", "minimal", ["auth", "orders"])
+    env = {k: v for k, v in os.environ.items() if k != "DJANGO_SETTINGS_MODULE"}
+    proc = subprocess.run(
+        [sys.executable, "-c", _ADD_PROBE], cwd=proj, env=env,
+        capture_output=True, text=True,
+    )
+    line = next((x for x in proc.stdout.splitlines() if x.startswith("RESULT ")), None)
+    assert line, proc.stdout[-3000:] + proc.stderr[-3000:]
+    import json
+
+    result = json.loads(line[len("RESULT "):])
+    assert result == {
+        "no_session_add": 401, "mint": 201, "guest_add": 200,
+        "guest_lines": 1, "guest_cart": 1,
+    }, result
