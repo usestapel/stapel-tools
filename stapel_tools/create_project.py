@@ -4067,13 +4067,23 @@ def create_project(
     shell: str | None = None,
     slots: dict[str, str] | None = None,
     base_image: str | None = None,
+    image_base: str | None = None,
+    fleet_tag: str | None = None,
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
         sys.exit(1)
 
+    from . import runtime_image
+
     try:
         base_image_ref = resolve_base_image(base_image)
+        image_base = runtime_image.resolve_image_base(image_base)
+        if image_base == "fleet":
+            fleet_tag = runtime_image.resolve_fleet_tag(fleet_tag)
+            if base_image_ref:
+                raise ValueError(
+                    "--base-image and --image-base fleet both choose the FROM; pass one")
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -4352,6 +4362,8 @@ def create_project(
 
     if base_image_ref:
         apply_base_image(project_dir, base_image_ref)
+    if image_base == "fleet":
+        runtime_image.apply_image_base(project_dir, image_base, fleet_tag)
 
     if is_git and (project_dir / ".gitmodules").exists():
         subprocess.run(["git", "add", "."], cwd=project_dir, capture_output=True)
@@ -4586,6 +4598,19 @@ def main():
              f"from ${BASE_IMAGE_ENV}). Default: the public python:3.12-slim "
              "image. Use it to build from your own registry's base.",
     )
+    parser.add_argument(
+        "--image-base", choices=("upstream", "fleet"), default=None,
+        help="upstream (default): public python/node images. fleet: backend "
+             "FROM stapel-images stapel-runtime (the catalog's closure "
+             "preinstalled, a thin project layer), frontend built on "
+             "node-build with an alpine export stage that ships only dist/.",
+    )
+    parser.add_argument(
+        "--fleet-tag", metavar="YYYYMMDD-SHA", default=None,
+        help="The stapel-images tag for --image-base fleet (also read from "
+             "$STAPEL_FLEET_IMAGE_TAG). Default: the tag this stapel-tools "
+             "release names.",
+    )
     args = parser.parse_args()
     from ._shell_slots import parse_slot_args
 
@@ -4675,6 +4700,8 @@ def main():
         shell=args.shell,
         slots=slot_choices,
         base_image=args.base_image,
+        image_base=args.image_base,
+        fleet_tag=args.fleet_tag,
     )
 
 

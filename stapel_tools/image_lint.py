@@ -81,6 +81,15 @@ IMG004  (warning) The service DECLARES a Django or Python major the base image
         :data:`BASE_DJANGO` below; they track stapel-images/VERSIONS.md and
         are updated when the base moves.
 
+IMG005  (error, no noqa) A generated project's Dockerfile, as a Studio preview
+        builds it, is not FROM a fleet tag. Every ``FROM`` must be an earlier
+        stage, a stapel-images image on an immutable dated tag (or digest),
+        ``scratch``, or the pinned static export base (``alpine:X.Y.Z``) in a
+        stage that installs nothing. All fleet references of a project share
+        ONE tag (one base date per host), and with ``--base-tag`` it must be
+        that tag. Run with ``--preview``; the preview sanitizer calls
+        :func:`lint_preview_dockerfile` and refuses on any finding.
+
 How a service's needs are worked out
 -------------------------------------
 Two ways, and the first wins:
@@ -197,6 +206,23 @@ NEED_RANK: dict[str, int] = {
 }
 
 RANK_BASE: dict[int, str] = {v: k for k, v in BASE_RANK.items()}
+
+#: stapel-runtime is built FROM media-base: it satisfies a media need. It is
+#: graded like a base but is never a tier the scaffold moves a service to,
+#: which is why it joins BASE_RANK after RANK_BASE is built.
+BASE_RANK["stapel-runtime"] = BASE_RANK["media-base"]
+
+#: Every image stapel-images publishes. IMG005 accepts these, and only these,
+#: as the base of a stage that builds or installs anything.
+FLEET_IMAGES = frozenset(BASE_RANK) | {"node-build"}
+
+#: A static stage base IMG005 accepts: alpine, pinned to a patch release.
+_STATIC_BASE_RE = re.compile(r"^(?:docker\.io/)?(?:library/)?alpine:\d+\.\d+\.\d+$")
+
+#: A RUN in a static stage that fetches or installs anything turns it into a
+#: build stage outside the fleet.
+_STATIC_RUN_FORBIDDEN_RE = re.compile(
+    r"\b(?:apk|apt-get|apt|dnf|yum|pip3?|python3?|npm|npx|pnpm|yarn|corepack|curl|wget|git)\b")
 
 #: What the CURRENT stapel base images ship, as (major, minor). These are the
 #: two facts IMG004 grades a service's own declarations against, and they are
@@ -390,6 +416,18 @@ def stapel_base_name(image: str) -> Optional[str]:
     if REGISTRY_PATH not in head.split("/"):
         return None
     return last if last in BASE_RANK else None
+
+
+def fleet_image_name(image: str) -> Optional[str]:
+    """Any stapel-images image (bases, stapel-runtime, node-build) -> its
+    name; anything else -> None."""
+    if not image:
+        return None
+    head, _, last = image.split("@", 1)[0].rpartition("/")
+    last = last.split(":", 1)[0]
+    if not head or REGISTRY_PATH not in head.split("/"):
+        return None
+    return last if last in FLEET_IMAGES else None
 
 
 def is_immutable_reference(image: str) -> bool:
@@ -724,6 +762,98 @@ def lint_dockerfile(path: Path) -> list:
     return violations
 
 
+def _fleet_tag(image: str) -> str:
+    if "@" in image:
+        return image.split("@", 1)[1]
+    return image.rpartition("/")[2].partition(":")[2]
+
+
+def lint_preview_dockerfile(source, base_tag: Optional[str] = None,
+                            path: Optional[str] = None) -> list:
+    """IMG005 for one Dockerfile (a path or its text).
+
+    The choke point for preview builds: whatever a coder did to the
+    Dockerfile, a stage that builds on a non-fleet base never reaches the
+    engine. Findings are errors and ``# noqa`` does not apply.
+    """
+    if isinstance(source, Path):
+        text = source.read_text(encoding="utf-8")
+        path = path or str(source)
+    else:
+        text = source
+    path = path or "Dockerfile"
+    lines = text.splitlines()
+    stages, _args = parse_stages(text)
+    out: list = []
+
+    def refuse(line: int, message: str) -> None:
+        out.append(Violation(path, line, "IMG005", message))
+
+    if not stages:
+        refuse(1, "no FROM — a preview builds only from a stapel-images base")
+        return out
+    names: set = set()
+    tags: dict = {}
+    for index, stage in enumerate(stages):
+        end = stages[index + 1].line - 1 if index + 1 < len(stages) else len(lines)
+        body = lines[stage.line:end]
+        image = stage.image
+        if image in names:
+            pass
+        elif not image:
+            refuse(stage.line, "FROM resolves to nothing (a build ARG with no default)")
+        elif image.lower() == "scratch":
+            pass
+        elif fleet_image_name(image):
+            if not is_immutable_reference(image):
+                refuse(stage.line, f"FROM {image} is a moving tag; pin the dated "
+                                   f"<YYYYMMDD>-<sha> tag of stapel-images")
+            else:
+                tags.setdefault(_fleet_tag(image), stage.line)
+        elif _STATIC_BASE_RE.match(image):
+            for offset, raw in enumerate(body, start=stage.line + 1):
+                if re.match(r"^\s*RUN\b", raw, re.IGNORECASE) and _STATIC_RUN_FORBIDDEN_RE.search(raw):
+                    refuse(offset, f"a stage on {image} may only copy and run what a fleet "
+                                   f"stage built; this RUN installs or fetches: {raw.strip()}")
+        else:
+            refuse(stage.line,
+                   f"FROM {image} is not a fleet tag. A preview image builds FROM "
+                   f"{REGISTRY_PATH}/stapel-runtime (backend) or node-build (frontend) "
+                   f"on a dated tag; regenerate with `stapel-create-project "
+                   f"--image-base fleet` or change this FROM")
+        if stage.name:
+            names.add(stage.name)
+    if len(tags) > 1:
+        first = min(tags.values())
+        refuse(first, "fleet images on more than one tag "
+                      f"({', '.join(sorted(tags))}); one base date per host")
+    if base_tag:
+        for tag, line in sorted(tags.items()):
+            if tag != base_tag:
+                refuse(line, f"fleet tag {tag} differs from the host's base tag {base_tag}; "
+                             f"one base date per host")
+    return out
+
+
+def lint_preview_project(project: Path, base_tag: Optional[str] = None) -> list:
+    """IMG005 over every Dockerfile of a generated project, plus the
+    one-tag rule ACROSS its Dockerfiles."""
+    violations: list = []
+    tags: dict = {}
+    for dockerfile in _walk_dockerfiles(project.resolve()):
+        violations.extend(lint_preview_dockerfile(dockerfile, base_tag=base_tag))
+        for stage in parse_stages(dockerfile.read_text(encoding="utf-8"))[0]:
+            if fleet_image_name(stage.image) and is_immutable_reference(stage.image):
+                tags.setdefault(_fleet_tag(stage.image), (str(dockerfile), stage.line))
+    if len(tags) > 1 and not base_tag:
+        where, line = min(tags.values())
+        violations.append(Violation(where, line, "IMG005",
+                                    f"the project's Dockerfiles use more than one fleet tag "
+                                    f"({', '.join(sorted(tags))}); one base date per host"))
+    violations.sort(key=lambda v: (v.path, v.line, v.rule))
+    return violations
+
+
 def lint_project(project: Path, notes: Optional[list] = None) -> list:
     violations: list = []
     count = 0
@@ -768,9 +898,27 @@ def main(argv: Optional[list] = None) -> int:
         help="Promote warnings to errors — for a fleet that has already "
              "migrated and wants IMG001 to stay closed.",
     )
+    parser.add_argument(
+        "--preview", action="store_true",
+        help="Grade the trees as generated projects a Studio preview builds "
+             "(IMG005 only: every FROM a fleet tag, one base date).",
+    )
+    parser.add_argument(
+        "--base-tag", default=None,
+        help="With --preview: the host's own stapel-images tag every fleet "
+             "FROM must equal.",
+    )
     args = parser.parse_args(argv)
 
-    violations = lint_paths(args.paths)
+    if args.preview:
+        violations = []
+        for raw in args.paths:
+            root = Path(raw)
+            if not root.exists():
+                raise SystemExit(f"Error: path does not exist: {root}")
+            violations.extend(lint_preview_project(root, base_tag=args.base_tag))
+    else:
+        violations = lint_paths(args.paths)
     if args.strict:
         for violation in violations:
             violation.level = "error"

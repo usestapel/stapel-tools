@@ -256,6 +256,19 @@ def write_file(path: Path, content: str):
     path.write_text(content, encoding="utf-8")
 
 
+def _project_fleet_tag(root: Path, exclude: str) -> str | None:
+    """The stapel-runtime tag the project's existing services build FROM
+    (``--image-base fleet``), so a new service joins the same base date."""
+    pattern = re.compile(r"^FROM \S*/stapel-images/stapel-runtime:(\d{8}-[0-9a-f]{7,40})\s*$", re.M)
+    for dockerfile in sorted(root.glob("*/Dockerfile")):
+        if dockerfile.parent.name == exclude:
+            continue
+        match = pattern.search(dockerfile.read_text(encoding="utf-8"))
+        if match:
+            return match.group(1)
+    return None
+
+
 def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
     from ._harness_templates import HARNESS_CONFTEST_FIXTURES, harness_files
     from ._templates import DOCKERFILE_CDN
@@ -828,6 +841,12 @@ def scaffold_service(
     for path, content in files.items():
         write_file(path, content)
         print(f"  created {path.relative_to(root)}")
+    fleet_tag = _project_fleet_tag(root, exclude=dir_name)
+    if fleet_tag:
+        from .runtime_image import apply_image_base
+
+        apply_image_base(root / dir_name, "fleet", fleet_tag)
+        print(f"  {dir_name}/Dockerfile: FROM stapel-runtime:{fleet_tag}, like the project's services")
 
     print("\nUpdating project configs...")
     _ensure_boot_contract_files(root)
