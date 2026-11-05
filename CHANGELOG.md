@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.76.1] — 2026-11-05
+
+Patch: the registry learns stapel-orders and the releases it rides on.
+
+- `STAPEL_LIBS["orders"]` — stapel-orders 0.1.0 (cart, checkout and orders over
+  opaque purchasables), mounted at `orders/api/`, purge beat
+  `stapel_orders.beat.get_orders_beat_schedule`. Opt-in and **not** a shop
+  companion: companions expand transitively and classified requires shop, so a
+  companion would put a cart into every classified project. `--modules shop
+  orders` sells the catalog with no glue: the shop preset's
+  `STAPEL_ORDERS["PURCHASABLE_TYPES"]["listing"]` is merged at runtime.
+- Pins: stapel-shop 0.2.38 (that preset default), stapel-listings 0.28.0 (the
+  `listings.purchasables` Function shop 0.2.38 requires), stapel-notifications
+  0.28.3 (the `orders.placed` / `orders.status_changed` types).
+- Not yet: `FRONTEND_REACT_LIBS["orders"]` — `@stapel/orders-react` has no npm
+  release, and the peer-graph gate fails on an unresolvable pair pin.
+
 ## [0.76.0] — 2026-10-23
 
 Minor: a new error-level rule in `stapel-lint`.

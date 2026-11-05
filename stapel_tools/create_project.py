@@ -99,8 +99,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Email/push notifications",
         "default": False,
-        "pin": "0.28.1",
-        "ahead_of_pypi": False,  # PyPI 0.28.1 @ 2026-10-22
+        "pin": "0.28.3",
+        "ahead_of_pypi": False,  # PyPI 0.28.3 @ 2026-11-05
     },
     "profiles": {
         "repo": "https://github.com/usestapel/stapel-profiles.git",
@@ -338,8 +338,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Listings & catalog",
         "default": False,
-        "pin": "0.27.0",
-        "ahead_of_pypi": False,  # PyPI 0.27.0 @ 2026-10-22
+        "pin": "0.28.0",
+        "ahead_of_pypi": False,  # PyPI 0.28.0 @ 2026-11-05
         "http": True,
         # Same fix/rationale as "categories" above: stapel-listings/urls.py's
         # own docstring says hosts mount it under their own ".../api/"
@@ -465,6 +465,27 @@ STAPEL_LIBS = {
         # and nothing else, so the settings file can call it (W004).
         "beat": ("stapel_moderation.beat", "get_moderation_beat_schedule"),
     },
+    "orders": {
+        "repo": "https://github.com/usestapel/stapel-orders.git",
+        "dir": "stapel_orders",
+        "required": False,
+        "description": "Cart, checkout and orders over opaque purchasables",
+        "default": False,
+        "pin": "0.1.0",
+        "ahead_of_pypi": False,  # PyPI 0.1.0 @ 2026-11-05
+        "http": True,
+        # stapel_orders/urls.py contributes "v1/" under the host's prefix.
+        "url_prefix": "orders/api/",
+        # Purchasable-generic: it calls each type's resolver Function and
+        # imports no sibling. What it sells comes from PURCHASABLE_TYPES — the
+        # shop preset registers "listing" (stapel-shop >= 0.2.38); alone, the
+        # empty registry is stapel_orders.E001 until a custom app registers one.
+        "requires": [],
+        # Not a shop companion: companions expand transitively, and classified
+        # requires shop, so a companion here would put a cart into every
+        # classified project. Select it explicitly: --modules shop orders.
+        "beat": ("stapel_orders.beat", "get_orders_beat_schedule"),
+    },
     # ── Composites (projections-and-composition §3/§4) ─────────────────────
     # A composite writes NO business logic: an INSTALLED_APPS/urls/config
     # preset over member modules + cross-domain Projection glue. Two flags
@@ -481,8 +502,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Composite: shop — categories + attributes + listings + reviews (glue: reviews→listings rating projection); likes wait for stapel-engagement",
         "default": False,
-        "pin": "0.2.37",
-        "ahead_of_pypi": False,  # PyPI 0.2.37 @ 2026-10-22
+        "pin": "0.2.38",
+        "ahead_of_pypi": False,  # PyPI 0.2.38 @ 2026-11-05
         "http": False,          # mounts no /shop/api/ — glue only
         "composite": True,
         "django_app": True,     # app slot REQUIRED: Projection glue lives there
