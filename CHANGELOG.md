@@ -18,7 +18,7 @@ Minor: scoped page embeds and fresher scaffold templates.
   `shell.dropped`; placed ones are listed under `pages`.
 - Pins: `@stapel/core` 0.31.0 (`NavEmbed.scope`/`routeProps`,
   `resolveEmbedProps`), `@stapel/listings-react` 0.43.0 (`ListingDetailPane`
-  `slots`).
+  `slots`), `@stapel/shell-react` 0.20.1 (same train).
 - `stapel-new-library` CI: the current library workflow — Python 3.11–3.14,
   stapel-core from PyPI by the declared range (git-main only in the advisory
   `core-main` job), the fleet gates (`stapel-verify`, `stapel-schema-lint

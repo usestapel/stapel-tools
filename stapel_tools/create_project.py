@@ -2048,7 +2048,9 @@ FRONTEND_SHELL_REACT_PACKAGE = "@stapel/shell-react"
 # 0.20.0 (2026-10-15): `npm view @stapel/shell-react version` -> 0.20.0, the
 # minor where both chromes take `slots` and `SHELL_TEMPLATES` /
 # `shell-templates.json` ship (FRONTEND_SHELL_SLOTS_FLOOR below).
-FRONTEND_SHELL_REACT_VERSION = "0.20.0"
+# 0.20.1 (2026-11-05): `npm view @stapel/shell-react version` -> 0.20.1, the
+# patch with the shell cart icon (released with core 0.31.0).
+FRONTEND_SHELL_REACT_VERSION = "0.20.1"
 
 # The first `@stapel/shell-react` release that themes ITSELF and reads the
 # container's staff answer. Two facts, one release, because they are one
