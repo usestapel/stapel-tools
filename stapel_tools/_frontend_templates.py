@@ -1127,7 +1127,9 @@ def _is_admin_entry(entry: dict) -> bool:
     )
 
 
-def monolith_mount_plan(route_plan: dict, *, pairs: tuple = ()) -> dict:
+def monolith_mount_plan(
+    route_plan: dict, *, pairs: tuple = (), page_embeds: dict | None = None
+) -> dict:
     """How every route in the MONOLITH's plan is mounted — the same pass the
     public storefront has always had (`public_mount_plan`), over the same
     `NAV_ENTRY_MOUNTS` table.
@@ -1143,9 +1145,13 @@ def monolith_mount_plan(route_plan: dict, *, pairs: tuple = ()) -> dict:
     a container with every selectable pair reported exactly those nine, each
     one already answered by a `NAV_ENTRY_MOUNTS` row this renderer never read.
 
+    *page_embeds* is `PageEmbedPlan.pages` (`{entry id: {slot: [embed]}}`):
+    an entry with any gets a wrapper that fills the page's `slots` prop.
+
     Returns the same shape `public_mount_plan` does, plus the two collections
     the monolith's own emitter needs (`_direct` imports, `_local` names).
     """
+    page_embeds = page_embeds or {}
     entries = [
         r["entry"]
         for r in (*route_plan["absolute_routes"], *route_plan["app_children"])
@@ -1198,11 +1204,14 @@ def monolith_mount_plan(route_plan: dict, *, pairs: tuple = ()) -> dict:
             local_imports.add(name)
             elements[entry["id"]] = f"<{name} />"
             continue
+        filled = page_embeds.get(entry["id"])
         if mount.get("route_params") or mount.get("adapter") or (
             mount.get("viewer") in pairs
-        ):
+        ) or filled:
             name = _wrapper_name(entry)
-            pages[f"src/pages/{name}.tsx"] = render_nav_page_wrapper_tsx(entry, mount, pairs=tuple(pairs))
+            pages[f"src/pages/{name}.tsx"] = render_nav_page_wrapper_tsx(
+                entry, mount, pairs=tuple(pairs), page_embeds=filled,
+            )
             line = f'import {{ {name} }} from "./pages/{name}.js";'
             if line not in wrapper_imports:
                 wrapper_imports.append(line)
@@ -2362,6 +2371,9 @@ ADMIN_ROOT_ENTRY = {
 #                            straight face.
 #   {"local": "Name"}        a container-local component this generator writes.
 #
+# `page_slots` (on any shape that emits a wrapper) names the page slots the
+# component renders from its `slots` prop; scoped embeds fill them.
+#
 # An id ABSENT from this table falls through to the placeholder, deliberately:
 # a pair that adds a screen this stapel-tools does not know about gets a page
 # naming that fact, not a mount that may or may not compile. The test
@@ -2420,8 +2432,9 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     # chat-react 0.2.0 — ConversationListPanel: limit/openHref/onOpen, all
     # optional.
     "chat.conversations": {},
-    # listings-react 0.2.0
-    "listings.detail": {"route_params": {"id": "number"}},
+    # listings-react 0.2.0; 0.43.0 renders `page.actions` from its `slots`
+    # prop (a node, or a function of the route params `{ id }`).
+    "listings.detail": {"route_params": {"id": "number"}, "page_slots": ("page.actions",)},
     # The composer is the fleet's one CROSS-PAIR screen, and it used to be the
     # scaffold's biggest lie by omission: the entry mounted a placeholder, so
     # the scripted storefront had no way to list anything. Everything it needs
@@ -3093,8 +3106,51 @@ def _wrapper_name(entry: dict) -> str:
     return f'{entry["component"]["export"]}Route'
 
 
+def _page_slot_components(entry_id: str, page_embeds: dict[str, list[dict]]) -> list[str]:
+    """One declaration per scoped embed (its `props` + `routeProps`) and one
+    component per page slot rendering them with `resolveEmbedProps`."""
+    lines: list[str] = []
+    for embeds in page_embeds.values():
+        for embed in embeds:
+            decl = {
+                key: embed[key] for key in ("props", "routeProps") if embed.get(key)
+            }
+            const = _pascal(embed["id"]) + "Embed"
+            lines.append(
+                f'const {const}: Pick<NavEmbed, "props" | "routeProps"> = '
+                f"{json.dumps(decl)};"
+            )
+    lines.append("")
+    for slot, embeds in page_embeds.items():
+        lines.extend([
+            f"/** `{slot}` on the `{entry_id}` page: the embeds scoped to it, their",
+            " * props read from the page's route. */",
+            f"function {_pascal(slot)}(props: {{ readonly route: NavRouteParams }}): ReactElement {{",
+        ])
+        body: list[str] = []
+        for embed in embeds:
+            export = embed["component"]["export"]
+            var = _pascal(embed["id"])
+            var = var[:1].lower() + var[1:]
+            lines.append(
+                f"  const {var} = resolveEmbedProps({_pascal(embed['id'])}Embed, props.route);"
+            )
+            # The pair's gen:nav checked props/routeProps against the scoped
+            # entry's path; the record core returns is untyped by design.
+            body.extend([
+                f"      {{{var} !== null ? (",
+                f'        <span data-testid="embed-{embed["id"]}">',
+                f"          <{export} {{...({var} as unknown as ComponentProps<typeof {export}>)}} />",
+                "        </span>",
+                "      ) : null}",
+            ])
+        lines.extend(["  return (", "    <>", *body, "    </>", "  );", "}", ""])
+    return lines
+
+
 def render_nav_page_wrapper_tsx(
-    entry: dict, mount: dict, options: dict | None = None, pairs: tuple = ()
+    entry: dict, mount: dict, options: dict | None = None, pairs: tuple = (),
+    page_embeds: dict[str, list[dict]] | None = None,
 ) -> str:
     """``src/pages/<Export>Route.tsx`` — the one-file binding between a route
     and a component that needs something the ROUTE knows.
@@ -3109,6 +3165,11 @@ def render_nav_page_wrapper_tsx(
        keeps react-router out of its main entry on purpose (§13.4 item 6), so
        `useRouterSearchParams` comes from `<pkg>/router` and the container is
        what joins the two.
+
+    *page_embeds* (`{slot: [embed]}`, see `_shell_slots.plan_page_embeds`)
+    fills the page's `slots` prop: each slot gets a render function of the
+    page's route params, and each embed's props come from `@stapel/core`
+    `resolveEmbedProps` (an embed whose route param is absent renders nothing).
     """
     comp = entry["component"]["export"]
     pkg = entry["_package"]
@@ -3120,7 +3181,8 @@ def render_nav_page_wrapper_tsx(
         " * See _frontend_templates.render_nav_page_wrapper_tsx for why this",
         " * file exists instead of the component being mounted directly.",
         " */",
-        'import type { ReactElement } from "react";',
+        'import type { ComponentProps, ReactElement } from "react";'
+        if page_embeds else 'import type { ReactElement } from "react";',
     ]
     params = mount.get("route_params") or {}
     adapter = mount.get("adapter")
@@ -3128,7 +3190,18 @@ def render_nav_page_wrapper_tsx(
     options = options or {}
     if params:
         lines.append('import { useParams } from "react-router";')
-    lines.append(f'import {{ {comp} }} from "{pkg}/{subpath}";')
+    embed_imports: dict[str, set[str]] = {f"{pkg}/{subpath}": {comp}}
+    for embeds in (page_embeds or {}).values():
+        for embed in embeds:
+            ref = embed["component"]
+            embed_imports.setdefault(f'{embed["_package"]}/{ref["subpath"]}', set()).add(
+                ref["export"]
+            )
+    if page_embeds:
+        lines.append('import { resolveEmbedProps } from "@stapel/core";')
+        lines.append('import type { NavEmbed, NavRouteParams } from "@stapel/core";')
+    for module, names in embed_imports.items():
+        lines.append(f'import {{ {", ".join(sorted(names))} }} from "{module}";')
     if adapter:
         hook, adapter_subpath = adapter
         lines.append(f'import {{ {hook} }} from "{pkg}/{adapter_subpath}";')
@@ -3147,6 +3220,8 @@ def render_nav_page_wrapper_tsx(
     if params:
         lines.append('import { RouteParamProblem } from "../NavPlaceholder.js";')
     lines.append("")
+    if page_embeds:
+        lines.extend(_page_slot_components(entry["id"], page_embeds))
     lines.append(f"export function {name}(): ReactElement {{")
     if viewer:
         lines.append("  const { user } = useAuthSessionState();")
@@ -3179,6 +3254,12 @@ def render_nav_page_wrapper_tsx(
         props.append(f"{prop}={{{fill['jsx']}}}")
     if viewer:
         props.append("{...(viewerId !== undefined ? { viewerId } : {})}")
+    if page_embeds:
+        filled = ", ".join(
+            f"{json.dumps(slot)}: (route) => <{_pascal(slot)} route={{route}} />"
+            for slot in page_embeds
+        )
+        props.append(f"slots={{{{ {filled} }}}}")
     rendered_props = (" " + " ".join(props)) if props else ""
     if viewer:
         lines.append("  return (")

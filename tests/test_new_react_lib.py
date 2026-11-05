@@ -762,6 +762,8 @@ class TestDefaultSkinParity:
         assert peers["@stapel/tokens-antd"] == ">=0.6.0"
         assert peers["antd"] == ">=5.20.0 <7"
         assert peers["react"] == ">=19"
+        # the pair develops against antd 6, the fleet canon
+        assert pkg["devDependencies"]["antd"] == "^6.5.0"
         # the subpaths carry their own byte budgets, so the main entry cannot
         # quietly grow the skin or a locale
         names = {limit["path"] for limit in pkg["size-limit"]}

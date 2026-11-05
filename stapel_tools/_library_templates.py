@@ -31,6 +31,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Typing :: Typed",
 ]
 dependencies = [
@@ -156,7 +157,7 @@ from stapel_core.conf import AppSettings
     defaults={
         # Example knob — replace with real settings, document each in
         # MODULE.md ("Settings" table) as you add them.
-        "GREETING": "pong",
+        "GREETING": "pong",{{GREETING_NOQA}}
     },
     import_strings=(),
 )
@@ -293,7 +294,7 @@ class PingView(StapelAPIView):
     response_serializer_class = PingResponseSerializer
 
     @extend_schema(responses={200: PingResponseSerializer})
-    def get(self, request):
+    def get(self, request):  # noqa: R007 — scaffold example, no flow yet
         return self.serialized_response(get_ping_presenter()().present())
 '''
 
@@ -944,7 +945,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
@@ -953,9 +954,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install stapel-core
-        run: pip install git+https://github.com/usestapel/stapel-core.git
-
+      # stapel-core and siblings resolve from PyPI by the declared range;
+      # git-main core is the advisory `core-main` job below.
       # Optional dependencies are NOT optional for the test job: a test that
       # imports celery, boto3 or a vendor SDK fails at collection when CI
       # installed the base package only — a red run on green code, and two
@@ -998,6 +998,13 @@ jobs:
           pip install "stapel-tools>=0.55.0,<1" --quiet
           stapel-sibling-lint .
 
+      - name: Fleet gates (stapel-verify arsenal, migrations, outbox atomicity)
+        run: |
+          stapel-verify .
+          stapel-schema-lint . --strict
+          stapel-migration-lint . --strict
+          python -m stapel_core.lint.emit_check .
+
       - name: Tests with coverage
         # Strict siblings: a DECLARED sibling that is missing FAILS instead of
         # skipping. A quiet skip on CI means the install step above did not do
@@ -1028,6 +1035,52 @@ jobs:
         continue-on-error: true
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  core-main:
+    # Advisory: the same suite against stapel-core's main branch.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install stapel-core from main
+        run: pip install git+https://github.com/usestapel/stapel-core.git
+      - name: Install with the test extra
+        run: pip install -e ".[test]"
+      - name: Tests
+        env:
+          STAPEL_TEST_STRICT_SIBLINGS: "1"
+        run: pytest tests/ -v
+
+  release-track:
+    # Release gate: install as an end user, dependencies from PyPI by pin.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install as an end user (deps resolved from PyPI by pin)
+        run: pip install .
+      - name: stapel-core resolved from PyPI satisfies the declared pin
+        run: |
+          cd "$RUNNER_TEMP" && python -c "
+          import importlib.metadata as m, re, tomllib
+          from pathlib import Path
+          pyproject = tomllib.loads(Path('$GITHUB_WORKSPACE/pyproject.toml').read_text())
+          dep = next(d for d in pyproject['project']['dependencies'] if d.startswith('stapel-core'))
+          floor_s, ceil_s = re.search(r'>=([\\d.]+),<([\\d.]+)', dep).groups()
+          floor = tuple(map(int, floor_s.split('.'))); ceil = tuple(map(int, ceil_s.split('.')))
+          v = m.version('stapel-core'); got = tuple(map(int, v.split('.')[:len(floor)]))
+          print(f'stapel-core {v} against {dep!r}')
+          assert floor <= got < ceil, f'{v} outside declared range {dep!r}'
+          "
+      - name: Import smoke (installed package, from a clean dir)
+        run: cd "$RUNNER_TEMP" && python -c "import {{PKG}}; print('release-track import OK')"
 '''
 
 PUBLISH_YML = '''name: Publish to PyPI

@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.77.0] — 2026-11-05
+
+Minor: scoped page embeds and fresher scaffold templates.
+
+- **`page.actions` is a page slot, not chrome.** A pair's embed with
+  `slot: "page.actions"` and `scope: {navEntry}` is placed on that entry's page
+  (`_shell_slots.plan_page_embeds`), never offered to or dropped by the shell
+  template, even though the shell-templates mirror lists `page.actions` under
+  sidenav-only. The page wrapper fills the component's `slots` prop with a
+  render function of the route params; each embed's props come from
+  `@stapel/core` `resolveEmbedProps` (`props` + `routeProps`), and an embed
+  whose route param is absent renders nothing. `NAV_ENTRY_MOUNTS` names the
+  pages that render a slot (`page_slots`); `listings.detail` is the first. An
+  embed without a scope, scoped to an unmounted page, or to a page without the
+  slot is dropped with a note and listed in `stapel.composition.json`
+  `shell.dropped`; placed ones are listed under `pages`.
+- Pins: `@stapel/core` 0.31.0 (`NavEmbed.scope`/`routeProps`,
+  `resolveEmbedProps`), `@stapel/listings-react` 0.43.0 (`ListingDetailPane`
+  `slots`).
+- `stapel-new-library` CI: the current library workflow — Python 3.11–3.14,
+  stapel-core from PyPI by the declared range (git-main only in the advisory
+  `core-main` job), the fleet gates (`stapel-verify`, `stapel-schema-lint
+  --strict`, `stapel-migration-lint --strict`, emit-check) and a
+  `release-track` job; the 3.14 classifier. A freshly scaffolded module and
+  library both pass `stapel-verify` (the ping view escapes R007, the library's
+  unread example knob escapes CFG006).
+- `stapel-new-react-lib`: antd dev dependency `^6.5.0` (was `^5.20.0`); the
+  peer range stays `>=5.20.0 <7`.
+
 ## [0.76.1] — 2026-11-05
 
 Patch: the registry learns stapel-orders and the releases it rides on.

@@ -65,7 +65,7 @@ class TestFilePlan:
                 for token in (
                     "{{SLUG}}", "{{SLUG_U}}", "{{PKG}}", "{{NAME_DASH}}",
                     "{{NAMESPACE}}", "{{TITLE}}", "{{CAMEL}}", "{{YEAR}}",
-                    "{{PACKAGES}}", "{{PACKAGE_DATA_EXTRA}}",
+                    "{{PACKAGES}}", "{{PACKAGE_DATA_EXTRA}}", "{{GREETING_NOQA}}",
                 ):
                     assert token not in content, f"{kind}:{rel} leaks {token}"
 
@@ -75,6 +75,32 @@ class TestFilePlan:
         ]
         assert "${{ matrix.python-version }}" in ci
         assert "${{ secrets.CODECOV_TOKEN }}" in ci
+
+    def test_ci_matches_the_fleet_library_workflow(self):
+        """Same jobs as a current library: 3.11-3.14, fleet gates, core from
+        PyPI by range with git-main only in the advisory job."""
+        ci = file_plan("module", build_context("search", "Search"))[
+            ".github/workflows/ci.yml"
+        ]
+        assert 'python-version: ["3.11", "3.12", "3.13", "3.14"]' in ci
+        for gate in (
+            "stapel-verify .", "stapel-schema-lint . --strict",
+            "stapel-migration-lint . --strict", "python -m stapel_core.lint.emit_check .",
+        ):
+            assert gate in ci
+        test_job = ci.split("\n  core-main:")[0]
+        assert "git+https://github.com/usestapel/stapel-core" not in test_job
+        assert "continue-on-error: true\n" in ci.split("\n  core-main:")[1]
+        assert "\n  release-track:" in ci
+        assert r"([\d.]+)" in ci and r"([\\d.]+)" not in ci
+
+    def test_example_knob_escape_only_where_nothing_reads_it(self):
+        """A library has no presenter reading GREETING; CFG006 would fail its
+        own CI. A module reads it, so an escape there would be stale."""
+        lib = file_plan("library", build_context("attributes", "A"))["conf.py"]
+        mod = file_plan("module", build_context("search", "S"))["conf.py"]
+        assert '"GREETING": "pong",  # noqa: CFG006' in lib
+        assert "noqa" not in mod
 
     def test_dashed_slug_naming(self):
         ctx = build_context("support-chat", "Support chat")

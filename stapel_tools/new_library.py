@@ -67,6 +67,9 @@ def file_plan(kind: str, ctx: dict) -> dict:
         **ctx,
         "PACKAGES": ", ".join(f'"{p}"' for p in packages),
         "PACKAGE_DATA_EXTRA": package_data_extra,
+        # A library has no code reading the example knob yet; CFG006 would
+        # fail the fleet gate in the scaffold's own CI.
+        "GREETING_NOQA": "" if module_only else "  # noqa: CFG006 — example knob",
     }
 
     plan = {

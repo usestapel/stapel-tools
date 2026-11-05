@@ -81,6 +81,8 @@ DEFAULT_CORE_PEER = ">=0.4.0 <1.0.0"
 # below is the minor that ships `SkinTheme`.
 TOKENS_ANTD_PEER = ">=0.6.0"
 ANTD_PEER = ">=5.20.0 <7"
+# The pair develops and tests against antd 6, the fleet canon.
+ANTD_DEV = "^6.5.0"
 
 # Icon names the shell's registry resolves (`shell-react/src/default/icons.tsx`).
 # An unknown name renders a generic glyph with no error, so the scaffold picks
@@ -230,7 +232,7 @@ def skin_context(skin: bool) -> dict:
         "SKIN_PEERS": f'    "@stapel/tokens-antd": "{TOKENS_ANTD_PEER}",\n',
         "SKIN_PEERS_ANTD": f'    "antd": "{ANTD_PEER}",\n',
         "SKIN_DEVDEPS": '    "@stapel/tokens-antd": "workspace:^",\n',
-        "SKIN_DEVDEPS_ANTD": '    "antd": "^5.20.0",\n',
+        "SKIN_DEVDEPS_ANTD": f'    "antd": "{ANTD_DEV}",\n',
         "SKIN_SIZE_LIMITS": (
             ",\n    {\n"
             '      "name": "default skin subpath (opt-in: antd + the token bridge)",\n'

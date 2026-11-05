@@ -423,3 +423,113 @@ class TestSlotSubset:
         composition = json.loads((front / "stapel.composition.json").read_text())
         assert composition["shell"]["slots"]["topbar.end"] == ["auth.account_menu"]
         assert "NotificationBell" not in (front / "src" / "embeds.generated.tsx").read_text()
+
+
+# A fixture pair offering a scoped page embed, shaped like a cart pair's
+# add-to-cart button on the listing page. Not a registered package.
+FIXTURE_ADD = {
+    "id": "orders.add_to_cart",
+    "slot": "page.actions",
+    "component": {"export": "AddButton", "subpath": "default"},
+    "order": 10,
+    "surface": "any",
+    "scope": {"navEntry": "listings.detail"},
+    "routeProps": {"purchasableKey": "id"},
+    "props": {"purchasableType": "listing"},
+}
+FIXTURE_PAIR = {
+    "package": "@acme/cart-fixture-react",
+    "version": "0.1.0",
+    "provider": "CartFixtureProvider",
+    "create_runtime": "createCartFixtureRuntime",
+    "register_i18n": "registerCartFixtureI18n",
+    "embeds": [FIXTURE_ADD],
+}
+
+
+class TestPageEmbeds:
+    """`page.actions` is a page slot: the scoped page renders it, no chrome."""
+
+    def test_page_embed_is_not_offered_to_or_dropped_by_the_chrome(self):
+        from stapel_tools._shell_slots import offer_slots
+
+        offer = offer_slots(
+            "topbar-sidenav", [_pair("@acme/cart-fixture-react", FIXTURE_ADD)],
+            auth_gated=True,
+        )
+        assert offer.dropped == [] and offer.notes == []
+        assert "page.actions" not in offer.slots
+
+    def test_scoped_embed_lands_on_its_page(self):
+        from stapel_tools._shell_slots import plan_page_embeds
+
+        later = {**FIXTURE_ADD, "id": "booking.book", "order": 20}
+        plan = plan_page_embeds(
+            [_pair("@acme/cart-fixture-react", later, FIXTURE_ADD)],
+            auth_gated=False, pages={"listings.detail": ("page.actions",)},
+        )
+        ids = [e["id"] for e in plan.pages["listings.detail"]["page.actions"]]
+        assert ids == ["orders.add_to_cart", "booking.book"]
+        assert plan.pages["listings.detail"]["page.actions"][0]["_package"] == (
+            "@acme/cart-fixture-react"
+        )
+        assert plan.dropped == []
+
+    @pytest.mark.parametrize("embed, pages, auth, fragment", [
+        ({**FIXTURE_ADD, "scope": None}, {"listings.detail": ("page.actions",)}, True,
+         "without a scope"),
+        (FIXTURE_ADD, {}, True, "does not mount"),
+        (FIXTURE_ADD, {"listings.detail": ()}, True, "renders no page.actions slot"),
+        ({**FIXTURE_ADD, "surface": "member"}, {"listings.detail": ("page.actions",)},
+         False, "member-only"),
+    ])
+    def test_unplaceable_embed_is_dropped_with_a_note(self, embed, pages, auth, fragment):
+        from stapel_tools._shell_slots import plan_page_embeds
+
+        plan = plan_page_embeds(
+            [_pair("@acme/cart-fixture-react", embed)], auth_gated=auth, pages=pages,
+        )
+        assert plan.pages == {}
+        assert plan.dropped == ["orders.add_to_cart"]
+        assert fragment in plan.notes[0]
+
+    def test_scaffold_fills_the_listing_page_slot(self, tmp_path, monkeypatch):
+        import json
+
+        monkeypatch.setitem(FRONTEND_REACT_LIBS, "orders", FIXTURE_PAIR)
+        front = _create(
+            tmp_path, modules=["core", "auth", "listings", "orders"],
+        ) / "frontend"
+        page = (front / "src" / "pages" / "ListingDetailPaneRoute.tsx").read_text()
+        assert 'import { resolveEmbedProps } from "@stapel/core";' in page
+        assert 'import { AddButton } from "@acme/cart-fixture-react/default";' in page
+        assert (
+            'const OrdersAddToCartEmbed: Pick<NavEmbed, "props" | "routeProps"> = '
+            '{"props": {"purchasableType": "listing"}, "routeProps": {"purchasableKey": "id"}};'
+        ) in page
+        assert "resolveEmbedProps(OrdersAddToCartEmbed, props.route)" in page
+        assert 'data-testid="embed-orders.add_to_cart"' in page
+        assert (
+            '<ListingDetailPane id={id} slots={{ "page.actions": (route) => '
+            "<PageActions route={route} /> }} />"
+        ) in page
+
+        composition = json.loads((front / "stapel.composition.json").read_text())
+        assert composition["pages"] == {
+            "listings.detail": {"page.actions": ["orders.add_to_cart"]},
+        }
+        assert "orders.add_to_cart" not in composition["shell"]["dropped"]
+        # A page slot never becomes a chrome slot.
+        assert "page.actions" not in composition["shell"]["slots"]
+        routes = (front / "src" / "routes.tsx").read_text()
+        assert "PageActions" not in routes
+
+    def test_without_the_scoped_page_the_embed_is_dropped(self, tmp_path, monkeypatch, capsys):
+        import json
+
+        monkeypatch.setitem(FRONTEND_REACT_LIBS, "orders", FIXTURE_PAIR)
+        front = _create(tmp_path, modules=["core", "auth", "orders"]) / "frontend"
+        composition = json.loads((front / "stapel.composition.json").read_text())
+        assert "pages" not in composition
+        assert "orders.add_to_cart" in composition["shell"]["dropped"]
+        assert "listings.detail, which this project does not mount" in capsys.readouterr().out

@@ -4,6 +4,7 @@ so the scaffold, Studio's intake and the tests all ask the same function.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 from ._shell_templates import (
@@ -13,6 +14,11 @@ from ._shell_templates import (
 )
 
 NONE = "none"
+
+# Page slots: the page a scoped embed names renders them, never a chrome
+# (`@stapel/core` `SHELL_SLOT_IDS`, `NavEmbed.scope`). The shell-templates
+# mirror lists `page.actions` under sidenav-only; that does not make it chrome.
+PAGE_SLOTS: frozenset[str] = frozenset({"page.actions"})
 
 
 @dataclass
@@ -95,12 +101,14 @@ def offer_slots(
     which offered embed to silence) come from here, not from a hand list.
     Raises ``ValueError`` for an unknown or unrenderable template."""
     spec = _check_template(template, renderable)
-    rendered: list[str] = list(spec["slots"])
+    rendered: list[str] = [s for s in spec["slots"] if s not in PAGE_SLOTS]
     notes: list[str] = []
     dropped: list[str] = []
     offered: dict[str, list[dict]] = {slot: [] for slot in rendered}
     for pair in pairs:
         for embed in pair.get("embeds") or ():
+            if embed["slot"] in PAGE_SLOTS:
+                continue  # plan_page_embeds
             if embed["slot"] not in offered:
                 dropped.append(embed["id"])
                 notes.append(
@@ -184,6 +192,62 @@ def plan_slots(
         template=template, slots=offered, overrides=overrides,
         notes=notes, dropped=dropped,
     )
+
+
+@dataclass
+class PageEmbedPlan:
+    """Scoped page-slot embeds resolved onto the pages this container mounts.
+
+    ``pages`` maps a nav entry id to ``{slot: [embed, ...]}`` in render order
+    (``order``, then ``id``); each embed carries ``_package``. ``notes`` and
+    ``dropped`` name every page embed left out and why.
+    """
+
+    pages: dict[str, dict[str, list[dict]]] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+    dropped: list[str] = field(default_factory=list)
+
+
+def plan_page_embeds(
+    pairs: list[dict],
+    *,
+    auth_gated: bool,
+    pages: Mapping[str, Iterable[str]],
+) -> PageEmbedPlan:
+    """Place every page-slot embed (``page.actions``) on the page its
+    ``scope.navEntry`` names. *pages* maps each nav entry this container
+    mounts to the page slots its page renders (``NAV_ENTRY_MOUNTS``
+    ``page_slots``). An embed is dropped with a note when it has no scope,
+    when its page is not mounted, when that page renders no such slot, or
+    when it is member-only and nothing is gated."""
+    plan = PageEmbedPlan()
+    slots_of = {entry: set(slots) for entry, slots in pages.items()}
+    for pair in pairs:
+        for embed in pair.get("embeds") or ():
+            slot = embed["slot"]
+            if slot not in PAGE_SLOTS:
+                continue
+            target = (embed.get("scope") or {}).get("navEntry")
+            reason = None
+            if not target:
+                reason = f"is a {slot} embed without a scope, so no page renders it"
+            elif target not in slots_of:
+                reason = f"is scoped to {target}, which this project does not mount"
+            elif slot not in slots_of[target]:
+                reason = f"is scoped to {target}, whose page renders no {slot} slot"
+            elif embed.get("surface", "any") == "member" and not auth_gated:
+                reason = "is member-only, and this composition has no gated shell"
+            if reason is not None:
+                plan.dropped.append(embed["id"])
+                plan.notes.append(f"embed {embed['id']} {reason}")
+                continue
+            plan.pages.setdefault(target, {}).setdefault(slot, []).append(
+                {**embed, "_package": pair["package"]}
+            )
+    for slots in plan.pages.values():
+        for claims in slots.values():
+            claims.sort(key=lambda e: (e["order"], e["id"]))
+    return plan
 
 
 def parse_slot_args(values: list[str] | None) -> dict[str, str]:

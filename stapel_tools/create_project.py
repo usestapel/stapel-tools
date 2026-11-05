@@ -1113,7 +1113,8 @@ FRONTEND_REACT_LIBS = {
     },
     "listings": {
         "package": "@stapel/listings-react",
-        "version": "0.42.0",
+        # 0.43.0: `ListingDetailPane` takes `slots` (`page.actions`).
+        "version": "0.43.0",
         # Declared an OPTIONAL peer, but `/default`'s ListingPrice imports it
         # statically, so a bundle without the package fails `vite build`
         # ("formatMoney" is not exported by __vite-optional-peer-dep). The
@@ -1944,7 +1945,11 @@ FRONTEND_REACT_CORE_DEPS = {
     # 0.30.0 (2026-10-15): `npm view @stapel/core version` -> 0.30.0, the
     # minor that ships `SHELL_SLOT_IDS` and the `NavEmbed` type the pairs'
     # manifests now carry under `embeds`; `@stapel/shell-react` 0.20.0 peers it.
-    "@stapel/core": "0.30.0",
+    #
+    # 0.31.0 (2026-11-05): `npm view @stapel/core version` -> 0.31.0, the minor
+    # with `NavEmbed.scope`/`routeProps` and `resolveEmbedProps`, which the
+    # generated page wrappers call to fill a page's `page.actions` slot.
+    "@stapel/core": "0.31.0",
     "@tanstack/react-query": "5.102.8",
 }
 # Only pulled in when >=1 selected module's registry entry has
@@ -2910,6 +2915,18 @@ def _write_frontend_scaffold(
         auth_gated=auth_wired, overrides=slots,
     )
     slot_notes = list(slot_plan.notes)
+    # Page-slot embeds (`page.actions`) go to the page their scope names, not
+    # to the chrome: every mounted entry whose page renders a slot.
+    from ._shell_slots import plan_page_embeds
+
+    page_plan = plan_page_embeds(
+        react_entries, auth_gated=auth_wired,
+        pages={
+            entry_id: F.NAV_ENTRY_MOUNTS.get(entry_id, {}).get("page_slots", ())
+            for entry_id in F.nav_entry_paths(route_plan)
+        } if shell_react_needed else {},
+    )
+    slot_notes.extend(page_plan.notes)
     emit_embeds = (
         routing_active and app_route_present and shell_has_slots()
         and bool(slot_plan.filled)
@@ -2949,7 +2966,8 @@ def _write_frontend_scaffold(
 
     mount_files = (
         F.monolith_mount_plan(
-            route_plan, pairs=tuple(e["key"] for e in react_entries)
+            route_plan, pairs=tuple(e["key"] for e in react_entries),
+            page_embeds=page_plan.pages,
         )
         if routing_active and shell_react_needed
         else {"pages": {}, "needs_placeholder": False}
@@ -3022,7 +3040,9 @@ def _write_frontend_scaffold(
         # produced a container that did not typecheck. Wrappers and the named
         # placeholder are the same machinery the public storefront has always
         # emitted — one table, one behaviour, two containers.
-        mounts = F.monolith_mount_plan(route_plan, pairs=pair_keys)
+        mounts = F.monolith_mount_plan(
+            route_plan, pairs=pair_keys, page_embeds=page_plan.pages,
+        )
         if mounts["pages"] or mounts["needs_placeholder"]:
             _write(frontend / "src" / "NavPlaceholder.tsx", F.NAV_PLACEHOLDER_TSX)
         if container_i18n:
@@ -3063,12 +3083,18 @@ def _write_frontend_scaffold(
                 *slot_plan.dropped,
                 *(e["id"] for embeds in slot_plan.filled.values() for e in embeds
                   if not embeds_source),
+                *page_plan.dropped,
             ],
         },
         "auth": {"model": auth_model, "gated": auth_wired},
         "theme": theme or "default",
         "modules": list(feature_libs),
     }
+    if page_plan.pages and routing_active:
+        composition["pages"] = {
+            entry_id: {slot: [e["id"] for e in embeds] for slot, embeds in slots.items()}
+            for entry_id, slots in page_plan.pages.items()
+        }
     _write(frontend / "stapel.composition.json", json.dumps(composition, indent=2) + "\n")
     for note in slot_notes:
         print(f"  note: {note}")
