@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.79.1] — 2026-11-05
+
+Patch. Pin stapel-notifications 0.30.0, the latest release (every built-in
+letter in eight languages; carries 0.29.0's dedup keys, same stapel-core
+0.95.3 floor).
+
 ## [0.79.0] — 2026-11-05
 
 Minor: a scaffolded shop lists a category from search; R013 and the

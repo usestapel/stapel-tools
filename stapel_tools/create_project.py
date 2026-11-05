@@ -99,8 +99,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Email/push notifications",
         "default": False,
-        "pin": "0.29.0",
-        "ahead_of_pypi": False,  # PyPI 0.29.0 @ 2026-11-05
+        "pin": "0.30.0",
+        "ahead_of_pypi": False,  # PyPI 0.30.0 @ 2026-11-05
     },
     "profiles": {
         "repo": "https://github.com/usestapel/stapel-profiles.git",
