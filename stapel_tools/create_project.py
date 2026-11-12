@@ -3932,6 +3932,11 @@ def _write_starter_catalog(
         _write(base / "fixtures" / "catalog" / name, json.dumps(data, indent=2) + "\n")
 
 
+#: The minimal preset's pyvips: the same release line the service tier's
+#: vips-builder stage builds (_templates.DOCKERFILE_CDN), with libvips bundled.
+_PYVIPS_BINARY_REQUIREMENT = "pyvips[binary]>=3.1,<4"
+
+
 def _append_wiring_requirements(
     project_dir: Path, ctx: dict, feature_libs: list[str], project_type: str,
 ) -> None:
@@ -3956,6 +3961,18 @@ def _append_wiring_requirements(
         line.startswith("celery") for line in lines
     ):
         added += ["# The beat schedule in settings is built from celery crontabs", "celery>=5.3"]
+    if project_type == "minimal" and "cdn" in feature_libs and not any(
+        line.startswith("pyvips") for line in lines
+    ):
+        # stapel_cdn.images.E001 refuses to boot (and so to migrate) without
+        # pyvips. The service tier gets libvips from its Dockerfile's
+        # vips-builder stage; this preset runs natively with no image, so the
+        # binary wheel carries libvips with it.
+        added += [
+            "# stapel-cdn's image pipeline: pyvips with libvips bundled (no Dockerfile",
+            "# here to install the system library; stapel_cdn.images.E001 without it)",
+            _PYVIPS_BINARY_REQUIREMENT,
+        ]
     if added:
         reqs.write_text("\n".join([*lines, *added]) + "\n")
     if project_type == "monolith" and realtime_selected(feature_libs):

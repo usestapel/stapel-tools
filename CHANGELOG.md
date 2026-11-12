@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+- **A minimal project with cdn migrates on a fresh venv.** `--type minimal`
+  with stapel-cdn selected (shop pulls it) listed no pyvips, so the first
+  `migrate` failed on `stapel_cdn.images.E001`. The minimal requirements now
+  carry `pyvips[binary]>=3.1,<4` (libvips bundled: this preset has no
+  Dockerfile to install the system library); the service tier keeps its
+  vips-builder stage.
+
 - **Unknown addresses get a page.** The generated router ends with
   `{ path: "*", element: <NotFoundPage /> }` (new `src/NotFoundPage.tsx`,
   container copy `storefront.notfound.*`): an unknown URL showed
