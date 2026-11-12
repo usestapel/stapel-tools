@@ -202,6 +202,9 @@ _register(
 
 _register("stapel-config-lint", True, "the reported line", "CFG001", "CFG006", "CFG007")
 _register(
+    "stapel-config-lint", True, "any line the env-bool expression spans", "CFG013",
+)
+_register(
     "stapel-config-lint", False,
     "a CONFIG.MD row (no source line to annotate)",
     "CFG000", "CFG002", "CFG003", "CFG004", "CFG005",
