@@ -4785,6 +4785,25 @@ def main():
         and args.modules is not None
     )
 
+    if not non_interactive and not sys.stdin.isatty():
+        # No terminal to ask on: the wizard would read EOF, and a script or an
+        # agent would see rc 0 with no project. Name what the call is missing.
+        missing = [
+            flag for flag, value in (
+                ("<name>", args.name),
+                ("--type", args.project_type),
+                ("--title", args.title),
+                ("--url", args.url),
+                ("--company-name", args.company_name),
+                ("--company-email", args.company_email),
+                ("--modules", args.modules),
+            ) if value is None or value == ""
+        ]
+        parser.error(
+            "stdin is not a terminal, so the wizard cannot ask; pass "
+            + ", ".join(missing) + " to run non-interactively"
+        )
+
     if non_interactive:
         params = {
             "name": args.name,
@@ -4821,8 +4840,8 @@ def main():
             if args.task_broker:
                 params["task_broker"] = args.task_broker
         except (KeyboardInterrupt, EOFError):
-            print("\nAborted.")
-            sys.exit(0)
+            print("\nAborted: no project was created.", file=sys.stderr)
+            sys.exit(130)
 
     create_project(
         name=params["name"],

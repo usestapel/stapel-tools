@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **The wizard fails loudly with no terminal.** A call missing any of
+  `<name> --type --title --url --company-name --company-email --modules` with
+  stdin not a TTY exits 2 and names the missing flags, instead of reading EOF
+  and exiting 0 with "Aborted." and no project. An interrupted interactive
+  wizard exits 130.
+
 - **Orders payment follows the posture.** The orders registry row declares
   `prototype_dev: {"PAYMENT": "mock"}`, so the local settings (always the
   prototype stage) take the mock provider and a checkout is paid at once;
