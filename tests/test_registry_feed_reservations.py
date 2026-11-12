@@ -246,6 +246,24 @@ class TestVendoring:
         assert not any(n.endswith("dirty.txt") for n in names)
         assert len(snap.commit) == 40
 
+    @pytest.mark.skipif(shutil.which("npm") is None, reason="npm packs the pair")
+    def test_relative_output_dir_vendors_into_the_project(self, tmp_path, monkeypatch):
+        ws = tmp_path / "ws"
+        _fake_brick(ws, "feed")
+        _fake_pair(ws, "feed")
+        monkeypatch.setenv("SIBLING_ROOT", str(ws))
+        (tmp_path / "apps").mkdir()
+        monkeypatch.chdir(tmp_path)
+        create_project(
+            name="p", project_type="monolith", title="p", url="https://x.dev",
+            company_name="X", company_email="x@x.dev", modules=["core", "social"],
+            output_dir=Path("apps"), use_submodules=False, init_git=False,
+            allow_unreleased=True)
+        proj = tmp_path / "apps" / "p"
+        assert (proj / "svc-p" / "vendor" / "stapel-feed-0.1.0.tar.gz").is_file()
+        assert (proj / "frontend" / "vendor" / "stapel-feed-react-0.0.0.tgz").is_file()
+        assert not (ws / "stapel-feed" / "apps").exists()
+
     def test_dockerfile_copies_vendor_before_install(self, tmp_path):
         dockerfile = tmp_path / "Dockerfile"
         dockerfile.write_text("FROM x\nCOPY svc-p/requirements.txt .\nRUN pip install -r requirements.txt\n")

@@ -4241,6 +4241,7 @@ def _vendor_unreleased(
     project (see :mod:`stapel_tools._unreleased`), so the image builds."""
     from . import _unreleased as U
 
+    project_dir = Path(project_dir).resolve()
     root = U.sibling_root(output_dir)
     backend = unreleased(feature_libs)
     pairs = unreleased_pairs([k for k in feature_libs if k in FRONTEND_REACT_LIBS]) \

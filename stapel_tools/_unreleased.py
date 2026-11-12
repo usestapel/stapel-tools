@@ -91,6 +91,8 @@ def snapshot_backend(root: Path, key: str, dest_dir: Path) -> Snapshot:
     commit = _git(repo, "rev-parse", "HEAD")
     version = _project_version(repo)
     name = f"stapel-{key}-{version}"
+    # git runs in the sibling checkout: a relative destination would land there.
+    dest_dir = Path(dest_dir).resolve()
     dest_dir.mkdir(parents=True, exist_ok=True)
     target = dest_dir / f"{name}.tar.gz"
     _git(repo, "archive", "--format=tar.gz", f"--prefix={name}/", "-o", str(target), "HEAD")
@@ -103,6 +105,8 @@ def snapshot_pair(root: Path, key: str, dest_dir: Path) -> Snapshot:
     npm = shutil.which("npm")
     if npm is None:
         raise UnreleasedSourceError("--allow-unreleased packs a pair with npm, which is not on PATH")
+    # npm runs in the sibling package: a relative destination would land there.
+    dest_dir = Path(dest_dir).resolve()
     dest_dir.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
         [npm, "pack", "--json", "--ignore-scripts", "--pack-destination", str(dest_dir)],
@@ -121,6 +125,7 @@ def snapshot_pair(root: Path, key: str, dest_dir: Path) -> Snapshot:
 def vendor_requirements(reqs: Path, service_dir: Path, root: Path, keys: list[str]) -> list[Snapshot]:
     """Replace each ``-e ../stapel-<key>`` line of *reqs* with the snapshot."""
     lines = reqs.read_text().splitlines()
+    service_dir = Path(service_dir).resolve()
     snaps = []
     for key in keys:
         snap = snapshot_backend(root, key, service_dir / "vendor")
@@ -157,6 +162,7 @@ def vendor_package_json(package_json: Path, frontend_dir: Path, root: Path,
                         pairs: list[tuple[str, str]]) -> list[Snapshot]:
     """Point each unreleased pair's dependency at its packed tarball."""
     pkg = json.loads(package_json.read_text())
+    frontend_dir = Path(frontend_dir).resolve()
     deps = pkg.setdefault("dependencies", {})
     snaps = []
     for key, package in pairs:
