@@ -138,6 +138,19 @@ CFG009  (warning) **In a library checkout**, a CONFIG.MD row owned by this
         ``settings``. Warning-level while the fleet corrects its rows (148
         across 21 libraries on 2026-10-22); promote to error after.
 
+CFG011  (error) **In a project**, a companion brick (``companion_of`` in the
+        scaffold registry: promotions, delivery, inventory or courses next to
+        orders) is installed next to its target and nothing registers it — the
+        settings neither merge nor import ``<package>.preset`` and do not
+        spell every Function its ``SETTINGS_DEFAULTS`` registers; or a
+        registration (a ``quote``/``reserve``/``commit``/``release``/
+        ``resolve`` string in a ``STAPEL_<MOD>`` dict, or in a preset the
+        settings merge) names a comm Function no installed app provides.
+        Both fail at the first checkout, not at boot. Static: providers are
+        the ``function("…")`` calls in the installed apps' sources; an app
+        whose source is not locatable turns the second half into a note.
+        See ``stapel_tools/_companion_lint.py`` for what it cannot see.
+
 CFG010  (warning) **In a library checkout**, a key the library offers (a top
         level key of the dict handed to ``AppSettings(defaults=...)``) that
         has no row in its own section of CONFIG.MD. The project CONFIG.MD a
@@ -964,6 +977,15 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
                 f"into the other mode overnight; suppress a deliberate "
                 f"exception with '# noqa: CFG007'",
             ))
+
+    # ------------------------------------------------------------------ CFG011
+    # Above the early exits too: a generated project has no CONFIG.MD yet.
+    if library_distribution(project) is None:
+        from ._companion_lint import lint as companion_lint
+
+        settings_files = [p for p in _walk_py(project) if _is_settings_file(p)]
+        for problem in companion_lint(project, settings_files, notes):
+            findings.append(Finding(problem.path, problem.line, "CFG011", problem.message))
 
     config_md = find_config_md(project)
     if config_md is None:

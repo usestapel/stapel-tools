@@ -187,7 +187,8 @@ def make_context(
         # Selection-derived wiring (_wiring): composite defaults, realtime,
         # beat schedule, required middleware — at the end of base.py.
         "STAPEL_WIRING": render_wiring(selected_keys, flavor="monolith"),
-        "STAPEL_DEV_WIRING": render_dev_wiring(selected_keys),
+        "STAPEL_DEV_WIRING": render_dev_wiring(
+            selected_keys, prototype=comp is not None and comp.has_posture),
         # Plain string flag (see HAS_CDN): the realtime config/asgi.py.
         "HAS_REALTIME": "true" if realtime_selected(selected_keys) else "",
         "BOOT_SMOKE_EXTRA": boot_smoke_extra(selected_keys),

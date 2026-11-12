@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+- **Companion bricks wire themselves.** A registry row may declare
+  `companion_of` (the modules its `preset.SETTINGS_DEFAULTS` plugs into).
+  When a target is selected too, the generated settings merge the companion's
+  fragment in the same `_stapel_merge_preset_defaults` call as the composite
+  presets (`_wiring.preset_modules`: registry order, two levels deep, under
+  any explicit value; an explicit `None` entry stays for the owning library's
+  merge registry to drop). A selection without a companion renders exactly
+  what it did before.
+- **`stapel-config-lint` CFG011.** Error in a project: a companion installed
+  next to its target with no registration (no merge or import of
+  `<package>.preset`, not every Function of its fragment spelled out), or a
+  registration (`quote`/`reserve`/`commit`/`release`/`resolve` in a
+  `STAPEL_<MOD>` dict or a merged preset) naming a comm Function no installed
+  app provides. Runs per settings unit; an unlocatable provider is a note.
+- **`stapel-preset-gate` checks companions.** A companion's fragment writes
+  exactly its targets' `STAPEL_<MOD>` namespaces and mounts at the registry
+  prefix; an unreleased, uninstalled companion prints `skipped (unreleased)`.
+- **Registry rows for promotions, delivery, inventory, cms, courses and
+  referrals, inert until released.** `"released": False` rows are listed by
+  `--modules` but refused unless `--allow-unreleased` (sibling checkout
+  install); `stapel-assemble` reports them as gaps. promotions, delivery,
+  inventory and courses are companions of orders.
+- **`prototype_dev` registry values** reach the local settings only when they
+  declare the prototype posture stage: delivery's `DEFAULT_CARRIER="mock"`.
+
 ## [0.79.1] — 2026-11-05
 
 Patch. Pin stapel-notifications 0.30.0, the latest release (every built-in

@@ -23,6 +23,13 @@ nothing. This gate holds the two equal:
   ``SETTINGS_DEFAULTS["STAPEL_SEARCH"]["SOURCES"]``, each naming an importable
   source (otherwise stapel_search.W001 and an empty search page).
 
+A companion brick (a registry row with ``companion_of``) ships a preset too:
+its ``SETTINGS_DEFAULTS`` writes exactly the ``STAPEL_<TARGET>`` namespaces of
+its ``companion_of`` targets, as dicts, because those are the only fragments
+the generated settings merge for it; a ``URL_INCLUDES`` it carries mounts at
+the registry's prefix. A companion with no PyPI release is checked when it is
+importable and reported ``skipped (unreleased)`` otherwise.
+
 The presets are read from the INSTALLED packages, so the gate checks the
 versions this environment resolved — in CI, the declared ``test`` extra.
 
@@ -43,6 +50,47 @@ def composite_keys() -> list[str]:
     from .create_project import STAPEL_LIBS
 
     return [key for key, info in STAPEL_LIBS.items() if info.get("composite")]
+
+
+def companion_keys(*, released_only: bool = False) -> list[str]:
+    from .create_project import STAPEL_LIBS
+
+    return [
+        key for key, info in STAPEL_LIBS.items()
+        if info.get("companion_of") and (not released_only or info.get("released", True))
+    ]
+
+
+def companion_drift(key: str, preset: ModuleType | object) -> list[str]:
+    """Every way a companion's preset disagrees with its registry row."""
+    from ._url_mounts import url_mount_for
+    from .create_project import STAPEL_LIBS
+
+    info = STAPEL_LIBS[key]
+    targets = {f"STAPEL_{t.upper()}": t for t in info.get("companion_of", ())}
+    findings: list[str] = []
+    defaults = getattr(preset, "SETTINGS_DEFAULTS", None)
+    if not isinstance(defaults, dict) or not defaults:
+        return [f"{key}: companion preset has no SETTINGS_DEFAULTS dict, so the "
+                f"scaffold has nothing to wire into {sorted(targets.values())}"]
+    for name, value in defaults.items():
+        if name not in targets:
+            findings.append(
+                f"{key}: SETTINGS_DEFAULTS writes {name!r}, which is no companion_of "
+                f"target ({sorted(targets)}); add the module to "
+                f"STAPEL_LIBS[{key!r}]['companion_of'] or drop the fragment")
+        elif not isinstance(value, dict):
+            findings.append(f"{key}: SETTINGS_DEFAULTS[{name!r}] is not a dict")
+    for name, target in targets.items():
+        if name not in defaults:
+            findings.append(
+                f"{key}: companion_of names {target!r} but SETTINGS_DEFAULTS has no "
+                f"{name!r} fragment")
+    mount = url_mount_for(info["dir"])
+    for prefix, module in getattr(preset, "URL_INCLUDES", []) or []:
+        if module == f"{info['dir']}.urls" and prefix != mount:
+            findings.append(f"{key}: preset mounts {module} at {prefix!r}, the registry at {mount!r}")
+    return findings
 
 
 def registry_members(key: str) -> list[str]:
@@ -178,17 +226,27 @@ def load_preset(key: str) -> ModuleType:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="stapel-preset-gate", description=__doc__.split("\n\n")[0])
-    parser.add_argument("composites", nargs="*", help="composite keys (default: all)")
+    parser.add_argument("composites", nargs="*",
+                        help="composite or companion keys (default: all)")
     args = parser.parse_args(argv)
-    keys = args.composites or composite_keys()
+    companions = set(companion_keys())
+    released = set(companion_keys(released_only=True))
+    keys = args.composites or [*composite_keys(), *companion_keys()]
     findings: list[str] = []
+    skipped: list[str] = []
     for key in keys:
         try:
             preset = load_preset(key)
         except ImportError as exc:
-            findings.append(f"{key}: preset not importable ({exc}); install the composite")
+            if key in companions and key not in released:
+                skipped.append(key)
+                continue
+            findings.append(f"{key}: preset not importable ({exc}); install the module")
             continue
-        findings.extend(preset_drift(key, preset))
+        findings.extend(companion_drift(key, preset) if key in companions
+                        else preset_drift(key, preset))
+    for key in skipped:
+        print(f"stapel-preset-gate: {key} skipped (unreleased, not installed)")
     from .create_project import FRONTEND_COMPOSITES
 
     for name in FRONTEND_COMPOSITES:
@@ -199,7 +257,7 @@ def main(argv: list[str] | None = None) -> int:
     if findings:
         print(f"stapel-preset-gate: {len(findings)} finding(s)", file=sys.stderr)
         return 1
-    print(f"stapel-preset-gate: {len(keys)} preset(s) equal the registry")
+    print(f"stapel-preset-gate: {len(keys) - len(skipped)} preset(s) equal the registry")
     return 0
 
 

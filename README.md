@@ -55,6 +55,16 @@ stapel-create-project shop --type monolith --title "Shop" --url https://shop.exa
 - `--posture prototype|live` — stage of the inherited settings (default `live`);
   local settings are always `prototype`, where OTP is mocked and logged.
 - `--theme default|ocean|forest|crimson|graphite|amber|<path>` — colour theme.
+- `--allow-unreleased` — accept modules with no PyPI release yet (`--help`
+  lists them); they install from the sibling workspace checkout
+  (`-e ../stapel-<name>`), so the project builds only inside the workspace.
+
+A companion brick (promotions, delivery, inventory, courses next to orders)
+wires itself: when its target is selected too, the generated settings merge
+its `preset.SETTINGS_DEFAULTS` with the composite presets, under any explicit
+value. `stapel-config-lint` CFG011 flags a companion installed with no
+registration, or a registration naming a comm Function no installed app
+provides.
 
 The generated frontend carries its gates: `npm run lint` (every stapel rule at
 error), `npm test` (nav gate), `npm run build`, `npm run gen:tokens:check`.

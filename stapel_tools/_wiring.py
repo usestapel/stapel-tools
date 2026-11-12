@@ -9,9 +9,11 @@ minimal single-file settings, so the two cannot wire a selection differently.
 
 What a selection gets (AUDIT-BRICKS-2, 2026-10-22):
 
-* a composite's ``preset.SETTINGS_DEFAULTS``, imported from the installed
-  package at settings time and merged two levels deep UNDER any explicit
-  value (SO-1: social's reviews ``TARGET_TYPES`` reached no generated app);
+* the ``preset.SETTINGS_DEFAULTS`` of every selected composite, and of every
+  selected companion whose ``companion_of`` target is selected too (promotions
+  next to orders), imported from the installed package at settings time and
+  merged two levels deep UNDER any explicit value (SO-1: social's reviews
+  ``TARGET_TYPES`` reached no generated app; companions were hand-pasted);
 * stapel-realtime's host wiring whenever a socket-serving module selected it
   (CH-8): the ``channels`` signal transport, ``CHANNEL_LAYERS``, the origin
   allowlist, ``ASGI_APPLICATION`` and a ``config/asgi.py`` built by
@@ -39,6 +41,24 @@ def composites(libs: list[str]) -> list[str]:
     return [k for k in reg if k in libs and reg[k].get("composite")]
 
 
+def companions_wired(libs: list[str]) -> list[str]:
+    """Selected companions with a selected ``companion_of`` target, registry order."""
+    reg = _libs()
+    return [
+        k for k in reg
+        if k in libs and any(t in libs for t in reg[k].get("companion_of", ()))
+    ]
+
+
+def preset_modules(libs: list[str]) -> list[str]:
+    """Registry keys whose ``preset.SETTINGS_DEFAULTS`` the settings merge.
+
+    One list for composites and companions, in registry order, so the merge
+    order (later refines earlier) is fixed by the registry, not the caller."""
+    wired = set(composites(libs)) | set(companions_wired(libs))
+    return [k for k in _libs() if k in wired]
+
+
 def realtime_selected(libs: list[str]) -> bool:
     return "realtime" in libs
 
@@ -58,13 +78,15 @@ def middleware(libs: list[str]) -> list[str]:
 
 
 _PRESET_MERGE = '''
-# ─── Composite scenario defaults ────────────────────────────────────────────
-# Each selected composite's preset.SETTINGS_DEFAULTS, imported from the
-# installed package so these values cannot drift from the release this project
-# pins. Merged two levels deep (STAPEL_<MOD> -> key -> registry entry) UNDER
-# anything set above: an explicit STAPEL_<MOD> key, or one entry of a registry
-# such as STAPEL_REVIEWS["TARGET_TYPES"], wins over the preset's. Later
-# composites refine earlier ones ({composites_doc}).
+# ─── Composite and companion defaults ───────────────────────────────────────
+# Each selected composite's preset.SETTINGS_DEFAULTS, and each companion's
+# whose target is selected, imported from the installed package so these
+# values cannot drift from the release this project pins. Merged two levels
+# deep (STAPEL_<MOD> -> key -> registry entry) UNDER anything set above: an
+# explicit STAPEL_<MOD> key, or one entry of a registry such as
+# STAPEL_ORDERS["ADJUSTERS"], wins over the preset's; an explicit None entry
+# stays None, which the owning library's merge registry reads as "removed".
+# Later presets refine earlier ones ({composites_doc}).
 def _stapel_merge_preset_defaults(namespace, preset_modules):
     from importlib import import_module
 
@@ -90,7 +112,7 @@ _stapel_merge_preset_defaults(globals(), [{modules}])
 
 
 def render_preset_defaults(libs: list[str]) -> str:
-    keys = composites(libs)
+    keys = preset_modules(libs)
     if not keys:
         return ""
     reg = _libs()
@@ -246,8 +268,35 @@ def render_wiring(libs: list[str], *, flavor: str) -> str:
     return "".join(p for p in parts if p)
 
 
-def render_dev_wiring(libs: list[str]) -> str:
-    return REALTIME_DEV if realtime_selected(libs) else ""
+_PROTOTYPE_DEV = '''
+# {namespace}: the demo strategy {key} declares for a prototype-stage machine
+# (this file's posture). An explicit value set above wins.
+{namespace} = {{**{values!r}, **(globals().get("{namespace}") or {{}})}}
+'''
+
+
+def render_prototype_dev(libs: list[str]) -> str:
+    """Each selected module's ``prototype_dev`` values (a mock carrier, a mock
+    payment) for the local settings. The library refuses a mock outside the
+    prototype stage, so only a settings module that declares that stage may
+    carry this."""
+    reg = _libs()
+    out = []
+    for key in reg:
+        values = reg[key].get("prototype_dev")
+        if key in libs and values:
+            out.append(_PROTOTYPE_DEV.format(
+                namespace=f"STAPEL_{key.upper()}", key=f"stapel-{key}", values=dict(values)))
+    return "".join(out)
+
+
+def render_dev_wiring(libs: list[str], *, prototype: bool = False) -> str:
+    """The local settings' selection wiring. ``prototype``: the local settings
+    module declares the prototype posture stage."""
+    parts = [REALTIME_DEV if realtime_selected(libs) else ""]
+    if prototype:
+        parts.append(render_prototype_dev(libs))
+    return "".join(parts)
 
 
 #: Appended to the service tier's boot_smoke.py when stapel-search is
