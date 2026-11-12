@@ -40,7 +40,7 @@ if not os.environ.get("SECRET_KEY") and not _IS_PROD:
     os.environ["SECRET_KEY"] = "django-insecure-{{slug}}-dev-only"
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 
-DEBUG = os.getenv("DEBUG", "false" if _IS_PROD else "true").lower() in ("true", "1", "yes")
+DEBUG = os.getenv("DEBUG", "false" if _IS_PROD else "true").lower() in ("true", "1", "yes")  # noqa: CFG013
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "" if _IS_PROD else "*").split(",")
 
 # Public origin of this project's frontend — the base every off-session
@@ -67,7 +67,9 @@ if _IS_PROD:
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     JWT_COOKIE_SECURE = True
-    SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True").lower() == "true"
+    # Blank means unset; moves to stapel_core.conf.env_bool with the core 0.96.0 pin.
+    SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "").strip().lower() not in (
+        "0", "false", "no", "off")  # noqa: CFG013
     # HSTS ramp — conservative default, no subdomains/preload; raise once
     # HTTPS is verified stable (see the monolith/microservices prod.py
     # template comment for the full rationale; security-programme.md SEC-4).

@@ -171,6 +171,28 @@ CFG010  (warning) **In a library checkout**, a key the library offers (a top
         ``REQUIRE_LOCATION_ON_PUBLISH`` refused publishes nobody was told
         about). Warning-level while the fleet backfills its rows.
 
+CFG013  (warning) An environment variable turned into a boolean by hand:
+        the read (``os.getenv`` / ``os.environ.get`` / ``os.environ[...]``,
+        through any ``.strip()`` / ``.lower()`` chain) is compared only
+        against boolean words (``== "true"``, ``in ("1", "yes")``,
+        ``not in ("0", "false", ...)``), or wrapped in ``bool(...)``. Every
+        hand-rolled parser answers "what does a blank value mean" and "what
+        does an unrecognised word mean" on its own, and the answers differ:
+        ``.lower() == "true"`` turns a default-on gate OFF for ``KEY=`` (the
+        blank line an env-file template leaves) and for ``1`` / ``yes``;
+        ``not in ("", "0", ...)`` does the same for blank; ``not in ("0",
+        ...)`` OPENS a default-off hatch for blank or a typo. Use
+        ``stapel_core.conf.env_bool(NAME, default)`` (stapel-core >= 0.96.0):
+        blank means unset, only a recognised word changes the value, and
+        ``manage.py check`` refuses anything else (``stapel_core.conf.E004``).
+        Runs in settings modules too — that is where these reads live.
+        Cannot see a read stored in a variable and compared later
+        (``_x = os.getenv("K")`` … ``_x == "true"``), nor a string compared
+        to a non-boolean word (``ENV == "prod"``), which is not a boolean.
+        Suppress a deliberate exception with ``# noqa: CFG013``. Warning
+        level until the scaffold templates move to ``env_bool`` (they need a
+        stapel-core pin that has it); promote to error after.
+
 ``os.environ.setdefault(...)`` is a write, not a read (manage.py / wsgi set
 DJANGO_SETTINGS_MODULE that way) and is never flagged.
 
@@ -218,7 +240,7 @@ SKIP_DIRS = {
 }
 
 #: call targets that read one config key from their first string argument
-_READ_CALLS = {"get_config", "get_secret", "getenv"}
+_READ_CALLS = {"get_config", "get_secret", "getenv", "env_bool"}
 #: attribute-call read: os.environ.get(...) / environ.get(...)
 _ENVIRON_GET = "get"
 
@@ -361,7 +383,7 @@ def _reads_in_call(call: ast.Call) -> Optional[str]:
     if isinstance(func, ast.Name) and func.id in _READ_CALLS:
         return _str_first_arg(call)
     if isinstance(func, ast.Attribute):
-        if func.attr in ("get_config", "get_secret", "getenv"):
+        if func.attr in _READ_CALLS:
             return _str_first_arg(call)
         # os.environ.get("X") / environ.get("X")
         if func.attr == _ENVIRON_GET and _is_environ(func.value):
@@ -377,6 +399,102 @@ def _reads_in_subscript(node: ast.Subscript) -> Optional[str]:
     if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
         return key_node.value
     return None
+
+
+#: Words a hand-rolled env-bool parser compares against (case-folded). A
+#: comparison whose string operands are ALL in this set is a boolean parse; one
+#: naming any other word (``"prod"``, ``"auto"``) is not reported.
+_BOOL_WORDS = frozenset({
+    "", "1", "0", "true", "false", "yes", "no", "on", "off", "y", "n", "t", "f",
+})
+_STRING_METHODS = frozenset({"strip", "lower", "upper", "casefold", "lstrip", "rstrip"})
+
+
+def _env_read_key(node: ast.AST) -> Optional[str]:
+    """The key of an env read under any ``.strip()``/``.lower()`` chain (or an
+    ``or "default"`` fallback); ``None`` when *node* is not one."""
+    while True:
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _STRING_METHODS
+        ):
+            node = node.func.value
+            continue
+        if isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or) and node.values:
+            node = node.values[0]
+            continue
+        break
+    if isinstance(node, ast.Call):
+        func = node.func
+        if (isinstance(func, ast.Name) and func.id == "getenv") or (
+            isinstance(func, ast.Attribute)
+            and (func.attr == "getenv" or (func.attr == _ENVIRON_GET and _is_environ(func.value)))
+        ):
+            if not node.args:
+                return None
+            # A key held in a constant (os.getenv(FLAG)) is named by its source.
+            return _str_first_arg(node) or ast.unparse(node.args[0])
+        return None
+    if isinstance(node, ast.Subscript):
+        return _reads_in_subscript(node)
+    return None
+
+
+def _bool_words(node: ast.AST) -> Optional[set[str]]:
+    """The string constants of *node* (a str, or a tuple/list/set of them)
+    when every one is a boolean word; ``None`` otherwise."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        items = [node.value]
+    elif isinstance(node, (ast.Tuple, ast.List, ast.Set)) and node.elts:
+        if not all(isinstance(e, ast.Constant) and isinstance(e.value, str) for e in node.elts):
+            return None
+        items = [e.value for e in node.elts]
+    else:
+        return None
+    words = {item.strip().lower() for item in items}
+    return words if words <= _BOOL_WORDS else None
+
+
+def find_hand_rolled_env_bools(project: Path) -> list[tuple[str, int, str]]:
+    """``(path, line, env key)`` for every CFG013 site under *project*."""
+    sites: list[tuple[str, int, str]] = []
+    for py in _walk_py(project):
+        try:
+            src = py.read_text(encoding="utf-8")
+            tree = ast.parse(src, filename=str(py))
+        except (OSError, SyntaxError, UnicodeDecodeError):
+            continue
+        lines = src.splitlines()
+        for node in ast.walk(tree):
+            key: Optional[str] = None
+            if isinstance(node, ast.Compare) and len(node.ops) == 1:
+                left, right = node.left, node.comparators[0]
+                if isinstance(node.ops[0], (ast.Eq, ast.NotEq, ast.In, ast.NotIn)):
+                    for read, other in ((left, right), (right, left)):
+                        candidate = _env_read_key(read)
+                        if candidate and _bool_words(other) is not None:
+                            key = candidate
+                            break
+            elif (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "bool"
+                and len(node.args) == 1
+            ):
+                key = _env_read_key(node.args[0])
+            if not key:
+                continue
+            # The escape may sit on any line the expression spans.
+            last = getattr(node, "end_lineno", None) or node.lineno
+            if any(
+                escape.is_suppressed(_noqa_rules(lines[n - 1]), "CFG013")
+                for n in range(node.lineno, last + 1)
+                if 0 < n <= len(lines)
+            ):
+                continue
+            sites.append((str(py), node.lineno, key))
+    return sorted(set(sites))
 
 
 def _noqa_rules(line: str) -> Optional[set[str]]:
@@ -1006,6 +1124,22 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
             f"route it through config/settings (get_config) so every knob is in "
             f"one audited place and in CONFIG.MD; suppress a deliberate exception "
             f"with '# noqa: CFG001'",
+        ))
+
+    # ------------------------------------------------------------------ CFG013
+    # Above the early exits: it needs no CONFIG.MD.
+    for path, line, key in find_hand_rolled_env_bools(project):
+        findings.append(Finding(
+            path, line, "CFG013",
+            f"'{key}' is parsed as a boolean by hand, which decides on its own "
+            f"what a blank value (the 'KEY=' an env-file template leaves) and "
+            f"an unrecognised word mean. Use "
+            f"stapel_core.conf.env_bool({key!r}, <default>) (stapel-core >= "
+            f"0.96.0): blank means unset, only a recognised word changes the "
+            f"value, anything else is refused by manage.py check "
+            f"(stapel_core.conf.E004); suppress a deliberate exception with "
+            f"'# noqa: CFG013'",
+            level="warning",
         ))
 
     # ------------------------------------------------------------------ CFG006

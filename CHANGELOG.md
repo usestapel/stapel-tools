@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [Unreleased] — proposed 0.80.0
 
 - **Chat thread route and "message" buttons, ready for the next chat-react.**
   Mount recipes for `chat.thread` (`chat/:id` → `ConversationThreadPage`
@@ -176,6 +176,23 @@
   called `*client*` for the module to count as one that makes requests.
 - **`prototype_dev` registry values** reach the local settings only when they
   declare the prototype posture stage: delivery's `DEFAULT_CARRIER="mock"`.
+
+- **`stapel-config-lint` CFG013: a boolean parsed from the environment by
+  hand** (warning). An environment read (`os.getenv`, `os.environ.get`,
+  `os.environ[...]`, through `.strip()`/`.lower()`) compared only against
+  boolean words, or wrapped in `bool(...)`. Each hand-rolled parser decides
+  alone what a blank `KEY=` and an unrecognised word mean, and the common
+  spellings get it wrong for a default-on gate (`== "true"` turns it off for
+  a blank value and for `1`). The hint names
+  `stapel_core.conf.env_bool(NAME, default)` (stapel-core 0.96.0); the rule
+  becomes an error once the scaffold pins a stapel-core that has `env_bool`.
+  A `# noqa: CFG013` anywhere on the lines the expression spans suppresses
+  it.
+- **A blank `SECURE_SSL_REDIRECT=` no longer turns the HTTPS redirect off.**
+  The generated prod settings read `SECURE_SSL_REDIRECT` with `== "true"`, so
+  a blank value, `1` or `yes` switched the redirect off. It is now off only
+  for `0` / `false` / `no` / `off`. Projects generated earlier keep the old
+  line; check `SECURE_SSL_REDIRECT` in their environment.
 
 ## [0.79.1] — 2026-11-05
 

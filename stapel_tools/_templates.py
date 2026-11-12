@@ -606,7 +606,9 @@ JWT_COOKIE_SECURE = True
 # builds comes out http:// behind an https proxy — which is how OAuth
 # redirect_uri stopped matching what Google and GitHub had registered
 # (2026-08-16).
-SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "True").lower() == "true"
+# Blank means unset; moves to stapel_core.conf.env_bool with the core 0.96.0 pin.
+SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "").strip().lower() not in (
+    "0", "false", "no", "off")  # noqa: CFG013
 
 # HSTS ramp: start conservative — 1 day, no subdomains, no preload — and
 # raise SECURE_HSTS_SECONDS to 31536000 (1 year) once HTTPS has been verified
