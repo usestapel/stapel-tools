@@ -37,6 +37,7 @@ never hand-edit the generated ``frontend/src/stapel-tokens/`` output.
 """
 
 import json
+import re
 
 PACKAGE_JSON = """\
 {
@@ -1624,6 +1625,26 @@ def slot_component_name(slot: str) -> str:
     return _pascal(slot)
 
 
+def _version_tuple(text: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", text)[:3])
+
+
+def page_slots(entry_id: str, pairs: list[dict]) -> tuple[str, ...]:
+    """The page slots *entry_id*'s page renders with the selected *pairs*:
+    ``NAV_ENTRY_MOUNTS`` ``page_slots``, or none when the pair that owns the
+    entry is older than the mount's ``page_slots_since``."""
+    mount = NAV_ENTRY_MOUNTS.get(entry_id, {})
+    since = mount.get("page_slots_since")
+    if since:
+        owner = next(
+            (p for p in pairs if any(e.get("id") == entry_id for e in p.get("nav") or ())),
+            None,
+        )
+        if owner is None or _version_tuple(owner.get("version", "0")) < _version_tuple(since):
+            return ()
+    return tuple(mount.get("page_slots", ()))
+
+
 def nav_entry_paths(route_plan: dict) -> dict[str, str]:
     """Every routed nav entry's absolute path, as the route plan mounts it —
     ``/login`` stays itself, an ``/app`` child becomes ``/app/<path>``."""
@@ -2468,6 +2489,8 @@ ADMIN_ROOT_ENTRY = {
 #
 # `page_slots` (on any shape that emits a wrapper) names the page slots the
 # component renders from its `slots` prop; scoped embeds fill them.
+# `page_slots_since` is the first version of the owning pair whose component
+# takes that prop; with an older mirror the page renders no page slot.
 #
 # An id ABSENT from this table falls through to the placeholder, deliberately:
 # a pair that adds a screen this stapel-tools does not know about gets a page
@@ -2507,10 +2530,15 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     "profiles.notifications": {},
     "profiles.contacts": {},
     "profiles.connections": {},
-    # The fx release of profiles-react renders `page.actions` from `slots`
-    # (chat-react's `chat.message_user` scopes there). Without a scoped embed
-    # the wrapper passes no `slots`, so an older pair compiles unchanged.
-    "profiles.public": {"route_params": {"userId": "string"}, "page_slots": ("page.actions",)},
+    # profiles-react 0.28.0 renders `page.actions` from `slots` (chat-react's
+    # `chat.message_user` and feed-react's `feed.author_posts_action` scope
+    # there); 0.27.x has no `slots` prop, so below that the page renders no
+    # page slot and a scoped embed is dropped with a note.
+    "profiles.public": {
+        "route_params": {"userId": "string"},
+        "page_slots": ("page.actions",),
+        "page_slots_since": "0.28.0",
+    },
     # categories-react 0.2.0
     "categories.catalog": {},
     "categories.category": {

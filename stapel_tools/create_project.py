@@ -3330,7 +3330,7 @@ def _write_frontend_scaffold(
     page_plan = plan_page_embeds(
         react_entries, auth_gated=auth_wired,
         pages={
-            entry_id: F.NAV_ENTRY_MOUNTS.get(entry_id, {}).get("page_slots", ())
+            entry_id: F.page_slots(entry_id, react_entries)
             for entry_id in F.nav_entry_paths(route_plan)
         } if shell_react_needed else {},
     )

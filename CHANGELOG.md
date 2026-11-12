@@ -11,6 +11,11 @@
   (chat-react 0.23.1 declares neither); regenerate the chat-react `nav` and
   `embeds` mirror (and profiles-react's, whose `PublicProfilePage` gains
   `slots`) from the released pairs' `nav-manifest.json`, in one train.
+  `profiles.public` renders its `page.actions` slot only from a
+  profiles-react mirror at 0.28.0 or later (`page_slots_since`); with 0.27.x
+  a scoped embed (chat's message button, feed's "Posts" button) is dropped
+  with a note instead of handing `slots` to a page without the prop, which
+  failed `tsc` in a social + feed project.
 
 - **A minimal project with cdn migrates on a fresh venv.** `--type minimal`
   with stapel-cdn selected (shop pulls it) listed no pyvips, so the first

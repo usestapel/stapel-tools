@@ -66,7 +66,14 @@ def test_classified_wires_thread_route_and_message_buttons(tmp_path, next_chat):
     assert 'import { useListing } from "@stapel/listings-react";' in modules
 
 
-def test_social_profile_page_gets_the_message_button(tmp_path, next_chat):
+@pytest.fixture
+def next_profiles(monkeypatch):
+    profiles = copy.deepcopy(cp.FRONTEND_REACT_LIBS["profiles"])
+    profiles["version"] = "0.28.0"  # PublicProfilePage takes `slots`
+    monkeypatch.setitem(cp.FRONTEND_REACT_LIBS, "profiles", profiles)
+
+
+def test_social_profile_page_gets_the_message_button(tmp_path, next_chat, next_profiles):
     src = _front(tmp_path, ["social"])
     profile = (src / "pages" / "PublicProfilePageRoute.tsx").read_text()
     assert "MessageButton" in profile and "slots={{" in profile
@@ -79,3 +86,23 @@ def test_todays_mirror_renders_no_chat_seams(tmp_path):
     assert "chat/:id" not in (src / "routes.tsx").read_text()
     assert "subjectOwner" not in (src / "modules.tsx").read_text()
     assert "slots=" not in (src / "pages" / "PublicProfilePageRoute.tsx").read_text()
+
+
+def test_profile_page_slots_wait_for_the_profiles_release(tmp_path, next_chat):
+    # A scoped embed alone must not hand `slots` to a PublicProfilePage that
+    # has no such prop (profiles-react 0.27.x): the container would not compile.
+    src = _front(tmp_path, ["social"])
+    profile = (src / "pages" / "PublicProfilePageRoute.tsx").read_text()
+    assert "slots=" not in profile and "MessageButton" not in profile
+
+
+def test_feed_embed_waits_for_the_profiles_release(tmp_path, monkeypatch):
+    monkeypatch.setenv("SIBLING_ROOT", str(tmp_path / "nowhere"))
+    cp.create_project(
+        name="app", project_type="monolith", title="App", url="https://x.dev",
+        company_name="X", company_email="x@x.dev", modules=["social", "feed"],
+        output_dir=tmp_path, use_submodules=False, init_git=False, want_landing=True,
+        allow_unreleased=True,
+    )
+    profile = (tmp_path / "app" / "frontend" / "src" / "pages" / "PublicProfilePageRoute.tsx").read_text()
+    assert "slots=" not in profile and "AuthorPostsButton" not in profile
