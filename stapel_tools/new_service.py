@@ -149,6 +149,7 @@ def make_context(
     from ._wiring import (
         boot_smoke_extra,
         keys_for_apps,
+        moderation_selected,
         realtime_selected,
         render_bootstrap_seed,
         render_dev_wiring,
@@ -191,6 +192,8 @@ def make_context(
             selected_keys, prototype=comp is not None and comp.has_posture),
         # Plain string flag (see HAS_CDN): the realtime config/asgi.py.
         "HAS_REALTIME": "true" if realtime_selected(selected_keys) else "",
+        # Plain string flag (see HAS_CDN): the moderation lead bootstrap command.
+        "HAS_MODERATION": "true" if moderation_selected(selected_keys) else "",
         "BOOT_SMOKE_EXTRA": boot_smoke_extra(selected_keys),
         "BOOTSTRAP_SEED": render_bootstrap_seed(selected_keys),
         # Plain string (see HAS_CDN): appended to the service conftest.
@@ -343,6 +346,13 @@ def generate_service_files(root: Path, ctx: dict) -> dict[Path, str]:
         root / d / "var" / "mailtrap" / ".gitkeep": "",
         root / f"{d}.yml": render(SERVICE_YML, ctx),
     }
+    if ctx.get("HAS_MODERATION"):
+        from ._wiring import ENSURE_MODERATION_LEAD_PY
+
+        commands = root / d / "apps" / m / "management"
+        files[commands / "__init__.py"] = ""
+        files[commands / "commands" / "__init__.py"] = ""
+        files[commands / "commands" / "ensure_moderation_lead.py"] = ENSURE_MODERATION_LEAD_PY
     # Outbox/mailtrap integration harness (G7, system-design §7.12.3 / §7.21).
     files.update(harness_files(root / d / "tests"))
     return files

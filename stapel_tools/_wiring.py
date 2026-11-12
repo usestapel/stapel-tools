@@ -300,6 +300,97 @@ def listings_without_geo(libs: list[str]) -> bool:
     return "listings" in libs and "geo" not in libs
 
 
+#: The moderation roles stapel-moderation documents (MODULE.md "Rights"): a
+#: moderator reads the queue (Case view = MID), a lead also claims and decides
+#: (Case change = HIGH). Defined so an admin can assign them; the local
+#: bootstrap admin gets the lead role (``ensure_moderation_lead``).
+MODERATION_ROLES = '''
+# ─── Moderation roles (stapel-moderation, MODULE.md "Rights") ───────────────
+# Rights are stapel-auth staff roles over the stapel_core.access mandate. A
+# moderator reads the queue and case cards (MID in the moderation app only), a
+# lead also claims and decides (HIGH there). Assign them to staff accounts in
+# the admin; the local bootstrap admin gets "moderation_lead" at boot
+# (bootstrap.sh, ensure_moderation_lead). An explicit role entry above wins.
+STAPEL_ACCESS = {
+    **(globals().get("STAPEL_ACCESS") or {}),
+    "ROLES": {
+        "moderator": {"clearance": "low", "apps": {"moderation": "mid"}},
+        "moderation_lead": {"clearance": "low", "apps": {"moderation": "high"}},
+        **((globals().get("STAPEL_ACCESS") or {}).get("ROLES") or {}),
+    },
+}
+'''
+
+#: bootstrap.sh step: the local bootstrap admin can sign in to the SPA (email)
+#: and reach the moderation queue (role). Arguments come from the same
+#: DJANGO_SUPERUSER_* env the superuser step reads; unset, the step is a no-op.
+MODERATION_LEAD_BOOTSTRAP = '''
+# optional: the bootstrap admin (DJANGO_SUPERUSER_*, local env only) gets the
+# email the SPA signs in with and the moderation lead role, at the prototype
+# posture stage only; without those variables it does nothing.
+optional "moderation-lead" python manage.py ensure_moderation_lead --username "${DJANGO_SUPERUSER_USERNAME:-}" --email "${DJANGO_SUPERUSER_EMAIL:-}"
+'''
+
+ENSURE_MODERATION_LEAD_PY = '''"""Give the local bootstrap admin a way into the moderation queue.
+
+``createsuperuser --noinput`` (bootstrap.sh's superuser step) sets no email on
+this user model, and the SPA signs in by email or phone code only, so the one
+staff account could not open the moderation console without a shell. This
+command, run by bootstrap.sh right after it, sets the admin's email (when no
+other account holds it) and assigns the ``moderation_lead`` staff role
+(settings STAPEL_ACCESS["ROLES"]).
+
+Prototype posture stage only: a launched deployment provisions its staff on
+purpose, never from a demo env. Idempotent.
+"""
+from django.contrib.auth import get_user_model
+from django.core.management.base import BaseCommand
+
+ROLE = "moderation_lead"
+
+
+class Command(BaseCommand):
+    help = "Bootstrap admin: SPA email + the moderation lead role (prototype stage only)."
+
+    def add_arguments(self, parser):
+        parser.add_argument("--username", default="")
+        parser.add_argument("--email", default="")
+
+    def handle(self, *args, username="", email="", **options):
+        if not username:
+            self.stdout.write("moderation-lead: no bootstrap admin configured, nothing to do")
+            return
+        from stapel_core.django.presets import stage as posture_stage
+
+        stage = posture_stage()
+        if stage != "prototype":
+            self.stdout.write(f"moderation-lead: posture stage is {stage!r}, not prototype; skipped")
+            return
+        User = get_user_model()
+        user = User.objects.filter(username=username).first()
+        if user is None:
+            self.stdout.write(f"moderation-lead: no user {username!r} yet; skipped")
+            return
+        if email and not user.email:
+            if User.objects.filter(email__iexact=email).exclude(pk=user.pk).exists():
+                self.stderr.write(f"moderation-lead: {email} belongs to another account; email not set")
+            else:
+                user.email = email
+                user.save(update_fields=["email"])
+        from stapel_auth.staff_roles import assign_staff_role
+
+        _assignment, created = assign_staff_role(user, ROLE)
+        self.stdout.write(
+            f"moderation-lead: {username} <{user.email or 'no email'}> "
+            f"{'now holds' if created else 'holds'} {ROLE}"
+        )
+'''
+
+
+def moderation_selected(libs: list[str]) -> bool:
+    return "moderation" in libs and "auth" in libs
+
+
 def render_wiring(libs: list[str], *, flavor: str) -> str:
     """The ``{{STAPEL_WIRING}}`` fragment for a selection. ``flavor`` is
     ``"monolith"`` (service settings tier) or ``"minimal"`` (one file)."""
@@ -308,6 +399,8 @@ def render_wiring(libs: list[str], *, flavor: str) -> str:
         parts.append(MODERATION_MEDIA_BASE)
     if listings_without_geo(libs):
         parts.append(LISTINGS_WITHOUT_GEO)
+    if moderation_selected(libs):
+        parts.append(MODERATION_ROLES)
     if realtime_selected(libs):
         parts.append(_REALTIME_MONOLITH if flavor == "monolith" else _REALTIME_MINIMAL)
     parts.append(render_beat_schedule(libs, flavor=flavor))
@@ -426,7 +519,10 @@ def render_bootstrap_seed(libs: list[str]) -> str:
     for cmd in seed_commands(libs):
         name = "seed-" + cmd.split()[2].replace("_", "-")
         lines.append(f'optional "{name}" {cmd}')
-    return ("\n" + "\n".join(lines) + "\n") if lines else ""
+    out = ("\n" + "\n".join(lines) + "\n") if lines else ""
+    if moderation_selected(libs):
+        out += MODERATION_LEAD_BOOTSTRAP
+    return out
 
 
 #: Starter category trees, one per composite (a generic one otherwise). No

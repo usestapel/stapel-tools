@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- **The moderation queue is reachable after first login.** A selection with
+  stapel-moderation defines the module's documented staff roles
+  (`moderator`: moderation MID, `moderation_lead`: moderation HIGH) in
+  `STAPEL_ACCESS["ROLES"]`, and the service's `bootstrap.sh` runs the
+  generated `ensure_moderation_lead` right after the superuser step: the
+  bootstrap admin (`DJANGO_SUPERUSER_*`, present in `.env.local` only) gets
+  the email the SPA signs in with (createsuperuser sets none on this user
+  model) and the `moderation_lead` role. Prototype posture stage only;
+  without those variables it does nothing.
+
 - **Listings without geo can publish.** A selection with stapel-listings and
   no stapel-geo (shop, booking) writes
   `STAPEL_LISTINGS["REQUIRE_LOCATION_ON_PUBLISH"] = False` under any explicit
