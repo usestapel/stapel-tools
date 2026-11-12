@@ -71,6 +71,11 @@
   an empty origin every case with photos parked as `MediaUnavailable`.
   New `stapel-config-lint` **CFG012** (error, project): moderation and cdn
   installed and no origin stated, or stated as an empty literal.
+- **Moderation without a model sends every case to a person.** A selection
+  with stapel-moderation and no stapel-agent (classified) writes
+  `STAPEL_MODERATION["SCREEN_ENABLED"] = False` under any explicit value:
+  the automatic stage calls `llm.complete`, nothing provided it, and the case
+  sat in `screening` (retries need a worker the local stack does not run).
 
 - **Uploaded media renders in the local stack.** The local nginx proxied
   `/media/` to Django while the dev `config/urls.py` mounts no media route, so

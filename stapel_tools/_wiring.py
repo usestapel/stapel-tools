@@ -279,6 +279,29 @@ def moderation_media_selected(libs: list[str]) -> bool:
     return "moderation" in libs and "cdn" in libs
 
 
+#: stapel-moderation's automatic stage calls the ``llm.complete`` Function,
+#: which stapel-agent provides. Without it every screening raised
+#: ScreeningUnavailable and the case sat in "screening" (retries need a worker
+#: and beat the local stack does not run). SCREEN_ENABLED=False is the module's
+#: documented configuration with no model: every case goes to a person.
+MODERATION_WITHOUT_LLM = '''
+# ─── Moderation without a model (no stapel-agent selected) ──────────────────
+# The automatic screening stage calls llm.complete, which stapel-agent
+# provides; this selection has none, so every screening would fail and the case
+# would never reach a moderator. With the stage off every case goes straight to
+# a person (stapel-moderation CONFIG.MD, SCREEN_ENABLED). Select agent and set
+# this back to True to screen automatically. An explicit value above wins.
+STAPEL_MODERATION = {
+    "SCREEN_ENABLED": False,
+    **(globals().get("STAPEL_MODERATION") or {}),
+}
+'''
+
+
+def moderation_without_llm(libs: list[str]) -> bool:
+    return "moderation" in libs and "agent" not in libs
+
+
 #: stapel-listings refuses to publish a listing with no coordinates by default
 #: (REQUIRE_LOCATION_ON_PUBLISH). Coordinates come from stapel-geo's location
 #: field; a selection without geo has no way to ask for them, so every publish
@@ -410,6 +433,8 @@ def render_wiring(libs: list[str], *, flavor: str) -> str:
     parts = [render_preset_defaults(libs)]
     if moderation_media_selected(libs):
         parts.append(MODERATION_MEDIA_BASE)
+    if moderation_without_llm(libs):
+        parts.append(MODERATION_WITHOUT_LLM)
     if listings_without_geo(libs):
         parts.append(LISTINGS_WITHOUT_GEO)
     if moderation_selected(libs):

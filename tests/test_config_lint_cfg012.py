@@ -86,3 +86,15 @@ def test_generated_project_without_moderation_gets_no_fragment(tmp_path):
     proj = _generate(tmp_path, ["core", "cdn"])
     base = (proj / "svc-app" / "config" / "settings" / "base.py").read_text()
     assert "MEDIA_BASE_URL" not in base
+
+
+def test_moderation_without_an_llm_provider_goes_to_a_person(tmp_path):
+    base = (_generate(tmp_path, ["core", "cdn", "moderation"]) / "svc-app" / "config"
+            / "settings" / "base.py").read_text()
+    assert '"SCREEN_ENABLED": False' in base
+
+
+def test_moderation_with_agent_keeps_screening(tmp_path):
+    base = (_generate(tmp_path, ["core", "cdn", "moderation", "agent"]) / "svc-app" / "config"
+            / "settings" / "base.py").read_text()
+    assert "SCREEN_ENABLED" not in base
