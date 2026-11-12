@@ -16,7 +16,9 @@ nothing. This gate holds the two equal:
   member with an HTTP surface is mounted;
 * SETTINGS_DEFAULTS: a mapping of ``STAPEL_<MOD>`` names to dicts, which is
   the shape the generated settings merge at runtime (``_wiring``), so the
-  scaffold's defaults ARE the preset's;
+  scaffold's defaults ARE the preset's; each ``<MOD>`` is a registry module,
+  because a fragment for a module the project does not install is skipped
+  (social's ``STAPEL_MODERATION`` targets merge only with moderation);
 * FRONTEND_COMPOSITES: every pair a frontend preset installs has its backend
   in the composite's selection (members plus companions);
 * search sources: a composite whose selection holds the ``search`` pair ships
@@ -164,6 +166,12 @@ def preset_drift(key: str, preset: ModuleType | object) -> list[str]:
                 findings.append(f"{key}: SETTINGS_DEFAULTS key {name!r} is not a STAPEL_<MOD> name")
             elif not isinstance(value, dict):
                 findings.append(f"{key}: SETTINGS_DEFAULTS[{name!r}] is not a dict")
+            elif name.removeprefix("STAPEL_").lower() not in STAPEL_LIBS:
+                findings.append(
+                    f"{key}: SETTINGS_DEFAULTS[{name!r}] names no registry module, so "
+                    "the scaffold cannot tell when to merge it (a fragment for a "
+                    "module outside the selection is merged only when that module "
+                    "is selected)")
         findings.extend(_search_source_drift(key, defaults))
     return findings
 
@@ -209,7 +217,9 @@ def frontend_drift(name: str) -> list[str]:
     from .create_project import FRONTEND_COMPOSITES, STAPEL_LIBS, _expand_with_requires
 
     preset = FRONTEND_COMPOSITES[name]
-    selection = set(_expand_with_requires([preset["backend"]]))
+    # Unreleased companions included: an unreleased pair's backend is one too,
+    # and both are inert together until released.
+    selection = set(_expand_with_requires([preset["backend"]], unreleased_companions=True))
     return [
         f"{name}: frontend pair {pair!r} has no backend in the {preset['backend']!r} "
         "selection (add it to the composite's requires or companions)"

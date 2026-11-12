@@ -314,6 +314,8 @@ def declarations() -> list:
         found.append((package, spec, source))
 
     for key, entry in gen.FRONTEND_REACT_LIBS.items():
+        if entry.get("released", True) is False:
+            continue  # packed from the workspace, never resolved from npm
         add(entry["package"], f"^{entry['version']}", f"FRONTEND_REACT_LIBS[{key!r}]")
     for name, version in gen.FRONTEND_REACT_CORE_DEPS.items():
         add(name, f"^{version}", "FRONTEND_REACT_CORE_DEPS")
