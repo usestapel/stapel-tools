@@ -3324,6 +3324,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         MONOLITH_MAKEFILE,
         NGINX_LOCAL_CONF_TEMPLATE,
         PROD_BILLING_COMMENT_BLOCK,
+        SMOKE_MEDIA_SH,
         Frontend,
         nginx_local_backend_locations,
         render_compose_base,
@@ -3408,6 +3409,9 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         "TITLE": ctx["title"], "DIR_NAME": dir_name,
     }) + ui_wiring.makefile_block(api_base=f"/{slug}/api"))
     _write(project_dir / ui_wiring.SCRIPT_PATH, ui_wiring.script_source())
+    smoke_media = project_dir / "scripts" / "smoke-media.sh"
+    _write(smoke_media, render_tokens(SMOKE_MEDIA_SH, {"DIR_NAME": dir_name}))
+    smoke_media.chmod(0o755)
     _write_shared_infra(project_dir, frontends)
     # Before scaffold_service: the service Dockerfile COPYs the step runner,
     # and _update_prometheus appends this service's scrape job to the file

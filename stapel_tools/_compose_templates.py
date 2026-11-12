@@ -267,10 +267,12 @@ server {
     # redirects the backend builds would silently lose the port).
     #
     # Reserved namespace, checked BEFORE the Vite catch-all below (see
-    # NGINX_CONF's prod twin + the project's AGENTS.md §5). Static/media
+    # NGINX_CONF's prod twin + the project's AGENTS.md §5). Static files
     # aren't collected in dev — Django's runserver serves them itself — so
-    # they proxy to the backend like the API does, instead of the
-    # alias-to-volume prod uses.
+    # they proxy to the backend like the API does. Media is NOT a runserver
+    # route (config/urls.py mounts none): uploads land in the media-content
+    # volume, which docker-compose.local.yml mounts here at /media exactly as
+    # prod does, so dev serves them the way prod does, from the volume.
     location /staticfiles/ {
         proxy_pass $stapel_backend;
         proxy_set_header Host $http_host;
@@ -287,8 +289,7 @@ server {
     }
 
     location /media/ {
-        proxy_pass $stapel_backend;
-        proxy_set_header Host $http_host;
+        alias /media/;
     }
 
     # Backend locations below are GENERATED from the project's actual lib
@@ -813,8 +814,9 @@ volumes:
   db-data-local:
   redis-data-local:
 {{BROKER_VOLUMES}}  frontend-node-modules:
-  # named by svc-*.yml (extends brings the refs along); harmless locally —
-  # the dev backend serves static/media itself via runserver.
+  # named by svc-*.yml (extends brings the refs along). static-content is
+  # unused locally (runserver serves static itself); media-content is where
+  # uploads land, and the local nginx serves /media/ from it, as prod does.
   static-content:
   media-content:
 
@@ -877,6 +879,16 @@ services:
       - "${HTTP_PORT:-8080}:80"
     volumes:
       - ./service-configs/nginx-local:/etc/nginx/templates:ro
+      # Uploaded media, served from the volume the backend writes (prod's
+      # shape). nocopy: nginx:alpine ships a root-owned /media, and an empty
+      # volume seeded from it leaves the backend (uid 10001) unable to create
+      # MEDIA_ROOT/<slug>.
+      - type: volume
+        source: media-content
+        target: /media
+        read_only: true
+        volume:
+          nocopy: true
     environment:
       BACKEND_UPSTREAM: "${BACKEND_UPSTREAM:-{{BACKEND_UPSTREAM_DEFAULT}}}"
       FRONTEND_LOCAL_UPSTREAM: "${FRONTEND_LOCAL_UPSTREAM:-frontend:5173}"
@@ -1074,6 +1086,79 @@ up: disk-guard
 
 down:
 \t$(COMPOSE) down
+
+# --- Smoke of the booted local stack ---------------------------------------
+# Health of every service, then a media round trip: a file the backend
+# stores must come back through nginx with its content type.
+HTTP_PORT ?= $(shell sed -n 's/^HTTP_PORT=//p' .env.local 2>/dev/null | tail -n 1)
+.PHONY: smoke-local
+smoke-local:
+\tsh deploy/smoke-services.sh localhost:$(or $(HTTP_PORT),8080)
+\tCOMPOSE="$(COMPOSE)" sh scripts/smoke-media.sh http://localhost:$(or $(HTTP_PORT),8080)
+"""
+
+#: scripts/smoke-media.sh — the local stack's media round trip. The health
+#: smoke (deploy/smoke-services.sh) answers 200 while every uploaded photo
+#: and avatar 404s, because nothing it probes is a file the backend wrote.
+SMOKE_MEDIA_SH = """\
+#!/bin/sh
+# scripts/smoke-media.sh - a file the backend stores is served back through
+# nginx, with its content type. Run against the booted local stack:
+#
+#   make smoke-local            # health probe + this script
+#   sh scripts/smoke-media.sh [base-url]   # default http://localhost:${HTTP_PORT:-8080}
+#
+# Env: COMPOSE (default: the local compose command), SERVICE (default
+# {{DIR_NAME}}).
+#
+# What it sees: the backend's default storage (MEDIA_ROOT) and the public
+# /media/ route in front of it, end to end through nginx. What it cannot see:
+# stapel-cdn's upload pipeline (variants, refs, signed links) - it writes the
+# file through Django's storage API, not through the upload endpoint.
+set -u
+
+BASE_URL="${1:-http://localhost:${HTTP_PORT:-8080}}"
+COMPOSE="${COMPOSE:-docker compose -f docker-compose.local.yml --env-file .env.local}"
+SERVICE="${SERVICE:-{{DIR_NAME}}}"
+body="${TMPDIR:-/tmp}/stapel-smoke-media.$$"
+trap 'rm -f "$body"' EXIT
+
+# A 1x1 PNG, stored under a unique name; the last stdout line is its URL.
+store='import base64, uuid
+from django.core.files.base import ContentFile
+from django.core.files.storage import default_storage
+png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=")
+name = default_storage.save("smoke/" + uuid.uuid4().hex + ".png", ContentFile(png))
+print(default_storage.url(name))'
+url="$($COMPOSE exec -T "$SERVICE" python manage.py shell -c "$store" 2>/dev/null | tail -n 1)"
+case "$url" in
+    /*) ;;
+    *) echo "SMOKE MEDIA FAILED: the backend did not store a file (got: '$url')" >&2; exit 1 ;;
+esac
+
+result="$(curl -s --max-time 10 -o "$body" -w '%{http_code} %{content_type}' "$BASE_URL$url" 2>/dev/null || true)"
+code="${result%% *}"
+ctype="${result#* }"
+
+name="${url#*/smoke/}"
+$COMPOSE exec -T "$SERVICE" python manage.py shell -c \\
+    "from django.core.files.storage import default_storage; default_storage.delete('smoke/$name')" \\
+    >/dev/null 2>&1 || true
+
+echo "  GET $url -> ${code:-000} ${ctype:-?}"
+if [ "$code" != "200" ]; then
+    echo "SMOKE MEDIA FAILED: a stored file is not served at its MEDIA_URL (http ${code:-000})" >&2
+    exit 1
+fi
+case "$ctype" in
+    image/png*) ;;
+    *) echo "SMOKE MEDIA FAILED: served as '$ctype', expected image/png" >&2; exit 1 ;;
+esac
+if ! head -c 8 "$body" | od -An -c | grep -q 'P   N   G'; then
+    echo "SMOKE MEDIA FAILED: the body is not the PNG that was stored" >&2
+    exit 1
+fi
+echo "OK: media stored by $SERVICE is served back through nginx"
 """
 
 MONOLITH_GITIGNORE = """\

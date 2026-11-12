@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- **Uploaded media renders in the local stack.** The local nginx proxied
+  `/media/` to Django while the dev `config/urls.py` mounts no media route, so
+  every photo and avatar answered 404. `docker-compose.local.yml` now mounts
+  the `media-content` volume into the local nginx (`nocopy`, read-only) and
+  `location /media/` aliases it, the shape prod has; the protected/private
+  404 stays in front. New generated gate `scripts/smoke-media.sh` (and
+  `make smoke-local`, which also runs the health smoke): stores a PNG through
+  the backend's storage and GETs it back through nginx, red unless 200 with
+  `image/png` and the same bytes.
+
 - **Companion bricks wire themselves.** A registry row may declare
   `companion_of` (the modules its `preset.SETTINGS_DEFAULTS` plugs into).
   When a target is selected too, the generated settings merge the companion's

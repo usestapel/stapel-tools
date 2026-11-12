@@ -75,4 +75,4 @@ def test_protected_and_private_media_are_not_served(tmp_path, uri):
 def test_public_variants_are_still_served(tmp_path, uri):
     confs = _confs(_create(tmp_path))
     assert "alias /media/" in _select(confs["prod"], uri)
-    assert "proxy_pass $stapel_backend" in _select(confs["local"], uri)
+    assert "alias /media/" in _select(confs["local"], uri)
