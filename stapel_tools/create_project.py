@@ -492,6 +492,110 @@ STAPEL_LIBS = {
         # The name is owned by @stapel/orders-react (ORDERS_ELEVATION_ACTIONS).
         "elevation_actions": ("orders.add_to_cart",),
     },
+    # ── Bricks with no PyPI release yet ─────────────────────────────────────
+    # "released": False keeps a row inert: `--modules` lists it, but the
+    # scaffold refuses it unless the caller passes --allow-unreleased, which
+    # installs the sibling workspace checkout (ahead_of_pypi path) instead of
+    # resolving a package PyPI does not have. stapel-assemble reports it as a
+    # gap. Releasing the brick = drop "released", set the pin and
+    # "ahead_of_pypi": False (tests/test_registry_bricks_wave.py).
+    #
+    # "companion_of": the modules this brick's preset.SETTINGS_DEFAULTS wires
+    # it into. When a target is selected too, the generated settings merge the
+    # fragment exactly like a composite's (_wiring.preset_modules); alone, the
+    # fragment is not merged and the brick's own API still works.
+    "promotions": {
+        "repo": "https://github.com/usestapel/stapel-promotions.git",
+        "dir": "stapel_promotions",
+        "required": False,
+        "description": "Promotions: discounts, promo codes and usage caps (an orders adjuster)",
+        "default": False,
+        "pin": "0.1.0",
+        "released": False,
+        "ahead_of_pypi": True,
+        "http": True,
+        "url_prefix": "promotions/api/",
+        "requires": [],
+        "companion_of": ["orders"],
+        "beat": ("stapel_promotions.beat", "get_promotions_beat_schedule"),
+    },
+    "delivery": {
+        "repo": "https://github.com/usestapel/stapel-delivery.git",
+        "dir": "stapel_delivery",
+        "required": False,
+        "description": "Delivery methods, rates, pickup points, address book and shipments (an orders adjuster)",
+        "default": False,
+        "pin": "0.1.0",
+        "released": False,
+        "ahead_of_pypi": True,
+        "http": True,
+        "url_prefix": "delivery/api/",
+        "requires": [],
+        "companion_of": ["orders"],
+        "beat": ("stapel_delivery.beat", "get_delivery_beat_schedule"),
+        # Local settings at the prototype stage ship the auto-advancing demo
+        # carrier (stapel_delivery refuses "mock" at any other stage).
+        "prototype_dev": {"DEFAULT_CARRIER": "mock"},
+    },
+    "inventory": {
+        "repo": "https://github.com/usestapel/stapel-inventory.git",
+        "dir": "stapel_inventory",
+        "required": False,
+        "description": "Stock per location, holds and a movement ledger (an orders checkout hook)",
+        "default": False,
+        "pin": "0.1.0",
+        "released": False,
+        "ahead_of_pypi": True,
+        "http": True,
+        "url_prefix": "inventory/api/",
+        "requires": [],
+        "companion_of": ["orders"],
+        "beat": ("stapel_inventory.beat", "get_inventory_beat_schedule"),
+    },
+    "cms": {
+        "repo": "https://github.com/usestapel/stapel-cms.git",
+        "dir": "stapel_cms",
+        "required": False,
+        "description": "Public content: pages, blog, menus, SEO fields, scheduled publishing",
+        "default": False,
+        "pin": "0.1.0",
+        "released": False,
+        "ahead_of_pypi": True,
+        "http": True,
+        # stapel_cms/urls.py contributes "api/v1/" under the host's prefix.
+        "url_prefix": "cms/",
+        "requires": [],
+        "beat": ("stapel_cms.beat", "get_cms_beat_schedule"),
+    },
+    "courses": {
+        "repo": "https://github.com/usestapel/stapel-courses.git",
+        "dir": "stapel_courses",
+        "required": False,
+        "description": "Courses, lessons, progress, quizzes and certificates (a purchasable type for orders)",
+        "default": False,
+        "pin": "0.1.0",
+        "released": False,
+        "ahead_of_pypi": True,
+        "http": True,
+        "url_prefix": "courses/api/",
+        "requires": [],
+        "companion_of": ["orders"],
+        "beat": ("stapel_courses.beat", "get_courses_beat_schedule"),
+    },
+    "referrals": {
+        "repo": "https://github.com/usestapel/stapel-referrals.git",
+        "dir": "stapel_referrals",
+        "required": False,
+        "description": "Referral codes, attribution and rewards on qualifying facts",
+        "default": False,
+        "pin": "0.1.0",
+        "released": False,
+        "ahead_of_pypi": True,
+        "http": True,
+        "url_prefix": "referrals/api/",
+        "requires": [],
+        "beat": ("stapel_referrals.beat", "get_referrals_beat_schedule"),
+    },
     # ── Composites (projections-and-composition §3/§4) ─────────────────────
     # A composite writes NO business logic: an INSTALLED_APPS/urls/config
     # preset over member modules + cross-domain Projection glue. Two flags
@@ -2296,6 +2400,26 @@ def _slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9\-]", "-", name.lower()).strip("-")
 
 
+def unreleased(modules: list[str]) -> list[str]:
+    """Registry keys among ``modules`` that PyPI does not serve yet."""
+    return [k for k in modules if STAPEL_LIBS.get(k, {}).get("released", True) is False]
+
+
+def require_released(modules: list[str], *, allow_unreleased: bool = False) -> None:
+    """Refuse a selection holding a brick with no PyPI release.
+
+    ``allow_unreleased`` (``--allow-unreleased``) installs the sibling
+    workspace checkout instead, a project that only builds inside the
+    workspace."""
+    pending = unreleased(modules)
+    if pending and not allow_unreleased:
+        names = ", ".join(f"stapel-{k}" for k in pending)
+        raise ValueError(
+            f"{names} not released on PyPI yet; a project selecting it would not "
+            "install. Pass --allow-unreleased to install the sibling workspace "
+            "checkout instead.")
+
+
 def _expand_with_requires(modules: list[str], *, companions: bool = True) -> list[str]:
     """Transitive closure of each module's hard ``requires`` (e.g. categories
     -> attributes), then re-ordered to STAPEL_LIBS registry order.
@@ -4069,6 +4193,7 @@ def create_project(
     base_image: str | None = None,
     image_base: str | None = None,
     fleet_tag: str | None = None,
+    allow_unreleased: bool = False,
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
@@ -4114,6 +4239,14 @@ def create_project(
             f"{', '.join(ENV_PRESETS)})",
             file=sys.stderr,
         )
+        sys.exit(1)
+
+    try:
+        require_released(
+            _expand_with_requires([m for m in modules if m != "core"]),
+            allow_unreleased=allow_unreleased)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
 
     if module_config:
@@ -4496,7 +4629,14 @@ def main():
         "--modules", nargs="+",
         choices=list(STAPEL_LIBS), metavar="MODULE",
         help="Modules to include (besides core which is always included). "
-             f"Available: {', '.join(k for k, v in STAPEL_LIBS.items() if not v['required'])}",
+             f"Available: {', '.join(k for k, v in STAPEL_LIBS.items() if not v['required'] and v.get('released', True))}. "
+             f"Not on PyPI yet (needs --allow-unreleased): {', '.join(unreleased(list(STAPEL_LIBS))) or 'none'}",
+    )
+    parser.add_argument(
+        "--allow-unreleased", action="store_true",
+        help="Accept modules with no PyPI release; they install from the sibling "
+             "workspace checkout (-e ../stapel-<name>), so the project builds "
+             "only inside the workspace.",
     )
     parser.add_argument(
         "--broker", choices=["none", "nats", "kafka"],
@@ -4702,6 +4842,7 @@ def main():
         base_image=args.base_image,
         image_base=args.image_base,
         fleet_tag=args.fleet_tag,
+        allow_unreleased=args.allow_unreleased,
     )
 
 

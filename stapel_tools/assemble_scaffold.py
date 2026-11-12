@@ -56,7 +56,7 @@ from pathlib import Path
 
 from .config_lint import collect_reads, lint_project
 from .config_manifest import ConfigEntry, aggregate_config_md, collect_lib_entries
-from .create_project import STAPEL_LIBS, _expand_with_requires, create_project
+from .create_project import STAPEL_LIBS, _expand_with_requires, create_project, unreleased
 
 
 @dataclass
@@ -217,6 +217,7 @@ def assemble_scaffold(
     shell: str | None = None,
     slots: dict[str, str] | None = None,
     base_image: str | None = None,
+    allow_unreleased: bool = False,
 ) -> AssembleResult:
     """Assemble a project from a slug + a flat list of Stapel lib keys, then
     statically verify it. See module docstring for the full contract.
@@ -249,7 +250,7 @@ def assemble_scaffold(
     for lib in libs:
         if lib == "core":
             continue
-        if lib in STAPEL_LIBS:
+        if lib in STAPEL_LIBS and (allow_unreleased or not unreleased([lib])):
             requested.add(lib)
         elif lib not in unknown_libs:
             unknown_libs.append(lib)
@@ -261,9 +262,10 @@ def assemble_scaffold(
 
     if unknown_libs:
         print(
-            "stapel-assemble: gap — lib(s) not in the STAPEL_LIBS registry, "
-            "skipped (not a crash, not a bug in the request — the module "
-            f"just isn't onboarded to stapel-tools yet): {', '.join(unknown_libs)}",
+            "stapel-assemble: gap — lib(s) not in the STAPEL_LIBS registry or "
+            "not released on PyPI yet, skipped (not a crash, not a bug in the "
+            "request — the module just isn't onboarded to stapel-tools yet): "
+            f"{', '.join(unknown_libs)}",
             file=sys.stderr,
         )
 
@@ -292,6 +294,7 @@ def assemble_scaffold(
         shell=shell,
         slots=slots,
         base_image=base_image,
+        allow_unreleased=allow_unreleased,
     )
 
     # Aggregate the connected libs' CONFIG.MD registries into the project's own
@@ -425,6 +428,11 @@ def main(argv: list[str] | None = None) -> int:
         help="FROM of every generated Python service Dockerfile "
         "(stapel-create-project --base-image; also $STAPEL_BASE_IMAGE).",
     )
+    parser.add_argument(
+        "--allow-unreleased", action="store_true",
+        help="Wire libs with no PyPI release from the sibling workspace checkout "
+        "instead of reporting them as gaps.",
+    )
     args = parser.parse_args(argv)
 
     from ._shell_slots import parse_slot_args
@@ -457,6 +465,7 @@ def main(argv: list[str] | None = None) -> int:
         shell=args.shell,
         slots=slots,
         base_image=args.base_image,
+        allow_unreleased=args.allow_unreleased,
     )
 
     print(
@@ -464,7 +473,7 @@ def main(argv: list[str] | None = None) -> int:
         f"({', '.join(result.libs_applied) or 'none'}) -> {result.project_dir}"
     )
     if result.libs_unknown:
-        print(f"  gap: unknown libs skipped: {', '.join(result.libs_unknown)}", file=sys.stderr)
+        print(f"  gap: unknown or unreleased libs skipped: {', '.join(result.libs_unknown)}", file=sys.stderr)
     if result.config_libs_missing:
         print(
             f"  gap: no CONFIG.MD yet for: {', '.join(result.config_libs_missing)} "
