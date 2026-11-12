@@ -63,13 +63,25 @@ _NO_DEFAULT = {"", "-", "—", "–", "none", "n/a", "нет"}
 # false positive is "declare it vault/env instead", not a leaked credential.
 _SENSITIVE_NAME_WORDS = {
     "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "CREDENTIALS",
-    "TOKEN", "KEY", "APIKEY", "PRIVATE", "CERT", "CERTIFICATE",
+    "TOKEN", "KEY", "APIKEY", "PRIVATE",
 }
+
+# A certificate is a credential only as what the key names: its last word
+# (TLS_CERT, SIGNING_CERTIFICATE), or the word before a file/PEM suffix
+# (CLIENT_CERT_PATH, CERT_PEM). Anywhere else the word is domain vocabulary:
+# a course's CERTIFICATE_NUMBER_PREFIX is a prefix, not a credential.
+_CERT_WORDS = {"CERT", "CERTIFICATE"}
+_FILE_SUFFIXES = {"FILE", "PATH", "PEM"}
 
 
 def _looks_secret(key: str) -> bool:
     """True when ``key``'s underscore-separated words name a credential."""
-    return bool(_SENSITIVE_NAME_WORDS & set(key.upper().split("_")))
+    words = key.upper().split("_")
+    if _SENSITIVE_NAME_WORDS & set(words):
+        return True
+    if words[-1] in _CERT_WORDS:
+        return True
+    return len(words) >= 2 and words[-1] in _FILE_SUFFIXES and words[-2] in _CERT_WORDS
 
 
 class ConfigManifestError(Exception):

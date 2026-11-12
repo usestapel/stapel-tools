@@ -29,6 +29,10 @@
   root `Makefile`, or an installed console script of the sibling
   (`stapel-verify`), is use; a test extra reached only by subprocess is no
   longer reported unused.
+- **A certificate is a secret name only as what the key names.** The
+  CONFIG.MD heuristic counts `CERT`/`CERTIFICATE` as the last word
+  (`TLS_CERT`) or before `FILE`/`PATH`/`PEM` (`CLIENT_CERT_PATH`);
+  `CERTIFICATE_NUMBER_PREFIX` may be declared `source = settings` again.
 - **`prototype_dev` registry values** reach the local settings only when they
   declare the prototype posture stage: delivery's `DEFAULT_CARRIER="mock"`.
 
