@@ -48,16 +48,21 @@
   value: nothing could ask for coordinates, so every publish answered 400
   `listing_location_required`. A selection with geo keeps the library default.
 
-- **Registry pins checked against PyPI; listings 0.29.0, profiles 0.23.0.**
+- **Registry pins checked against PyPI; listings 0.29.0, profiles 0.23.0,
+  agent 0.39.0.**
   0.79.1 rendered `stapel-listings>=0.28.0,<0.29` with 0.29.0 on PyPI: no
   neighbour's ceiling held it back (shop, classified and booking all ask
   `stapel-listings<1.0`), the registry row was simply not moved and nothing
   compared it with the index. New `scripts/check_pypi_pins.py`
   (`make pins-check`, a publish-workflow step, `--strict`): PIN001 a pin not
   on PyPI, PIN002 a newer release outside the rendered ceiling. Pins moved:
-  listings 0.29.0, profiles 0.23.0 (both additive). Still stale, named by the
-  gate: agent 0.39.0 (pin 0.38.1), recordings 0.44.0 (pin 0.42.0). The
-  generated requirements comment no longer claims "matches last-published".
+  listings 0.29.0, profiles 0.23.0 (both additive), agent 0.39.0 (a
+  classified + agent project's gates give the same results on 0.38.1 and
+  0.39.0). Still stale, named by the gate: recordings 0.44.0 (pin 0.42.0),
+  held until a recordings project's own gates are green (they are red on
+  either pin: the generated image and check run without ffmpeg,
+  `stapel_recordings.E006`). The generated requirements comment no longer
+  claims "matches last-published".
 
 - **The wizard fails loudly with no terminal.** A call missing any of
   `<name> --type --title --url --company-name --company-email --modules` with

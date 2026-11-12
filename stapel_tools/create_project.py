@@ -162,8 +162,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "LLM facade (complete/translate/transcribe/summarize/image)",
         "default": False,
-        "pin": "0.38.1",
-        "ahead_of_pypi": False,  # PyPI 0.38.1 @ 2026-10-22
+        "pin": "0.39.0",
+        "ahead_of_pypi": False,  # PyPI 0.39.0 @ 2026-11-05 (scripts/check_pypi_pins.py)
         "http": True,
         "url_prefix": "agent/",
         "requires": [],
