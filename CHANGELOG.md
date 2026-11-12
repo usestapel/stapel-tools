@@ -22,7 +22,10 @@
   bootstrap admin (`DJANGO_SUPERUSER_*`, present in `.env.local` only) gets
   the email the SPA signs in with (createsuperuser sets none on this user
   model) and the `moderation_lead` role. Prototype posture stage only;
-  without those variables it does nothing.
+  without those variables it does nothing. The roles come with
+  `stapel_core.access.backend.MandateBackend` first in
+  `AUTHENTICATION_BACKENDS` (without it the clearances had no effect,
+  `stapel_core.access.W001`).
 
 - **Listings without geo can publish.** A selection with stapel-listings and
   no stapel-geo (shop, booking) writes

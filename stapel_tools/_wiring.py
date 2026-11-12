@@ -319,6 +319,15 @@ STAPEL_ACCESS = {
         **((globals().get("STAPEL_ACCESS") or {}).get("ROLES") or {}),
     },
 }
+# The roles act only through the mandate backend (stapel_core.access.W001):
+# it computes has_perm from role clearance x model declaration at call time.
+AUTHENTICATION_BACKENDS = [
+    "stapel_core.access.backend.MandateBackend",
+    *[
+        b for b in (globals().get("AUTHENTICATION_BACKENDS") or ["django.contrib.auth.backends.ModelBackend"])
+        if b != "stapel_core.access.backend.MandateBackend"
+    ],
+]
 '''
 
 #: bootstrap.sh step: the local bootstrap admin can sign in to the SPA (email)

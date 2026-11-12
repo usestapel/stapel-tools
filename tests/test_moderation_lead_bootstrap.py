@@ -56,3 +56,14 @@ def test_roles_merge_under_explicit_entries():
     assert ns["STAPEL_ACCESS"]["STRICT"] is True
     assert ns["STAPEL_ACCESS"]["ROLES"]["moderator"] == {"clearance": "mid"}
     assert ns["STAPEL_ACCESS"]["ROLES"]["moderation_lead"]["apps"] == {"moderation": "high"}
+
+
+def test_roles_come_with_the_mandate_backend():
+    ns = {"AUTHENTICATION_BACKENDS": ["django.contrib.auth.backends.ModelBackend"]}
+    exec(_wiring.MODERATION_ROLES, ns)  # noqa: S102
+    assert ns["AUTHENTICATION_BACKENDS"] == [
+        "stapel_core.access.backend.MandateBackend",
+        "django.contrib.auth.backends.ModelBackend",
+    ]
+    exec(_wiring.MODERATION_ROLES, ns)  # noqa: S102  (idempotent)
+    assert ns["AUTHENTICATION_BACKENDS"].count("stapel_core.access.backend.MandateBackend") == 1
