@@ -299,3 +299,17 @@ class TestBrickFlows:
         ci = (self.ROOT / ".github" / "workflows" / "ci.yml").read_text()
         assert '"social feed" "booking reservations"' in ci
         assert "scripts/e2e_brick_flows.py" in ci
+
+
+class TestGdprOwners:
+    def test_both_bricks_are_derived_owners(self, tmp_path):
+        """stapel-gdpr waits for every owner's receipt; the map is read off
+        the bricks' own gdpr.py (OWNER / SUBJECT_TYPES), never hand-listed."""
+        from stapel_tools._gdpr_owners import derive_data_owners
+
+        for key in BRICKS:
+            repo = tmp_path / f"stapel-{key}"
+            repo.mkdir()
+            (repo / "gdpr.py").write_text(f'OWNER = "{key}"\nSUBJECT_TYPES = ["account"]\n')
+        assert derive_data_owners(list(BRICKS), tmp_path) == {
+            "feed": ["account"], "reservations": ["account"]}

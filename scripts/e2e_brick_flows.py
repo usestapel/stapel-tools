@@ -87,6 +87,21 @@ def _json(r):
     return json.loads(r.content) if r.content else None
 
 
+def _png() -> bytes:
+    """A 32x32 RGB PNG: a listing publishes with at least one image."""
+    import struct
+    import zlib
+
+    raw = b"".join(
+        b"\x00" + b"".join(bytes((x * 8, y * 8, 128)) for x in range(32)) for y in range(32))
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data))
+
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", 32, 32, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
 def feed() -> None:
     from django.urls import reverse
 
@@ -128,11 +143,20 @@ def reservations() -> None:
     category = _json(Client().get(reverse("category-roots")))[0]["id"]
 
     provider = Member("provider")
-    r = provider.call("POST", reverse("listing-list"), {"currency": "USD"})
+    # A service: countable=False (listings.bookables answers available=False
+    # for a countable listing with no stock).
+    r = provider.call("POST", reverse("listing-list"), {"currency": "USD", "countable": False})
     assert r.status_code == 201, ("listing", r.status_code, r.content[:300])
     listing = _json(r)["id"]
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    r = provider.client.post(
+        reverse("typed-image-upload", kwargs={"image_type": "product"}),
+        {"file": SimpleUploadedFile("chair.png", _png(), content_type="image/png")}, **provider.auth)
+    assert r.status_code in (200, 201), ("image", r.status_code, r.content[:300])
+    image = _json(r)["image"]["prefix"]
     r = provider.call("POST", reverse("listing-save-draft", kwargs={"pk": listing}), {
-        "category_id": str(category), "title_draft": "Haircut",
+        "category_id": str(category), "title_draft": "Haircut", "images_draft": [image],
         "description_draft": "Thirty minutes in the chair", "price_draft": "20.00"})
     assert r.status_code == 200, ("draft", r.status_code, r.content[:300])
     r = provider.call("POST", reverse("listing-publish", kwargs={"pk": listing}), {})
