@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **Moderation screening gets a media origin.** A selection with
+  stapel-moderation and stapel-cdn writes
+  `STAPEL_MODERATION["MEDIA_BASE_URL"] = os.getenv("SITE_URL", "")` (under
+  any explicit value): `cdn.describe` answers relative variant URLs, and with
+  an empty origin every case with photos parked as `MediaUnavailable`.
+  New `stapel-config-lint` **CFG012** (error, project): moderation and cdn
+  installed and no origin stated, or stated as an empty literal.
+
 - **Uploaded media renders in the local stack.** The local nginx proxied
   `/media/` to Django while the dev `config/urls.py` mounts no media route, so
   every photo and avatar answered 404. `docker-compose.local.yml` now mounts

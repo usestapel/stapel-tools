@@ -257,10 +257,34 @@ MIDDLEWARE = [
 '''
 
 
+#: stapel-moderation screens a case's photos through ``cdn.describe``, which
+#: answers relative variant URLs; with no origin to resolve them against every
+#: case with photos parks as ``MediaUnavailable`` (moderation.W007). The site
+#: origin is the one that serves ``/media/`` (this project's nginx).
+MODERATION_MEDIA_BASE = '''
+# ─── Moderation media origin (stapel-moderation + stapel-cdn) ───────────────
+# cdn.describe answers relative variant URLs (/media/<slug>/...). Screening
+# resolves them against MEDIA_BASE_URL; with none, every case with photos parks
+# as MediaUnavailable and never reaches a decision (stapel_moderation.W007).
+# This site's own origin serves /media/ (SITE_URL, written into .env at project
+# creation). An explicit STAPEL_MODERATION["MEDIA_BASE_URL"] above wins.
+STAPEL_MODERATION = {
+    "MEDIA_BASE_URL": os.getenv("SITE_URL", ""),
+    **(globals().get("STAPEL_MODERATION") or {}),
+}
+'''
+
+
+def moderation_media_selected(libs: list[str]) -> bool:
+    return "moderation" in libs and "cdn" in libs
+
+
 def render_wiring(libs: list[str], *, flavor: str) -> str:
     """The ``{{STAPEL_WIRING}}`` fragment for a selection. ``flavor`` is
     ``"monolith"`` (service settings tier) or ``"minimal"`` (one file)."""
     parts = [render_preset_defaults(libs)]
+    if moderation_media_selected(libs):
+        parts.append(MODERATION_MEDIA_BASE)
     if realtime_selected(libs):
         parts.append(_REALTIME_MONOLITH if flavor == "monolith" else _REALTIME_MINIMAL)
     parts.append(render_beat_schedule(libs, flavor=flavor))

@@ -151,6 +151,18 @@ CFG011  (error) **In a project**, a companion brick (``companion_of`` in the
         whose source is not locatable turns the second half into a note.
         See ``stapel_tools/_companion_lint.py`` for what it cannot see.
 
+CFG012  (error) **In a project**, the settings install stapel-moderation and
+        stapel-cdn and nothing gives moderation a media origin: no
+        ``STAPEL_MODERATION["MEDIA_BASE_URL"]`` (dict literal or subscript
+        assignment), no flat ``MEDIA_BASE_URL`` setting, no non-empty
+        ``MEDIA_BASE_URL=`` in ``.env``/``.env.example`` — or the value
+        stated is the literal ``""``/``None``. ``cdn.describe`` answers
+        relative variant URLs, so every case with photos parks as
+        ``MediaUnavailable`` and never reaches a decision. Static: a value
+        computed at runtime (``os.getenv("SITE_URL", "")``) counts as stated;
+        whether it is empty in a given environment is
+        ``stapel_moderation.W007``'s question at boot.
+
 CFG010  (warning) **In a library checkout**, a key the library offers (a top
         level key of the dict handed to ``AppSettings(defaults=...)``) that
         has no row in its own section of CONFIG.MD. The project CONFIG.MD a
@@ -882,6 +894,88 @@ def find_config_md(project: Path) -> Optional[Path]:
     return cand if cand.is_file() else None
 
 
+# ---------------------------------------------------------------------------
+# CFG012 — moderation screening media needs an origin
+# ---------------------------------------------------------------------------
+
+_MEDIA_BASE_KEY = "MEDIA_BASE_URL"
+
+
+def _is_empty_literal(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and (node.value is None or node.value == "")
+
+
+def _media_base_statements(tree: ast.AST) -> list[ast.AST]:
+    """Value nodes this settings module gives the moderation media origin."""
+    values: list[ast.AST] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id == _MEDIA_BASE_KEY:
+                    values.append(node.value)
+                elif (
+                    isinstance(target, ast.Subscript)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "STAPEL_MODERATION"
+                    and isinstance(target.slice, ast.Constant)
+                    and target.slice.value == _MEDIA_BASE_KEY
+                ):
+                    values.append(node.value)
+                elif (
+                    isinstance(target, ast.Name)
+                    and target.id == "STAPEL_MODERATION"
+                    and isinstance(node.value, ast.Dict)
+                ):
+                    for key, value in zip(node.value.keys, node.value.values):
+                        if isinstance(key, ast.Constant) and key.value == _MEDIA_BASE_KEY:
+                            values.append(value)
+    return values
+
+
+def _env_states_media_base(project: Path) -> bool:
+    for name in (".env", ".env.example"):
+        for root in (project, *project.parents[:1]):
+            env = root / name
+            if not env.is_file():
+                continue
+            for line in env.read_text(encoding="utf-8", errors="replace").splitlines():
+                key, sep, value = line.strip().partition("=")
+                if sep and key.strip() == _MEDIA_BASE_KEY and value.strip():
+                    return True
+    return False
+
+
+def _moderation_media_base_findings(project: Path, settings_files: list[Path]) -> list[Finding]:
+    installs: dict[str, tuple[str, int]] = {}
+    stated: list[ast.AST] = []
+    for path in settings_files:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+        except (SyntaxError, UnicodeDecodeError, OSError):
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value in ("stapel_moderation", "stapel_cdn"):
+                installs.setdefault(node.value, (str(path), node.lineno))
+        stated.extend(_media_base_statements(tree))
+    if "stapel_moderation" not in installs or "stapel_cdn" not in installs:
+        return []
+    if any(not _is_empty_literal(value) for value in stated) or _env_states_media_base(project):
+        return []
+    path, line = installs["stapel_moderation"]
+    how = "state it as empty" if stated else "never state it"
+    return [Finding(
+        path, line, "CFG012",
+        f"stapel-moderation and stapel-cdn are installed and the settings {how}: "
+        f"STAPEL_MODERATION['{_MEDIA_BASE_KEY}'] has no origin, so the relative "
+        f"variant URLs cdn.describe answers resolve to nothing and every case "
+        f"with photos parks as MediaUnavailable (the seller waits on a review "
+        f"that never comes). Set it to the origin that serves /media/ — the "
+        f"site URL for a project whose nginx serves media, e.g. "
+        f"STAPEL_MODERATION = {{'{_MEDIA_BASE_KEY}': os.getenv('SITE_URL', ''), ...}}",
+    )]
+
+
 def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Finding]:
     project = project.resolve()
     if notes is None:
@@ -986,6 +1080,12 @@ def lint_project(project: Path, *, notes: Optional[list[str]] = None) -> list[Fi
         settings_files = [p for p in _walk_py(project) if _is_settings_file(p)]
         for problem in companion_lint(project, settings_files, notes):
             findings.append(Finding(problem.path, problem.line, "CFG011", problem.message))
+
+    # ------------------------------------------------------------------ CFG012
+    # Above the early exits too: a generated project has no CONFIG.MD yet.
+    if library_distribution(project) is None:
+        settings_files = [p for p in _walk_py(project) if _is_settings_file(p)]
+        findings.extend(_moderation_media_base_findings(project, settings_files))
 
     config_md = find_config_md(project)
     if config_md is None:
