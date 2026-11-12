@@ -255,6 +255,7 @@ class TestEmission:
         expected = F.render_routes_tsx(
             F.build_nav_route_plan(nav_pairs), auth_wired=False, want_landing=False,
             app_route_present=True, has_cdn=False, pairs=tuple(e["key"] for e in entries),
+            not_found=(front / "src" / "NotFoundPage.tsx").is_file(),
         )
         assert routes == expected
 

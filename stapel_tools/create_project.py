@@ -3195,7 +3195,10 @@ def _write_frontend_scaffold(
             route_plan, auth_wired=auth_wired, want_landing=bool(want_landing),
             app_route_present=app_route_present, has_cdn=has_cdn,
             pairs=pair_keys, embed_slots=embed_slots or None,
+            not_found=container_i18n,
         ))
+        if container_i18n:
+            _write(frontend / "src" / "NotFoundPage.tsx", F.NOT_FOUND_PAGE_TSX)
         # The mount pass's own files. The monolith had none of them: it mounted
         # every nav entry bare, so nine published screens that REQUIRE a prop
         # (the id their address carries, a slot no container can fabricate)

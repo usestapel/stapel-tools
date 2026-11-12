@@ -1267,6 +1267,7 @@ def render_routes_tsx(
     route_plan: dict, *, auth_wired: bool, want_landing: bool, app_route_present: bool,
     has_cdn: bool = False, pairs: tuple = (),
     embed_slots: dict[str, str] | None = None,
+    not_found: bool = False,
 ) -> str:
     """``frontend/src/routes.tsx`` — react-router v7's ``createBrowserRouter``
     (v7 ships v6-future behaviour as ITS OWN default; there is no
@@ -1366,6 +1367,8 @@ def render_routes_tsx(
         lines.append(f'import {{ {name} }} from "./{name}.js";')
     if mounts["needs_placeholder"]:
         lines.append('import { NavPlaceholder } from "./NavPlaceholder.js";')
+    if not_found:
+        lines.append('import { NotFoundPage } from "./NotFoundPage.js";')
     lines.extend(mounts["imports"])
     if needs_cdn_avatar_helper:
         lines.append('import { avatarUrlFor } from "./lib/cdn.js";')
@@ -1510,6 +1513,11 @@ def render_routes_tsx(
             lines.append("    ],")
         lines.append("  },")
 
+    if not_found:
+        # Last, and a splat: an address no route above matches (an unknown
+        # "/app/..." child included) gets the product's page, not the router's
+        # developer error screen.
+        lines.append('  { path: "*", element: <NotFoundPage /> },')
     lines.append("]);")
     lines.append("")
     return "\n".join(lines)
@@ -2823,6 +2831,11 @@ STOREFRONT_I18N_EN: dict[str, str] = {
         "The parameter in the address could not be read, so there is nothing "
         "to open. Check the link."
     ),
+    "storefront.notfound.title": "There is no page at this address",
+    "storefront.notfound.body": (
+        "The link may be old or mistyped. Nothing was lost on your side."
+    ),
+    "storefront.notfound.home": "Go to the start page",
 }
 
 
@@ -2888,6 +2901,36 @@ export function registerStorefrontI18n(
 ): void {{
   engine.registerBundle(locale, STOREFRONT_I18N_BUNDLE_EN);
 }}
+'''
+
+
+#: ``frontend/src/NotFoundPage.tsx`` — the router's catch-all. Without it an
+#: unknown address showed react-router's developer error screen ("Unexpected
+#: Application Error! 404 ... Hey developer") to visitors.
+NOT_FOUND_PAGE_TSX = '''\
+/**
+ * GENERATED — what a visitor sees at an address no route matches. The
+ * router's own fallback is a developer error screen; this is the product's.
+ */
+import type { ReactElement } from "react";
+import { Link } from "react-router";
+import { Result } from "antd";
+import { useT } from "@stapel/core";
+import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
+
+export function NotFoundPage(): ReactElement {
+  const t = useT();
+  return (
+    <main data-testid="not-found">
+      <Result
+        status="404"
+        title={t(STOREFRONT_I18N_KEYS.notfoundTitle)}
+        subTitle={t(STOREFRONT_I18N_KEYS.notfoundBody)}
+        extra={<Link to="/">{t(STOREFRONT_I18N_KEYS.notfoundHome)}</Link>}
+      />
+    </main>
+  );
+}
 '''
 
 

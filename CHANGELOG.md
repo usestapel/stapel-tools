@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **Unknown addresses get a page.** The generated router ends with
+  `{ path: "*", element: <NotFoundPage /> }` (new `src/NotFoundPage.tsx`,
+  container copy `storefront.notfound.*`): an unknown URL showed
+  react-router's developer error screen ("Hey developer") to visitors.
+
 - **The moderation queue is reachable after first login.** A selection with
   stapel-moderation defines the module's documented staff roles
   (`moderator`: moderation MID, `moderation_lead`: moderation HIGH) in
