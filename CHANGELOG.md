@@ -28,6 +28,12 @@
   moderation, booking's `STAPEL_RESERVATIONS` without reservations, shop's
   `STAPEL_ORDERS` without orders). `stapel-preset-gate` requires every
   fragment to name a registry module.
+- **CI walks the feed and the booking.** `scripts/e2e_brick_flows.py feed`
+  (follow, post, home feed, like, comment) and `reservations` (schedule,
+  anonymous slots, booking refused without an account, book, history,
+  double booking 409, cancel) run over a `--modules social` / `--modules
+  booking` project in `e2e-generated-project`; while a brick is unreleased
+  the step says so and passes.
 - **The nav icon registry follows shell-react 0.20.1** (`HomeOutlined`,
   `SettingOutlined`, `FolderOutlined`, `ShoppingCartOutlined`).
 

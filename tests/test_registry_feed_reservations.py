@@ -280,3 +280,22 @@ class TestVendoring:
         assert (proj / "frontend" / "src" / "pages" / "FeedHomePage.tsx").is_file()
         base = (svc / "config" / "settings" / "base.py").read_text()
         assert '"stapel_feed"' in base or "'stapel_feed'" in base
+
+
+# ─── the CI flow ────────────────────────────────────────────────────────────
+
+
+class TestBrickFlows:
+    ROOT = Path(__file__).resolve().parent.parent
+
+    def test_script_names_both_flows(self):
+        result = subprocess.run(
+            [sys.executable, str(self.ROOT / "scripts" / "e2e_brick_flows.py")],
+            capture_output=True, text=True)
+        assert result.returncode == 2
+        assert "feed|reservations" in result.stderr
+
+    def test_ci_runs_them_per_composite(self):
+        ci = (self.ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        assert '"social feed" "booking reservations"' in ci
+        assert "scripts/e2e_brick_flows.py" in ci

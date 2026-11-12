@@ -484,6 +484,35 @@ jobs:
           REDIS_URL: redis://127.0.0.1:6379/0
         run: python "$GITHUB_WORKSPACE/scripts/e2e_live_circle.py" e2e
 
+      # The companion bricks' flows (SPEC-NEXT-BRICKS §A.7, §B.5): one
+      # scaffold call per composite, its own requirements installed, then the
+      # feed (follow -> post -> home -> like -> comment) and the booking
+      # (schedule -> slots -> 403 -> book -> history -> 409 -> cancel) over
+      # the generated urlconf. Until stapel-feed / stapel-reservations are on
+      # PyPI their rows are unreleased and the step says so and passes: the
+      # sibling checkouts are not public, so CI has nothing to install.
+      - name: Brick flows — social+feed, booking+reservations
+        env:
+          POSTGRES_HOST: 127.0.0.1
+          POSTGRES_PORT: "5432"
+          POSTGRES_USER: stapel
+          POSTGRES_PASSWORD: stapel
+          POSTGRES_DB: stapel_e2e
+          REDIS_URL: redis://127.0.0.1:6379/0
+        run: |
+          for pair in "social feed" "booking reservations"; do
+            set -- $pair
+            if python -c "import sys; from stapel_tools.create_project import unreleased; sys.exit(1 if unreleased(['$2']) else 0)"; then
+              stapel-create-project "flow$2" --type monolith --title "Flow $2" \
+                --url "https://$2.example" --company-name Acme --company-email "hi@$2.example" \
+                --modules "$1" --no-git --no-submodules --output-dir "$RUNNER_TEMP"
+              pip install --quiet -r "$RUNNER_TEMP/flow$2/svc-flow$2/requirements.txt"
+              (cd "$RUNNER_TEMP/flow$2/svc-flow$2" && python "$GITHUB_WORKSPACE/scripts/e2e_brick_flows.py" "$2")
+            else
+              echo "stapel-$2 is not released yet (STAPEL_LIBS['$2']['released'] is False): flow not run"
+            fi
+          done
+
       # The 0.55.5 run died two steps below on an ERESOLVE while every pin was
       # published and resolvable — the pair pins had been raised to the
       # 2026-08 release and the SUBSTRATE under them had not
