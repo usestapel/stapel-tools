@@ -78,3 +78,31 @@ def test_env_bool_is_a_config_read(tmp_path):
 
     proj = _project(tmp_path, 'X = env_bool("GATE", True)')
     assert [r.key for r in collect_reads(proj)] == ["GATE"]
+
+
+@pytest.mark.parametrize("project_type", ["minimal", "monolith"])
+def test_generated_markers_sit_on_the_reported_line(tmp_path, project_type):
+    """The scaffold's own escapes suppress CFG013 and are not stale (ESC001/ESC002)."""
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    from stapel_tools.create_project import create_project
+    from stapel_tools.verify import main as verify_main
+
+    create_project(
+        name="p", project_type=project_type, title="p", url="https://x.dev",
+        company_name="X", company_email="x@x.dev", modules=["core", "auth"],
+        output_dir=tmp_path, use_submodules=False, init_git=False)
+    proj = tmp_path / "p"
+    markers = [
+        (path, n) for path in proj.rglob("*.py") if ".venv" not in path.parts
+        for n, line in enumerate(path.read_text().splitlines(), 1) if "noqa: CFG013" in line
+    ]
+    assert markers, "the generated settings carry no CFG013 escape"
+    assert [f for f in lint_project(proj) if f.rule == "CFG013"] == []
+    out = io.StringIO()
+    with redirect_stdout(out), redirect_stderr(out):
+        verify_main([str(proj)])
+    stale = [line for line in out.getvalue().splitlines()
+             if "CFG013" in line and ("ESC001" in line or "ESC002" in line)]
+    assert stale == []

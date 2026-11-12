@@ -202,7 +202,7 @@ _register(
 
 _register("stapel-config-lint", True, "the reported line", "CFG001", "CFG006", "CFG007")
 _register(
-    "stapel-config-lint", True, "any line the env-bool expression spans", "CFG013",
+    "stapel-config-lint", True, "the first line of the env-bool expression", "CFG013",
 )
 _register(
     "stapel-config-lint", False,

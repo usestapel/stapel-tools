@@ -68,8 +68,8 @@ if _IS_PROD:
     CSRF_COOKIE_SECURE = True
     JWT_COOKIE_SECURE = True
     # Blank means unset; moves to stapel_core.conf.env_bool with the core 0.96.0 pin.
-    SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "").strip().lower() not in (
-        "0", "false", "no", "off")  # noqa: CFG013
+    SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "").strip().lower() not in (  # noqa: CFG013
+        "0", "false", "no", "off")
     # HSTS ramp — conservative default, no subdomains/preload; raise once
     # HTTPS is verified stable (see the monolith/microservices prod.py
     # template comment for the full rationale; security-programme.md SEC-4).
