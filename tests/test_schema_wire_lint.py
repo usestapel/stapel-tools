@@ -11,6 +11,8 @@ import json
 import textwrap
 from pathlib import Path
 
+import pytest
+
 from stapel_tools import lint_profile, schema_wire_lint as swl, verify
 
 # ---------------------------------------------------------------------------
@@ -845,3 +847,73 @@ def test_sch004_is_silent_on_pinned_names(tmp_path):
     (tmp_path / "docs" / "schema.json").write_text(text)
 
     assert [v for v in swl.lint_library(tmp_path) if v.rule == "SCH004"] == []
+
+
+# ---------------------------------------------------------------------------
+# (c) requests are recognised by the call's shape, not the variable's name
+# ---------------------------------------------------------------------------
+
+
+CONFTEST = (
+    "@pytest.fixture\n"
+    "def client_for():\n"
+    "    def _client(user):\n"
+    "        from rest_framework.test import APIClient\n"
+    "        c = APIClient()\n"
+    "        c.force_authenticate(user)\n"
+    "        return c\n"
+    "    return _client\n\n"
+    "@pytest.fixture\n"
+    "def env(client_for, learner):\n"
+    "    return client_for(learner)\n"
+)
+
+
+def _requests(source: str, conftest: str = "") -> bool:
+    import ast as _ast
+
+    context = [_ast.parse(conftest)] if conftest else []
+    return swl.analyse_wire_signals(_ast.parse(source), context).performs_requests
+
+
+@pytest.mark.parametrize("source", [
+    # a conftest fixture returning a client, received under an unrelated name
+    "def test_x(env):\n    env.get('/a/')\n",
+    # a local bound to a conftest client factory
+    "class Clients:\n    def __init__(self, client_for, learner):\n"
+    "        self.lc = client_for(learner)\n\n"
+    "def test_x(clients):\n    clients.lc.post('/a/', {})\n",
+    # a Django test client under any name
+    "def test_x():\n    browser = Client()\n    browser.post('/a/', {})\n",
+    # an object carrying a client
+    "def test_x(env):\n    env.client.get('/a/')\n",
+])
+def test_a_client_under_any_name_makes_requests(source):
+    """Inversion: before, only a ``client`` substring in the ROOT name
+    counted, so all four read as "no requests made"."""
+    assert _requests(source, CONFTEST)
+
+
+@pytest.mark.parametrize("source", [
+    "def test_x(settings_env):\n    settings_env.get('KEY')\n",
+    "def test_x(response):\n    response.data.get('results')\n",
+    "def test_x():\n    os.environ.get('X')\n",
+])
+def test_a_dict_get_is_not_a_request(source):
+    assert not _requests(source, CONFTEST)
+
+
+def test_the_library_hands_its_conftest_to_the_reader(tmp_path, monkeypatch):
+    lib = _library(tmp_path, tests={"test_api.py": "def test_list(env):\n    env.get('/a/')\n"})
+    (lib / "tests" / "conftest.py").write_text(CONFTEST)
+    seen = []
+    real = swl.analyse_wire_signals
+
+    def spy(tree, context=()):
+        signals = real(tree, context)
+        seen.append(signals.performs_requests)
+        return signals
+
+    monkeypatch.setattr(swl, "analyse_wire_signals", spy)
+    swl.lint_library(lib)
+    assert True in seen

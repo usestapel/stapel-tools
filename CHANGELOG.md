@@ -33,6 +33,12 @@
   CONFIG.MD heuristic counts `CERT`/`CERTIFICATE` as the last word
   (`TLS_CERT`) or before `FILE`/`PATH`/`PEM` (`CLIENT_CERT_PATH`);
   `CERTIFICATE_NUMBER_PREFIX` may be declared `source = settings` again.
+- **The wire lint recognises a client by the call's shape.** A verb on a
+  name bound to a DRF/Django client factory, on a fixture (in the module or a
+  library conftest) that returns one, directly or through a nested factory
+  (`client_for(user)`), or on a chain carrying a `client` segment
+  (`env.client.get`) is a request; a test's client no longer has to be
+  called `*client*` for the module to count as one that makes requests.
 - **`prototype_dev` registry values** reach the local settings only when they
   declare the prototype posture stage: delivery's `DEFAULT_CARRIER="mock"`.
 

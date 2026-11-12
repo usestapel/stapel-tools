@@ -243,10 +243,15 @@ CLIENT_METHODS = frozenset(
     {"get", "post", "put", "patch", "delete", "head", "options"}
 )
 
-#: What makes a receiver a test client. Substring, lowercased: `client`,
-#: `api_client`, `staff_client`, `self.client`, `anon_client` are all the same
-#: thing, and a fleet that invents `owner_client` tomorrow needs no edit here.
+#: What makes a receiver a test client. Substring, lowercased, of ANY name
+#: or attribute along the receiver chain: `client`, `api_client`,
+#: `self.client`, `env.client` are all the same thing, and a fleet that
+#: invents `owner_client` tomorrow needs no edit here.
 CLIENT_HINT = "client"
+
+#: Test-client factories (DRF and Django). A name bound to one of these, or a
+#: fixture returning one, is a client whatever it is called (`env`, `browser`).
+CLIENT_FACTORIES = frozenset({"APIClient", "Client", "AsyncClient", "RequestsClient"})
 
 #: Validator entry points that mean "something was checked against a schema".
 JSONSCHEMA_CALLS = frozenset({"validate", "iter_errors", "is_valid"})
@@ -453,6 +458,71 @@ def _root_name(node: ast.AST) -> str:
     return node.id if isinstance(node, ast.Name) else ""
 
 
+def _chain_names(node: ast.AST) -> list:
+    """Every name and attribute along a receiver chain: ``env.client`` ->
+    ``["client", "env"]``; ``self.api.get`` receiver ``self.api`` ->
+    ``["api", "self"]``."""
+    out = []
+    while True:
+        if isinstance(node, ast.Attribute):
+            out.append(node.attr)
+            node = node.value
+        elif isinstance(node, ast.Subscript):
+            node = node.value
+        elif isinstance(node, ast.Call):
+            node = node.func
+        else:
+            break
+    if isinstance(node, ast.Name):
+        out.append(node.id)
+    return out
+
+
+def _client_names(*trees: ast.AST) -> set:
+    """Names that hold a test client, whatever they are called.
+
+    A client factory is a DRF/Django client class or a function returning
+    one, directly, through a local, or through a nested factory it returns
+    (``client_for(user)``). A name bound to a factory call is a client, and so
+    is a fixture (a function) returning one, since a test receives it under
+    the function's name. Read to a fixpoint over the module and its
+    conftests."""
+    factories = set(CLIENT_FACTORIES)
+    clients: set = set()
+    functions = [n for t in trees for n in ast.walk(t)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    assigns = [n for t in trees for n in ast.walk(t)
+               if isinstance(n, (ast.Assign, ast.AnnAssign)) and n.value is not None]
+
+    def yields_client(value: Optional[ast.AST]) -> bool:
+        if isinstance(value, ast.Call):
+            return _called_name(value) in factories
+        return isinstance(value, ast.Name) and (value.id in clients or value.id in factories)
+
+    changed = True
+    while changed:
+        changed = False
+        for node in assigns:
+            if not yields_client(node.value):
+                continue
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                name = target.id if isinstance(target, ast.Name) else (
+                    target.attr if isinstance(target, ast.Attribute) else None)
+                if name and name not in clients:
+                    clients.add(name)
+                    changed = True
+        for func in functions:
+            if func.name in factories:
+                continue
+            if any(isinstance(sub, (ast.Return, ast.Yield)) and yields_client(sub.value)
+                   for sub in ast.walk(func)):
+                factories.add(func.name)
+                clients.add(func.name)
+                changed = True
+    return clients
+
+
 def _names_in(node: ast.AST) -> set:
     return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
 
@@ -494,8 +564,9 @@ def _assigned_names(node: ast.AST) -> list:
 # ---------------------------------------------------------------------------
 
 
-def analyse_wire_signals(tree: ast.Module) -> WireSignals:
-    """Read the four behaviours (a)-(d) off a test module's AST."""
+def analyse_wire_signals(tree: ast.Module, context: Iterable[ast.Module] = ()) -> WireSignals:
+    """Read the four behaviours (a)-(d) off a test module's AST. ``context``:
+    the conftests whose fixtures the module receives."""
     signals = WireSignals()
 
     # Names holding a PATH to the committed document, so a two-step
@@ -547,18 +618,26 @@ def analyse_wire_signals(tree: ast.Module) -> WireSignals:
             if signals.reads_committed_schema:
                 signals.enumerates_paths = True
 
-    # (c) — real requests
+    # (c) — real requests, recognised by the call's shape, not the variable's
+    # name: a verb on a receiver that is a client (a factory result, a fixture
+    # returning one, or a chain carrying a `client` segment).
+    client_names = _client_names(tree, *context)
+
+    def _is_client(receiver: ast.AST) -> bool:
+        chain = _chain_names(receiver)
+        return any(CLIENT_HINT in n.lower() for n in chain) or bool(set(chain) & client_names)
+
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
         func = node.func
         if isinstance(func, ast.Attribute) and func.attr in CLIENT_METHODS:
-            if CLIENT_HINT in _root_name(func.value).lower():
+            if _is_client(func.value):
                 signals.performs_requests = True
         if _called_name(node) == "APIClient":
             signals.performs_requests = True
         if _called_name(node) == "getattr" and node.args:
-            if CLIENT_HINT in _root_name(node.args[0]).lower():
+            if _is_client(node.args[0]):
                 signals.performs_requests = True
 
     # (d) — RECEIVED BODIES validated against a schema. The instance under
@@ -919,11 +998,13 @@ def lint_library(library: Path) -> list:
         ))
 
     wire_tests: list = []
+    conftests = [t for p in _python_files(library)
+                 if p.name == "conftest.py" and (t := _parse(p)) is not None]
     for module in _test_modules(library):
         tree = _parse(module)
         if tree is None:
             continue
-        signals = analyse_wire_signals(tree)
+        signals = analyse_wire_signals(tree, conftests)
         if signals.is_wire_test:
             wire_tests.append(module)
             continue
