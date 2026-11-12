@@ -279,12 +279,35 @@ def moderation_media_selected(libs: list[str]) -> bool:
     return "moderation" in libs and "cdn" in libs
 
 
+#: stapel-listings refuses to publish a listing with no coordinates by default
+#: (REQUIRE_LOCATION_ON_PUBLISH). Coordinates come from stapel-geo's location
+#: field; a selection without geo has no way to ask for them, so every publish
+#: answered 400 listing_location_required.
+LISTINGS_WITHOUT_GEO = '''
+# ─── Listings without a location source (no stapel-geo selected) ────────────
+# stapel-listings refuses to publish a listing with no coordinates by default;
+# this selection has no geo module to ask for them, so every publish would
+# answer 400 listing_location_required. Select geo (and set this back to True)
+# to make location part of a listing. An explicit value above wins.
+STAPEL_LISTINGS = {
+    "REQUIRE_LOCATION_ON_PUBLISH": False,
+    **(globals().get("STAPEL_LISTINGS") or {}),
+}
+'''
+
+
+def listings_without_geo(libs: list[str]) -> bool:
+    return "listings" in libs and "geo" not in libs
+
+
 def render_wiring(libs: list[str], *, flavor: str) -> str:
     """The ``{{STAPEL_WIRING}}`` fragment for a selection. ``flavor`` is
     ``"monolith"`` (service settings tier) or ``"minimal"`` (one file)."""
     parts = [render_preset_defaults(libs)]
     if moderation_media_selected(libs):
         parts.append(MODERATION_MEDIA_BASE)
+    if listings_without_geo(libs):
+        parts.append(LISTINGS_WITHOUT_GEO)
     if realtime_selected(libs):
         parts.append(_REALTIME_MONOLITH if flavor == "monolith" else _REALTIME_MINIMAL)
     parts.append(render_beat_schedule(libs, flavor=flavor))

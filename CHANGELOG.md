@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+- **Listings without geo can publish.** A selection with stapel-listings and
+  no stapel-geo (shop, booking) writes
+  `STAPEL_LISTINGS["REQUIRE_LOCATION_ON_PUBLISH"] = False` under any explicit
+  value: nothing could ask for coordinates, so every publish answered 400
+  `listing_location_required`. A selection with geo keeps the library default.
+
 - **Registry pins checked against PyPI; listings 0.29.0, profiles 0.23.0.**
   0.79.1 rendered `stapel-listings>=0.28.0,<0.29` with 0.29.0 on PyPI: no
   neighbour's ceiling held it back (shop, classified and booking all ask
