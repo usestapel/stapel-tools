@@ -1368,7 +1368,7 @@ def render_routes_tsx(
     if mounts["needs_placeholder"]:
         lines.append('import { NavPlaceholder } from "./NavPlaceholder.js";')
     if not_found:
-        lines.append('import { NotFoundPage } from "./NotFoundPage.js";')
+        lines.append('import { NotFoundPage, RouteErrorPage } from "./NotFoundPage.js";')
     lines.extend(mounts["imports"])
     if needs_cdn_avatar_helper:
         lines.append('import { avatarUrlFor } from "./lib/cdn.js";')
@@ -1518,6 +1518,18 @@ def render_routes_tsx(
         # "/app/..." child included) gets the product's page, not the router's
         # developer error screen.
         lines.append('  { path: "*", element: <NotFoundPage /> },')
+        # One pathless root carries the errorElement for every route below
+        # it: a loader 404 or a render error shows the product's page too.
+        start = lines.index("export const router = createBrowserRouter([") + 1
+        body = ["    " + ln for ln in lines[start:]]
+        lines[start:] = [
+            "  {",
+            "    errorElement: <RouteErrorPage />,",
+            "    children: [",
+            *body,
+            "    ],",
+            "  },",
+        ]
     lines.append("]);")
     lines.append("")
     return "\n".join(lines)
@@ -2836,6 +2848,11 @@ STOREFRONT_I18N_EN: dict[str, str] = {
         "The link may be old or mistyped. Nothing was lost on your side."
     ),
     "storefront.notfound.home": "Go to the start page",
+    "storefront.routeerror.title": "This page could not be shown",
+    "storefront.routeerror.body": (
+        "Something went wrong while opening it. Reloading the page or starting "
+        "again from the start page usually helps."
+    ),
 }
 
 
@@ -2909,17 +2926,29 @@ export function registerStorefrontI18n(
 #: Application Error! 404 ... Hey developer") to visitors.
 NOT_FOUND_PAGE_TSX = '''\
 /**
- * GENERATED — what a visitor sees at an address no route matches. The
- * router's own fallback is a developer error screen; this is the product's.
+ * GENERATED — what a visitor sees at an address no route matches, and when a
+ * route fails to render. The router's own fallback is a developer error
+ * screen; these are the product's. The technical detail (the unmatched path,
+ * the error message) is shown in dev builds only.
  */
 import type { ReactElement } from "react";
-import { Link } from "react-router";
-import { Result } from "antd";
+import { Link, isRouteErrorResponse, useLocation, useRouteError } from "react-router";
+import { Result, Typography } from "antd";
 import { useT } from "@stapel/core";
 import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
 
+function DevDetail({ text }: { readonly text: string }): ReactElement | null {
+  if (!import.meta.env.DEV || text.length === 0) return null;
+  return (
+    <Typography.Text type="secondary" code data-testid="route-dev-detail">
+      {text}
+    </Typography.Text>
+  );
+}
+
 export function NotFoundPage(): ReactElement {
   const t = useT();
+  const location = useLocation();
   return (
     <main data-testid="not-found">
       <Result
@@ -2927,7 +2956,36 @@ export function NotFoundPage(): ReactElement {
         title={t(STOREFRONT_I18N_KEYS.notfoundTitle)}
         subTitle={t(STOREFRONT_I18N_KEYS.notfoundBody)}
         extra={<Link to="/">{t(STOREFRONT_I18N_KEYS.notfoundHome)}</Link>}
-      />
+      >
+        <DevDetail text={location.pathname} />
+      </Result>
+    </main>
+  );
+}
+
+/** The router's `errorElement`: a 404 response reads as not-found, anything
+ * else as a page that could not be shown. */
+export function RouteErrorPage(): ReactElement {
+  const t = useT();
+  const error = useRouteError();
+  if (isRouteErrorResponse(error) && error.status === 404) {
+    return <NotFoundPage />;
+  }
+  const detail = isRouteErrorResponse(error)
+    ? `${error.status} ${error.statusText}`
+    : error instanceof Error
+      ? error.message
+      : String(error ?? "");
+  return (
+    <main data-testid="route-error">
+      <Result
+        status="error"
+        title={t(STOREFRONT_I18N_KEYS.routeerrorTitle)}
+        subTitle={t(STOREFRONT_I18N_KEYS.routeerrorBody)}
+        extra={<Link to="/">{t(STOREFRONT_I18N_KEYS.notfoundHome)}</Link>}
+      >
+        <DevDetail text={detail} />
+      </Result>
     </main>
   );
 }

@@ -12,7 +12,11 @@
 - **Unknown addresses get a page.** The generated router ends with
   `{ path: "*", element: <NotFoundPage /> }` (new `src/NotFoundPage.tsx`,
   container copy `storefront.notfound.*`): an unknown URL showed
-  react-router's developer error screen ("Hey developer") to visitors.
+  react-router's developer error screen ("Hey developer") to visitors. The
+  routes sit under one pathless root whose `errorElement` is the generated
+  `RouteErrorPage` (a 404 response reads as not-found, anything else as
+  `storefront.routeerror.*`); the unmatched path or error message is shown in
+  dev builds only.
 
 - **The moderation queue is reachable after first login.** A selection with
   stapel-moderation defines the module's documented staff roles

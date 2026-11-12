@@ -345,10 +345,11 @@ class TestManifestAssembly:
         front = _create(tmp_path, modules=self.MODULES) / "frontend"
         routes = (front / "src" / "routes.tsx").read_text()
         assert 'import { WorkspaceSelectionProvider } from "@stapel/workspaces-react";' in routes
+        # Indented one level deeper under the router's pathless error root.
         assert (
             "<ProtectedRoute>\n"
-            "        <WorkspaceSelectionProvider><AppChrome /></WorkspaceSelectionProvider>\n"
-            "      </ProtectedRoute>"
+            "            <WorkspaceSelectionProvider><AppChrome /></WorkspaceSelectionProvider>\n"
+            "          </ProtectedRoute>"
         ) in routes
 
     def test_without_workspaces_no_selection_provider(self, tmp_path):
