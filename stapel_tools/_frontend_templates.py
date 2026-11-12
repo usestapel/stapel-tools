@@ -465,6 +465,25 @@ def pair_base_url(entry: dict) -> str:
     return entry.get("base_url") or f'/{entry["key"]}/api/v1/'
 
 
+#: modules.tsx: the chat runtime's `subjectOwner` seam, answered from the
+#: listing the page shows (listings-react's own detail read).
+_LISTING_SUBJECT_OWNER_TSX = """\
+/**
+ * GENERATED — whose listing a "message the seller" button writes to. Chat
+ * cannot read listings and listings cannot import chat; the container answers
+ * from listings-react's own detail read.
+ */
+const ListingSubjectOwner: NonNullable<ChatSlots["subjectOwner"]> = ({ subject, children }) => {
+  const id = subject.type === "listing" ? Number(subject.key) : Number.NaN;
+  const known = Number.isInteger(id);
+  const listing = useListing(known ? id : undefined);
+  return children({
+    ownerId: known && listing.data?.owner ? String(listing.data.owner) : null,
+    pending: known && listing.isPending,
+  });
+};"""
+
+
 def render_modules_tsx(
     entries: list[dict], *, has_cdn: bool = False, shell_react: bool = False,
     container_i18n: bool = False, auto_anonymous_actions: tuple[str, ...] = (),
@@ -539,6 +558,15 @@ def render_modules_tsx(
     # member there is (src/mandateSource.ts, the storefront's source).
     keys = {e["key"] for e in entries}
     mandate_wired = "auth" in keys and "workspaces" not in keys
+    # chat-react's "message the seller" embed on the listing page asks the
+    # host whose listing it is (`slots.subjectOwner`). Wired when the chat
+    # mirror carries that embed (the pair release with it) and listings is
+    # selected; an older chat pair has no such slot, so nothing is emitted.
+    chat_subject_owner = "listings" in keys and any(
+        emb.get("scope", {}).get("navEntry") == "listings.detail"
+        for e in entries if e["key"] == "chat"
+        for emb in e.get("embeds", ())
+    )
     # The elevation seam (@stapel/core `ElevationProvider`, fed by
     # @stapel/auth-react's `autoAnonymous`): a listed act mints a guest
     # session when it is taken, so a guest-keyed write (the stapel-orders
@@ -601,10 +629,16 @@ def render_modules_tsx(
         lines.append(f'import {{ {", ".join(cdn_helpers)} }} from "./lib/cdn.js";')
     if mandate_wired:
         lines.append('import { useStorefrontMandateSource } from "./mandateSource.js";')
+    if chat_subject_owner:
+        lines.append('import { useListing } from "@stapel/listings-react";')
+        lines.append('import type { ChatSlots } from "@stapel/chat-react";')
     lines.append("")
     lines.append('const query = createStapelQueryClient({ cacheVersion: "0.0.0" });')
     lines.append('const i18n = createI18n({ locale: "en" });')
     lines.append("")
+    if chat_subject_owner:
+        lines.extend(_LISTING_SUBJECT_OWNER_TSX.splitlines())
+        lines.append("")
     if elevation_wired:
         lines.append("/**")
         lines.append(" * Acts that mint a guest session when an anonymous visitor takes them")
@@ -622,6 +656,13 @@ def render_modules_tsx(
                 f'const {key}Runtime = {e["create_runtime"]}'
                 f'({{ baseUrl: {json.dumps(pair_base_url(e))}, '
                 'autoAnonymous: { actions: AUTO_ANONYMOUS_ACTIONS } });'
+            )
+        elif e.get("create_runtime") and key == "chat" and chat_subject_owner:
+            # "Message the seller" on a listing page asks the host whose
+            # listing it is; this container is where chat and listings meet.
+            lines.append(
+                f'const {key}Runtime = {e["create_runtime"]}'
+                f'({{ baseUrl: {json.dumps(pair_base_url(e))}, slots: {{ subjectOwner: ListingSubjectOwner }} }});'
             )
         elif e.get("create_runtime") and key == "listings" and has_cdn:
             # Photos: the pair draws "photo unavailable" without a resolver,
@@ -2462,7 +2503,10 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     "profiles.notifications": {},
     "profiles.contacts": {},
     "profiles.connections": {},
-    "profiles.public": {"route_params": {"userId": "string"}},
+    # The fx release of profiles-react renders `page.actions` from `slots`
+    # (chat-react's `chat.message_user` scopes there). Without a scoped embed
+    # the wrapper passes no `slots`, so an older pair compiles unchanged.
+    "profiles.public": {"route_params": {"userId": "string"}, "page_slots": ("page.actions",)},
     # categories-react 0.2.0
     "categories.catalog": {},
     "categories.category": {
@@ -2537,6 +2581,10 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     # chat-react 0.2.0 — ConversationListPanel: limit/openHref/onOpen, all
     # optional.
     "chat.conversations": {},
+    # The chat-react release with `chat.thread` (`chat/:id`):
+    # ConversationThreadPage requires `id`, its own route param. Mounted once
+    # the registry mirror carries the entry (unreleased pair today).
+    "chat.thread": {"route_params": {"id": "string"}},
     # listings-react 0.2.0; 0.43.0 renders `page.actions` from its `slots`
     # prop (a node, or a function of the route params `{ id }`).
     "listings.detail": {"route_params": {"id": "number"}, "page_slots": ("page.actions",)},

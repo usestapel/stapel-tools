@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+- **Chat thread route and "message" buttons, ready for the next chat-react.**
+  Mount recipes for `chat.thread` (`chat/:id` → `ConversationThreadPage`
+  with its `id` route param) and `page.actions` on `profiles.public`; when the
+  chat mirror carries an embed scoped to `listings.detail` and listings is
+  selected, `modules.tsx` answers chat's `slots.subjectOwner` from
+  listings-react's `useListing` (`owner`). Inert with today's mirror
+  (chat-react 0.23.1 declares neither); regenerate the chat-react `nav` and
+  `embeds` mirror (and profiles-react's, whose `PublicProfilePage` gains
+  `slots`) from the released pairs' `nav-manifest.json`, in one train.
+
 - **A minimal project with cdn migrates on a fresh venv.** `--type minimal`
   with stapel-cdn selected (shop pulls it) listed no pyvips, so the first
   `migrate` failed on `stapel_cdn.images.E001`. The minimal requirements now
