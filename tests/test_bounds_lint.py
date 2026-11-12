@@ -17,7 +17,8 @@ import json
 import textwrap
 from pathlib import Path
 
-from stapel_tools import bounds_lint as bl, lint_profile, verify
+from stapel_tools import bounds_lint as bl
+from stapel_tools import lint_profile, verify
 
 # ---------------------------------------------------------------------------
 # the model, transcribed from stapel-alerts/models.py

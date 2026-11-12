@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from stapel_tools import lint_profile, schema_wire_lint as swl, verify
+from stapel_tools import lint_profile, verify
+from stapel_tools import schema_wire_lint as swl
 
 # ---------------------------------------------------------------------------
 # committed documents

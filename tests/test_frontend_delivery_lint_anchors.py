@@ -2,8 +2,6 @@
 import re
 
 import pytest
-
-from stapel_tools import frontend_delivery_lint as fdl
 from test_frontend_delivery_lint import (
     CANON_COMPOSE,
     CANON_CONF,
@@ -12,6 +10,8 @@ from test_frontend_delivery_lint import (
     project,
     rules,
 )
+
+from stapel_tools import frontend_delivery_lint as fdl
 
 #: INCIDENT_COMPOSE with the nginx volumes and restart coming from an x- block
 ANCHORED_INCIDENT_COMPOSE = """\
