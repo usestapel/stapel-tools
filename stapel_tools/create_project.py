@@ -108,8 +108,10 @@ STAPEL_LIBS = {
         "required": False,
         "description": "User profiles",
         "default": False,
-        "pin": "0.22.1",
-        "ahead_of_pypi": False,  # PyPI 0.22.1 @ 2026-10-22
+        # 0.23.0: the `profiles.social_graph` Function stapel-feed's home feed
+        # reads (SOCIAL_GRAPH_FUNCTION); a lower pin answers 503 on /feed.
+        "pin": "0.23.0",
+        "ahead_of_pypi": False,  # PyPI 0.23.0 @ 2026-11-05
     },
     "translate": {
         "repo": "https://github.com/usestapel/stapel-translate.git",
@@ -338,8 +340,11 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Listings & catalog",
         "default": False,
-        "pin": "0.28.0",
-        "ahead_of_pypi": False,  # PyPI 0.28.0 @ 2026-11-05
+        # 0.29.0: `listings.bookables`, the resolver the booking preset
+        # registers for stapel-reservations' `listing` type (unpriced
+        # listings included).
+        "pin": "0.29.0",
+        "ahead_of_pypi": False,  # PyPI 0.29.0 @ 2026-11-05
         "http": True,
         # Same fix/rationale as "categories" above: stapel-listings/urls.py's
         # own docstring says hosts mount it under their own ".../api/"
@@ -596,6 +601,48 @@ STAPEL_LIBS = {
         "requires": [],
         "beat": ("stapel_referrals.beat", "get_referrals_beat_schedule"),
     },
+    # Composite companions with no PyPI release yet: each joins its composite's
+    # "companions" (feed: social, reservations: booking) and is expanded with
+    # it only once released or under --allow-unreleased (_expand_with_requires).
+    "feed": {
+        "repo": "https://github.com/usestapel/stapel-feed.git",
+        "dir": "stapel_feed",
+        "required": False,
+        "description": "Posts, comments, reactions and home/public/author feeds over the profiles follow graph",
+        "default": False,
+        "pin": "0.1.0",
+        "released": False,
+        "ahead_of_pypi": True,
+        "http": True,
+        # stapel_feed/urls.py contributes "v1/" under the host's prefix.
+        "url_prefix": "feed/api/",
+        # profiles: the home feed reads `profiles.social_graph` and every card
+        # `profiles.public_cards` (503 without a provider, never a guess).
+        # cdn: post pictures are cdn refs described through `cdn.describe_many`.
+        "requires": ["profiles", "cdn"],
+    },
+    "reservations": {
+        "repo": "https://github.com/usestapel/stapel-reservations.git",
+        "dir": "stapel_reservations",
+        "required": False,
+        "description": "Schedules, free slots and reservations over opaque bookables (no double booking)",
+        "default": False,
+        "pin": "0.1.0",
+        "released": False,
+        "ahead_of_pypi": True,
+        "http": True,
+        # stapel_reservations/urls.py contributes "v1/" under the host's prefix.
+        "url_prefix": "reservations/api/",
+        # Bookable-generic: what it books comes from BOOKABLE_TYPES. The
+        # booking preset registers "listing"; alone, the empty registry is
+        # stapel_reservations.E001 until a custom app registers a type.
+        "requires": [],
+        # Reminders, completion of past reservations, attempt purge.
+        "beat": ("stapel_reservations.beat", "get_reservations_beat_schedule"),
+        # The payment seam's demo strategy; stapel-reservations refuses "mock"
+        # outside the prototype stage (W002 there, E002 elsewhere).
+        "prototype_dev": {"PAYMENT": "mock"},
+    },
     # ── Composites (projections-and-composition §3/§4) ─────────────────────
     # A composite writes NO business logic: an INSTALLED_APPS/urls/config
     # preset over member modules + cross-domain Projection glue. Two flags
@@ -659,7 +706,9 @@ STAPEL_LIBS = {
         "django_app": True,     # reserved glue slot (see shop comment)
         "url_prefix": None,
         "requires": ["calendar", "categories", "listings"],
-        "companions": ["auth", "cdn", "profiles", "search", "vocabularies"],
+        # reservations: the booking action and the two histories (inert until
+        # stapel-reservations is released; see _expand_with_requires).
+        "companions": ["auth", "cdn", "profiles", "search", "vocabularies", "reservations"],
     },
     "social": {
         "repo": "https://github.com/usestapel/stapel-social.git",
@@ -674,7 +723,9 @@ STAPEL_LIBS = {
         "django_app": True,     # reserved glue slot (see shop comment)
         "url_prefix": None,
         "requires": ["chat", "profiles", "reviews"],
-        "companions": ["auth", "cdn"],
+        # feed: the community's main surface (inert until stapel-feed is
+        # released; see _expand_with_requires).
+        "companions": ["auth", "cdn", "feed"],
     },
 }
 
@@ -1773,6 +1824,177 @@ FRONTEND_REACT_LIBS = {
         ],
         "shell_provider": "WorkspaceSelectionProvider",
     },
+    # ── Pairs with no npm release yet ───────────────────────────────────────
+    # "released": False mirrors the backend row: the pair is never installed
+    # from npm (no version is served). Under --allow-unreleased the scaffold
+    # packs the sibling stapel-react checkout's built package into the
+    # project (frontend/vendor/, a `file:` dependency); without it the backend
+    # row refuses the selection first. "version" is the planned first release.
+    "feed": {
+        "package": "@stapel/feed-react",
+        "version": "0.1.0",
+        "released": False,
+        "provider": "FeedProvider",
+        "create_runtime": "createFeedRuntime",
+        "register_i18n": "registerFeedI18n",
+        # `feed.home` is the community's first tab (order 1); the post and
+        # author pages are addressed by id, off the menu.
+        "nav": [
+            {
+                "id": "feed.home",
+                "labelKey": "feed.nav.home",
+                "icon": "HomeOutlined",
+                "route": {"path": "/feed"},
+                "component": {"export": "FeedPage", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": True,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 1,
+            },
+            {
+                "id": "feed.post",
+                "labelKey": "feed.nav.post",
+                "icon": "MessageOutlined",
+                "route": {"path": "/p/:id"},
+                "component": {"export": "PostPage", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 2,
+            },
+            {
+                "id": "feed.author",
+                "labelKey": "feed.nav.author",
+                "icon": "ProfileOutlined",
+                "route": {"path": "/u/:userId/posts"},
+                "component": {"export": "AuthorFeedPane", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 3,
+            },
+        ],
+        # A "Posts" button on a public profile (`profiles.public`'s
+        # page.actions) and the phone composer button.
+        "embeds": [
+            {
+                "id": "feed.author_posts_action",
+                "slot": "page.actions",
+                "component": {"export": "AuthorPostsButton", "subpath": "default"},
+                "order": 20,
+                "surface": "any",
+                "scope": {"navEntry": "profiles.public"},
+                "routeProps": {"userId": "userId"},
+            },
+            {
+                "id": "feed.compose_fab",
+                "slot": "bottombar",
+                "component": {"export": "ComposeFab", "subpath": "default"},
+                "order": 10,
+                "surface": "member",
+                "breakpoints": ["phone"],
+                "opens": "feed.home",
+            },
+        ],
+    },
+    "reservations": {
+        "package": "@stapel/reservations-react",
+        "version": "0.1.0",
+        "released": False,
+        "provider": "ReservationsProvider",
+        "create_runtime": "createReservationsRuntime",
+        "register_i18n": "registerReservationsI18n",
+        # The booking page and the booking detail are addressed by id; the two
+        # histories hang from the container-owned `account.root`, and the
+        # schedule editor is linked from the agenda (off the menu).
+        "nav": [
+            {
+                "id": "reservations.book",
+                "labelKey": "reservations.nav.book",
+                "icon": "ClockCircleOutlined",
+                "route": {"path": "/book/:bookableType/:bookableKey"},
+                "component": {"export": "BookPage", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": False,
+                "surface": "public",
+                "order": 63,
+            },
+            {
+                "id": "reservations.mine",
+                "labelKey": "reservations.nav.mine",
+                "icon": "ClockCircleOutlined",
+                "route": {"path": "reservations"},
+                "component": {"export": "MyReservationsPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 41,
+            },
+            {
+                "id": "reservations.detail",
+                "labelKey": "reservations.nav.detail",
+                "icon": "ClockCircleOutlined",
+                "route": {"path": "/reservations/:id"},
+                "component": {"export": "ReservationDetailPane", "subpath": "default"},
+                "placement": {"level": "top"},
+                "menuVisibleDefault": False,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 64,
+            },
+            {
+                "id": "reservations.agenda",
+                "labelKey": "reservations.nav.agenda",
+                "icon": "OrderedListOutlined",
+                "route": {"path": "agenda"},
+                "component": {"export": "ProviderAgendaPane", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": True,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 42,
+            },
+            {
+                "id": "reservations.schedule",
+                "labelKey": "reservations.nav.schedule",
+                "icon": "SettingOutlined",
+                "route": {"path": "listings/:id/schedule"},
+                "component": {"export": "ScheduleEditor", "subpath": "default"},
+                "placement": {"level": "submenu", "parentId": "account.root"},
+                "menuVisibleDefault": False,
+                "requiresAuth": True,
+                "surface": "member",
+                "order": 43,
+            },
+        ],
+        # "Book" on a listing (`listings.detail`'s page.actions) and the
+        # upcoming-bookings badge in the top bar.
+        "embeds": [
+            {
+                "id": "reservations.book_action",
+                "slot": "page.actions",
+                "component": {"export": "BookButton", "subpath": "default"},
+                "order": 20,
+                "surface": "any",
+                "scope": {"navEntry": "listings.detail"},
+                "routeProps": {"bookableKey": "id"},
+                "props": {"bookableType": "listing"},
+            },
+            {
+                "id": "reservations.upcoming_badge",
+                "slot": "topbar.end",
+                "component": {"export": "UpcomingBadge", "subpath": "default"},
+                "order": 21,
+                "surface": "member",
+                "opens": "reservations.mine",
+            },
+        ],
+    },
 }
 # ---------------------------------------------------------------------------
 # Composite frontend presets — the product shapes (architect verdict,
@@ -1891,6 +2113,7 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "cdn",
             "listings",
             "profiles",
+            "reservations",
             "search",
             "vocabularies",
         ],
@@ -1899,6 +2122,7 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "auth": "a storefront always generates sign-in",
             "profiles": "the owner's own settings screen",
             "cdn": "photos of the resource being booked",
+            "reservations": "the booking action and the two histories are this pair's screens",
             "search": "browse: finding a resource before booking it",
             "vocabularies": (
                 "the terms behind a category's ref_select features — a "
@@ -1911,11 +2135,12 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
     "social": {
         "backend": "social",
         "description": "Social surface: profiles, messaging, reviews",
-        "pairs": ["auth", "cdn", "chat", "profiles", "reviews"],
+        "pairs": ["auth", "cdn", "chat", "feed", "profiles", "reviews"],
         "pending": {},
         "why": {
             "auth": "sign-in",
             "cdn": "avatars and attachments",
+            "feed": "the feed is the community's main surface",
         },
     },
 }
@@ -1926,10 +2151,16 @@ class CompositeError(SystemExit):
     failure and print the roster instead of a stack trace."""
 
 
-def composite_pairs(name: str) -> list[str]:
+def unreleased_pairs(keys: list[str]) -> list[str]:
+    """Pair keys among ``keys`` that npm does not serve yet."""
+    return [k for k in keys if FRONTEND_REACT_LIBS.get(k, {}).get("released", True) is False]
+
+
+def composite_pairs(name: str, *, allow_unreleased: bool = False) -> list[str]:
     """The registered pairs a preset installs. Raises on an unknown preset (the
     roster is small and hand-curated — a typo must not silently scaffold a
-    container with no pairs)."""
+    container with no pairs). A pair npm does not serve yet is left out unless
+    ``allow_unreleased``; :func:`composite_report` names it."""
     preset = FRONTEND_COMPOSITES.get(name)
     if preset is None:
         raise CompositeError(
@@ -1943,7 +2174,8 @@ def composite_pairs(name: str) -> list[str]:
             "A preset is a SELECTION over FRONTEND_REACT_LIBS; register the pair "
             "there first."
         )
-    return list(preset["pairs"])
+    held = set() if allow_unreleased else set(unreleased_pairs(preset["pairs"]))
+    return [k for k in preset["pairs"] if k not in held]
 
 
 def composite_nav_bundle(name: str, *, app_package: str = "app") -> list[dict]:
@@ -1997,6 +2229,11 @@ def composite_report(name: str) -> list[str]:
     lines.append("  container pages: " + ", ".join(composite_container_pages(name)))
     for key, reason in preset["pending"].items():
         lines.append(f"  NOT INSTALLED — {key}: {reason}")
+    for key in unreleased_pairs(preset["pairs"]):
+        lines.append(
+            f"  NOT INSTALLED — {key}: {FRONTEND_REACT_LIBS[key]['package']} is not "
+            "on npm yet (stapel-create-project --allow-unreleased packs the sibling "
+            "checkout)")
     return lines
 
 
@@ -2420,13 +2657,19 @@ def require_released(modules: list[str], *, allow_unreleased: bool = False) -> N
             "checkout instead.")
 
 
-def _expand_with_requires(modules: list[str], *, companions: bool = True) -> list[str]:
+def _expand_with_requires(
+    modules: list[str], *, companions: bool = True, unreleased_companions: bool = False,
+) -> list[str]:
     """Transitive closure of each module's hard ``requires`` (e.g. categories
     -> attributes), then re-ordered to STAPEL_LIBS registry order.
 
     A composite's ``companions`` (the backend of every frontend pair it
     installs beyond its own members) join the closure too, unless
     ``companions=False`` — the preset gate asks for the member set alone.
+    A companion with no PyPI release (``"released": False``) joins only with
+    ``unreleased_companions=True`` (``--allow-unreleased``): a released
+    composite never pulls in a brick its pip install cannot resolve. A module
+    named in ``modules`` itself is always kept.
 
     A hard requires is a real pyproject dependency (categories/listings on
     attributes) — without this expansion a project that only requested
@@ -2442,7 +2685,11 @@ def _expand_with_requires(modules: list[str], *, companions: bool = True) -> lis
         changed = False
         for key in list(needed):
             info = STAPEL_LIBS.get(key, {})
-            deps = [*info.get("requires", []), *(info.get("companions", []) if companions else [])]
+            extra = [
+                c for c in (info.get("companions", []) if companions else [])
+                if unreleased_companions or STAPEL_LIBS.get(c, {}).get("released", True)
+            ]
+            deps = [*info.get("requires", []), *extra]
             for dep in deps:
                 if dep not in needed:
                     needed.add(dep)
@@ -3959,6 +4206,37 @@ def _append_wiring_requirements(
             ))
 
 
+def _vendor_unreleased(
+    project_dir: Path, ctx: dict, feature_libs: list[str], project_type: str, output_dir: Path,
+) -> None:
+    """Snapshot every unreleased brick and pair of the selection into the
+    project (see :mod:`stapel_tools._unreleased`), so the image builds."""
+    from . import _unreleased as U
+
+    root = U.sibling_root(output_dir)
+    backend = unreleased(feature_libs)
+    pairs = unreleased_pairs([k for k in feature_libs if k in FRONTEND_REACT_LIBS]) \
+        if project_type == "monolith" else []
+    backend, pairs, absent = U.available(root, backend, pairs)
+    for path in absent:
+        print(f"  unreleased: no workspace checkout at {path}; the project installs it "
+              "only next to that workspace", file=sys.stderr)
+    service_dir = project_dir / ctx["service_dir_name"] if project_type == "monolith" else project_dir
+    if backend:
+        for snap in U.vendor_requirements(service_dir / "requirements.txt", service_dir, root, backend):
+            print(f"  unreleased: {snap.path.relative_to(project_dir)} (stapel checkout {snap.commit[:12]})")
+        if (service_dir / "Dockerfile").exists():
+            U.vendor_dockerfile(service_dir / "Dockerfile")
+    if pairs:
+        frontend = project_dir / "frontend"
+        packed = U.vendor_package_json(
+            frontend / "package.json", frontend, root,
+            [(k, FRONTEND_REACT_LIBS[k]["package"]) for k in pairs])
+        for snap in packed:
+            print(f"  unreleased: {snap.path.relative_to(project_dir)}"
+                  + (f" (stapel-react checkout {snap.commit[:12]})" if snap.commit else ""))
+
+
 def _setup_pip_deps(
     project_dir: Path,
     modules: list[str],
@@ -4241,6 +4519,15 @@ def create_project(
         )
         sys.exit(1)
 
+    if allow_unreleased:
+        # The composites' unreleased companions become explicit selections, so
+        # every later closure over `modules` sees them (feed next to social,
+        # reservations next to booking) exactly as it will once they ship.
+        modules = [*modules, *(
+            key for key in _expand_with_requires(
+                [m for m in modules if m != "core"], unreleased_companions=True)
+            if key not in modules
+        )]
     try:
         require_released(
             _expand_with_requires([m for m in modules if m != "core"]),
@@ -4427,15 +4714,25 @@ def create_project(
         # A listing photo is stored under its own asset type, the one the
         # generated composer page uploads to (LISTING_IMAGE_ASSET_TYPE);
         # stapel-cdn refuses a type this list does not name.
-        asset_types = ("avatar",)
-        if "listings" in feature_only:
-            from ._frontend_templates import LISTING_IMAGE_ASSET_TYPE
+        # A post picture likewise (POST_IMAGE_ASSET_TYPE, the feed page's
+        # upload target). These upload targets are MERGED into an explicit
+        # ASSET_TYPES too: a list without them refuses the page's own upload.
+        from ._frontend_templates import LISTING_IMAGE_ASSET_TYPE, POST_IMAGE_ASSET_TYPE
 
-            asset_types = (*asset_types, LISTING_IMAGE_ASSET_TYPE)
+        targets = tuple(
+            asset for key, asset in (
+                ("listings", LISTING_IMAGE_ASSET_TYPE), ("feed", POST_IMAGE_ASSET_TYPE))
+            if key in feature_only
+        )
         module_config.setdefault("cdn", {
-            "ASSET_TYPES": asset_types,
+            "ASSET_TYPES": ("avatar", *targets),
             "ENABLED_SUBMODULES": ("images",),
         })
+        if targets:
+            # stapel-cdn's own default is ("avatar",).
+            explicit = tuple(module_config["cdn"].get("ASSET_TYPES") or ("avatar",))
+            merged = (*explicit, *(t for t in targets if t not in explicit))
+            module_config["cdn"] = {**module_config["cdn"], "ASSET_TYPES": merged}
         if "profiles" in feature_only:
             module_config.setdefault("profiles", {"PROFILES_AVATAR_CHECK": "comm"})
         # ...and the one cdn default that is NOT the library's: the shipped
@@ -4486,6 +4783,9 @@ def create_project(
         _setup_monolith_pip_deps(project_dir / ctx["service_dir_name"], modules, module_config)
     else:
         _setup_pip_deps(project_dir, modules, module_config)
+
+    if allow_unreleased and project_type in ("monolith", "minimal"):
+        _vendor_unreleased(project_dir, ctx, feature_only, project_type, output_dir)
 
     if project_type in ("monolith", "minimal"):
         _append_wiring_requirements(project_dir, ctx, feature_only, project_type)

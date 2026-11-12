@@ -234,11 +234,12 @@ def composite_names() -> list[str]:
 
 
 def composite_modules(name: str) -> list[str]:
-    from .create_project import FRONTEND_COMPOSITES
+    from .create_project import FRONTEND_COMPOSITES, composite_pairs
     preset = FRONTEND_COMPOSITES.get(name)
     if preset is None:
         raise RuntimeImageError(f"unknown composite {name!r}; known: {', '.join(composite_names())}")
-    return sorted({preset["backend"], *preset["pairs"]})
+    # Released pairs only: the runtime image installs from PyPI.
+    return sorted({preset["backend"], *composite_pairs(name)})
 
 
 def generate_composite(name: str, output_dir: Path, image_base: str = "upstream",

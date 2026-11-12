@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+- **stapel-feed and stapel-reservations in the registry, inert until
+  released** (SPEC-NEXT-BRICKS §A.7, §B.5). `STAPEL_LIBS["feed"]`
+  (`feed/api/`, requires profiles and cdn) and `["reservations"]`
+  (`reservations/api/`, beat helper, prototype-stage `PAYMENT="mock"`), with
+  `FRONTEND_REACT_LIBS` mirrors of both pairs' nav manifests and embeds.
+  feed is a companion of social and reservations of booking (frontend pairs
+  too); a released composite never pulls an unreleased companion, and
+  `--allow-unreleased` selects it as if released. Pins: profiles 0.23.0
+  (`profiles.social_graph`), listings 0.29.0 (`listings.bookables`).
+- **`--allow-unreleased` builds in the image.** An unreleased brick is a
+  `git archive` sdist of the sibling checkout's HEAD in `<service>/vendor/`
+  (the Dockerfile copies it before installing), an unreleased pair an
+  `npm pack` tarball in `frontend/vendor/` (`file:` dependency); the
+  commit is recorded. Siblings come from `$SIBLING_ROOT`, else the output
+  directory; a missing checkout keeps the editable line and is printed. The
+  nav and peer gates compare an unreleased pair's mirror when the checkout
+  has it and never ask npm for it.
+- **The feed page uploads pictures.** `feed.home` mounts a generated
+  `FeedHomePage` that hands `@stapel/cdn-react`'s upload queue to
+  `FeedPage`; `STAPEL_CDN["ASSET_TYPES"]` gains `"post"` when feed is
+  selected, merged into an explicit list rather than replacing it.
+- **A preset fragment for a module the project does not install is not
+  merged** (social's `STAPEL_MODERATION` post/comment targets without
+  moderation, booking's `STAPEL_RESERVATIONS` without reservations, shop's
+  `STAPEL_ORDERS` without orders). `stapel-preset-gate` requires every
+  fragment to name a registry module.
+- **The nav icon registry follows shell-react 0.20.1** (`HomeOutlined`,
+  `SettingOutlined`, `FolderOutlined`, `ShoppingCartOutlined`).
+
 - **Companion bricks wire themselves.** A registry row may declare
   `companion_of` (the modules its `preset.SETTINGS_DEFAULTS` plugs into).
   When a target is selected too, the generated settings merge the companion's

@@ -49,7 +49,7 @@ class TestRows:
         """``released`` is only ever written as False; dropping it releases."""
         for key, info in STAPEL_LIBS.items():
             assert info.get("released", True) in (True, False), key
-            if key not in WAVE:
+            if key not in (*WAVE, "feed", "reservations"):
                 assert "released" not in info, key
 
     def test_no_composite_pulls_an_unreleased_brick(self):

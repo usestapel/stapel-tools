@@ -810,13 +810,17 @@ NAV_ICON_REGISTRY: frozenset[str] = frozenset(
         "AuditOutlined",
         "ClockCircleOutlined",
         "FolderOpenOutlined",
+        "FolderOutlined",
         "HeartOutlined",
+        "HomeOutlined",
         "MessageOutlined",
         "OrderedListOutlined",
         "PlusOutlined",
         "ProfileOutlined",
         "QrcodeOutlined",
         "SearchOutlined",
+        "SettingOutlined",
+        "ShoppingCartOutlined",
         "TagOutlined",
     }
 )
@@ -1223,7 +1227,7 @@ def monolith_mount_plan(
                 elements[entry["id"]] = _placeholder_jsx(entry, gaps)
                 continue
             name = spec["page"]
-            pages[f"src/pages/{name}.tsx"] = render_listing_compose_page_tsx(pairs)
+            pages[f"src/pages/{name}.tsx"] = COMPOSITE_RENDERERS[mount["composite"]](pairs)
             line = f'import {{ {name} }} from "./pages/{name}.js";'
             if line not in wrapper_imports:
                 wrapper_imports.append(line)
@@ -2614,6 +2618,18 @@ NAV_ENTRY_MOUNTS: dict[str, dict] = {
     "workspaces.audit": {},
     "workspaces.invite": {"route_params": {"token": "string"}},
     # the container's own.
+    # feed-react 0.1.0: FeedPage takes the picture queue from the container
+    # (cdn-react's upload bag); the post and author pages read their ids.
+    "feed.home": {"composite": "feed.home"},
+    "feed.post": {"route_params": {"id": "number"}},
+    "feed.author": {"route_params": {"userId": "string"}},
+    # reservations-react 0.1.0: the booking page reads the bookable from its
+    # address; the detail and the schedule editor read their ids.
+    "reservations.book": {"route_params": {"bookableType": "string", "bookableKey": "string"}},
+    "reservations.mine": {},
+    "reservations.detail": {"route_params": {"id": "number"}},
+    "reservations.agenda": {},
+    "reservations.schedule": {"route_params": {"id": "number"}},
     "account.root": {"local": "AccountHome"},
     "admin.root": {"local": "AdminHome"},
 }
@@ -3403,6 +3419,13 @@ def render_nav_page_wrapper_tsx(
 # either way, and the pair's presence decides whether the slot is WIRED or
 # whether the page says out loud that it is not.
 COMPOSITE_PAGES: dict[str, dict] = {
+    "feed.home": {
+        "page": "FeedHomePage",
+        # The feed composer's picture queue: ONE upload bag, drawn by the
+        # gallery field and published from by the composer.
+        "pairs": {"cdn": ("attachments", "attachmentPicker")},
+        "optional": {},
+    },
     "listings.compose": {
         "page": "ListingComposePage",
         # pair key -> the composer prop(s) it satisfies
@@ -3675,6 +3698,58 @@ def render_listing_compose_page_tsx(pairs: tuple = ()) -> str:
     return "\n".join(lines) + "\n"
 
 
+# The cdn asset type a post picture is stored as; create_project adds it to
+# STAPEL_CDN["ASSET_TYPES"] whenever feed is selected (cdn is a feed requires).
+POST_IMAGE_ASSET_TYPE = "post"
+# stapel-feed's MAX_ATTACHMENTS default.
+POST_IMAGES_MAX = 10
+
+
+def render_feed_home_page_tsx(pairs: tuple = ()) -> str:
+    """``src/pages/FeedHomePage.tsx`` — the feed with its picture queue wired.
+
+    `@stapel/feed-react` takes pictures structurally (`attachments` is an
+    upload bag, `attachmentPicker` the field that fills it) and never imports
+    `@stapel/cdn-react`, an L2 pair importing an L2 pair being the fork this
+    architecture prevents. The container holds the two together."""
+    return "\n".join([
+        "/**",
+        " * GENERATED — the feed, with pictures.",
+        " *",
+        " * `@stapel/feed-react` owns the posts; the picture queue is `@stapel/cdn-react`'s",
+        " * (`useUploadQueue`), drawn by `<MediaGalleryField bag={…}/>` and published",
+        " * from by the composer — ONE bag, so the refs a post carries are the",
+        " * pictures on screen.",
+        " */",
+        'import type { ReactElement } from "react";',
+        'import { useUploadQueue } from "@stapel/cdn-react";',
+        'import type { CdnUploadTarget } from "@stapel/cdn-react";',
+        'import { MediaGalleryField } from "@stapel/cdn-react/default";',
+        'import { FeedPage } from "@stapel/feed-react/default";',
+        "",
+        "/** stapel-feed's MAX_ATTACHMENTS — see POST_IMAGES_MAX in stapel-tools. */",
+        f"const POST_IMAGES_MAX = {POST_IMAGES_MAX};",
+        "/** The asset type the generated backend lists in STAPEL_CDN[\"ASSET_TYPES\"]",
+        " * — see POST_IMAGE_ASSET_TYPE in stapel-tools. */",
+        "const POST_IMAGE_TARGET: CdnUploadTarget = {",
+        '  kind: "image",',
+        f'  assetType: "{POST_IMAGE_ASSET_TYPE}",',
+        "};",
+        "",
+        "export function FeedHomePage(): ReactElement {",
+        "  const images = useUploadQueue({ target: POST_IMAGE_TARGET, max: POST_IMAGES_MAX });",
+        "  return <FeedPage attachments={images} attachmentPicker={<MediaGalleryField bag={images} />} />;",
+        "}",
+        "",
+    ])
+
+
+COMPOSITE_RENDERERS = {
+    "feed.home": render_feed_home_page_tsx,
+    "listings.compose": render_listing_compose_page_tsx,
+}
+
+
 def composite_gaps(entry_id: str, pairs: tuple) -> tuple:
     """The props a composite page cannot fill with THIS pair selection, named
     the way the placeholder names props: `<prop> (needs @stapel/<key>-react)`.
@@ -3750,7 +3825,7 @@ def public_mount_plan(
                 elements[entry["id"]] = _placeholder_jsx(entry, gaps)
                 continue
             name = spec["page"]
-            pages[f"src/pages/{name}.tsx"] = render_listing_compose_page_tsx(pairs)
+            pages[f"src/pages/{name}.tsx"] = COMPOSITE_RENDERERS[mount["composite"]](pairs)
             line = f'import {{ {name} }} from "./pages/{name}.js";'
             if line not in wrapper_imports:
                 wrapper_imports.append(line)

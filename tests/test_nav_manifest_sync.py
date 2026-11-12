@@ -256,7 +256,8 @@ def test_full_pin_table_covers_the_substrate_and_every_registered_pair(gate):
     import stapel_tools.create_project as cp
 
     for info in cp.FRONTEND_REACT_LIBS.values():
-        assert info["package"] in packages
+        # An unreleased pair is packed from the workspace, never pinned on npm.
+        assert (info["package"] in packages) is info.get("released", True)
     for expected in (
         "@stapel/core", "@stapel/shell-react", "@stapel/tokens-antd",
         "@stapel/tokens", "@stapel/image", "@stapel/eslint-plugin",

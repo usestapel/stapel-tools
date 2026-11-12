@@ -263,6 +263,9 @@ def test_declarations_cover_every_pin_the_generator_writes(gate):
 
     declared = gate.pinned_specs(gate.declarations())
     for entry in generator.FRONTEND_REACT_LIBS.values():
+        if entry.get("released", True) is False:
+            assert entry["package"] not in declared  # packed from the workspace
+            continue
         assert f"^{entry['version']}" in declared[entry["package"]]
     for table in (
         generator.FRONTEND_REACT_CORE_DEPS,

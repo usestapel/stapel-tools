@@ -262,6 +262,9 @@ def full_pin_table() -> list[tuple[str, str, str]]:
     table: list[tuple[str, str, str]] = [
         (f"FRONTEND_REACT_LIBS[{key!r}]", info["package"], info["version"])
         for key, info in FRONTEND_REACT_LIBS.items()
+        # An unreleased pair is installed from a packed workspace checkout,
+        # never from npm: it has no served version to be stale against.
+        if info.get("released", True)
     ]
     table += [
         ("FRONTEND_REACT_CORE_DEPS", "@stapel/core", FRONTEND_REACT_CORE_DEPS["@stapel/core"]),
@@ -302,6 +305,24 @@ def check(
     for key, info in FRONTEND_REACT_LIBS.items():
         mirrored_entries = info.get("nav")
         real = _load_real_manifest(packages, key, info["package"])
+        if info.get("released", True) is False:
+            # No npm release: the mirror tracks the pair's branch, so a
+            # checkout of the default branch may not carry it yet, and its
+            # version is the workspace placeholder. Entries and embeds are
+            # still compared whenever the checkout has the package.
+            if real is None:
+                print(f"check_nav_manifest_sync: {key}: unreleased, and "
+                      f"{packages / f'{key}-react'} is not in this checkout — not compared")
+                continue
+            for field, label in (("nav", "entries"), ("embeds", "embeds")):
+                if info.get(field) != real.get(label):
+                    mismatches.append(
+                        f"{key} (unreleased): mirrored {field!r} differs from the real "
+                        f"{packages / f'{key}-react' / 'nav-manifest.json'} {label!r}:\n"
+                        f"  mirror: {json.dumps(info.get(field), indent=2, sort_keys=True)}\n"
+                        f"  real:   {json.dumps(real.get(label), indent=2, sort_keys=True)}")
+            checked += 1
+            continue
         real_published = bool((real or {}).get("entries"))
         mirrored_embeds = info.get("embeds")
         real_embeds = (real or {}).get("embeds")

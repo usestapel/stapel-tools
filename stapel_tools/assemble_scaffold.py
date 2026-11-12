@@ -258,7 +258,8 @@ def assemble_scaffold(
     # who only asked for "categories" still gets a project whose pip install
     # actually resolves (create_project does the same closure — this mirrors
     # it here so libs_applied/CONFIG.MD reporting matches what was wired).
-    known_libs = _expand_with_requires(list(requested))
+    known_libs = _expand_with_requires(
+        list(requested), unreleased_companions=allow_unreleased)
 
     if unknown_libs:
         print(
