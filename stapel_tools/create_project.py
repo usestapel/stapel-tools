@@ -108,8 +108,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "User profiles",
         "default": False,
-        "pin": "0.22.1",
-        "ahead_of_pypi": False,  # PyPI 0.22.1 @ 2026-10-22
+        "pin": "0.23.0",
+        "ahead_of_pypi": False,  # PyPI 0.23.0 @ 2026-11-05 (scripts/check_pypi_pins.py)
     },
     "translate": {
         "repo": "https://github.com/usestapel/stapel-translate.git",
@@ -338,8 +338,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Listings & catalog",
         "default": False,
-        "pin": "0.28.0",
-        "ahead_of_pypi": False,  # PyPI 0.28.0 @ 2026-11-05
+        "pin": "0.29.0",
+        "ahead_of_pypi": False,  # PyPI 0.29.0 @ 2026-11-05 (scripts/check_pypi_pins.py)
         "http": True,
         # Same fix/rationale as "categories" above: stapel-listings/urls.py's
         # own docstring says hosts mount it under their own ".../api/"
@@ -4010,7 +4010,7 @@ def _setup_pip_deps(
                 f"{pypi_name}{extras_suffix}>={pin},<{ceiling}"
                 if pin and ceiling else f"{pypi_name}{extras_suffix}"
             )
-            note = f"# {info['dir']} — matches last-published PyPI v{pin}"
+            note = f"# {info['dir']} — registry pin v{pin} (stapel-tools checks it against PyPI at release)"
         if entry not in lines:
             lines.append(note)
             lines.append(entry)
