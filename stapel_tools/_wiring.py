@@ -86,7 +86,9 @@ _PRESET_MERGE = '''
 # explicit STAPEL_<MOD> key, or one entry of a registry such as
 # STAPEL_ORDERS["ADJUSTERS"], wins over the preset's; an explicit None entry
 # stays None, which the owning library's merge registry reads as "removed".
-# Later presets refine earlier ones ({composites_doc}).
+# Later presets refine earlier ones ({composites_doc}). A fragment for a
+# module this project does not install is skipped (social's moderation targets
+# without stapel-moderation, booking's bookable without stapel-reservations).
 def _stapel_merge_preset_defaults(namespace, preset_modules):
     from importlib import import_module
 
@@ -99,9 +101,12 @@ def _stapel_merge_preset_defaults(namespace, preset_modules):
                 merged[key] = value
         return merged
 
+    unselected = namespace.get("_STAPEL_PRESET_UNSELECTED", ())
     combined = {{}}
     for module in preset_modules:
         for name, defaults in import_module(module).SETTINGS_DEFAULTS.items():
+            if name in unselected:
+                continue
             combined[name] = merge(combined.get(name, {{}}), defaults)
     for name, defaults in combined.items():
         namespace[name] = merge(defaults, namespace.get(name) or {{}})
@@ -110,6 +115,23 @@ def _stapel_merge_preset_defaults(namespace, preset_modules):
 _stapel_merge_preset_defaults(globals(), [{modules}])
 '''
 
+# The registry modules this project does not install, read by the merge above.
+_UNSELECTED = '''
+_STAPEL_PRESET_UNSELECTED = (
+{unselected})
+'''
+
+
+def unselected_namespaces(libs: list[str]) -> list[str]:
+    """``STAPEL_<MOD>`` names of the registry's Django-app modules outside
+    *libs*: a preset fragment written for one of them is not merged."""
+    reg = _libs()
+    return [
+        f"STAPEL_{key.upper()}" for key, info in reg.items()
+        if key not in libs and key != "core" and info.get("django_app", True)
+        and not info.get("composite")
+    ]
+
 
 def render_preset_defaults(libs: list[str]) -> str:
     keys = preset_modules(libs)
@@ -117,7 +139,9 @@ def render_preset_defaults(libs: list[str]) -> str:
         return ""
     reg = _libs()
     modules = ", ".join(f'"{reg[k]["dir"]}.preset"' for k in keys)
-    return _PRESET_MERGE.format(modules=modules, composites_doc=" -> ".join(keys))
+    unselected = "".join(f'    "{name}",\n' for name in unselected_namespaces(libs))
+    return _UNSELECTED.format(unselected=unselected) + _PRESET_MERGE.format(
+        modules=modules, composites_doc=" -> ".join(keys))
 
 
 _REALTIME_MONOLITH = '''
