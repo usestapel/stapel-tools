@@ -24,6 +24,11 @@
   `--modules` but refused unless `--allow-unreleased` (sibling checkout
   install); `stapel-assemble` reports them as gaps. promotions, delivery,
   inventory and courses are companions of orders.
+- **SIB005 counts a sibling the suite runs.** `python -m stapel_x…` (one
+  string, or adjacent `"-m", "stapel_x…"` list items) in a suite file or the
+  root `Makefile`, or an installed console script of the sibling
+  (`stapel-verify`), is use; a test extra reached only by subprocess is no
+  longer reported unused.
 - **`prototype_dev` registry values** reach the local settings only when they
   declare the prototype posture stage: delivery's `DEFAULT_CARRIER="mock"`.
 

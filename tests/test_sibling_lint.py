@@ -408,6 +408,43 @@ def test_sib005_ignores_the_harness(tmp_path):
     assert lint_project(tmp_path) == []
 
 
+@pytest.mark.parametrize("body", [
+    "import subprocess, sys\n"
+    "def test_x():\n    subprocess.run([sys.executable, '-m', 'stapel_geo.lint', '.'])\n",
+    "import os\ndef test_x():\n    os.system('python -m stapel_geo.lint .')\n",
+])
+def test_sib005_a_dash_m_invocation_in_the_suite_is_use(tmp_path, body):
+    _project(tmp_path, test_extra=["pytest", "stapel-geo>=0.4.0,<1.0"])
+    _write(tmp_path, "tests/test_x.py", body)
+    assert lint_project(tmp_path) == []
+
+
+def test_sib005_a_makefile_invocation_is_use(tmp_path):
+    _project(tmp_path, test_extra=["pytest", "stapel-geo>=0.4.0,<1.0"])
+    _write(tmp_path, "tests/test_x.py", "def test_x():\n    assert True\n")
+    _write(tmp_path, "Makefile", "gate:\n\t$(PYTHON) -m stapel_geo.lint .\n")
+    assert lint_project(tmp_path) == []
+
+
+def test_sib005_a_console_script_of_the_sibling_is_use(tmp_path):
+    """stapel-tools is installed here: its ``stapel-verify`` script names it."""
+    _project(tmp_path, test_extra=["pytest", "stapel-tools>=0.79,<1.0"])
+    _write(tmp_path, "tests/test_x.py",
+           "import subprocess\ndef test_x():\n    subprocess.run(['stapel-verify', '.'])\n")
+    assert lint_project(tmp_path) == []
+
+
+def test_sib005_inversion_a_lookalike_is_not_use(tmp_path):
+    """Another module's -m, and a longer script name, do not count."""
+    _project(tmp_path, test_extra=["pytest", "stapel-geo>=0.4.0,<1.0", "stapel-tools>=0.79,<1.0"])
+    _write(tmp_path, "tests/test_x.py",
+           "import subprocess, sys\ndef test_x():\n"
+           "    subprocess.run([sys.executable, '-m', 'stapel_geography'])\n"
+           "    subprocess.run(['stapel-verify-extra', '-x'])\n")
+    assert sorted(v.message.split(",")[0] for v in lint_project(tmp_path)) == [
+        "the `test` extra declares stapel-geo", "the `test` extra declares stapel-tools"]
+
+
 def test_sib005_points_at_the_line_that_declares_it(tmp_path):
     _project(tmp_path, test_extra=["pytest", "stapel-geo>=0.4.0,<1.0"])
     _write(tmp_path, "tests/test_x.py", "def test_x():\n    assert True\n")

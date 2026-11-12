@@ -70,7 +70,10 @@ SIB004  (warning) A **declared** sibling reached behind a skip guard
 
 SIB005  (warning) The ``test`` extra declares a ``stapel-*`` sibling that no
         suite file imports or names (a ``requires("stapel_x")`` counts as
-        naming it — the seam speaks in strings). The other direction, so the extra cannot
+        naming it — the seam speaks in strings), and that neither the suite
+        nor the root ``Makefile`` runs: ``python -m stapel_x…`` (as one string
+        or as ``"-m", "stapel_x…"`` list items) or one of the sibling's
+        installed console scripts (``stapel-verify``) counts as use. The other direction, so the extra cannot
         rot into a wish list: an extra that stops describing the suite stops
         being read.
 
@@ -727,6 +730,58 @@ def _config_source_violations(project: Path) -> list:
     return out
 
 
+_DASH_M = re.compile(r"-m\s+(stapel_[A-Za-z0-9_]+)")
+
+
+def _console_scripts(dist: str) -> set:
+    """Console-script names an installed ``dist`` ships (empty when absent)."""
+    from importlib import metadata
+
+    try:
+        eps = metadata.distribution(dist).entry_points
+    except metadata.PackageNotFoundError:
+        return set()
+    return {ep.name for ep in eps if ep.group == "console_scripts"}
+
+
+def invoked_dists(project: Path, texts: dict, candidates: Iterable[str]) -> set:
+    """Siblings a suite or the root Makefile RUNS rather than imports.
+
+    ``texts`` maps a suite file to its source. ``-m stapel_x`` in any string
+    (shell lines, Makefile recipes), ``"-m", "stapel_x.y"`` adjacent list
+    items, and a candidate's console-script name as a whole word count."""
+    sources = dict(texts)
+    makefile = Path(project) / "Makefile"
+    if makefile.is_file():
+        sources[str(makefile)] = makefile.read_text(encoding="utf-8", errors="replace")
+    used: set = set()
+    for path, src in sources.items():
+        used.update(dist_of(m.split(".")[0]) for m in _DASH_M.findall(src))
+        if path.endswith(".py"):
+            try:
+                tree = ast.parse(src)
+            except (SyntaxError, ValueError):
+                tree = None
+            for node in ast.walk(tree) if tree is not None else ():
+                if not isinstance(node, (ast.List, ast.Tuple)):
+                    continue
+                items = node.elts
+                for first, second in zip(items, items[1:]):
+                    if (isinstance(first, ast.Constant) and first.value == "-m"
+                            and isinstance(second, ast.Constant) and isinstance(second.value, str)
+                            and second.value.startswith("stapel_")):
+                        used.add(dist_of(second.value.split(".")[0]))
+    for dist in candidates:
+        if dist in used:
+            continue
+        for script in _console_scripts(dist):
+            pattern = re.compile(rf"(?<![\w-]){re.escape(script)}(?![\w-])")
+            if any(pattern.search(src) for src in sources.values()):
+                used.add(dist)
+                break
+    return used
+
+
 def lint_project(project: Path, notes: Optional[list] = None) -> list:
     """Lint one repository. Returns violations sorted by (path, line, rule)."""
     project = Path(project).resolve()
@@ -781,6 +836,10 @@ def lint_project(project: Path, notes: Optional[list] = None) -> list:
 
     # SIB005 — the extra as a description of the suite, checked backwards.
     if declaration.path is not None:
+        unused = [d for d in declaration.test_extra
+                  if d.startswith("stapel-") and d not in used_dists]
+        texts = {p: "\n".join(lines) for p, lines in source_of.items()}
+        used_dists |= invoked_dists(project, texts, unused)
         pyproject_lines = declaration.path.read_text(encoding="utf-8").splitlines()
         source_of[str(declaration.path)] = pyproject_lines
         for dist in sorted(declaration.test_extra):
