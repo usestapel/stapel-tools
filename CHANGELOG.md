@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+- **A fresh chat composite's boot-smoke is green.** `make boot-smoke` runs
+  over base.py with no env, so the socket origin allowlist was empty and
+  classified/social failed their own gate on `stapel_core.jwt.E001` +
+  `stapel_chat.E014`. With stapel-realtime selected, `boot_smoke.py` now
+  states the local stack's origins when the env gives none (gate-only, as it
+  does `FRONTEND_URL`) and copies them into `STAPEL_REALTIME`; nothing is
+  silenced.
+
 - **Moderation screening gets a media origin.** A selection with
   stapel-moderation and stapel-cdn writes
   `STAPEL_MODERATION["MEDIA_BASE_URL"] = os.getenv("SITE_URL", "")` (under

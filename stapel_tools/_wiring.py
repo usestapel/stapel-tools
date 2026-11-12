@@ -336,8 +336,30 @@ SILENCED_SYSTEM_CHECKS = [*globals().get("SILENCED_SYSTEM_CHECKS", []), "stapel_
 """
 
 
+#: Appended to boot_smoke.py when stapel-realtime is selected. base.py reads
+#: the socket origin allowlist from the env (STAPEL_WS_ALLOWED_ORIGINS), which
+#: this gate runs without, and an empty list is an error by design
+#: (stapel_core.jwt.E001, stapel_chat.E014). The gate supplies the local
+#: stack's origins the way it supplies FRONTEND_URL: an assignment in this
+#: gate-only layer, never a default in base.py, and only when the env gave none.
+BOOT_SMOKE_REALTIME = """
+# Socket origins (stapel_core.jwt.E001, stapel_chat.E014): base.py reads them
+# from the env, which this gate runs without; an empty allowlist is an error,
+# so the gate states the local stack's origins (gate-only, as FRONTEND_URL).
+if not STAPEL_WS_ALLOWED_ORIGINS:  # noqa: F405
+    STAPEL_WS_ALLOWED_ORIGINS = ["http://localhost", "http://localhost:5173"]
+STAPEL_REALTIME = {  # noqa: F405
+    **STAPEL_REALTIME,  # noqa: F405
+    "ALLOWED_ORIGINS": list(STAPEL_REALTIME.get("ALLOWED_ORIGINS") or STAPEL_WS_ALLOWED_ORIGINS),  # noqa: F405
+}
+"""
+
+
 def boot_smoke_extra(libs: list[str]) -> str:
-    return BOOT_SMOKE_SEARCH if "search" in libs else ""
+    parts = [BOOT_SMOKE_SEARCH if "search" in libs else ""]
+    if realtime_selected(libs):
+        parts.append(BOOT_SMOKE_REALTIME)
+    return "".join(parts)
 
 
 def asgi_py(libs: list[str], *, settings_module: str) -> str | None:
