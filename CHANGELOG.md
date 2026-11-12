@@ -25,7 +25,8 @@
   without those variables it does nothing. The roles come with
   `stapel_core.access.backend.MandateBackend` first in
   `AUTHENTICATION_BACKENDS` (without it the clearances had no effect,
-  `stapel_core.access.W001`).
+  `stapel_core.access.W001`) and Django's `ModelBackend` swapped for core's
+  `AuditedModelBackend` (W002).
 
 - **Listings without geo can publish.** A selection with stapel-listings and
   no stapel-geo (shop, booking) writes

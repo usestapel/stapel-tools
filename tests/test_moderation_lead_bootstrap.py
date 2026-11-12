@@ -63,7 +63,7 @@ def test_roles_come_with_the_mandate_backend():
     exec(_wiring.MODERATION_ROLES, ns)  # noqa: S102
     assert ns["AUTHENTICATION_BACKENDS"] == [
         "stapel_core.access.backend.MandateBackend",
-        "django.contrib.auth.backends.ModelBackend",
+        "stapel_core.access.backend.AuditedModelBackend",
     ]
     exec(_wiring.MODERATION_ROLES, ns)  # noqa: S102  (idempotent)
     assert ns["AUTHENTICATION_BACKENDS"].count("stapel_core.access.backend.MandateBackend") == 1

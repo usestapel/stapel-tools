@@ -321,10 +321,14 @@ STAPEL_ACCESS = {
 }
 # The roles act only through the mandate backend (stapel_core.access.W001):
 # it computes has_perm from role clearance x model declaration at call time.
+# Django's ModelBackend becomes core's AuditedModelBackend, the drop-in that
+# audits a manual grant used above the mandate (stapel_core.access.W002).
 AUTHENTICATION_BACKENDS = [
     "stapel_core.access.backend.MandateBackend",
     *[
-        b for b in (globals().get("AUTHENTICATION_BACKENDS") or ["django.contrib.auth.backends.ModelBackend"])
+        "stapel_core.access.backend.AuditedModelBackend"
+        if b == "django.contrib.auth.backends.ModelBackend" else b
+        for b in (globals().get("AUTHENTICATION_BACKENDS") or ["django.contrib.auth.backends.ModelBackend"])
         if b != "stapel_core.access.backend.MandateBackend"
     ],
 ]
