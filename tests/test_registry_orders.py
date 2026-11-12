@@ -61,3 +61,40 @@ class TestMountedInGeneratedProject:
         assert '"stapel_orders"' in settings
         assert 'path("orders/api/", include("stapel_orders.urls"))' in urls
         assert "stapel_orders.beat" in settings
+
+
+class TestPaymentFromPosture:
+    """SPEC-STAPEL-ORDERS: PAYMENT is posture-derived. A prototype local stack
+    left it at ``none`` and every checkout stayed unpaid."""
+
+    def _settings(self, tmp_path, posture):
+        from stapel_tools.create_project import create_project
+
+        create_project(
+            name="app", project_type="monolith", title="App", url="https://x.dev",
+            company_name="X", company_email="x@x.dev", modules=["shop", "orders"],
+            output_dir=tmp_path, use_submodules=False, init_git=False,
+            auth_model="public", posture=posture,
+        )
+        root = tmp_path / "app" / "svc-app" / "config" / "settings"
+        return {p.stem: p.read_text() for p in root.glob("*.py")}
+
+    def test_prototype_local_settings_take_the_mock_payment(self, tmp_path):
+        files = self._settings(tmp_path, "prototype")
+        ns: dict = {}
+        line = next(ln for ln in files["dev"].splitlines() if ln.startswith("STAPEL_ORDERS ="))
+        exec(line, ns)  # noqa: S102
+        assert ns["STAPEL_ORDERS"]["PAYMENT"] == "mock"
+        # Never in what prod inherits.
+        for name in ("base", "prod", "boot_smoke"):
+            assert "'PAYMENT': 'mock'" not in files.get(name, ""), name
+
+    def test_a_live_posture_keeps_the_mock_on_the_local_machine_only(self, tmp_path):
+        # dev.py re-declares the prototype stage whatever the base posture is
+        # (this machine is never a launched deployment); prod inherits base.
+        files = self._settings(tmp_path, "live")
+        assert 'public_space(stage="live")' in files["base"]
+        assert 'public_space(stage="prototype")' in files["dev"]
+        assert "'PAYMENT': 'mock'" in files["dev"]
+        for name in ("base", "prod", "boot_smoke"):
+            assert "'PAYMENT': 'mock'" not in files.get(name, ""), name

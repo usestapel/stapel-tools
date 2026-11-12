@@ -491,6 +491,10 @@ STAPEL_LIBS = {
         # an anonymous add with no session is a 401 unless the SPA mints one.
         # The name is owned by @stapel/orders-react (ORDERS_ELEVATION_ACTIONS).
         "elevation_actions": ("orders.add_to_cart",),
+        # Posture-derived (SPEC-STAPEL-ORDERS): local settings at the prototype
+        # stage take payment as the mock provider, so a checkout is paid at
+        # once; stapel_orders refuses "mock" at any other stage (E002/W002).
+        "prototype_dev": {"PAYMENT": "mock"},
     },
     # ── Bricks with no PyPI release yet ─────────────────────────────────────
     # "released": False keeps a row inert: `--modules` lists it, but the

@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+- **Orders payment follows the posture.** The orders registry row declares
+  `prototype_dev: {"PAYMENT": "mock"}`, so the local settings (always the
+  prototype stage) take the mock provider and a checkout is paid at once;
+  base/prod keep the library default `none` (SPEC-STAPEL-ORDERS).
+
 - **A fresh chat composite's boot-smoke is green.** `make boot-smoke` runs
   over base.py with no env, so the socket origin allowlist was empty and
   classified/social failed their own gate on `stapel_core.jwt.E001` +
