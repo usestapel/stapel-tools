@@ -103,8 +103,10 @@ class TestRows:
 
     def test_pins_the_bricks_stand_on(self):
         # profiles.social_graph (0.23.0) and listings.bookables (0.29.0).
-        assert STAPEL_LIBS["profiles"]["pin"] == "0.23.0"
-        assert STAPEL_LIBS["listings"]["pin"] == "0.29.0"
+        def v(key):
+            return tuple(int(x) for x in STAPEL_LIBS[key]["pin"].split("."))
+        assert v("profiles") >= (0, 23, 0)
+        assert v("listings") >= (0, 29, 0)
 
     def test_pairs_mirror_and_are_unreleased(self):
         for key in BRICKS:

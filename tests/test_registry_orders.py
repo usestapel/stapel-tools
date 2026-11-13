@@ -20,7 +20,7 @@ class TestRegistryEntry:
     def test_registered_with_the_published_pin(self):
         info = STAPEL_LIBS["orders"]
         assert info["dir"] == "stapel_orders"
-        assert info["pin"] == "0.1.0"
+        assert info["pin"] == "0.2.0"
         assert info["ahead_of_pypi"] is False
         assert info["http"] is True
         assert info["url_prefix"] == "orders/api/"
