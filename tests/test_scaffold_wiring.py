@@ -299,6 +299,20 @@ def _v(text):
     return tuple(int(p) for p in text.split("."))
 
 
+#: Releases that fix a defect a scaffolded app hits in normal use. A
+#: floor below one hands a fresh project the defect even when the
+#: resolver would pick the patch: pins are floors for every rebuild.
+FIX_FLOORS = {
+    "orders": "0.2.1",  # a visitor with no session reads the empty cart
+    "gdpr": "0.9.1",  # a timed-out account erasure can finish
+}
+
+
+@pytest.mark.parametrize("key", sorted(FIX_FLOORS))
+def test_pin_is_at_least_the_fix_release(key):
+    assert _v(STAPEL_LIBS[key]["pin"]) >= _v(FIX_FLOORS[key])
+
+
 @pytest.mark.parametrize("key", sorted(WAVE_FLOORS))
 def test_pin_is_at_least_the_wave_release(key):
     assert _v(STAPEL_LIBS[key]["pin"]) >= _v(WAVE_FLOORS[key])

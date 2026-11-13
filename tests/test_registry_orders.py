@@ -1,5 +1,5 @@
 """stapel-orders in the registry: cart, checkout and orders over opaque
-purchasables (PyPI 0.1.0).
+purchasables (pinned at 0.2.1: the cold guest cart read).
 
 Orders is opt-in and NOT a shop companion: companions expand transitively,
 classified requires shop, and a classified ad is contacted, not bought. The
@@ -20,7 +20,9 @@ class TestRegistryEntry:
     def test_registered_with_the_published_pin(self):
         info = STAPEL_LIBS["orders"]
         assert info["dir"] == "stapel_orders"
-        assert info["pin"] == "0.2.0"
+        # 0.2.1 is the release where a visitor with no session reads the
+        # empty cart; 0.2.0 answered 401, so a scaffolded shop showed an error.
+        assert _v(info["pin"]) >= (0, 2, 1)
         assert info["ahead_of_pypi"] is False
         assert info["http"] is True
         assert info["url_prefix"] == "orders/api/"

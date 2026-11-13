@@ -141,8 +141,10 @@ STAPEL_LIBS = {
         # an account in its closure grace period keeps every endpoint outside
         # stapel-gdpr with a token minted before the closure.
         "middleware": ["stapel_gdpr.guards.AccountClosureGuardMiddleware"],
-        "pin": "0.9.0",
-        "ahead_of_pypi": False,  # PyPI 0.9.0 @ 2026-10-22
+        # 0.9.1: a timed-out account erasure can finish (late receipts
+        # finalize it; gdpr_redrive_timeouts); 0.9.0 left it `deleting`.
+        "pin": "0.9.1",
+        "ahead_of_pypi": False,  # PyPI 0.9.1 @ 2026-11-04
     },
     # --- second onboarding wave (2026-07-11, static-scaffold-and-config.md §2
     # follow-up): 14 sibling checkouts brought into the registry. Dict order
@@ -479,8 +481,10 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Cart, checkout and orders over opaque purchasables",
         "default": False,
-        "pin": "0.2.0",
-        "ahead_of_pypi": False,  # PyPI 0.2.0 @ 2026-11-13
+        # 0.2.1: a visitor with no session reads the empty cart (200); 0.2.0
+        # answered the cold guest read with 401.
+        "pin": "0.2.1",
+        "ahead_of_pypi": False,  # PyPI 0.2.1 @ 2026-11-13
         "http": True,
         # stapel_orders/urls.py contributes "v1/" under the host's prefix.
         "url_prefix": "orders/api/",

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.80.2] — 2026-11-13
+
+- **Pins: stapel-orders 0.2.1, stapel-gdpr 0.9.1.** Registry floors moved to
+  the releases that fix a defect a fresh project hits: orders 0.2.1 answers a
+  visitor with no session with the empty cart (200) where 0.2.0 answered the
+  cold cart read with 401; gdpr 0.9.1 lets a timed-out account erasure finish
+  (a late receipt finalizes it, `gdpr_redrive_timeouts`) where 0.9.0 left the
+  account `deleting`. Generated requirements now read
+  `stapel-orders>=0.2.1,<0.3` and `stapel-gdpr>=0.9.1,<0.10`. A test holds
+  both floors (`FIX_FLOORS`).
+
 ## [0.80.1] — 2026-11-13
 
 - **A project's own categories boot alone.** The generated `bootstrap.sh`
