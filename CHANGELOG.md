@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.80.3] — 2026-11-14
+
+- **`--image-base fleet` defaults to stapel-images `20261113-ac3ea3a1`**
+  (was `20261105-325a4c29`). The tag is a multi-arch index (linux/amd64 +
+  linux/arm64), so a generated project's images build natively on the host
+  that builds them: an x86_64 stand gets amd64, an Apple-silicon
+  workstation gets arm64, with no `--platform` anywhere. Its stapel-runtime
+  carries this catalog's closure (stapel-core 0.96.0, auth 0.51.0, cdn
+  0.31.0, listings 0.30.0, shop 0.2.39, …): the registry is 0.80.2's,
+  unchanged, so a composite's `pip install` on the runtime installs
+  nothing (on the previous tag it installed 5-8 stapel libraries). A test now holds that
+  generated Dockerfiles and compose files force no platform.
+
 ## [0.80.2] — 2026-11-13
 
 - **Pins: stapel-orders 0.2.1, stapel-gdpr 0.9.1.** Registry floors moved to

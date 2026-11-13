@@ -67,6 +67,21 @@ def test_fleet_builds_every_image_on_one_tag(tmp_path, modules):
     assert not [v for v in image_lint.lint_project(proj) if v.rule in ("IMG001", "IMG003")]
 
 
+@pytest.mark.parametrize("image_base", ["upstream", "fleet"])
+def test_generated_images_force_no_platform(tmp_path, image_base):
+    """The fleet tags are multi-arch indexes: a generated project builds for
+    the host it is built on. A forced platform would make an arm64
+    workstation emulate amd64."""
+    kw = {"fleet_tag": TAG} if image_base == "fleet" else {}
+    proj = _gen(tmp_path, "arch", modules=["core", "cdn"], image_base=image_base, **kw)
+    files = _dockerfiles(proj) + sorted(proj.glob("docker-compose*.yml"))
+    assert files, "the scaffold wrote no Dockerfile or compose file"
+    for path in files:
+        text = path.read_text()
+        assert "--platform" not in text, path
+        assert not re.search(r"^\s*platform\s*:", text, re.M), path
+
+
 def test_fleet_tag_from_env(tmp_path, monkeypatch):
     monkeypatch.setenv(runtime_image.FLEET_TAG_ENV, TAG)
     proj = _gen(tmp_path, "viaenv", image_base="fleet")
