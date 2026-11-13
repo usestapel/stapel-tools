@@ -548,8 +548,21 @@ def asgi_py(libs: list[str], *, settings_module: str) -> str | None:
 
 
 def seed_commands(libs: list[str]) -> list[str]:
+    """Reference-data seeds (currencies): before the project's own seeds,
+    which may read them."""
     reg = _libs()
     return [cmd for k in reg if k in libs for cmd in reg[k].get("seed", [])]
+
+
+def starter_seed_commands(libs: list[str]) -> list[str]:
+    """Starter-content seeds (the demo category tree): after the project's own
+    seeds, and each a no-op when the project already made that content."""
+    reg = _libs()
+    return [cmd for k in reg if k in libs for cmd in reg[k].get("starter_seed", [])]
+
+
+def _seed_step(cmd: str) -> str:
+    return f'optional "seed-{cmd.split()[2].replace("_", "-")}" {cmd}'
 
 
 def testing_plugins(libs: list[str]) -> list[str]:
@@ -577,14 +590,25 @@ def render_pytest_plugins(libs: list[str]) -> str:
 def render_bootstrap_seed(libs: list[str]) -> str:
     """``optional`` bootstrap steps for each selected module's idempotent seed
     (reference data a fresh app needs: currencies, a starter category tree)."""
-    lines = []
-    for cmd in seed_commands(libs):
-        name = "seed-" + cmd.split()[2].replace("_", "-")
-        lines.append(f'optional "{name}" {cmd}')
+    lines = [_seed_step(cmd) for cmd in seed_commands(libs)]
     out = ("\n" + "\n".join(lines) + "\n") if lines else ""
     if moderation_selected(libs):
         out += MODERATION_LEAD_BOOTSTRAP
     return out
+
+
+def render_bootstrap_starter(libs: list[str]) -> str:
+    """``optional`` steps loading starter content after the project's seeds
+    (``--seed-if-empty``: skipped once the project seeded its own)."""
+    lines = [_seed_step(cmd) for cmd in starter_seed_commands(libs)]
+    if not lines:
+        return ""
+    return (
+        "\n# optional: starter content (a demo category tree) for a project that\n"
+        "# seeded none of its own. After the project's seeds on purpose: each step\n"
+        "# loads only into an empty table, so a project's own categories stand alone.\n"
+        + "\n".join(lines) + "\n"
+    )
 
 
 #: Starter category trees, one per composite (a generic one otherwise). No

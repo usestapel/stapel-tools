@@ -152,6 +152,7 @@ def make_context(
         moderation_selected,
         realtime_selected,
         render_bootstrap_seed,
+        render_bootstrap_starter,
         render_dev_wiring,
         render_pytest_plugins,
         render_wiring,
@@ -196,6 +197,7 @@ def make_context(
         "HAS_MODERATION": "true" if moderation_selected(selected_keys) else "",
         "BOOT_SMOKE_EXTRA": boot_smoke_extra(selected_keys),
         "BOOTSTRAP_SEED": render_bootstrap_seed(selected_keys),
+        "BOOTSTRAP_STARTER": render_bootstrap_starter(selected_keys),
         # Plain string (see HAS_CDN): appended to the service conftest.
         "PYTEST_PLUGINS": render_pytest_plugins(selected_keys),
     }

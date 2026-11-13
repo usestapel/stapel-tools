@@ -389,6 +389,87 @@ def test_bootstrap_seeds_currencies_and_a_starter_catalog(tmp_path):
     assert json.loads((svc / "fixtures" / "catalog" / "features.json").read_text()) == []
 
 
+# A step runner that runs every step, and a `python` that models the two
+# commands that touch the category table: the project's `run_seeds` (its own
+# categories, from PROJECT_CATEGORIES) and `load_catalog --seed-if-empty`
+# (the starter tree, only into an empty table). Everything else is a no-op.
+_STUB_RUNNER = """\
+require() { shift; "$@"; }
+optional() { shift; "$@"; }
+db_direct() { "$@"; }
+wait_for_database() { :; }
+ensure_superuser() { :; }
+bootstrap_done() { :; }
+"""
+
+_FAKE_PYTHON = """\
+import json, os, sys
+args = sys.argv[1:]
+if args[:1] != ["manage.py"]:
+    sys.exit(0)
+state = os.environ["CATALOG_STATE"]
+cats = json.load(open(state)) if os.path.exists(state) else []
+if args[1] == "run_seeds":
+    cats += [c for c in json.loads(os.environ["PROJECT_CATEGORIES"]) if c not in cats]
+elif args[1] == "load_catalog" and "--seed-if-empty" in args and not cats:
+    cats = [c["slug"] for c in json.load(open("fixtures/catalog/categories.json"))]
+json.dump(cats, open(state, "w"))
+"""
+
+
+def _boot_categories(tmp_path, svc, own_categories):
+    """Run the generated bootstrap.sh; the category slugs it leaves behind."""
+    import json
+    import shutil
+
+    if shutil.which("sh") is None:
+        pytest.skip("no POSIX sh")
+    fake = tmp_path / "fakebin"
+    fake.mkdir(exist_ok=True)
+    (fake / "python").write_text(f"#!{sys.executable}\n" + _FAKE_PYTHON)
+    (fake / "python").chmod(0o755)
+    runner = tmp_path / "runner.sh"
+    runner.write_text(_STUB_RUNNER)
+    state = tmp_path / f"catalog-{len(own_categories)}.json"
+    env = {
+        **os.environ,
+        "PATH": f"{fake}{os.pathsep}{os.environ['PATH']}",
+        "STAPEL_BOOTSTRAP_LIB": str(runner),
+        "CATALOG_STATE": str(state),
+        "PROJECT_CATEGORIES": json.dumps(own_categories),
+    }
+    proc = subprocess.run(["sh", "bootstrap.sh"], cwd=svc, env=env, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    return json.loads(state.read_text())
+
+
+def test_project_seeding_its_own_categories_boots_with_only_those(tmp_path):
+    """The starter tree loads after the project's seeds, so `--seed-if-empty`
+    finds the project's categories and adds none of the demo ones."""
+    proj = _create(tmp_path, "oc", "monolith", ["shop"])
+    svc = proj / "svc-oc"
+    assert _boot_categories(tmp_path, svc, ["brake-pads", "filters"]) == ["brake-pads", "filters"]
+    boot = (svc / "bootstrap.sh").read_text()
+    assert boot.index('optional "seeds"') < boot.index('optional "seed-load-catalog"')
+
+
+def test_project_without_category_seed_gets_the_starter_tree(tmp_path):
+    import json
+
+    proj = _create(tmp_path, "st", "monolith", ["shop"])
+    svc = proj / "svc-st"
+    starter = [c["slug"] for c in json.loads((svc / "fixtures" / "catalog" / "categories.json").read_text())]
+    assert {"electronics", "phones"} <= set(starter)
+    assert _boot_categories(tmp_path, svc, []) == starter
+
+
+def test_reference_data_seeds_still_run_before_the_projects(tmp_path):
+    """Currencies are reference data a project seed may read: they stay first."""
+    proj = _create(tmp_path, "rd", "monolith", ["shop"])
+    boot = (proj / "svc-rd" / "bootstrap.sh").read_text()
+    assert boot.index('optional "seed-load-default-currencies"') < boot.index('optional "seeds"')
+
+
 def test_no_seed_without_the_module(tmp_path):
     proj = _create(tmp_path, "ns", "monolith", ["reviews"])
     assert "seed-" not in (proj / "svc-ns" / "bootstrap.sh").read_text()

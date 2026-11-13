@@ -245,7 +245,10 @@ STAPEL_LIBS = {
         "requires": ["attributes"],  # pyproject dependency, hard
         # A starter tree (fixtures/catalog/, written by the scaffold) so the
         # first publish has a category; a no-op once the catalog has rows.
-        "seed": ["python manage.py load_catalog --seed-if-empty"],
+        # A starter, not reference data: it runs AFTER the project's own
+        # seeds, so a project that seeds its own categories boots with only
+        # those, and one that seeds none still gets the starter tree.
+        "starter_seed": ["python manage.py load_catalog --seed-if-empty"],
     },
     # The WebSocket substrate (stapel-realtime): a Django app with checks and
     # two comm Functions, no models and no urls of its own. Selected through
@@ -4167,8 +4170,9 @@ def _write_starter_catalog(
     project_dir: Path, ctx: dict, feature_libs: list[str], project_type: str,
 ) -> None:
     """``fixtures/catalog/`` under the service's BASE_DIR: the starter tree
-    ``load_catalog --seed-if-empty`` (a bootstrap step) loads into an empty
-    catalog, so a fresh app has a category to publish into."""
+    ``load_catalog --seed-if-empty`` (a bootstrap step after the project's
+    seeds) loads into a catalog still empty then, so a fresh app has a
+    category to publish into and a project's own categories stand alone."""
     from ._wiring import starter_catalog
 
     files = starter_catalog(feature_libs)

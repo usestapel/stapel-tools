@@ -171,7 +171,7 @@ optional "collectstatic" python manage.py collectstatic --noinput --clear --verb
 # empty list runs nothing; a failed or unknown seed degrades the boot and is
 # named in the log.
 optional "seeds" python manage.py run_seeds
-
+{{BOOTSTRAP_STARTER}}
 bootstrap_done
 """
 

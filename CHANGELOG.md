@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.80.1] — 2026-11-13
+
+- **A project's own categories boot alone.** The generated `bootstrap.sh`
+  ran the starter catalog (`load_catalog --seed-if-empty`, the demo tree:
+  electronics, phones, …) before the project's own seeds, so a shop that
+  seeds its own categories booted with the demo tree next to them. The
+  starter catalog now runs after `optional "seeds"`: `--seed-if-empty` finds
+  the project's categories and loads nothing; a project that seeds none still
+  gets the starter tree. Reference data (currencies) still runs before the
+  project's seeds. In the registry, categories' bootstrap command moved from
+  `seed` to the new `starter_seed` key (`_wiring.starter_seed_commands`,
+  `render_bootstrap_starter`). Existing projects: move the
+  `seed-load-catalog` line below `optional "seeds"` in each `bootstrap.sh`.
+
 ## [0.80.0] — 2026-11-13
 
 - **Chat thread route and "message" buttons, ready for the next chat-react.**

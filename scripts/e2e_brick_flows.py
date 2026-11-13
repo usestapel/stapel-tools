@@ -138,7 +138,7 @@ def reservations() -> None:
     from django.test import Client
     from django.urls import reverse
 
-    # The starter catalog the generated bootstrap seeds (categories' "seed").
+    # The starter catalog the generated bootstrap seeds (categories' "starter_seed").
     call_command("load_catalog", "--seed-if-empty")
     category = _json(Client().get(reverse("category-roots")))[0]["id"]
 
