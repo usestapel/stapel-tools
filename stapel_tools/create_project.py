@@ -413,8 +413,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Production secret storage (OpenBao/Vault facade)",
         "default": False,
-        "pin": "0.1.5",
-        "ahead_of_pypi": False,  # PyPI 0.1.5 @ 2026-11-13
+        "pin": "0.1.6",
+        "ahead_of_pypi": False,  # PyPI 0.1.6 @ 2026-11-13
         # A facade activated via STAPEL_SECRETS_PROVIDER (env), not a Django
         # app: no models/urls of its own. Not mounted in INSTALLED_APPS.
         "http": False,
