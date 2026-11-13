@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] — proposed 0.80.0
+## [0.80.0] — 2026-11-13
 
 - **Chat thread route and "message" buttons, ready for the next chat-react.**
   Mount recipes for `chat.thread` (`chat/:id` → `ConversationThreadPage`
@@ -63,11 +63,23 @@
   on PyPI, PIN002 a newer release outside the rendered ceiling. Pins moved:
   listings 0.29.0, profiles 0.23.0 (both additive), agent 0.39.0 (a
   classified + agent project's gates give the same results on 0.38.1 and
-  0.39.0). Still stale, named by the gate: recordings 0.44.0 (pin 0.42.0),
-  held until a recordings project's own gates are green (they are red on
-  either pin: the generated image and check run without ffmpeg,
-  `stapel_recordings.E006`). The generated requirements comment no longer
-  claims "matches last-published".
+  0.39.0). The generated requirements comment no longer claims "matches
+  last-published".
+
+- **Pins moved to the 2026-11-13 releases.** stapel-core 0.96.0 (blank env
+  values mean the default, unknown boolean words fail `check` with
+  `stapel_core.conf.E004`, consumer schemas no longer overwrite an owner's
+  fact schema), stapel-orders 0.2.0 (checkout seams; the `mock` payment emits
+  `orders.payment.completed`, so mock checkout next to stapel-billing works
+  on core 0.96), stapel-auth 0.51.0, stapel-billing 0.25.0, stapel-cdn
+  0.31.0 (private media is served by signed links only), stapel-chat 0.12.0,
+  stapel-listings 0.30.0, stapel-moderation 0.9.0, stapel-translate 0.9.0,
+  stapel-video 0.14.0, stapel-workspaces 0.38.0, and the patches
+  notifications 0.30.1, docs 0.10.1, forms 0.6.4, vault 0.1.5.
+  stapel-recordings moves to 0.44.0: a recordings project's `check` reports
+  the same ids on 0.42.0 and 0.44.0 (`stapel_recordings.E006`, no ffmpeg in
+  the generated image), so holding the older pin bought nothing and kept
+  `check_pypi_pins --strict` (a publish step) red.
 
 - **The wizard fails loudly with no terminal.** A call missing any of
   `<name> --type --title --url --company-name --company-email --modules` with

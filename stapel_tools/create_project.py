@@ -60,8 +60,8 @@ STAPEL_LIBS = {
         # not pin a core that has never heard of it — the project would boot
         # with a socket every browser is turned away from.
         # 0.95.0: `manage.py run_seeds`, which the generated bootstrap.sh calls.
-        "pin": "0.95.3",
-        "ahead_of_pypi": False,  # PyPI 0.95.3 @ 2026-11-05
+        "pin": "0.96.0",
+        "ahead_of_pypi": False,  # PyPI 0.96.0 @ 2026-11-13
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
@@ -72,8 +72,8 @@ STAPEL_LIBS = {
         # unique_phone / signed_in_client / otp_limiter_off (0.50.0), listed in
         # the service conftest's pytest_plugins.
         "pytest_plugin": "stapel_auth.testing",
-        "pin": "0.50.1",
-        "ahead_of_pypi": False,  # PyPI 0.50.1 @ 2026-10-23
+        "pin": "0.51.0",
+        "ahead_of_pypi": False,  # PyPI 0.51.0 @ 2026-11-13
     },
     "billing": {
         "repo": "https://github.com/usestapel/stapel-billing.git",
@@ -81,8 +81,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Billing & subscriptions",
         "default": False,
-        "pin": "0.24.1",
-        "ahead_of_pypi": False,  # PyPI 0.24.1 @ 2026-10-22
+        "pin": "0.25.0",
+        "ahead_of_pypi": False,  # PyPI 0.25.0 @ 2026-11-13
     },
     "cdn": {
         "repo": "https://github.com/usestapel/stapel-cdn.git",
@@ -90,8 +90,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "File uploads & CDN",
         "default": False,
-        "pin": "0.30.0",
-        "ahead_of_pypi": False,  # PyPI 0.30.0 @ 2026-10-22 (answers user.deletion_cancelled: core 0.94 lifecycle.E001)
+        "pin": "0.31.0",
+        "ahead_of_pypi": False,  # PyPI 0.31.0 @ 2026-11-13 (answers user.deletion_cancelled: core 0.94 lifecycle.E001)
     },
     "notifications": {
         "repo": "https://github.com/usestapel/stapel-notifications.git",
@@ -99,8 +99,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Email/push notifications",
         "default": False,
-        "pin": "0.30.0",
-        "ahead_of_pypi": False,  # PyPI 0.30.0 @ 2026-11-05
+        "pin": "0.30.1",
+        "ahead_of_pypi": False,  # PyPI 0.30.1 @ 2026-11-13
     },
     "profiles": {
         "repo": "https://github.com/usestapel/stapel-profiles.git",
@@ -119,8 +119,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Translations & i18n",
         "default": False,
-        "pin": "0.8.5",
-        "ahead_of_pypi": False,  # PyPI 0.8.5 @ 2026-10-22
+        "pin": "0.9.0",
+        "ahead_of_pypi": False,  # PyPI 0.9.0 @ 2026-11-13
     },
     "workspaces": {
         "repo": "https://github.com/usestapel/stapel-workspaces.git",
@@ -128,8 +128,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Workspaces & multi-tenancy",
         "default": False,
-        "pin": "0.37.0",
-        "ahead_of_pypi": False,  # PyPI 0.37.0 @ 2026-10-22
+        "pin": "0.38.0",
+        "ahead_of_pypi": False,  # PyPI 0.38.0 @ 2026-11-13
     },
     "gdpr": {
         "repo": "https://github.com/usestapel/stapel-gdpr.git",
@@ -272,8 +272,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Chat & messaging (direct/group/support)",
         "default": False,
-        "pin": "0.11.0",
-        "ahead_of_pypi": False,  # PyPI 0.11.0 @ 2026-10-22
+        "pin": "0.12.0",
+        "ahead_of_pypi": False,  # PyPI 0.12.0 @ 2026-11-13
         "http": True,
         "url_prefix": "chat/",
         # Its sockets are built on stapel-realtime (stapel_chat.E010/E011 refuse
@@ -301,8 +301,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Workspace documents (folders, revisions, snapshot/CRDT collab)",
         "default": False,
-        "pin": "0.10.0",
-        "ahead_of_pypi": False,  # PyPI 0.10.0 @ 2026-10-15
+        "pin": "0.10.1",
+        "ahead_of_pypi": False,  # PyPI 0.10.1 @ 2026-11-13
         "http": True,
         "url_prefix": "docs/",
         "requires": [],
@@ -313,8 +313,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Admin-defined forms (schemas, anonymous submissions, response review)",
         "default": False,
-        "pin": "0.6.3",
-        "ahead_of_pypi": False,  # PyPI 0.6.3 @ 2026-10-15
+        "pin": "0.6.4",
+        "ahead_of_pypi": False,  # PyPI 0.6.4 @ 2026-11-13
         "http": True,
         "url_prefix": "forms/",
         "requires": ["attributes"],  # pyproject dependency, hard
@@ -343,8 +343,8 @@ STAPEL_LIBS = {
         # 0.29.0: `listings.bookables`, the resolver the booking preset
         # registers for stapel-reservations' `listing` type (unpriced
         # listings included).
-        "pin": "0.29.0",
-        "ahead_of_pypi": False,  # PyPI 0.29.0 @ 2026-11-05 (scripts/check_pypi_pins.py)
+        "pin": "0.30.0",
+        "ahead_of_pypi": False,  # PyPI 0.30.0 @ 2026-11-13 (scripts/check_pypi_pins.py)
         "http": True,
         # Same fix/rationale as "categories" above: stapel-listings/urls.py's
         # own docstring says hosts mount it under their own ".../api/"
@@ -374,8 +374,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Recording lifecycle, normalization & transcription",
         "default": False,
-        "pin": "0.42.0",
-        "ahead_of_pypi": False,  # PyPI 0.42.0 @ 2026-10-22
+        "pin": "0.44.0",
+        "ahead_of_pypi": False,  # PyPI 0.44.0 @ 2026-11-05
         "http": True,
         "url_prefix": "recordings/",
         "requires": [],
@@ -413,8 +413,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Production secret storage (OpenBao/Vault facade)",
         "default": False,
-        "pin": "0.1.4",
-        "ahead_of_pypi": False,  # PyPI 0.1.4 @ 2026-10-15
+        "pin": "0.1.5",
+        "ahead_of_pypi": False,  # PyPI 0.1.5 @ 2026-11-13
         # A facade activated via STAPEL_SECRETS_PROVIDER (env), not a Django
         # app: no models/urls of its own. Not mounted in INSTALLED_APPS.
         "http": False,
@@ -427,8 +427,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Video calls (rooms, lobby, LiveKit-backed by default)",
         "default": False,
-        "pin": "0.13.0",
-        "ahead_of_pypi": False,  # PyPI 0.13.0 @ 2026-10-15
+        "pin": "0.14.0",
+        "ahead_of_pypi": False,  # PyPI 0.14.0 @ 2026-11-13
         "http": True,
         "url_prefix": "video/",
         # The lobby socket speaks the realtime v1 envelope (hard dependency).
@@ -460,8 +460,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Cross-target moderation (reports, verdicts, sanctions, appeals)",
         "default": False,
-        "pin": "0.8.4",
-        "ahead_of_pypi": False,  # PyPI 0.8.4 @ 2026-10-22
+        "pin": "0.9.0",
+        "ahead_of_pypi": False,  # PyPI 0.9.0 @ 2026-11-13
         "http": True,
         "url_prefix": "moderation/",
         "requires": [],
@@ -476,8 +476,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Cart, checkout and orders over opaque purchasables",
         "default": False,
-        "pin": "0.1.0",
-        "ahead_of_pypi": False,  # PyPI 0.1.0 @ 2026-11-05
+        "pin": "0.2.0",
+        "ahead_of_pypi": False,  # PyPI 0.2.0 @ 2026-11-13
         "http": True,
         # stapel_orders/urls.py contributes "v1/" under the host's prefix.
         "url_prefix": "orders/api/",
