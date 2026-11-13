@@ -75,7 +75,7 @@
   0.31.0 (private media is served by signed links only), stapel-chat 0.12.0,
   stapel-listings 0.30.0, stapel-moderation 0.9.0, stapel-translate 0.9.0,
   stapel-video 0.14.0, stapel-workspaces 0.38.0, and the patches
-  notifications 0.30.1, docs 0.10.1, forms 0.6.4, vault 0.1.6.
+  notifications 0.30.1, docs 0.10.1, forms 0.6.4, vault 0.1.7.
   stapel-recordings moves to 0.44.0: a recordings project's `check` reports
   the same ids on 0.42.0 and 0.44.0 (`stapel_recordings.E006`, no ffmpeg in
   the generated image), so holding the older pin bought nothing and kept
