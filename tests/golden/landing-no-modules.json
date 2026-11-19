@@ -1,0 +1,20 @@
+{
+ ".dockerignore": "44197a05c2f4fab8578ebf36c0ef149aead66c1d4e36e766838171c0cd1c23a5",
+ ".gitignore": "28c5cefa5ad87f7116a693595c9cdae71e79d5f150f5dc23647b0ffce670fd88",
+ "Dockerfile": "57b25c8a94b280e7d88a5d7829908851a2fe4616d88d957aef53aec05fead970",
+ "README.md": "07007a439b3f88433dfdc4e1cdbd2cfd6a365960fbae55f67a75aa50f02b1854",
+ "eslint.config.js": "dca7c71af28cf1a0767ed50fd10c3e71444d2ac8ced9cb0925d064e511683478",
+ "frontend-publish.sh": "268261c2ec75496abe115405a715a3731e3c23dc3e96ccac8434819883a3e19f",
+ "index.html": "b2d739cccc8d5eddd87349aceec8edcd6bd468315bcda97f37b117cf02ad4630",
+ "package.json": "ad6006838dff3a644efc92f44593d0a7ac9414bec0a379b957f41a5d76bfeeb4",
+ "pnpm-workspace.yaml": "ac02d96368617c760f093cfe61fdec64b6244007ab3553e0d6621f706f54a353",
+ "src/LandingPage.tsx": "043470f36a0df50f899538193d96ed9e4d015c3b621a66296ad9f74c207da9ea",
+ "src/main.tsx": "0c78e2f64ba79af80bc6d0863acbbbda4f067e8fbadee0d957d9cac32a4ee22a",
+ "src/routes.tsx": "41b71c398a24f135172e2561cbd808e168582858524d14c51aee17b767c1660c",
+ "src/vite-env.d.ts": "65996936fbb042915f7b74a200fcdde7e410f32a669b1ab9597cfaa4b0faddb5",
+ "stapel.composition.json": "6cc7f40ec50672fa73e5aff448db47978701bae0ac0fdf8dde13716f5dfee10a",
+ "stapel.theme.json": "bb583db61a21e4c4fc95a3d4a265916a7ba9d3e62d92b7bdbee49a2728593b22",
+ "tsconfig.json": "8c366c654272a547c1f23b4e6ad51d2d3bd4784299850963c35512a3fbb7bc2d",
+ "tsconfig.node.json": "618ba8345554eba24286d38ac836432e4c3f894c370a364a8da848f6d5dad59c",
+ "vite.config.ts": "565f292c3469d6f72d49930551e079a30d10e52785dbc7d163e6adc9cd58e484"
+}

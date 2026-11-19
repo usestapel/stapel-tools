@@ -1,0 +1,7 @@
+{
+ ".dockerignore": "44197a05c2f4fab8578ebf36c0ef149aead66c1d4e36e766838171c0cd1c23a5",
+ ".github/workflows/publish-frontend.yml": "3451e11b86bb11c5f00e97752d9c76f98bd29e16a15aeae2313814c972dab9b0",
+ "Dockerfile": "bd3d8801ecfdf91bbd296cf1b7f54adf157f0cafbeb71195a9f58b334b3f02cb",
+ "frontend-publish.sh": "268261c2ec75496abe115405a715a3731e3c23dc3e96ccac8434819883a3e19f",
+ "package.json": "480df32fa419bb5f3c54839da362ec8bee960ef53b643bc3ce4dee6d1116785e"
+}
