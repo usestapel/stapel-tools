@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.82.0] — 2026-11-19
+
+Platform-neutral scaffold composition (D11, refactor steps R0–R5). The
+generated React frontends are byte-identical to 0.81.3 for every case of the
+golden matrix; the change is where the facts live and what can read them.
+
+- **Golden gate** (`scripts/golden_scaffold.py`, `make golden` /
+  `make golden-update`, `tests/test_golden_scaffold.py`): 39 compositions
+  (no modules, auth, `--no-auth`, `--landing`, the four composites, every
+  released pair, `--auth-model` ×4, `--slot` overrides incl. `none`, every
+  theme preset, `minimal`/`microservices`, `--broker nats`, `--posture live`,
+  `--image-base fleet`, `stapel-frontend-repo-init` per preset) hashed file
+  by file, secrets and the tools-version stamp fed deterministically. The
+  manifests were taken from 0.81.3 before anything moved. Backend files are
+  out of scope on purpose: they read the selected modules' installed
+  `capabilities.json`, so they move with the environment.
+- **`stapel_tools.composition`**: frozen `Composition` (the single input of
+  every emitter), `BrickUi` / `NavEntrySpec` / `EmbedSpec` / `ContainerRoot`
+  / `CompositePage`, `PlatformRequest`, `EmitPlan`, `Gate`;
+  `build_composition()` (the only place CLI values are interpreted),
+  `Emitter` protocol with a pure `plan()`, `write_plan()` (the only writer).
+  `ReactEmitter` is the old `_write_frontend_scaffold` body with every write
+  collected into the plan; `_write_frontend_scaffold` is a wrapper that keeps
+  its keyword signature.
+- **Registry split.** Neutral nav entries, embeds, page slots, badge signals,
+  container roots and container pages in `composition/bricks.py`, with
+  neutral icon keys (`composition/icons.py`, 20 keys). React delivery facts
+  in `composition/react/bindings.py` (`ReactBinding`: package, version,
+  providers, the component behind each nav id / embed id), the antd glyph per
+  icon key (`REACT_ICONS`), mounts, composite-page props and badge hooks in
+  `composition/react/`. `FRONTEND_REACT_LIBS`, `NAV_ENTRY_MOUNTS`,
+  `COMPOSITE_PAGES`, `MONOLITH_CONTAINER_ROOTS`, `NAV_BADGE_SOURCES` and
+  `NAV_ICON_REGISTRY` are computed views, held equal (key order and container
+  types included) to a frozen snapshot of the pre-split tables
+  (`tests/test_registry_split.py`).
+- **Planners moved and neutral.** `build_nav_route_plan` and its helpers to
+  `composition/nav.py`, the slot planner to `composition/slots.py` (both
+  re-exported from their old modules). Planned entries and embeds carry
+  `_brick` instead of an npm `_package`; React renderers resolve the package
+  from the binding (`_frontend_templates.react_package`). Code that read
+  `entry["_package"]` from a planner's output reads `_brick` now.
+  `SHELL_TEMPLATES_BY_PLATFORM` names each platform's template table (KMP
+  empty).
+- **Export for other platforms**: `stapel_tools/data/composition-registry.json`
+  and `stapel_tools/data/route-plans/*.json` (`python -m
+  stapel_tools.composition.export`, drift-checked by `--check` in
+  `make check` and the suite), shipped in the wheel.
+- **`check_nav_manifest_sync.py` is platform-parametric**: a neutral row
+  (every icon key has a React glyph, every bound id is declared by its brick,
+  needs no sibling), the React row unchanged, and a KMP row that skips without
+  a stapel-kmp checkout and says NOT ARMED while no KMP binding exists.
+
 ## [0.81.3] — 2026-11-19
 
 - **`stapel-exposure-lint` recognises Gradle builds and says when it

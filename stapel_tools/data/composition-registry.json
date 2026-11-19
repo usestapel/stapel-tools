@@ -1,0 +1,1345 @@
+{
+  "version": 1,
+  "icons": [
+    "apps",
+    "audit",
+    "bell",
+    "cart",
+    "clock",
+    "folder",
+    "folder-open",
+    "heart",
+    "home",
+    "list-ordered",
+    "login",
+    "message",
+    "plus",
+    "profile",
+    "qr",
+    "search",
+    "settings",
+    "shield-check",
+    "tag",
+    "user"
+  ],
+  "slots": [
+    "topbar.start",
+    "topbar.center",
+    "topbar.end",
+    "sidenav.head",
+    "sidenav.foot",
+    "sheet.foot",
+    "bottombar",
+    "browsebar",
+    "footer",
+    "page.actions"
+  ],
+  "containerRoots": [
+    {
+      "id": "account.root",
+      "labelKey": "app.nav.account",
+      "icon": "user",
+      "path": "account",
+      "order": 100,
+      "requiresAuth": true,
+      "surface": "member"
+    },
+    {
+      "id": "admin.root",
+      "labelKey": "shell.nav.admin",
+      "icon": "audit",
+      "path": "admin",
+      "order": 110,
+      "requiresAuth": true,
+      "surface": "member"
+    }
+  ],
+  "containerPages": {
+    "feed.home": {
+      "requires": [
+        "cdn"
+      ],
+      "optional": []
+    },
+    "listings.compose": {
+      "requires": [
+        "categories",
+        "cdn"
+      ],
+      "optional": [
+        "geo",
+        "currencies"
+      ]
+    }
+  },
+  "bricks": {
+    "attributes": {
+      "nav": [],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/attributes-react",
+          "version": "0.18.0",
+          "released": true,
+          "entries": [],
+          "embeds": []
+        }
+      }
+    },
+    "auth": {
+      "nav": [
+        {
+          "id": "auth.login",
+          "labelKey": "auth.nav.login",
+          "icon": "login",
+          "path": "/login",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": null,
+          "order": 0
+        },
+        {
+          "id": "auth.qr_confirm",
+          "labelKey": "auth.nav.qr_confirm",
+          "icon": "qr",
+          "path": "/qr-confirm",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": true,
+          "surface": "public",
+          "order": 1
+        },
+        {
+          "id": "auth.security",
+          "labelKey": "auth.nav.security",
+          "icon": "shield-check",
+          "path": "security",
+          "level": "submenu",
+          "parentId": "profiles.settings",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": null,
+          "order": 10
+        },
+        {
+          "id": "admin.sso_orgs",
+          "labelKey": "auth.nav.admin_sso",
+          "icon": "apps",
+          "path": "sso",
+          "level": "submenu",
+          "parentId": "admin.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 40
+        },
+        {
+          "id": "admin.service_keys",
+          "labelKey": "auth.nav.admin_service_keys",
+          "icon": "shield-check",
+          "path": "service-keys",
+          "level": "submenu",
+          "parentId": "admin.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 41
+        },
+        {
+          "id": "admin.staff_roles",
+          "labelKey": "auth.nav.admin_staff_roles",
+          "icon": "user",
+          "path": "staff-roles",
+          "level": "submenu",
+          "parentId": "admin.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 42
+        },
+        {
+          "id": "admin.users_create",
+          "labelKey": "auth.nav.admin_users",
+          "icon": "plus",
+          "path": "create-account",
+          "level": "submenu",
+          "parentId": "admin.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 43
+        },
+        {
+          "id": "admin.auth_audit",
+          "labelKey": "auth.nav.admin_audit",
+          "icon": "audit",
+          "path": "auth-audit",
+          "level": "submenu",
+          "parentId": "admin.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 44
+        }
+      ],
+      "embeds": [
+        {
+          "id": "auth.account_menu",
+          "slot": "topbar.end",
+          "order": 90,
+          "surface": "member",
+          "opens": "account.root"
+        }
+      ],
+      "platforms": {
+        "react": {
+          "package": "@stapel/auth-react",
+          "version": "0.28.1",
+          "released": true,
+          "entries": [
+            "auth.login",
+            "auth.qr_confirm",
+            "auth.security",
+            "admin.sso_orgs",
+            "admin.service_keys",
+            "admin.staff_roles",
+            "admin.users_create",
+            "admin.auth_audit"
+          ],
+          "embeds": [
+            "auth.account_menu"
+          ]
+        }
+      }
+    },
+    "billing": {
+      "nav": [
+        {
+          "id": "account.billing",
+          "labelKey": "billing.wallet.heading",
+          "icon": "tag",
+          "path": "billing",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 80
+        }
+      ],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/billing-react",
+          "version": "0.12.0",
+          "released": true,
+          "entries": [
+            "account.billing"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "calendar": {
+      "nav": [
+        {
+          "id": "calendar.month",
+          "labelKey": "calendar.view.heading",
+          "icon": "clock",
+          "path": "calendar",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 40
+        },
+        {
+          "id": "calendar.availability",
+          "labelKey": "calendar.availability.heading",
+          "icon": "list-ordered",
+          "path": "availability",
+          "level": "submenu",
+          "parentId": "calendar.month",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 10
+        }
+      ],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/calendar-react",
+          "version": "0.9.1",
+          "released": true,
+          "entries": [
+            "calendar.month",
+            "calendar.availability"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "categories": {
+      "nav": [
+        {
+          "id": "categories.catalog",
+          "labelKey": "categories.catalog.title",
+          "icon": "apps",
+          "path": "/c",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": true,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 5
+        },
+        {
+          "id": "categories.category",
+          "labelKey": "categories.category.title",
+          "icon": "folder-open",
+          "path": "/c/:slug",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 6
+        }
+      ],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/categories-react",
+          "version": "0.36.0",
+          "released": true,
+          "entries": [
+            "categories.catalog",
+            "categories.category"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "cdn": {
+      "nav": [],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/cdn-react",
+          "version": "0.8.2",
+          "released": true,
+          "entries": [],
+          "embeds": []
+        }
+      }
+    },
+    "chat": {
+      "nav": [
+        {
+          "id": "chat.conversations",
+          "labelKey": "chat.nav.conversations",
+          "icon": "message",
+          "path": "chat",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 25
+        }
+      ],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/chat-react",
+          "version": "0.23.1",
+          "released": true,
+          "entries": [
+            "chat.conversations"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "currencies": {
+      "nav": [],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/currencies-react",
+          "version": "0.4.0",
+          "released": true,
+          "entries": [],
+          "embeds": []
+        }
+      }
+    },
+    "feed": {
+      "nav": [
+        {
+          "id": "feed.home",
+          "labelKey": "feed.nav.home",
+          "icon": "home",
+          "path": "/feed",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": true,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 1
+        },
+        {
+          "id": "feed.post",
+          "labelKey": "feed.nav.post",
+          "icon": "message",
+          "path": "/p/:id",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 2
+        },
+        {
+          "id": "feed.author",
+          "labelKey": "feed.nav.author",
+          "icon": "profile",
+          "path": "/u/:userId/posts",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 3
+        }
+      ],
+      "embeds": [
+        {
+          "id": "feed.author_posts_action",
+          "slot": "page.actions",
+          "order": 20,
+          "surface": "any",
+          "scopeNavEntry": "profiles.public",
+          "routeProps": {
+            "userId": "userId"
+          }
+        },
+        {
+          "id": "feed.compose_fab",
+          "slot": "bottombar",
+          "order": 10,
+          "surface": "member",
+          "opens": "feed.home",
+          "breakpoints": [
+            "phone"
+          ]
+        }
+      ],
+      "platforms": {
+        "react": {
+          "package": "@stapel/feed-react",
+          "version": "0.1.0",
+          "released": false,
+          "entries": [
+            "feed.home",
+            "feed.post",
+            "feed.author"
+          ],
+          "embeds": [
+            "feed.author_posts_action",
+            "feed.compose_fab"
+          ]
+        }
+      }
+    },
+    "forms": {
+      "nav": [
+        {
+          "id": "forms.list",
+          "labelKey": "forms.nav.list",
+          "icon": "profile",
+          "path": "forms",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 60
+        },
+        {
+          "id": "forms.builder",
+          "labelKey": "forms.nav.builder",
+          "icon": "apps",
+          "path": "forms/:formId",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": false,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 61
+        },
+        {
+          "id": "forms.responses",
+          "labelKey": "forms.nav.responses",
+          "icon": "list-ordered",
+          "path": "forms/:formId/responses",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": false,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 62
+        }
+      ],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/forms-react",
+          "version": "0.4.2",
+          "released": true,
+          "entries": [
+            "forms.list",
+            "forms.builder",
+            "forms.responses"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "gdpr": {
+      "nav": [
+        {
+          "id": "account.privacy",
+          "labelKey": "gdpr.privacy.heading",
+          "icon": "shield-check",
+          "path": "privacy",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 90
+        },
+        {
+          "id": "public.privacy-request",
+          "labelKey": "gdpr.public.heading",
+          "icon": "shield-check",
+          "path": "privacy-request",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 900
+        },
+        {
+          "id": "admin.privacy",
+          "labelKey": "gdpr.admin.heading",
+          "icon": "audit",
+          "path": "privacy",
+          "level": "submenu",
+          "parentId": "admin.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 40
+        }
+      ],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/gdpr-react",
+          "version": "0.4.1",
+          "released": true,
+          "entries": [
+            "account.privacy",
+            "public.privacy-request",
+            "admin.privacy"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "geo": {
+      "nav": [],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/geo-react",
+          "version": "0.7.1",
+          "released": true,
+          "entries": [],
+          "embeds": []
+        }
+      }
+    },
+    "listings": {
+      "nav": [
+        {
+          "id": "listings.detail",
+          "labelKey": "listings.nav.detail",
+          "icon": "tag",
+          "path": "/l/:id",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 10
+        },
+        {
+          "id": "listings.compose",
+          "labelKey": "listings.nav.compose",
+          "icon": "plus",
+          "path": "/new",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 20,
+          "shortLabelKey": "listings.nav.compose.short"
+        },
+        {
+          "id": "listings.mine",
+          "labelKey": "listings.nav.mine",
+          "icon": "profile",
+          "path": "listings",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 10,
+          "shortLabelKey": "listings.nav.mine.short"
+        },
+        {
+          "id": "listings.favorites",
+          "labelKey": "listings.nav.favorites",
+          "icon": "heart",
+          "path": "favorites",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 20
+        }
+      ],
+      "embeds": [],
+      "pageSlots": {
+        "listings.detail": [
+          "page.actions"
+        ]
+      },
+      "platforms": {
+        "react": {
+          "package": "@stapel/listings-react",
+          "version": "0.43.0",
+          "released": true,
+          "entries": [
+            "listings.detail",
+            "listings.compose",
+            "listings.mine",
+            "listings.favorites"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "moderation": {
+      "nav": [
+        {
+          "id": "moderation.policy",
+          "labelKey": "moderation.nav.policy",
+          "icon": "shield-check",
+          "path": "policy",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 90
+        },
+        {
+          "id": "account.appeals",
+          "labelKey": "moderation.nav.appeals",
+          "icon": "audit",
+          "path": "appeals",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 40
+        },
+        {
+          "id": "admin.moderation",
+          "labelKey": "moderation.nav.moderation",
+          "icon": "shield-check",
+          "path": "moderation",
+          "level": "submenu",
+          "parentId": "admin.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 20
+        },
+        {
+          "id": "admin.moderation-appeals",
+          "labelKey": "moderation.nav.appeals",
+          "icon": "audit",
+          "path": "moderation-appeals",
+          "level": "submenu",
+          "parentId": "admin.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 21
+        }
+      ],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/moderation-react",
+          "version": "0.4.0",
+          "released": true,
+          "entries": [
+            "moderation.policy",
+            "account.appeals",
+            "admin.moderation",
+            "admin.moderation-appeals"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "notifications": {
+      "nav": [
+        {
+          "id": "notifications.feed",
+          "labelKey": "notifications.nav.feed",
+          "icon": "bell",
+          "path": "notifications",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": null,
+          "order": 20
+        },
+        {
+          "id": "notifications.push",
+          "labelKey": "notifications.nav.push",
+          "icon": "bell",
+          "path": "settings/push",
+          "level": "submenu",
+          "parentId": "profiles.settings",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": null,
+          "order": 30
+        }
+      ],
+      "embeds": [
+        {
+          "id": "notifications.bell",
+          "slot": "topbar.end",
+          "order": 20,
+          "surface": "member",
+          "opens": "notifications.feed"
+        }
+      ],
+      "badges": {
+        "notifications.feed": "unread_count"
+      },
+      "platforms": {
+        "react": {
+          "package": "@stapel/notifications-react",
+          "version": "0.13.1",
+          "released": true,
+          "entries": [
+            "notifications.feed",
+            "notifications.push"
+          ],
+          "embeds": [
+            "notifications.bell"
+          ]
+        }
+      }
+    },
+    "profiles": {
+      "nav": [
+        {
+          "id": "profiles.settings",
+          "labelKey": "profiles.nav.settings",
+          "icon": "user",
+          "path": "settings",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": null,
+          "order": 90
+        },
+        {
+          "id": "profiles.language",
+          "labelKey": "profiles.nav.language",
+          "icon": "message",
+          "path": "language",
+          "level": "submenu",
+          "parentId": "profiles.settings",
+          "menuVisibleDefault": false,
+          "requiresAuth": true,
+          "surface": null,
+          "order": 20
+        },
+        {
+          "id": "profiles.notifications",
+          "labelKey": "profiles.nav.notifications",
+          "icon": "bell",
+          "path": "notifications",
+          "level": "submenu",
+          "parentId": "profiles.settings",
+          "menuVisibleDefault": false,
+          "requiresAuth": true,
+          "surface": null,
+          "order": 30
+        },
+        {
+          "id": "profiles.contacts",
+          "labelKey": "profiles.nav.contacts",
+          "icon": "message",
+          "path": "contacts",
+          "level": "submenu",
+          "parentId": "profiles.settings",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": null,
+          "order": 40
+        },
+        {
+          "id": "profiles.connections",
+          "labelKey": "profiles.nav.connections",
+          "icon": "heart",
+          "path": "connections",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": null,
+          "order": 91
+        },
+        {
+          "id": "profiles.public",
+          "labelKey": "profiles.nav.public_profile",
+          "icon": "profile",
+          "path": "/u/:userId",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 92
+        }
+      ],
+      "embeds": [],
+      "pageSlots": {
+        "profiles.public": [
+          "page.actions"
+        ]
+      },
+      "platforms": {
+        "react": {
+          "package": "@stapel/profiles-react",
+          "version": "0.27.1",
+          "released": true,
+          "entries": [
+            "profiles.settings",
+            "profiles.language",
+            "profiles.notifications",
+            "profiles.contacts",
+            "profiles.connections",
+            "profiles.public"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "recordings": {
+      "nav": [
+        {
+          "id": "recordings.list",
+          "labelKey": "recordings.list.heading",
+          "icon": "folder-open",
+          "path": "recordings",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 40
+        },
+        {
+          "id": "recordings.detail",
+          "labelKey": "recordings.detail.heading",
+          "icon": "profile",
+          "path": ":recordingId",
+          "level": "submenu",
+          "parentId": "recordings.list",
+          "menuVisibleDefault": false,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 41
+        },
+        {
+          "id": "share.view",
+          "labelKey": "recordings.share.heading",
+          "icon": "apps",
+          "path": "share/:linkToken",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 90
+        }
+      ],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/recordings-react",
+          "version": "0.11.2",
+          "released": true,
+          "entries": [
+            "recordings.list",
+            "recordings.detail",
+            "share.view"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "reservations": {
+      "nav": [
+        {
+          "id": "reservations.book",
+          "labelKey": "reservations.nav.book",
+          "icon": "clock",
+          "path": "/book/:bookableType/:bookableKey",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 63
+        },
+        {
+          "id": "reservations.mine",
+          "labelKey": "reservations.nav.mine",
+          "icon": "clock",
+          "path": "reservations",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 41
+        },
+        {
+          "id": "reservations.detail",
+          "labelKey": "reservations.nav.detail",
+          "icon": "clock",
+          "path": "/reservations/:id",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 64
+        },
+        {
+          "id": "reservations.agenda",
+          "labelKey": "reservations.nav.agenda",
+          "icon": "list-ordered",
+          "path": "agenda",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 42
+        },
+        {
+          "id": "reservations.schedule",
+          "labelKey": "reservations.nav.schedule",
+          "icon": "settings",
+          "path": "listings/:id/schedule",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": false,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 43
+        }
+      ],
+      "embeds": [
+        {
+          "id": "reservations.book_action",
+          "slot": "page.actions",
+          "order": 20,
+          "surface": "any",
+          "scopeNavEntry": "listings.detail",
+          "routeProps": {
+            "bookableKey": "id"
+          },
+          "props": {
+            "bookableType": "listing"
+          }
+        },
+        {
+          "id": "reservations.upcoming_badge",
+          "slot": "topbar.end",
+          "order": 21,
+          "surface": "member",
+          "opens": "reservations.mine"
+        }
+      ],
+      "platforms": {
+        "react": {
+          "package": "@stapel/reservations-react",
+          "version": "0.1.0",
+          "released": false,
+          "entries": [
+            "reservations.book",
+            "reservations.mine",
+            "reservations.detail",
+            "reservations.agenda",
+            "reservations.schedule"
+          ],
+          "embeds": [
+            "reservations.book_action",
+            "reservations.upcoming_badge"
+          ]
+        }
+      }
+    },
+    "reviews": {
+      "nav": [],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/reviews-react",
+          "version": "0.9.0",
+          "released": true,
+          "entries": [],
+          "embeds": []
+        }
+      }
+    },
+    "search": {
+      "nav": [
+        {
+          "id": "search.results",
+          "labelKey": "search.nav.results",
+          "icon": "search",
+          "path": "/s",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 10
+        },
+        {
+          "id": "search.ranking",
+          "labelKey": "search.nav.ranking",
+          "icon": "list-ordered",
+          "path": "/ranking-disclosure",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 11,
+          "shortLabelKey": "search.nav.ranking.short"
+        }
+      ],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/search-react",
+          "version": "0.52.1",
+          "released": true,
+          "entries": [
+            "search.results",
+            "search.ranking"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "translate": {
+      "nav": [
+        {
+          "id": "account.language",
+          "labelKey": "translate.nav.language",
+          "icon": "message",
+          "path": "language",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 40
+        }
+      ],
+      "embeds": [
+        {
+          "id": "translate.language_switcher",
+          "slot": "topbar.end",
+          "order": 40,
+          "surface": "any",
+          "props": {
+            "compact": true
+          }
+        }
+      ],
+      "platforms": {
+        "react": {
+          "package": "@stapel/translate-react",
+          "version": "0.3.0",
+          "released": true,
+          "entries": [
+            "account.language"
+          ],
+          "embeds": [
+            "translate.language_switcher"
+          ]
+        }
+      }
+    },
+    "video": {
+      "nav": [
+        {
+          "id": "video.rooms",
+          "labelKey": "video.rooms.heading",
+          "icon": "message",
+          "path": "meetings",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 40
+        },
+        {
+          "id": "admin.usage",
+          "labelKey": "video.usage.heading",
+          "icon": "clock",
+          "path": "usage",
+          "level": "submenu",
+          "parentId": "admin.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 30
+        }
+      ],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/video-react",
+          "version": "0.4.0",
+          "released": true,
+          "entries": [
+            "video.rooms",
+            "admin.usage"
+          ],
+          "embeds": []
+        }
+      }
+    },
+    "vocabularies": {
+      "nav": [],
+      "embeds": [],
+      "platforms": {
+        "react": {
+          "package": "@stapel/vocabularies-react",
+          "version": "0.5.0",
+          "released": true,
+          "entries": [],
+          "embeds": []
+        }
+      }
+    },
+    "workspaces": {
+      "nav": [
+        {
+          "id": "workspaces.list",
+          "labelKey": "workspaces.nav.workspaces",
+          "icon": "apps",
+          "path": "workspaces",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 10
+        },
+        {
+          "id": "workspaces.settings",
+          "labelKey": "workspaces.nav.settings",
+          "icon": "profile",
+          "path": "workspaces/settings",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 11
+        },
+        {
+          "id": "workspaces.members",
+          "labelKey": "workspaces.nav.members",
+          "icon": "user",
+          "path": "workspaces/members",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 12
+        },
+        {
+          "id": "workspaces.invitations",
+          "labelKey": "workspaces.nav.invitations",
+          "icon": "message",
+          "path": "workspaces/invitations",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 13
+        },
+        {
+          "id": "workspaces.audit",
+          "labelKey": "workspaces.nav.audit",
+          "icon": "audit",
+          "path": "workspaces/audit",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 14
+        },
+        {
+          "id": "workspaces.invite",
+          "labelKey": "workspaces.nav.invite",
+          "icon": "message",
+          "path": "/invite/:token",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 0
+        }
+      ],
+      "embeds": [
+        {
+          "id": "workspaces.switcher",
+          "slot": "topbar.start",
+          "order": 10,
+          "surface": "member"
+        }
+      ],
+      "platforms": {
+        "react": {
+          "package": "@stapel/workspaces-react",
+          "version": "0.23.0",
+          "released": true,
+          "entries": [
+            "workspaces.list",
+            "workspaces.settings",
+            "workspaces.members",
+            "workspaces.invitations",
+            "workspaces.audit",
+            "workspaces.invite"
+          ],
+          "embeds": [
+            "workspaces.switcher"
+          ]
+        }
+      }
+    }
+  },
+  "composites": {
+    "shop": {
+      "backend": "shop",
+      "bricks": [
+        "auth",
+        "attributes",
+        "categories",
+        "cdn",
+        "currencies",
+        "listings",
+        "profiles",
+        "reviews",
+        "search",
+        "vocabularies"
+      ]
+    },
+    "classified": {
+      "backend": "classified",
+      "bricks": [
+        "auth",
+        "attributes",
+        "categories",
+        "cdn",
+        "chat",
+        "currencies",
+        "geo",
+        "listings",
+        "moderation",
+        "profiles",
+        "reviews",
+        "search",
+        "vocabularies"
+      ]
+    },
+    "booking": {
+      "backend": "booking",
+      "bricks": [
+        "auth",
+        "attributes",
+        "calendar",
+        "categories",
+        "cdn",
+        "listings",
+        "profiles",
+        "reservations",
+        "search",
+        "vocabularies"
+      ]
+    },
+    "social": {
+      "backend": "social",
+      "bricks": [
+        "auth",
+        "cdn",
+        "chat",
+        "feed",
+        "profiles",
+        "reviews"
+      ]
+    }
+  }
+}

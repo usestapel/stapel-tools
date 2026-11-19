@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "modules": [
+    "auth",
+    "notifications",
+    "workspaces"
+  ],
+  "authWired": true,
+  "absoluteRoutes": [
+    {
+      "id": "auth.login",
+      "path": "/login",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "workspaces.invite",
+      "path": "/invite/:token",
+      "brick": "workspaces",
+      "containerRoot": false
+    },
+    {
+      "id": "auth.qr_confirm",
+      "path": "/qr-confirm",
+      "brick": "auth",
+      "containerRoot": false
+    }
+  ],
+  "appChildren": [
+    {
+      "id": "notifications.feed",
+      "path": "notifications",
+      "brick": "notifications",
+      "containerRoot": false
+    },
+    {
+      "id": "account.root",
+      "path": "account",
+      "brick": null,
+      "containerRoot": true
+    },
+    {
+      "id": "workspaces.list",
+      "path": "account/workspaces",
+      "brick": "workspaces",
+      "containerRoot": false
+    },
+    {
+      "id": "workspaces.settings",
+      "path": "account/workspaces/settings",
+      "brick": "workspaces",
+      "containerRoot": false
+    },
+    {
+      "id": "workspaces.members",
+      "path": "account/workspaces/members",
+      "brick": "workspaces",
+      "containerRoot": false
+    },
+    {
+      "id": "workspaces.invitations",
+      "path": "account/workspaces/invitations",
+      "brick": "workspaces",
+      "containerRoot": false
+    },
+    {
+      "id": "workspaces.audit",
+      "path": "account/workspaces/audit",
+      "brick": "workspaces",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.root",
+      "path": "admin",
+      "brick": null,
+      "containerRoot": true
+    },
+    {
+      "id": "admin.sso_orgs",
+      "path": "admin/sso",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.service_keys",
+      "path": "admin/service-keys",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.staff_roles",
+      "path": "admin/staff-roles",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.users_create",
+      "path": "admin/create-account",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.auth_audit",
+      "path": "admin/auth-audit",
+      "brick": "auth",
+      "containerRoot": false
+    }
+  ],
+  "containerRoots": [
+    "account.root",
+    "admin.root"
+  ]
+}

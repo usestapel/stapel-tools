@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "modules": [
+    "auth",
+    "profiles"
+  ],
+  "authWired": false,
+  "absoluteRoutes": [
+    {
+      "id": "profiles.public",
+      "path": "/u/:userId",
+      "brick": "profiles",
+      "containerRoot": false
+    }
+  ],
+  "appChildren": [
+    {
+      "id": "profiles.settings",
+      "path": "settings",
+      "brick": "profiles",
+      "containerRoot": false
+    },
+    {
+      "id": "profiles.language",
+      "path": "settings/language",
+      "brick": "profiles",
+      "containerRoot": false
+    },
+    {
+      "id": "profiles.notifications",
+      "path": "settings/notifications",
+      "brick": "profiles",
+      "containerRoot": false
+    },
+    {
+      "id": "profiles.contacts",
+      "path": "settings/contacts",
+      "brick": "profiles",
+      "containerRoot": false
+    },
+    {
+      "id": "profiles.connections",
+      "path": "connections",
+      "brick": "profiles",
+      "containerRoot": false
+    }
+  ],
+  "containerRoots": []
+}

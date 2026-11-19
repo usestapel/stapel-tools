@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "modules": [
+    "auth",
+    "profiles"
+  ],
+  "authWired": true,
+  "absoluteRoutes": [
+    {
+      "id": "auth.login",
+      "path": "/login",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "auth.qr_confirm",
+      "path": "/qr-confirm",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "profiles.public",
+      "path": "/u/:userId",
+      "brick": "profiles",
+      "containerRoot": false
+    }
+  ],
+  "appChildren": [
+    {
+      "id": "profiles.settings",
+      "path": "settings",
+      "brick": "profiles",
+      "containerRoot": false
+    },
+    {
+      "id": "auth.security",
+      "path": "settings/security",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "profiles.language",
+      "path": "settings/language",
+      "brick": "profiles",
+      "containerRoot": false
+    },
+    {
+      "id": "profiles.notifications",
+      "path": "settings/notifications",
+      "brick": "profiles",
+      "containerRoot": false
+    },
+    {
+      "id": "profiles.contacts",
+      "path": "settings/contacts",
+      "brick": "profiles",
+      "containerRoot": false
+    },
+    {
+      "id": "profiles.connections",
+      "path": "connections",
+      "brick": "profiles",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.root",
+      "path": "admin",
+      "brick": null,
+      "containerRoot": true
+    },
+    {
+      "id": "admin.sso_orgs",
+      "path": "admin/sso",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.service_keys",
+      "path": "admin/service-keys",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.staff_roles",
+      "path": "admin/staff-roles",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.users_create",
+      "path": "admin/create-account",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.auth_audit",
+      "path": "admin/auth-audit",
+      "brick": "auth",
+      "containerRoot": false
+    }
+  ],
+  "containerRoots": [
+    "admin.root"
+  ]
+}

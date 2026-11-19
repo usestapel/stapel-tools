@@ -46,6 +46,22 @@ ruff check . --select E,F,W --ignore E501
 
 The pre-push hook runs the same command; CI rejects anything it flags.
 
+## Scaffold output is golden
+
+`make golden` regenerates every frontend of a matrix of compositions
+(`scripts/golden_scaffold.py`) and compares it file by file with
+`tests/golden/*.json`. A change that is meant to move generated output (a
+template edit, a pair pin) runs `make golden-update` in the same commit and
+reads the printed diff: it names every file that moved. A refactor moves
+nothing.
+
+The brick registry is split: neutral nav entries and embeds in
+`stapel_tools/composition/bricks.py`, React delivery facts in
+`stapel_tools/composition/react/bindings.py`; `FRONTEND_REACT_LIBS` is a view
+over both. After editing either, `make registry-export` rewrites
+`stapel_tools/data/composition-registry.json` and the route-plan fixtures
+(`make registry-export-check` and the suite fail when they are stale).
+
 ## Design rules (the short version)
 
 - **No new hardcoded behavior.** Anything a host project might want to

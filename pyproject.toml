@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.81.3"
+version = "0.82.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -181,7 +181,7 @@ include = ["stapel_tools*"]
 # wheel has to carry it, not just the .py files.
 [tool.setuptools.package-data]
 "stapel_tools.catalog_fixtures" = ["schemas/*.json"]
-"stapel_tools" = ["data/*.mjs"]
+"stapel_tools" = ["data/*.mjs", "data/*.json", "data/route-plans/*.json"]
 
 [tool.pytest.ini_options]
 # tests/fixtures holds INPUT trees — repositories-in-miniature the linters are

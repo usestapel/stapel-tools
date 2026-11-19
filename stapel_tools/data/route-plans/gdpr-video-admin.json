@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "modules": [
+    "auth",
+    "gdpr",
+    "video"
+  ],
+  "authWired": true,
+  "absoluteRoutes": [
+    {
+      "id": "auth.login",
+      "path": "/login",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "auth.qr_confirm",
+      "path": "/qr-confirm",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "public.privacy-request",
+      "path": "/privacy-request",
+      "brick": "gdpr",
+      "containerRoot": false
+    }
+  ],
+  "appChildren": [
+    {
+      "id": "video.rooms",
+      "path": "meetings",
+      "brick": "video",
+      "containerRoot": false
+    },
+    {
+      "id": "account.root",
+      "path": "account",
+      "brick": null,
+      "containerRoot": true
+    },
+    {
+      "id": "account.privacy",
+      "path": "account/privacy",
+      "brick": "gdpr",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.root",
+      "path": "admin",
+      "brick": null,
+      "containerRoot": true
+    },
+    {
+      "id": "admin.usage",
+      "path": "admin/usage",
+      "brick": "video",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.privacy",
+      "path": "admin/privacy",
+      "brick": "gdpr",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.sso_orgs",
+      "path": "admin/sso",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.service_keys",
+      "path": "admin/service-keys",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.staff_roles",
+      "path": "admin/staff-roles",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.users_create",
+      "path": "admin/create-account",
+      "brick": "auth",
+      "containerRoot": false
+    },
+    {
+      "id": "admin.auth_audit",
+      "path": "admin/auth-audit",
+      "brick": "auth",
+      "containerRoot": false
+    }
+  ],
+  "containerRoots": [
+    "account.root",
+    "admin.root"
+  ]
+}

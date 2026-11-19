@@ -106,8 +106,10 @@ Exit 0 = for every registered pair, mirror and real ``nav-manifest.json``
 agree about whether there is a nav surface and about what is on it (as
 parsed JSON — key order doesn't matter, content does), version included.
 Exit 1 = at least one disagreement, printed with both sides so the fix is
-obvious (update the mirror in create_project.py's FRONTEND_REACT_LIBS to
-match the real file — and add its ``NAV_ENTRY_MOUNTS`` rows, which
+obvious (update the neutral entry in ``composition/bricks.py`` and the
+pair's version/components in ``composition/react/bindings.py`` — together
+they ARE ``FRONTEND_REACT_LIBS`` — and add its ``NAV_ENTRY_MOUNTS`` rows
+(``composition/react/mounts.py``), which
 ``tests/test_public_surface.py::TestMountTable`` insists on — or drop the
 mirror if the pair really did retire the surface).
 """
@@ -279,7 +281,59 @@ def full_pin_table() -> list[tuple[str, str, str]]:
     return table
 
 
+def check_neutral() -> int:
+    """The checks only the neutral registry makes possible, needing no
+    sibling checkout: every neutral icon key has a React glyph (and no glyph
+    maps an unknown key), every nav/embed id a binding names is declared by
+    its brick, every container root and container page has its React half."""
+    sys.path.insert(0, str(REPO_ROOT))
+    from stapel_tools.composition.react.registry import check_bindings
+
+    problems = check_bindings()
+    if problems:
+        print("check_nav_manifest_sync: the neutral registry and the React binding disagree:\n")
+        for problem in problems:
+            print(f"  - {problem}")
+        return 1
+    print("check_nav_manifest_sync: neutral registry and React binding agree "
+          "(icons covered, every bound id declared).")
+    return 0
+
+
+def kmp_root(root: Path | None = None) -> Path:
+    return (root or sibling_root()) / "stapel-kmp"
+
+
+def check_kmp(root: Path | None = None) -> int:
+    """The KMP row. Its real files (``<ui module>/nav-manifest.json``) are
+    compared against ``project_kmp(BrickUi, KmpBinding)`` once the KMP
+    emitter registers bindings; until then the row says it is NOT ARMED,
+    on every run, instead of reading as green."""
+    where = kmp_root(root)
+    if not where.is_dir():
+        print(f"check_nav_manifest_sync: kmp: no stapel-kmp checkout at {where} — skipping.")
+        return 0
+    print("check_nav_manifest_sync: kmp: NOT ARMED — this stapel-tools registers "
+          "no KMP bindings yet (the KMP emitter is not built), so no "
+          f"nav-manifest.json under {where} is compared.")
+    return 0
+
+
 def check(
+    root: Path | None = None,
+    *,
+    ask_registry: bool = False,
+    published=npm_published,
+    latest=npm_latest,
+) -> int:
+    """Every row: the neutral registry, React, KMP. Exit 1 if any fails."""
+    neutral = check_neutral()
+    react = check_react(root, ask_registry=ask_registry, published=published, latest=latest)
+    kmp = check_kmp(root)
+    return 1 if (neutral or react or kmp) else 0
+
+
+def check_react(
     root: Path | None = None,
     *,
     ask_registry: bool = False,
@@ -402,7 +456,7 @@ def check(
                         "version) — this is not a pending publish, it is a "
                         "STALE PIN. Every generated project installs "
                         f"{info['package']}@^{info['version']}. Raise the "
-                        "\"version\" in FRONTEND_REACT_LIBS to "
+                        "\"version\" in composition/react/bindings.py to "
                         f"{real['version']!r} (and re-run "
                         "scripts/check_npm_peer_graph.py — a raised pair pin "
                         "can move a peer floor)."

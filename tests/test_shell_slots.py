@@ -11,7 +11,8 @@ SWITCHER = FRONTEND_REACT_LIBS["translate"]["embeds"][0]
 
 
 def _pair(package, *embeds):
-    return {"package": package, "embeds": list(embeds)}
+    key = package.split("/", 1)[1].removesuffix("-react")
+    return {"key": key, "package": package, "embeds": list(embeds)}
 
 
 def _search(eid, order=10):
@@ -136,7 +137,8 @@ class TestOfferAndOrder:
         assert [e["id"] for e in plan.slots["topbar.end"]] == [
             "notifications.bell", "translate.language_switcher",
         ]
-        assert plan.slots["topbar.end"][0]["_package"] == "@stapel/notifications-react"
+        # planners annotate the brick; a platform renderer resolves its package
+        assert plan.slots["topbar.end"][0]["_brick"] == "notifications"
 
 
 class TestParseSlotArgs:
@@ -472,9 +474,7 @@ class TestPageEmbeds:
         )
         ids = [e["id"] for e in plan.pages["listings.detail"]["page.actions"]]
         assert ids == ["orders.add_to_cart", "booking.book"]
-        assert plan.pages["listings.detail"]["page.actions"][0]["_package"] == (
-            "@acme/cart-fixture-react"
-        )
+        assert plan.pages["listings.detail"]["page.actions"][0]["_brick"] == "cart-fixture"
         assert plan.dropped == []
 
     @pytest.mark.parametrize("embed, pages, auth, fragment", [

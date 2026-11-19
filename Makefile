@@ -35,9 +35,9 @@ PYTHON ?= python
 # `preset-gate` holds every composite's installed preset.py equal to
 # STAPEL_LIBS (apps, order, mounts, defaults shape, frontend pairs). It reads
 # the INSTALLED composites, so it needs the `test` extra.
-.PHONY: check lint test nav-sync sibling-lint peer-graph pins-check hooks-doctor preset-gate composite-gates
+.PHONY: check lint test nav-sync sibling-lint peer-graph pins-check hooks-doctor preset-gate composite-gates golden golden-update registry-export registry-export-check
 
-check: hooks-doctor lint sibling-lint nav-sync preset-gate test
+check: hooks-doctor lint sibling-lint nav-sync registry-export-check preset-gate golden test
 
 hooks-doctor:
 	@$(PYTHON) -m stapel_tools.hooks doctor || { \
@@ -55,6 +55,24 @@ sibling-lint:
 
 nav-sync:
 	$(PYTHON) scripts/check_nav_manifest_sync.py
+
+# The golden whole-tree gate over generated projects (scripts/golden_scaffold.py):
+# every case of the composition matrix must generate byte-identical trees.
+# A deliberate output change (a template edit, a pin bump) runs golden-update
+# in the same commit; the printed diff names every file that moved.
+golden:
+	$(PYTHON) scripts/golden_scaffold.py
+
+golden-update:
+	$(PYTHON) scripts/golden_scaffold.py --update
+
+# The neutral registry's export for non-Python consumers (stapel-kmp parity,
+# Studio): data/composition-registry.json and data/route-plans/*.json.
+registry-export:
+	$(PYTHON) -m stapel_tools.composition.export
+
+registry-export-check:
+	$(PYTHON) -m stapel_tools.composition.export --check
 
 preset-gate:
 	$(PYTHON) -m stapel_tools.preset_gate

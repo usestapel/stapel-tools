@@ -39,6 +39,26 @@ never hand-edit the generated ``frontend/src/stapel-tokens/`` output.
 import json
 import re
 
+# The route planner, moved to composition/nav.py; re-exported for callers.
+from .composition import nav as _nav
+from .composition.nav import (  # noqa: F401  (re-exported names)
+    CONTAINER_NAV_ROOTS,
+    NavContractError,
+    nav_entry_surface,
+    nav_wired_pairs,
+    parent_roots_needed,
+)
+
+# The registry tables these renderers read, as views over the neutral brick
+# registry and the React binding (composition/react/registry.py).
+from .composition.react.registry import (  # noqa: F401  (re-exported names)
+    COMPOSITE_PAGES,
+    MONOLITH_CONTAINER_ROOTS,
+    NAV_BADGE_SOURCES,
+    NAV_ENTRY_MOUNTS,
+    NAV_ICON_REGISTRY,
+)
+
 PACKAGE_JSON = """\
 {
   "name": "{{SLUG}}-frontend",
@@ -829,150 +849,57 @@ def _ts_string_array(values: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-class NavContractError(ValueError):
-    """A nav mirror declares something no container can honour. Raised at
-    GENERATION time on purpose: every one of these used to degrade silently —
-    an unknown icon rendered a generic glyph, an undeclared parent dropped the
-    screen, a `route.index` was copied around and read by nobody — and a
-    scaffolded app looked complete while a screen was simply gone."""
+def react_package(item: dict) -> str:
+    """The npm package a planned entry or embed is imported from.
 
+    The planners annotate ``_brick`` (platform-neutral); the React binding
+    names the package. A storefront's own manifests (``public_nav_manifests``)
+    and hand-built entries carry ``_package`` directly."""
+    package = item.get("_package")
+    if package:
+        return package
+    from .create_project import FRONTEND_REACT_LIBS
 
-# The icon names the shell's registry actually resolves
-# (`shell-react/src/default/icons.tsx` — `ICONS`). The registry falls back to a
-# generic glyph for an unknown name WITHOUT a word, so a typo ships as a
-# slightly wrong picture nobody notices. Generation refuses one instead.
-# Adding an icon to the shell means adding its name here, in the same wave.
-NAV_ICON_REGISTRY: frozenset[str] = frozenset(
-    {
-        "LoginOutlined",
-        "SafetyCertificateOutlined",
-        "UserOutlined",
-        "BellOutlined",
-        "AppstoreOutlined",
-        "AuditOutlined",
-        "ClockCircleOutlined",
-        "FolderOpenOutlined",
-        "FolderOutlined",
-        "HeartOutlined",
-        "HomeOutlined",
-        "MessageOutlined",
-        "OrderedListOutlined",
-        "PlusOutlined",
-        "ProfileOutlined",
-        "QrcodeOutlined",
-        "SearchOutlined",
-        "SettingOutlined",
-        "ShoppingCartOutlined",
-        "TagOutlined",
-    }
-)
-
-# Nav parents no PAIR owns, because no module owns "the account section" or
-# "the admin section": the CONTAINER declares them (ACCOUNT_ROOT_ENTRY /
-# ADMIN_ROOT_ENTRY below) and every `placement.parentId` pointing at one
-# resolves against the container's own one-entry manifest.
-CONTAINER_NAV_ROOTS: frozenset[str] = frozenset({"account.root", "admin.root"})
+    return FRONTEND_REACT_LIBS[item["_brick"]]["package"]
 
 
 def declared_nav_ids() -> set[str]:
-    """Every nav id ANY registered pair declares, plus the container-owned
-    roots. The reference set for the parent check: a `parentId` inside it but
-    absent from THIS project's selection is a legitimate drop ("that pair is not
-    installed"); a `parentId` outside it is a typo or a parent nobody ever
-    declared — the `admin.root` case, where two real admin screens vanished from
-    every generated container without a word."""
-    from .create_project import FRONTEND_REACT_LIBS
-
-    ids = set(CONTAINER_NAV_ROOTS)
-    for pair in FRONTEND_REACT_LIBS.values():
-        for entry in pair.get("nav", ()):
-            ids.add(entry["id"])
-    return ids
+    """Every nav id any registered pair declares, plus the container roots
+    (``composition.nav.declared_nav_ids``)."""
+    return _nav.declared_nav_ids()
 
 
-def validate_nav_entries(entries: list[dict], *, declared: set[str] | None = None) -> None:
-    """Refuse, at generation time, the three nav declarations that used to
-    degrade quietly (shared-layer audit Q3/G5):
-
-    * an `icon` outside the shell's registry — renders a generic glyph today;
-    * a submenu `parentId` NO pair and no container ever declares — the screen
-      is dropped as an orphan and nothing says so (gdpr's `admin.privacy` and
-      video's `admin.usage` were both invisible in every generated container);
-    * a `route.index` — the field is DEAD: `resolveNav` copies `route` opaque,
-      the shell's `matchesLocation` ignores it, and this generator decides a
-      section's index itself (the container owns `/account` and `/admin`). It is
-      dropped from the contract rather than half-implemented, so declaring one
-      is an error that names the decision instead of a route that never matches.
-    """
-    known = declared_nav_ids() if declared is None else declared
-    problems: list[str] = []
-    for entry in entries:
-        icon = entry.get("icon")
-        if icon not in NAV_ICON_REGISTRY:
-            problems.append(
-                f"{entry['id']}: icon {icon!r} is not in the shell's registry "
-                f"({', '.join(sorted(NAV_ICON_REGISTRY))}). Add the icon to "
-                "shell-react/src/default/icons.tsx AND to NAV_ICON_REGISTRY, or "
-                "pick a registered name — an unknown name renders a generic "
-                "glyph with no error."
-            )
-        if "index" in entry.get("route", {}):
-            problems.append(
-                f"{entry['id']}: route.index is not honoured by anything — "
-                "resolveNav copies `route` opaque, the shell's matchesLocation "
-                "ignores it, and the container decides its own section index. "
-                "Drop the field from the declaration."
-            )
-        placement = entry.get("placement", {})
-        if placement.get("level") == "submenu":
-            parent = placement.get("parentId")
-            if parent is None or parent not in known:
-                problems.append(
-                    f"{entry['id']}: placement.parentId {parent!r} is declared by "
-                    "no registered pair and by no container root "
-                    f"({', '.join(sorted(CONTAINER_NAV_ROOTS))}). A submenu entry "
-                    "under a parent nobody declares is dropped as an orphan and "
-                    "the screen disappears silently."
-                )
-    if problems:
-        raise NavContractError(
-            "nav manifest mirror is not mountable:\n  - " + "\n  - ".join(problems)
-        )
+def validate_nav_entries(
+    entries: list[dict],
+    *,
+    declared: set[str] | None = None,
+    icons: frozenset[str] | None = None,
+) -> None:
+    """``composition.nav.validate_nav_entries``, reading the declared ids
+    through THIS module's :func:`declared_nav_ids`."""
+    _nav.validate_nav_entries(
+        entries, declared=declared_nav_ids() if declared is None else declared, icons=icons,
+    )
 
 
-# The monolith frontend's own versions of the container roots. Same ids (the
-# parentId a pair declares must resolve in EITHER container), different address
-# and different copy: a monolith's member area is `/app`, so the roots are its
-# relative children, and the labels come from the app's own bundle rather than
-# from a storefront's.
-MONOLITH_CONTAINER_ROOTS: dict[str, dict] = {
-    "account.root": {
-        "id": "account.root",
-        "labelKey": "app.nav.account",
-        "icon": "UserOutlined",
-        "route": {"path": "account"},
-        "component": {"export": "AccountSection", "subpath": "."},
-        "placement": {"level": "top"},
-        "menuVisibleDefault": True,
-        "requiresAuth": True,
-        "surface": "member",
-        "order": 100,
-        "_local": "AccountSection",
-    },
-    "admin.root": {
-        "id": "admin.root",
-        "labelKey": "shell.nav.admin",
-        "icon": "AuditOutlined",
-        "route": {"path": "admin"},
-        "component": {"export": "AdminSection", "subpath": "."},
-        "placement": {"level": "top"},
-        "menuVisibleDefault": True,
-        "requiresAuth": True,
-        "surface": "member",
-        "order": 110,
-        "_local": "AdminSection",
-    },
-}
+def build_nav_route_plan(nav_pairs: list[dict], **kwargs) -> dict:
+    """``composition.nav.build_nav_route_plan``, reading the declared ids
+    through THIS module's :func:`declared_nav_ids`.
+
+    Thin on purpose and kept here: a fixture generator outside this repo
+    (stapel-kmp's shared route-plan fixtures) widens the declared set by
+    patching ``_frontend_templates.declared_nav_ids``, and that patch must
+    keep reaching the planner."""
+    kwargs.setdefault("declared", declared_nav_ids())
+    return _nav.build_nav_route_plan(nav_pairs, **kwargs)
+
+
+# NAV_ICON_REGISTRY — the antd names the shell resolves — is the value set of
+# composition.react.registry.REACT_ICONS (neutral key -> antd name).
+
+# MONOLITH_CONTAINER_ROOTS — the container roots as the monolith frontend
+# mounts them (`/app/account`, `/app/admin`) — is a view of the neutral
+# composition.bricks.CONTAINER_ROOTS plus their React section components.
 
 # The app-level copy for those two labels. English only, for the same reason
 # the storefront's own bundle is (STOREFRONT_I18N_EN): a generator does not
@@ -981,130 +908,6 @@ MONOLITH_NAV_I18N_EN: dict[str, str] = {
     "app.nav.account": "Account",
     "shell.nav.admin": "Admin",
 }
-
-
-def parent_roots_needed(pairs: list[dict]) -> list[str]:
-    """Which container roots the selected pairs' entries actually hang from.
-
-    Returned sorted, and EMPTY when nothing needs them: a project with no
-    admin-level screen must not grow an empty "Admin" tab, and a project that
-    has one must not lose it (gdpr's `admin.privacy` and video's `admin.usage`
-    were dropped as orphans in every generated container because no manifest
-    declared `admin.root` — the shared-layer audit's Q3 finding)."""
-    needed = set()
-    for pair in pairs:
-        for entry in pair.get("nav", ()):
-            placement = entry.get("placement", {})
-            if placement.get("level") != "submenu":
-                continue
-            parent = placement.get("parentId")
-            if parent in CONTAINER_NAV_ROOTS:
-                needed.add(parent)
-    return sorted(needed)
-
-
-def nav_wired_pairs(react_entries: list[dict], *, auth_wired: bool) -> list[dict]:
-    """The selected react pairs (``create_project._frontend_react_entries``
-    output) that actually join the scripted nav/route tree — every selected
-    pair carrying a ``nav`` mirror, EXCEPT auth's when ``auth_wired`` is
-    False (the ``--no-auth`` escape hatch: a project can still wire the auth
-    RUNTIME via ``modules.tsx`` — e.g. to drive `AuthPanel` by hand
-    somewhere of its own choosing — without any of auth's screens joining
-    "/login"/the nav menu)."""
-    return [e for e in react_entries if e.get("nav") and (e["key"] != "auth" or auth_wired)]
-
-
-def nav_entry_surface(entry: dict) -> str:
-    """The entry's resolved surface — declared, or derived from
-    ``requiresAuth``. The same derivation ``@stapel/shell-react``'s
-    ``navEntrySurface`` does, in ONE place here: both container renderers
-    route by surface, and two copies of the rule is how they came to
-    disagree about where a public screen belongs."""
-    return entry.get("surface") or ("member" if entry["requiresAuth"] else "public")
-
-
-def build_nav_route_plan(nav_pairs: list[dict]) -> dict:
-    """Pure, deterministic route-tree plan ``render_routes_tsx`` turns into
-    react-router v7 route objects — the SCRIPTED (no-LLM) decision tree over
-    the selected pairs' mirrored nav entries (registry order).
-
-    Two kinds of entry become a route:
-
-    - a TOP entry whose ``route.path`` is ABSOLUTE (starts with "/", e.g.
-      auth.login's "/login") mounts as its own top-level sibling route —
-      NEVER nested under "/app" (a sign-in screen is reachable regardless of
-      session state, the opposite of what "/app" protects).
-    - a TOP entry with a RELATIVE path, or a SUBMENU entry whose
-      ``placement.parentId`` resolves among the selected TOP entries, nests
-      as a child of "/app" (its full path is ``"<parent-path>/<own-path>"``
-      for a submenu entry — e.g. auth.security under profiles.settings
-      becomes "settings/security"). A submenu entry whose parent isn't
-      among the selected TOP entries is DROPPED — the exact orphan-drop
-      rule ``@stapel/shell-react``'s own ``resolveNav`` documents, mirrored
-      here so routing and the nav menu never disagree about what "installed"
-      means.
-
-    A CONTAINER ROOT (`account.root`, `admin.root`) is injected as a top
-    whenever a selected entry hangs from one: no module owns "the account
-    section" or "the admin section", so without the container declaring them
-    those screens were dropped as orphans and vanished with no log.
-
-    Returns ``{"absolute_routes": [...], "app_children": [...],
-    "container_roots": [...]}``; each route is ``{"path": <route path>,
-    "entry": <mirrored NavEntry dict>}`` — entries carry a ``"_package"`` key
-    (the pair's npm package name) for ``render_routes_tsx``'s component
-    imports, or a ``"_local"`` key for a page the container itself writes.
-    """
-    all_entries = [{**entry, "_package": pair["package"]} for pair in nav_pairs for entry in pair["nav"]]
-    validate_nav_entries(all_entries)
-    roots = parent_roots_needed(nav_pairs)
-    all_entries.extend(MONOLITH_CONTAINER_ROOTS[root] for root in roots)
-    tops = {e["id"]: e for e in all_entries if e["placement"]["level"] == "top"}
-    children_by_parent: dict[str, list[dict]] = {}
-    for e in all_entries:
-        if e["placement"]["level"] != "submenu":
-            continue
-        parent_id = e["placement"].get("parentId")
-        if parent_id is None or parent_id not in tops:
-            continue  # orphan — dropped, not thrown (mirrors resolveNav)
-        children_by_parent.setdefault(parent_id, []).append(e)
-
-    absolute_routes: list[dict] = []
-    app_children: list[dict] = []
-    for top in sorted(tops.values(), key=lambda e: (e["order"], e["id"])):
-        path = top["route"]["path"]
-        if path.startswith("/"):
-            absolute_routes.append({"path": path, "entry": top})
-            continue
-        if nav_entry_surface(top) == "public":
-            # A PUBLIC-surface screen with a relative path is not an "/app"
-            # child: "/app" is the member area, and this container gates it
-            # whenever auth is wired. The public renderer has always hoisted
-            # such a screen to a root-level sibling
-            # (build_public_route_plan's own rule); this plan did not, so
-            # gdpr's `public.privacy-request` — the DSAR form a person with
-            # no account is supposed to be able to open — sat behind the
-            # login wall in every generated monolith, and recordings'
-            # `share/:linkToken` would have joined it. A sibling route still
-            # honours its own `requiresAuth` (render_routes_tsx), so this
-            # relocates the screen without loosening anything.
-            absolute_routes.append({"path": f"/{path}", "entry": top})
-            for child in sorted(
-                children_by_parent.get(top["id"], []), key=lambda e: (e["order"], e["id"])
-            ):
-                absolute_routes.append(
-                    {"path": f'/{path}/{child["route"]["path"]}', "entry": child}
-                )
-            continue
-        app_children.append({"path": path, "entry": top})
-        for child in sorted(children_by_parent.get(top["id"], []), key=lambda e: (e["order"], e["id"])):
-            app_children.append({"path": f'{path}/{child["route"]["path"]}', "entry": child})
-
-    return {
-        "absolute_routes": absolute_routes,
-        "app_children": app_children,
-        "container_roots": roots,
-    }
 
 
 def render_nav_generated_ts(nav_pairs: list[dict], *, auth_wired: bool = True) -> str:
@@ -1294,7 +1097,7 @@ def monolith_mount_plan(
             elements[entry["id"]] = f"<{name} />"
             continue
         comp = entry["component"]
-        direct.setdefault((entry["_package"], comp["subpath"]), set()).add(
+        direct.setdefault((react_package(entry), comp["subpath"]), set()).add(
             comp["export"]
         )
         elements[entry["id"]] = f'<{comp["export"]} />'
@@ -1687,7 +1490,7 @@ def render_embeds_generated_tsx(
         body: list[str] = []
         for embed in embeds:
             comp = embed["component"]
-            imports.setdefault(f'{embed["_package"]}/{comp["subpath"]}', set()).add(
+            imports.setdefault(f'{react_package(embed)}/{comp["subpath"]}', set()).add(
                 comp["export"]
             )
             element = f'<{comp["export"]}{_jsx_props(embed.get("props"))} />'
@@ -2461,274 +2264,8 @@ ADMIN_ROOT_ENTRY = {
     "order": 110,
 }
 
-# How a nav entry's component is MOUNTED — read off each component's own prop
-# interface in the sibling stapel-react checkout, never guessed. This is the
-# table that keeps generation from emitting a mount that does not compile, and
-# it is the reason spec §6.1 item 11 (a placeholder that NAMES the absence) is
-# mechanical rather than a promise.
-#
-# Four shapes:
-#   {}                       zero REQUIRED props — mount it directly.
-#   {"route_params": {...}}  the component needs the route's own parameters
-#                            (`:id`, `:slug`); generation emits a one-file page
-#                            wrapper that reads them via `useParams()` and says
-#                            so when the address does not parse.
-#   {"adapter": (hook, sub)} the component needs a binding the pair itself
-#                            publishes on another subpath (search's
-#                            `useRouterSearchParams` from `./router` — the pair
-#                            keeps react-router out of its main entry, so the
-#                            container supplies the binding).
-#   {"container": (...)}     the component needs props only the CONTAINER can
-#                            supply — the cross-pair slots spec §6.2 lists as
-#                            wiring. Generation emits the placeholder; it does
-#                            NOT fabricate an empty value, because an empty
-#                            feature schema is not "no schema yet", it is "this
-#                            category has no attributes", which is a lie with a
-#                            straight face.
-#   {"local": "Name"}        a container-local component this generator writes.
-#
-# `page_slots` (on any shape that emits a wrapper) names the page slots the
-# component renders from its `slots` prop; scoped embeds fill them.
-# `page_slots_since` is the first version of the owning pair whose component
-# takes that prop; with an older mirror the page renders no page slot.
-#
-# An id ABSENT from this table falls through to the placeholder, deliberately:
-# a pair that adds a screen this stapel-tools does not know about gets a page
-# naming that fact, not a mount that may or may not compile. The test
-# `test_nav_entry_mounts_covers_every_registered_entry` keeps the gap visible.
-NAV_ENTRY_MOUNTS: dict[str, dict] = {
-    # auth-react 0.17.1 — AuthPanel/QrConfirmPanel/SecuritySettings: every
-    # prop optional (src/default/*.tsx).
-    "auth.login": {},
-    "auth.qr_confirm": {},
-    "auth.security": {},
-    # auth-react 0.17.1 admin skin (src/default/admin/*.tsx) — all five panels
-    # take NO props at all: each reads its data off the pair's own runtime, and
-    # the four that read a staff-only list answer a refused read with the
-    # pair's own `ForbiddenState` (`forbidden.tsx`). The container hands over
-    # nothing; the staff gate around the whole subtree is still its own.
-    "admin.sso_orgs": {},
-    "admin.service_keys": {},
-    "admin.staff_roles": {},
-    "admin.users_create": {},
-    "admin.auth_audit": {},
-    # notifications-react 0.11.0 — NotificationsPage: every prop optional.
-    "notifications.feed": {},
-    # notifications-react 0.11.0 — PushSettingsPane requires `getToken()`, the
-    # function that mints a push subscription token from the host's OWN service
-    # worker / native bridge. There is no service worker in a generated
-    # container to mint one from, and a stub returning a fake token registers a
-    # device that can never be delivered to — so the entry gets the placeholder
-    # naming the prop.
-    "notifications.push": {"container": ("getToken",)},
-    # profiles-react 0.26.2 — ProfileSettings/LanguageSettings/
-    # NotificationPreferences/ContactsManager/ConnectionsPage: every prop
-    # optional (`ContactsManagerProps` is mode/surface/gutter, all skin).
-    # PublicProfilePage requires `userId`, which its own route carries.
-    "profiles.settings": {},
-    "profiles.language": {},
-    "profiles.notifications": {},
-    "profiles.contacts": {},
-    "profiles.connections": {},
-    # profiles-react 0.28.0 renders `page.actions` from `slots` (chat-react's
-    # `chat.message_user` and feed-react's `feed.author_posts_action` scope
-    # there); 0.27.x has no `slots` prop, so below that the page renders no
-    # page slot and a scoped embed is dropped with a note.
-    "profiles.public": {
-        "route_params": {"userId": "string"},
-        "page_slots": ("page.actions",),
-        "page_slots_since": "0.28.0",
-    },
-    # categories-react 0.2.0
-    "categories.catalog": {},
-    "categories.category": {
-        "route_params": {"slug": "string"},
-        # The page leaves the listing grid to its container (a named
-        # placeholder otherwise). A list of alternatives: the first whose
-        # pairs are all installed fills the slot.
-        #
-        # 1. search + listings (T15): the category's search results drawn as
-        #    `ListingFeedCard`s. Every composite that selects search ships the
-        #    `listing` source (stapel-preset-gate, SH1), so the doc type is a
-        #    fact of the selection, not a guess. The hit's stored card is
-        #    mapped onto the listing card the feed card reads.
-        # 2. listings alone: listings-react 0.42's `ListingBoardPane` over
-        #    the public board narrowed by stapel-listings 0.27's
-        #    `?category_id=` filter.
-        "slot_fills": {
-            "renderListings": [
-                {
-                    "pairs": ("search", "listings"),
-                    "imports": (
-                        ("SearchPage", "@stapel/search-react/default"),
-                        ("useRouterSearchParams", "@stapel/search-react/router"),
-                        ("ListingFeedCard", "@stapel/listings-react/default"),
-                    ),
-                    "type_imports": (
-                        ("SearchItem", "@stapel/search-react"),
-                        ("ListingCard", "@stapel/listings-react"),
-                    ),
-                    "hooks": ("const searchAdapter = useRouterSearchParams();",),
-                    "helpers": (
-                        "/** A search hit's stored card as the listing card `ListingFeedCard` draws. */",
-                        "function listingCardFromHit(item: SearchItem): ListingCard {",
-                        "  const card = item.card;",
-                        "  const images = Array.isArray(card.images)",
-                        "    ? card.images.filter((ref): ref is string => typeof ref === \"string\")",
-                        "    : [];",
-                        "  return {",
-                        "    id: Number(item.key),",
-                        "    title: typeof card.title === \"string\" ? card.title : \"\",",
-                        "    price: typeof card.price === \"string\" ? card.price : null,",
-                        "    currency: typeof card.currency === \"string\" ? card.currency : \"\",",
-                        "    images,",
-                        "    features_title: [],",
-                        "    features_badges: [],",
-                        "    location_label: typeof card.location_label === \"string\" ? card.location_label : \"\",",
-                        "    is_favorited: null,",
-                        "  };",
-                        "}",
-                    ),
-                    "jsx": (
-                        "(category) => (\n"
-                        "        <SearchPage\n"
-                        "          adapter={searchAdapter}\n"
-                        "          defaultType=\"listing\"\n"
-                        "          defaultCategory={String(category.id)}\n"
-                        "          categoryFilter={false}\n"
-                        "          searchBox={false}\n"
-                        "          renderCard={(item) => <ListingFeedCard listing={listingCardFromHit(item)} href={`/l/${item.key}`} />}\n"
-                        "        />\n"
-                        "      )"
-                    ),
-                },
-                {
-                    "pairs": ("listings",),
-                    "imports": (("ListingBoardPane", "@stapel/listings-react/default"),),
-                    "jsx": "(category) => (\n        <ListingBoardPane categoryIds={[String(category.id)]} hrefFor={(id) => `/l/${id}`} />\n      )",
-                },
-            ],
-        },
-    },
-    # chat-react 0.2.0 — ConversationListPanel: limit/openHref/onOpen, all
-    # optional.
-    "chat.conversations": {},
-    # The chat-react release with `chat.thread` (`chat/:id`):
-    # ConversationThreadPage requires `id`, its own route param. Mounted once
-    # the registry mirror carries the entry (unreleased pair today).
-    "chat.thread": {"route_params": {"id": "string"}},
-    # listings-react 0.2.0; 0.43.0 renders `page.actions` from its `slots`
-    # prop (a node, or a function of the route params `{ id }`).
-    "listings.detail": {"route_params": {"id": "number"}, "page_slots": ("page.actions",)},
-    # The composer is the fleet's one CROSS-PAIR screen, and it used to be the
-    # scaffold's biggest lie by omission: the entry mounted a placeholder, so
-    # the scripted storefront had no way to list anything. Everything it needs
-    # is knowable from the pairs' own manifests (categories supplies the
-    # feature schema and the picker, cdn supplies the photo queue and grid), so
-    # generation WIRES it — and NAMES the one slot it still cannot fill.
-    "listings.compose": {"composite": "listings.compose"},
-    "listings.mine": {},
-    "listings.favorites": {},
-    # search-react 0.2.0 — SearchPage's `adapter` is REQUIRED and the pair
-    # deliberately does not import react-router from its main entry (§13.4
-    # item 6), so the binding comes from its own `./router` subpath.
-    # SearchPage also requires `defaultType` — the doc type to search when the
-    # URL carries none. That is a DEPLOYMENT fact (`STAPEL_SEARCH["SOURCES"]`
-    # names the types this fleet indexes), so it is satisfiable from a
-    # generator option and never from a guess: `--doc-type listing` mounts the
-    # page, and its absence gets the placeholder naming the prop. Guessing it
-    # would send every search to a type the backend refuses, on a page that
-    # looks perfectly wired.
-    "search.results": {
-        "adapter": ("useRouterSearchParams", "router"),
-        "option_props": {"defaultType": "doc_type"},
-    },
-    "search.ranking": {},
-    # gdpr-react 0.3.0 — PrivacyPane/PrivacyAdminPane/PrivacyRequestPane:
-    # every prop optional. The request pane's `captcha` slot stays unfilled:
-    # a public DSAR form with no captcha is the pair's own default, and a
-    # container cannot invent a provider's widget.
-    "account.privacy": {},
-    # translate-react 0.2.0 — LanguageSettingsPane: every prop optional.
-    "account.language": {},
-    "admin.privacy": {},
-    "public.privacy-request": {},
-    # video-react 0.2.1 — ScopeUsagePane/RoomsPane: every prop optional.
-    "admin.usage": {},
-    "video.rooms": {},
-    # billing-react 0.10.0 — WalletPanel's only prop is `onCheckoutUrl`, and
-    # it is optional: omitted, the pair sends the browser to the hosted
-    # checkout with `location.assign`. A container that passed its router's
-    # navigate would be handing a react-router navigate an off-origin URL.
-    "account.billing": {},
-    # calendar-react 0.8.0 — Calendar/AvailabilityPane: every prop optional.
-    # `viewerId` is among them, so owner-only controls stay hidden until a
-    # host supplies one; that is the pair's own designed degradation, not a
-    # slot this generator can fill from a session it does not read.
-    # With auth installed the signed-in user's id is the `viewerId` (Calendar
-    # hands it on to its EventSheet): without it RSVP and edit stay hidden for
-    # everyone. A `CalendarPeopleProvider` names the viewer instead of
-    # printing their id; other people stay ids until a directory exists.
-    "calendar.month": {"viewer": "auth"},
-    "calendar.availability": {},
-    # forms-react 0.3.1 — `workspaceId` is optional on all three (the runtime's
-    # active selection answers it, which is exactly what the routable case
-    # means), but the builder and the responses table both REQUIRE `formId`,
-    # and their routes carry it.
-    "forms.list": {},
-    "forms.builder": {"route_params": {"formId": "string"}},
-    "forms.responses": {"route_params": {"formId": "string"}},
-    # recordings-react 0.6.1 — RecordingsList: every prop optional (`onOpen`
-    # omitted renders static rows; the detail route is reached from the menu).
-    # The other two require the id their own address carries, and `linkToken`
-    # is a BEARER SECRET: it belongs in the route and nowhere else.
-    "recordings.list": {},
-    "recordings.detail": {"route_params": {"recordingId": "string"}},
-    "share.view": {"route_params": {"linkToken": "string"}},
-    # moderation-react 0.1.1 — all four screens take ZERO required props, read
-    # off the pair's own prop interfaces rather than assumed:
-    # `PolicyDisclosurePaneProps` (optional `targetType`), `AppealPanelProps`
-    # (optional `caseId`/`sanctionId`, which the pair's own
-    # `DEFAULT_APPEAL_HREF` puts in the QUERY STRING — `?case=` — not in the
-    # path, so there is no route param to thread), `ModerationQueueProps`
-    # (optional `viewerId`: the module has no `/me` and a container that
-    # invented one would mislabel a colleague's lease as the reader's own,
-    # so it stays unset and every lease reads as somebody's) and
-    # `AppealsQueueProps` (nothing but `data-testid`). Each also extends
-    # `ThemeModeProp`, whose `mode` is optional BY DESIGN — a pair that
-    # defaulted it is how a dark host gets one white rectangle.
-    "moderation.policy": {},
-    "account.appeals": {},
-    "admin.moderation": {},
-    "admin.moderation-appeals": {},
-    # workspaces-react 0.19.0 — every account screen's `workspaceId` is
-    # optional BECAUSE this nav contract routes it: with none, the active
-    # workspace comes from the runtime selection and a screen with no
-    # selection renders the pair's own "choose a workspace" state. The invite
-    # page is the exception and the only required prop in the pair: `token`,
-    # off its own public `/invite/:token` route.
-    "workspaces.list": {},
-    "workspaces.settings": {},
-    "workspaces.members": {},
-    "workspaces.invitations": {},
-    "workspaces.audit": {},
-    "workspaces.invite": {"route_params": {"token": "string"}},
-    # the container's own.
-    # feed-react 0.1.0: FeedPage takes the picture queue from the container
-    # (cdn-react's upload bag); the post and author pages read their ids.
-    "feed.home": {"composite": "feed.home"},
-    "feed.post": {"route_params": {"id": "number"}},
-    "feed.author": {"route_params": {"userId": "string"}},
-    # reservations-react 0.1.0: the booking page reads the bookable from its
-    # address; the detail and the schedule editor read their ids.
-    "reservations.book": {"route_params": {"bookableType": "string", "bookableKey": "string"}},
-    "reservations.mine": {},
-    "reservations.detail": {"route_params": {"id": "number"}},
-    "reservations.agenda": {},
-    "reservations.schedule": {"route_params": {"id": "number"}},
-    "account.root": {"local": "AccountHome"},
-    "admin.root": {"local": "AdminHome"},
-}
+# NAV_ENTRY_MOUNTS is a view: composition/react/mounts.py (REACT_MOUNTS) plus
+# the neutral page slots (composition.react.registry.nav_entry_mounts).
 
 
 def public_nav_pairs(entries: list[dict]) -> list[dict]:
@@ -3373,7 +2910,7 @@ def _placeholder_jsx(entry: dict, missing: tuple = ()) -> str:
     parts = [
         f'entryId={json.dumps(entry["id"])}',
         f"component={json.dumps(comp)}",
-        f'pkg={json.dumps(entry["_package"])}',
+        f'pkg={json.dumps(react_package(entry))}',
     ]
     if missing:
         parts.append("missing={" + _ts_string_array(list(missing)) + "}")
@@ -3465,7 +3002,7 @@ def render_nav_page_wrapper_tsx(
     `resolveEmbedProps` (an embed whose route param is absent renders nothing).
     """
     comp = entry["component"]["export"]
-    pkg = entry["_package"]
+    pkg = react_package(entry)
     subpath = entry["component"]["subpath"]
     name = _wrapper_name(entry)
     lines = [
@@ -3487,7 +3024,7 @@ def render_nav_page_wrapper_tsx(
     for embeds in (page_embeds or {}).values():
         for embed in embeds:
             ref = embed["component"]
-            embed_imports.setdefault(f'{embed["_package"]}/{ref["subpath"]}', set()).add(
+            embed_imports.setdefault(f'{react_package(embed)}/{ref["subpath"]}', set()).add(
                 ref["export"]
             )
     if page_embeds:
@@ -3583,50 +3120,14 @@ def render_nav_page_wrapper_tsx(
     return "\n".join(lines)
 
 
-# Cross-pair screens: the ones a CONTAINER composes because no pair may import
-# another pair (an L2 pair importing an L2 pair is the fork this architecture
-# exists to prevent). Each entry names the pairs whose exports the generated
-# page imports, the prop each of them satisfies, and the slots that stay
-# UNFILLED with the pair that would fill them — so the page can say what is
-# missing instead of quietly asking a seller for a latitude.
-#
-# `pairs` are REQUIRED members: without one the screen is not assembled at all
-# and the route gets the placeholder naming the absence. `optional` members
-# fill a slot the composer degrades around on its own — the page is emitted
-# either way, and the pair's presence decides whether the slot is WIRED or
-# whether the page says out loud that it is not.
-COMPOSITE_PAGES: dict[str, dict] = {
-    "feed.home": {
-        "page": "FeedHomePage",
-        # The feed composer's picture queue: ONE upload bag, drawn by the
-        # gallery field and published from by the composer.
-        "pairs": {"cdn": ("attachments", "attachmentPicker")},
-        "optional": {},
-    },
-    "listings.compose": {
-        "page": "ListingComposePage",
-        # pair key -> the composer prop(s) it satisfies
-        "pairs": {
-            "categories": ("features", "renderCategoryPicker"),
-            "cdn": ("gallerySlot", "images"),
-        },
-        # pair key -> the composer prop(s) it fills WHEN INSTALLED. `geo` used
-        # to live in an `unwired` table instead, because there was no react
-        # pair for a geocoder: the page carried a permanent notice saying the
-        # composer asks a seller for a raw lat/lon pair, which was true and
-        # which no scaffolded storefront could do anything about.
-        # `@stapel/geo-react` is published and registered now, so the slot is
-        # FILLED when the pair is selected and the notice is emitted only when
-        # it is not. `currencies` is the same shape one field over: unfilled,
-        # the price field simply states the deployment's currency (the pair's
-        # own designed degradation) — so there is no notice for that one,
-        # only a picker when the pair is there.
-        "optional": {
-            "geo": ("locationPicker",),
-            "currencies": ("renderCurrencyPicker",),
-        },
-    },
-}
+# COMPOSITE_PAGES — cross-pair screens a CONTAINER composes, because no pair
+# may import another pair — is a view: which bricks a page requires or can use
+# is neutral (composition.bricks.CONTAINER_PAGES), the page component and the
+# prop each pair's exports satisfy are React's
+# (composition.react.registry.REACT_COMPOSITE_PAGES). `pairs` are REQUIRED
+# members: without one the screen is not assembled and the route gets the
+# placeholder naming the absence. `optional` members fill a slot the composer
+# degrades around on its own.
 
 # How many photos a listing carries. A STOREFRONT number (stapel-cdn has no
 # opinion on it and stapel-listings does not cap it), which is why it is here
@@ -4026,7 +3527,7 @@ def public_mount_plan(
             elements[entry["id"]] = f"<{name} />"
             continue
         comp = entry["component"]["export"]
-        direct.setdefault((entry["_package"], entry["component"]["subpath"]), set()).add(comp)
+        direct.setdefault((react_package(entry), entry["component"]["subpath"]), set()).add(comp)
         elements[entry["id"]] = f"<{comp} />"
 
     imports: list[str] = []
@@ -4167,33 +3668,9 @@ def render_public_routes_tsx(
     return "\n".join(lines)
 
 
-# Runtime counts for nav destinations — the `navBadges` channel
-# (`@stapel/shell-react` 0.11.0+), keyed by the nav id the pair's own manifest
-# already gave the entry. The shell deliberately fetches nothing: how many of
-# anything is waiting is a fact each module's pair owns, and a shell that read
-# it would depend on modules it must not. So the CONTAINER joins the two —
-# which is the same job it does for the vocabulary seam and the composer's
-# slots, and the same reason it is declared here rather than hand-written into
-# every storefront.
-#
-# One source today, and that is honest rather than thin: `useUnreadCount()` is
-# the only count the published pairs expose as a count (chat-react publishes a
-# conversation list, moderation-react a queue bag — neither is a number, and a
-# generator that derived one by fetching a page and calling `.length` would be
-# inventing a metric). A pair that ships one joins this table and every
-# generated container starts marking the destination.
-#
-# The hook is session-gated inside its own pair (`useActiveSessionReady`), so
-# it is safe on a PUBLIC shell an anonymous visitor sees: no request is made
-# and the badge simply never appears.
-NAV_BADGE_SOURCES: dict[str, dict] = {
-    "notifications.feed": {
-        "pair": "notifications",
-        "package": "@stapel/notifications-react",
-        "hook": "useUnreadCount",
-        "var": "unreadNotifications",
-    },
-}
+# NAV_BADGE_SOURCES — runtime counts for nav destinations (`navBadges`) — is
+# a view: the neutral badge signal on the brick (BrickUi.badges) joined to the
+# React pair hook (composition.react.registry.REACT_BADGES).
 
 
 def nav_badge_sources(nav_ids) -> list[dict]:
