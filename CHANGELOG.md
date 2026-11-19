@@ -2,6 +2,24 @@
 
 ## [0.82.0] — 2026-11-19
 
+Also carries everything listed under 0.81.3: that tag was cut, but its publish
+gate (PIN002) refused the `<0.98` core ceiling once stapel-core 0.98.0 reached
+PyPI, so 0.81.3 was never published.
+
+- **A generated minimal project signs someone in.** Its `requirements.txt`
+  declares `celery>=5.3` (as the service tier always did): stapel-auth's
+  `tasks.py` imports celery at module level and session issuance calls
+  `.delay()`, so the OTP verify answered 500 with `ModuleNotFoundError`.
+  `config/celery.py` (every project type) calls `app.set_default()`:
+  constructing the app makes it current only in the importing thread, and
+  Celery's Django fixup makes it the default only when nothing touched
+  `celery.current_app` earlier — otherwise a request on another thread
+  (gunicorn `--threads`, runserver) used the unconfigured default app
+  (amqp://localhost) and 500ed. `tests/test_minimal_sign_in.py` signs in from
+  a worker thread on a scaffolded project, with inversions for both.
+- **Pin: stapel-core 0.98.0** (the client-IP seam in `stapel_core.security`;
+  additive). Generated requirements read `stapel-core>=0.98.0,<0.99`.
+
 Platform-neutral scaffold composition (D11, refactor steps R0–R5). The
 generated React frontends are byte-identical to 0.81.3 for every case of the
 golden matrix; the change is where the facts live and what can read them.
