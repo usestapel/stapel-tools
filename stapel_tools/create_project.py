@@ -64,9 +64,11 @@ STAPEL_LIBS = {
         # 0.95.0: `manage.py run_seeds`, which the generated bootstrap.sh calls.
         # 0.97.0: contract profile 2 (additive; PIN002 refuses a ceiling below
         # the newest release). 0.98.0: the client-IP seam in
-        # stapel_core.security (additive, old paths kept).
-        "pin": "0.98.0",
-        "ahead_of_pypi": False,  # PyPI 0.98.0 @ 2026-11-19
+        # stapel_core.security (additive, old paths kept). 0.98.1: a shut
+        # registration door under public_space is presets.W001, not E001 —
+        # what lets --auth-kinds close the kinds it leaves out.
+        "pin": "0.98.1",
+        "ahead_of_pypi": False,  # PyPI 0.98.1 @ 2026-11-19
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",

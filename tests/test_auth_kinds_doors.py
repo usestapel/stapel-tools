@@ -1,15 +1,16 @@
-"""``--auth-kinds`` switches login axes only; the registration doors of the
-kinds it leaves out stay the posture's.
+"""``--auth-kinds`` closes the channels it leaves out, on both axes.
 
 stapel-auth keeps a channel open while its ``AUTH_<KIND>_LOGIN`` OR its
-``AUTH_<KIND>_REGISTRATION`` is on, and since 0.53 it names that half-closed
-pair ``stapel_auth.W015``. Shutting the excluded doors from the scaffold is not
-possible on stapel-core 0.98.0: ``stapel_core.presets.E001`` reports any shut
-door ``public_space`` opens as a security override (a deploy blocker). Until
-core distinguishes narrowing from weakening, a fresh ``--auth-kinds phone``
-project says so out loud: W015 per excluded kind with a registration axis,
-no E001, and the excluded email door still answers. These tests pin exactly
-that state so nobody mistakes it for closed.
+``AUTH_<KIND>_REGISTRATION`` is on. Listing kinds used to switch only the
+login axes, so a ``--auth-kinds phone`` project reported ``login.email=false``
+next to ``registration.email=true`` and a stranger could still register by
+email (stapel-auth 0.53 names that pair ``stapel_auth.W015``). The scaffold now
+shuts the registration door of every unlisted kind; the public posture reports
+that narrowing as ``stapel_core.presets.W001`` (core >= 0.98.1), never E001;
+no check at ERROR level is left on a fresh scaffold.
+
+The live test scaffolds the project and asks it: the capabilities, the system
+checks, and the excluded doors themselves.
 """
 from __future__ import annotations
 
@@ -41,9 +42,10 @@ from stapel_auth.fictional import fictional_phone
 call_command("migrate", "--noinput", verbosity=0, skip_checks=True)
 found = checks.run_checks()
 out = {"checks": sorted({f.id for f in found})}
-out["w015"] = sorted(
-    f.msg.split("AUTH_", 1)[1].split("_LOGIN", 1)[0].lower()
-    for f in found if f.id == "stapel_auth.W015"
+out["errors"] = sorted(f.id for f in found if f.is_serious())
+out["w001_keys"] = sorted(
+    f.msg.split("['", 1)[1].split("']", 1)[0]
+    for f in found if f.id == "stapel_core.presets.W001"
 )
 c = Client(raise_request_exception=False)
 cap = c.get(reverse("capabilities")).json()
@@ -82,22 +84,45 @@ def _probe(project) -> dict:
     return json.loads(result.stdout.strip().splitlines()[-1])
 
 
-def test_no_registration_axis_is_rendered(project):
+def test_unlisted_kinds_have_their_registration_door_rendered_shut(project):
     settings = (project / "config" / "settings.py").read_text()
-    assert "_REGISTRATION" not in settings.split("# ─── Deployment posture")[0]
+    for kind in ("EMAIL", "OAUTH", "SSO", "PASSWORD"):
+        assert f'"AUTH_{kind}_REGISTRATION": False' in settings, kind
+    assert "AUTH_PHONE_REGISTRATION" not in settings  # the listed kind keeps the posture's door
 
 
 @_needs_auth
-def test_excluded_kinds_are_reported_by_w015_not_blocked(project):
+def test_an_excluded_kind_is_closed_and_the_listed_one_open(project):
     got = _probe(project)
+    assert "stapel_auth.W015" not in got["checks"], got["checks"]
     assert "stapel_core.presets.E001" not in got["checks"], got["checks"]
-    assert got["w015"] == ["email", "oauth", "sso"], got["w015"]
-    # login off, registration on: the half-closed state W015 describes
-    assert got["login"]["email"] is False and got["registration"]["email"] is True
+    assert got["errors"] == [], got["errors"]  # nothing at ERROR: migrate/boot proceed
+    # The narrowed doors are visible as core's W001, one per door the
+    # public posture opens and this project shut (password is shut by both).
+    assert got["w001_keys"] == [
+        "AUTH_EMAIL_REGISTRATION", "AUTH_OAUTH_REGISTRATION", "AUTH_SSO_REGISTRATION",
+    ], got["w001_keys"]
+    for kind in ("email", "password", "sso"):
+        assert got["login"][kind] is False and got["registration"][kind] is False, (kind, got)
     assert got["login"]["phone"] is True and got["registration"]["phone"] is True
     assert got["phone_request"] == 200, got
-    assert got["email_request"] == 200, got  # the excluded door still answers
-    assert got["password_register"] == 403, got  # shut by the posture itself
+    assert got["email_request"] == 403, got
+    assert got["password_register"] == 403, got
+
+
+@_needs_auth
+def test_inversion_registration_left_on_reopens_the_excluded_door(project, tmp_path):
+    import shutil
+
+    copy = tmp_path / "doors"
+    shutil.copytree(project, copy)
+    settings = copy / "config" / "settings.py"
+    settings.write_text(settings.read_text().replace(
+        '    "AUTH_EMAIL_REGISTRATION": False,\n', ""))
+    got = _probe(copy)
+    assert "stapel_auth.W015" in got["checks"]
+    assert got["registration"]["email"] is True
+    assert got["email_request"] == 200, got
 
 
 @pytest.mark.parametrize(("line", "expected"), [

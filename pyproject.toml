@@ -42,7 +42,9 @@ test = [
     # DRF 3.18.0 dropped the `cc_delim_re` import Django 6.1 removed.
     "djangorestframework>=3.18",
     "drf-spectacular",
-    "stapel-core>=0.97.0,<1",  # contract profile 2 (tests/test_contract_profile.py)
+    # 0.97.0: contract profile 2 (tests/test_contract_profile.py); 0.98.1: a
+    # shut registration door is presets.W001 (tests/test_auth_kinds_doors.py).
+    "stapel-core>=0.98.1,<1",
     # `stapel-fixture-lint`'s VOC001 goes through the shipped JSON Schema when
     # this is installed and through the structural checks alone when it is not.
     # Declared here so CI really takes the schema branch: an optional import
