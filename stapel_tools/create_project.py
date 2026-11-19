@@ -2316,6 +2316,89 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
     )
 
 
+def _mobile_request(
+    project_type: str, slug: str, *, mobile_offline: bool, mobile_id: str | None,
+    mobile_name: str | None, mobile_shell: str | None, mobile_maven_repo: str | None,
+):
+    """The KMP PlatformRequest of this invocation: CLI values, plus the backend
+    facts the mobile app needs (dev port, the project's own module and its mount)."""
+    from .composition.model import PlatformRequest
+
+    module = slug.replace("-", "_")
+    if project_type == "minimal":
+        # the project's own urls under /api/, next to the schema views (MINIMAL_URLS)
+        custom = ((module, "/api/", "..", ("/api/schema/", "/api/docs/")),)
+        dev_port = 8000
+    else:
+        custom = ((module, f"/{slug}/", f"../svc-{slug}", ()),)
+        dev_port = 8080
+    repo = "central"
+    if mobile_maven_repo:
+        repo = "local" if mobile_maven_repo == "local" else str(Path(mobile_maven_repo).resolve())
+    return PlatformRequest(
+        "kmp", shell=mobile_shell,
+        options=(
+            ("offline", bool(mobile_offline)), ("app_id", mobile_id), ("app_name", mobile_name),
+            ("repo", repo), ("dev_port", dev_port), ("custom", custom),
+            ("serve_well_known", project_type == "monolith"),
+        ),
+    )
+
+
+def _mobile_composition(ctx, project_type, feature_libs, want_auth, auth_comp, theme,
+                        mobile_request, *, validate: bool = False):
+    from ._auth_model import resolve as resolve_auth_model
+    from .composition.emitter import build_composition, emitter_for
+
+    if auth_comp is None and "auth" in feature_libs:
+        auth_comp = resolve_auth_model(None, auth_selected=True)
+    comp = build_composition(
+        ctx=ctx, project_type=project_type, feature_libs=list(feature_libs),
+        want_auth=want_auth, auth_comp=auth_comp, theme=theme, mobile=mobile_request,
+    )
+    if validate:
+        emitter_for("kmp").validate(comp, mobile_request)
+    return comp
+
+
+#: The root Makefile's door to the mobile gates.
+MOBILE_MAKE_TARGET = """
+# The mobile app's proof gates (mobile/scripts/mobile-check.sh): PASS / FAIL / NOT RUN.
+.PHONY: mobile-check
+mobile-check:
+\t$(MAKE) -C mobile check
+"""
+
+_NGINX_SERVICE_MARKER = "    # stapel-new-service appends one location block per backend service"
+
+
+def _write_mobile(project_dir: Path, ctx: dict, project_type: str, feature_libs, want_auth,
+                  auth_comp, theme, mobile_request) -> None:
+    """``mobile/`` — the KMP emitter's plan, written; nginx and make wired to it."""
+    from .composition.emitter import emitter_for, write_plan
+
+    comp = _mobile_composition(ctx, project_type, feature_libs, want_auth, auth_comp, theme,
+                               mobile_request)
+    plan = emitter_for("kmp").plan(comp, mobile_request)
+    write_plan(project_dir, plan)
+    if plan.nginx_locations:
+        conf = project_dir / "service-configs" / "nginx" / "nginx.conf"
+        text = conf.read_text(encoding="utf-8")
+        if _NGINX_SERVICE_MARKER not in text:
+            raise RuntimeError("nginx.conf has no service marker to place the mobile locations at")
+        block = ("    # Deep-link association files for the mobile app (mobile/README.md).\n"
+                 + "".join(plan.nginx_locations) + "\n")
+        conf.write_text(text.replace(_NGINX_SERVICE_MARKER, block + _NGINX_SERVICE_MARKER, 1),
+                        encoding="utf-8")
+    makefile = project_dir / "Makefile"
+    if makefile.exists():
+        makefile.write_text(makefile.read_text(encoding="utf-8") + MOBILE_MAKE_TARGET,
+                            encoding="utf-8")
+    print("  mobile/ (stapel-kmp: Android, iOS, desktop) — see mobile/README.md")
+    for note in plan.notes:
+        print(f"  note: {note}")
+
+
 def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None, module_config: dict | None = None, auth_comp=None):
     from ._minimal_templates import (
         MINIMAL_BILLING_UNCONFIGURED_BLOCK,
@@ -3033,6 +3116,12 @@ def create_project(
     image_base: str | None = None,
     fleet_tag: str | None = None,
     allow_unreleased: bool = False,
+    mobile: str | None = None,
+    mobile_offline: bool = False,
+    mobile_id: str | None = None,
+    mobile_name: str | None = None,
+    mobile_shell: str | None = None,
+    mobile_maven_repo: str | None = None,
 ):
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
@@ -3128,8 +3217,19 @@ def create_project(
         )
         sys.exit(1)
 
+    mobile_flags = [
+        flag for flag, value in (
+            ("--mobile-offline", mobile_offline), ("--mobile-id", mobile_id),
+            ("--mobile-name", mobile_name), ("--mobile-shell", mobile_shell),
+            ("--mobile-maven-repo", mobile_maven_repo),
+        ) if value
+    ]
+    if mobile is None and mobile_flags:
+        print(f"Error: {', '.join(mobile_flags)} need --mobile kmp", file=sys.stderr)
+        sys.exit(1)
+
     if theme is not None:
-        if project_type != "monolith":
+        if project_type != "monolith" and mobile is None:
             print(f"Error: --theme styles the generated SPA; {project_type} has none", file=sys.stderr)
             sys.exit(1)
         from ._theme_presets import render_theme_json
@@ -3225,6 +3325,25 @@ def create_project(
 
     slug = _slugify(name)
     project_dir = output_dir / name
+
+    mobile_request = None
+    if mobile is not None:
+        from .composition.model import CompositionError
+
+        try:
+            mobile_request = _mobile_request(
+                project_type, slug, mobile_offline=mobile_offline, mobile_id=mobile_id,
+                mobile_name=mobile_name, mobile_shell=mobile_shell,
+                mobile_maven_repo=mobile_maven_repo,
+            )
+            _mobile_composition(
+                {"slug": slug, "title": title, "url": url.rstrip("/")}, project_type,
+                _expand_with_requires([m for m in modules if m != "core"]),
+                want_auth, auth_comp, theme, mobile_request, validate=True,
+            )
+        except CompositionError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            sys.exit(1)
 
     if project_dir.exists():
         print(f"Error: {project_dir} already exists", file=sys.stderr)
@@ -3347,6 +3466,10 @@ def create_project(
 
     if allow_unreleased and project_type in ("monolith", "minimal"):
         _vendor_unreleased(project_dir, ctx, feature_only, project_type, output_dir)
+
+    if mobile_request is not None:
+        _write_mobile(project_dir, ctx, project_type, feature_only, want_auth, auth_comp,
+                      theme, mobile_request)
 
     if project_type in ("monolith", "minimal"):
         _append_wiring_requirements(project_dir, ctx, feature_only, project_type)
@@ -3612,6 +3735,37 @@ def main():
              "$STAPEL_FLEET_IMAGE_TAG). Default: the tag this stapel-tools "
              "release names.",
     )
+    mobile_group = parser.add_argument_group(
+        "mobile app (Kotlin Multiplatform: Android, iOS, desktop) — see mobile/README.md")
+    mobile_group.add_argument(
+        "--mobile", choices=("kmp",), default=None,
+        help="Also generate mobile/: a stapel-kmp app over the same backend, with the "
+             "installed bricks that have a KMP library, the web's theme and the "
+             "project's own modules' generated clients. Selected modules with no KMP "
+             "library are listed as pending; sign-in kinds the mobile client cannot "
+             "complete (oauth, magic, sso, passkey, qr) are left out, and --mobile is "
+             "refused when no selected kind is completable.",
+    )
+    mobile_group.add_argument(
+        "--mobile-offline", action="store_true",
+        help="Add the durable cache (stapel-cache-room) and its one offline(...) line.",
+    )
+    mobile_group.add_argument(
+        "--mobile-id", metavar="REVERSE.DNS",
+        help="Android application id and iOS bundle id. Default: from --url and the "
+             "project name (https://shop.example + shop -> example.shop).",
+    )
+    mobile_group.add_argument(
+        "--mobile-name", metavar="NAME", help="The app's display name. Default: --title.")
+    mobile_group.add_argument(
+        "--mobile-shell", metavar="TEMPLATE",
+        help="stapel-shell template: AdaptiveTabs (default) or Stack.")
+    mobile_group.add_argument(
+        "--mobile-maven-repo", metavar="local|DIR",
+        help="Resolve stapel-kmp artifacts that are not on Maven Central yet from "
+             "mavenLocal (local) or a staging repository directory. Required while the "
+             "train is unreleased; written to mobile/gradle.properties (stapel.repo).",
+    )
     args = parser.parse_args()
     from ._shell_slots import parse_slot_args
 
@@ -3723,6 +3877,12 @@ def main():
         image_base=args.image_base,
         fleet_tag=args.fleet_tag,
         allow_unreleased=args.allow_unreleased,
+        mobile=args.mobile,
+        mobile_offline=args.mobile_offline,
+        mobile_id=args.mobile_id,
+        mobile_name=args.mobile_name,
+        mobile_shell=args.mobile_shell,
+        mobile_maven_repo=args.mobile_maven_repo,
     )
 
 

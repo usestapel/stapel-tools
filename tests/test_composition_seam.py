@@ -49,8 +49,11 @@ class TestBuildComposition:
             ("topbar.end", "none"), ("topbar.start", "none"))
 
     def test_unknown_platform_is_refused(self):
-        with pytest.raises(CompositionError, match="no emitter for platform 'kmp'"):
-            emitter_for("kmp")
+        with pytest.raises(CompositionError, match="no emitter for platform 'swiftui'"):
+            emitter_for("swiftui")
+
+    def test_kmp_has_an_emitter(self):
+        assert emitter_for("kmp").platform == "kmp"
 
 
 class TestThePlanIsPure:
@@ -159,7 +162,8 @@ def test_moved_planners_are_the_same_objects():
 
     assert F.CONTAINER_NAV_ROOTS is nav.CONTAINER_NAV_ROOTS
     assert _shell_slots.plan_slots is slots.plan_slots
-    assert slots.SHELL_TEMPLATES_BY_PLATFORM["kmp"] == {}
+    # the KMP row is stapel-shell's vendored shell-templates.json
+    assert set(slots.SHELL_TEMPLATES_BY_PLATFORM["kmp"]) == {"AdaptiveTabs", "Stack"}
 
 
 def test_patching_the_old_declared_ids_still_reaches_the_planner():
@@ -241,11 +245,11 @@ class TestSyncGateRows:
         assert "neutral registry and React binding agree" in result.stdout
         assert "kmp: no stapel-kmp checkout" in result.stdout
 
-    def test_kmp_row_says_not_armed_when_a_checkout_exists(self, tmp_path):
-        (tmp_path / "stapel-kmp").mkdir()
+    def test_kmp_row_is_armed_and_compares_present_descriptors(self, tmp_path):
         result = self._run(tmp_path)
-        assert result.returncode == 0
-        assert "kmp: NOT ARMED" in result.stdout
+        assert result.returncode == 0, result.stdout
+        assert "NOT ARMED" not in result.stdout
+        assert "kmp: ARMED — 1 brick(s) with a present descriptor compared (auth)" in result.stdout
 
     def test_neutral_row_fails_on_a_binding_disagreement(self, monkeypatch, capsys):
         """Inversion: an icon key without a React glyph turns the gate red."""

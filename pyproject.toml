@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.82.2"
+version = "0.83.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -184,6 +184,11 @@ include = ["stapel_tools*"]
 [tool.setuptools.package-data]
 "stapel_tools.catalog_fixtures" = ["schemas/*.json"]
 "stapel_tools" = ["data/*.mjs", "data/*.json", "data/route-plans/*.json"]
+# The KMP emitter's vendored stapel-kmp data (digest-pinned) and its templates.
+"stapel_tools.composition.kmp" = [
+    "vendored/*.json", "vendored/nav-manifests/*.json", "vendored/gradle/*",
+    "templates/*", "templates/ios/*",
+]
 
 [tool.pytest.ini_options]
 # tests/fixtures holds INPUT trees — repositories-in-miniature the linters are

@@ -212,6 +212,18 @@
           "embeds": [
             "auth.account_menu"
           ]
+        },
+        "kmp": {
+          "ui": "stapel-auth-ui",
+          "version": "0.0.1",
+          "released": false,
+          "entries": [
+            "auth.login",
+            "auth.security"
+          ],
+          "embeds": [
+            "auth.account_menu"
+          ]
         }
       }
     },

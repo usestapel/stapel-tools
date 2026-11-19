@@ -35,9 +35,9 @@ PYTHON ?= python
 # `preset-gate` holds every composite's installed preset.py equal to
 # STAPEL_LIBS (apps, order, mounts, defaults shape, frontend pairs). It reads
 # the INSTALLED composites, so it needs the `test` extra.
-.PHONY: check lint test nav-sync sibling-lint peer-graph pins-check hooks-doctor preset-gate composite-gates golden golden-update registry-export registry-export-check
+.PHONY: kmp-vendor check lint test nav-sync sibling-lint peer-graph pins-check hooks-doctor preset-gate composite-gates golden golden-update registry-export registry-export-check
 
-check: hooks-doctor lint sibling-lint nav-sync registry-export-check preset-gate golden test
+check: hooks-doctor lint sibling-lint nav-sync kmp-vendor registry-export-check preset-gate golden test
 
 hooks-doctor:
 	@$(PYTHON) -m stapel_tools.hooks doctor || { \
@@ -55,6 +55,11 @@ sibling-lint:
 
 nav-sync:
 	$(PYTHON) scripts/check_nav_manifest_sync.py
+
+# The KMP emitter's vendored stapel-kmp data equals its pin (digests, no
+# network). Re-vendor with: python -m stapel_tools.composition.kmp.vendor --from <stapel-kmp>
+kmp-vendor:
+	$(PYTHON) -m stapel_tools.composition.kmp.vendor --check
 
 # The golden whole-tree gate over generated projects (scripts/golden_scaffold.py):
 # every case of the composition matrix must generate byte-identical trees.

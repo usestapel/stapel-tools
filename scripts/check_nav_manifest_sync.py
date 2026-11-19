@@ -305,17 +305,78 @@ def kmp_root(root: Path | None = None) -> Path:
 
 
 def check_kmp(root: Path | None = None) -> int:
-    """The KMP row. Its real files (``<ui module>/nav-manifest.json``) are
-    compared against ``project_kmp(BrickUi, KmpBinding)`` once the KMP
-    emitter registers bindings; until then the row says it is NOT ARMED,
-    on every run, instead of reading as green."""
+    """The KMP row, ARMED for every brick whose descriptor the vendored
+    ``kmp-registry.json`` marks present.
+
+    Three comparisons, the first two need no checkout:
+
+    * every id a KMP binding lists is declared by its neutral brick;
+    * the vendored ``nav-manifests/<brick>.json`` destinations equal
+      ``project_kmp`` on the shared fields (the KMP-only ``presentation`` and
+      ``requires`` are not neutral), and its embeds equal the neutral embeds
+      the binding lists;
+    * with a stapel-kmp checkout: its real ``bricks/<brick>/ui/nav-manifest.json``
+      equals the vendored copy byte for byte (re-vendor when it moved), and a
+      brick the checkout marks present that this vendored copy does not is a
+      FAILURE (the scaffold would write a stand-in descriptor for a library
+      that ships one).
+
+    A brick whose descriptor is not present is printed on every run (the
+    scaffold lists it as pending), never counted as compared."""
+    sys.path.insert(0, str(REPO_ROOT))
+    from stapel_tools.composition.bricks import BRICK_UI
+    from stapel_tools.composition.kmp import vendor
+    from stapel_tools.composition.kmp.registry import (
+        KMP_ONLY_FIELDS,
+        check_bindings,
+        kmp_bindings,
+        nav_manifest,
+        project_kmp,
+    )
+
+    problems = list(check_bindings())
+    compared = []
+    for key, binding in sorted(kmp_bindings().items()):
+        if not binding.descriptor_present:
+            print(f"check_nav_manifest_sync: kmp: {key}: descriptor not present in the vendored "
+                  f"stapel-kmp ({binding.descriptor_class}) — scaffolds list it as pending")
+            continue
+        manifest = nav_manifest(key)
+        if manifest is None:
+            problems.append(f"kmp {key}: descriptor present but no vendored nav-manifests/{key}.json")
+            continue
+        real = [{k: v for k, v in d.items() if k not in KMP_ONLY_FIELDS}
+                for d in manifest.get("destinations", [])]
+        if real != project_kmp(key):
+            problems.append(
+                f"kmp {key}: vendored nav-manifest destinations differ from the neutral entries:\n"
+                f"  neutral: {json.dumps(project_kmp(key), indent=2)}\n"
+                f"  kmp:     {json.dumps(real, indent=2)}")
+        brick = BRICK_UI.get(key)
+        neutral_embeds = [e.id for e in brick.embeds if e.id in binding.embeds] if brick else []
+        if [e["id"] for e in manifest.get("embeds", [])] != neutral_embeds:
+            problems.append(f"kmp {key}: vendored embeds differ from the neutral embeds")
+        compared.append(key)
+
     where = kmp_root(root)
-    if not where.is_dir():
-        print(f"check_nav_manifest_sync: kmp: no stapel-kmp checkout at {where} — skipping.")
-        return 0
-    print("check_nav_manifest_sync: kmp: NOT ARMED — this stapel-tools registers "
-          "no KMP bindings yet (the KMP emitter is not built), so no "
-          f"nav-manifest.json under {where} is compared.")
+    if where.is_dir() and (where / "kmp-registry.json").is_file():
+        drift = vendor.sibling_drift(where)
+        hint = "re-vendor (python -m stapel_tools.composition.kmp.vendor --from <checkout>)"
+        problems += [f"kmp: stapel-kmp checkout {where}: {d} — {hint}"
+                     for d in drift if d.startswith("nav-manifests/")]
+        for d in drift:
+            if not d.startswith("nav-manifests/"):
+                print(f"check_nav_manifest_sync: kmp: the checkout moved past the vendored "
+                      f"copy: {d} ({hint} when the scaffold should follow)")
+    else:
+        print(f"check_nav_manifest_sync: kmp: no stapel-kmp checkout at {where} — "
+              "the vendored copy is compared with the neutral registry only.")
+
+    if problems:
+        print("check_nav_manifest_sync: kmp: FAILED\n  - " + "\n  - ".join(problems))
+        return 1
+    print(f"check_nav_manifest_sync: kmp: ARMED — {len(compared)} brick(s) with a present "
+          f"descriptor compared ({', '.join(compared) or 'none yet'}).")
     return 0
 
 

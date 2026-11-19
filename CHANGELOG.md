@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.83.0] — 2026-11-20
+
+- **`--mobile kmp`: the KMP emitter.** One scaffold invocation also writes
+  `mobile/`, a Kotlin Multiplatform app (Android, iOS, desktop JVM) built from
+  stapel-kmp by Maven coordinates, laid out like stapel-kmp's reference app:
+  one `stapelApp { }` with the installed bricks, the web's
+  `stapel.theme.json` byte for byte, `stapel.environments.json` (dev base URL
+  per platform: `10.0.2.2` on the Android emulator, `127.0.0.1` on the iOS
+  simulator and desktop; prod from `--url`), `stapel.composition.json`
+  (installed / custom / pending / headless modules, sign-in methods, routes,
+  slots), the Gradle wrapper (shipped as package data, its jar's sha256
+  verified against Gradle's published checksum when vendored; nothing is
+  downloaded at scaffold time), an Xcode project from the wizard template, and
+  the project's own backend module wired to the codegen plugin
+  (`make contracts` → `contracts/<module>/` → generated client bound in Koin).
+  Minimal and monolith projects; a monolith's nginx serves the deep-link
+  association files (`/.well-known/apple-app-site-association`,
+  `assetlinks.json`) with placeholders for the owner's signing identities.
+- `--mobile-offline` adds `stapel-cache-room` and its one `offline(...)` line
+  (desktop gets a per-user data directory: it has no platform default).
+  `--mobile-id`, `--mobile-name`, `--mobile-shell`, and `--mobile-maven-repo
+  local|DIR` (required while the stapel-kmp train is not on Maven Central).
+- **Refusals (ruling R14).** Sign-in kinds the mobile client cannot complete
+  (oauth, magic, sso, passkey, qr) are left out of the app and named in the
+  composition file and the CLI output; a selection with none it can complete
+  refuses `--mobile kmp` before anything is written.
+- **Proof gates in the generated app**: `mobile/scripts/mobile-check.sh`
+  (`make check`, root `make mobile-check`): codegen + token drift, the nav gate
+  on JVM and the iOS simulator, `assembleDebug`, a desktop launch smoke, an
+  Xcode build + simulator launch and deep-link smoke, and with
+  `WALK_BASE_URL` the sign-in walk against the running backend on desktop and
+  iOS. PASS / FAIL / NOT RUN per gate; `STRICT=1` fails on NOT RUN. Opt-in
+  test: `STAPEL_KMP_PROOF=1 STAPEL_KMP_MAVEN_REPO=… pytest -m slow
+  tests/test_kmp_emitter.py`.
+- **Vendored stapel-kmp data**, digest-pinned (`composition/kmp/vendored/`,
+  `pin.json`): `kmp-registry.json`, stapel-shell's `shell-templates.json`
+  (`SHELL_TEMPLATES_BY_PLATFORM["kmp"]` is filled from it), present bricks'
+  `nav-manifest.json`, the Gradle wrapper. `make kmp-vendor` (in `make
+  check` and CI) verifies the digests; re-vendor with
+  `python -m stapel_tools.composition.kmp.vendor --from <stapel-kmp>`.
+- **Nav gate KMP row ARMED**: every KMP binding id is declared by its neutral
+  brick; a present descriptor's vendored nav manifest equals the neutral
+  entries on the shared fields; with a stapel-kmp checkout (CI fetches one) its
+  real manifests equal the vendored copies (auth compared at the vendored
+  stapel-kmp commit). A brick whose descriptor is not present is printed on
+  every run and scaffolded as `pending`, never with a stand-in descriptor.
+- `composition-registry.json` gains a `kmp` row per brick with a KMP library.
+- Golden gate: ten `mobile-*` cases (minimal+auth, shop, classified, booking,
+  social; offline on and off) hash `mobile/` and the nginx config; every
+  React golden is unchanged.
+
 ## [0.82.2] — 2026-11-19
 
 - **`--image-base fleet` defaults to stapel-images `20261119-d6b695c0`**

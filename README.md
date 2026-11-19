@@ -69,6 +69,46 @@ provides.
 The generated frontend carries its gates: `npm run lint` (every stapel rule at
 error), `npm test` (nav gate), `npm run build`, `npm run gen:tokens:check`.
 
+#### Mobile app (`--mobile kmp`)
+
+The same invocation also generates `mobile/`: one Kotlin Multiplatform app
+(Android, iOS, desktop JVM) on the [stapel-kmp](https://github.com/usestapel/stapel-kmp)
+libraries, next to the backend (minimal and monolith projects).
+
+```bash
+stapel-create-project shop --type minimal --title "Shop" --url https://shop.example \
+    --company-name "Acme" --company-email hi@shop.example \
+    --modules auth --auth-model public --auth-kinds phone,email,password \
+    --mobile kmp --mobile-offline --mobile-maven-repo local
+cd shop/mobile && make check        # every proof gate the machine can run
+```
+
+- `--mobile kmp` — the installed bricks that have a stapel-kmp library, the
+  web's theme byte for byte, environments per platform (the Android emulator
+  reaches the host at `10.0.2.2`), the project's own backend module wired to
+  the codegen plugin (`make contracts` once it has endpoints). Selected modules
+  with no KMP library are listed as `pending` in `mobile/stapel.composition.json`
+  and printed. Sign-in kinds the mobile client cannot complete yet (oauth,
+  magic, sso, passkey, qr) are left out and named; a selection with none it
+  can complete is refused.
+- `--mobile-offline` — the durable cache (`stapel-cache-room`) and its one
+  `offline(...)` line.
+- `--mobile-id`, `--mobile-name`, `--mobile-shell AdaptiveTabs|Stack` —
+  application/bundle id (default from `--url` and the name), display name,
+  shell template.
+- `--mobile-maven-repo local|DIR` — required while the stapel-kmp train is not
+  on Maven Central: mavenLocal or a staging repository directory.
+
+`mobile/scripts/mobile-check.sh` (`make check`, root `make mobile-check`) runs
+the codegen and token drift gates, the nav gate (JVM and iOS simulator),
+`assembleDebug`, a desktop launch smoke, an Xcode build + simulator launch and
+deep-link smoke, and — with `WALK_BASE_URL` — the sign-in walk against the
+running backend. Each gate prints PASS, FAIL or NOT RUN (missing tool); `STRICT=1`
+fails on NOT RUN. `mobile/README.md` is the owner's checklist before a store
+build (signing identities, bundle ids, the deep-link association files the
+monolith's nginx serves at `/.well-known/`). The stapel-kmp data the emitter
+reads is vendored and digest-pinned (`python -m stapel_tools.composition.kmp.vendor`).
+
 ### `stapel-new-service` — add a service to an existing project
 
 ```bash

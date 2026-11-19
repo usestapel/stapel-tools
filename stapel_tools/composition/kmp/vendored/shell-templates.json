@@ -1,0 +1,61 @@
+{
+    "version": 1,
+    "templates": [
+        {
+            "id": "AdaptiveTabs",
+            "slots": {
+                "phone": [
+                    "topbar.start",
+                    "topbar.center",
+                    "topbar.end",
+                    "sheet.foot",
+                    "bottombar"
+                ],
+                "tablet": [
+                    "topbar.start",
+                    "topbar.center",
+                    "topbar.end",
+                    "sidenav.head",
+                    "sidenav.foot"
+                ],
+                "desktop": [
+                    "topbar.start",
+                    "topbar.center",
+                    "topbar.end",
+                    "sidenav.head",
+                    "sidenav.foot"
+                ]
+            },
+            "chrome": {
+                "phone": "BottomBar",
+                "tablet": "Rail",
+                "desktop": "Drawer"
+            }
+        },
+        {
+            "id": "Stack",
+            "slots": {
+                "phone": [
+                    "topbar.start",
+                    "topbar.center",
+                    "topbar.end"
+                ],
+                "tablet": [
+                    "topbar.start",
+                    "topbar.center",
+                    "topbar.end"
+                ],
+                "desktop": [
+                    "topbar.start",
+                    "topbar.center",
+                    "topbar.end"
+                ]
+            },
+            "chrome": {
+                "phone": "None",
+                "tablet": "None",
+                "desktop": "None"
+            }
+        }
+    ]
+}

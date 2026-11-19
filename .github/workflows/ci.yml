@@ -77,10 +77,22 @@ jobs:
           repository: usestapel/stapel-react
           path: siblings/stapel-react
 
+      # The KMP row of the same gate compares the vendored stapel-kmp nav
+      # manifests with stapel-kmp's main (a brick that started shipping its
+      # descriptor there is drift until it is re-vendored here).
+      - name: Fetch the sibling stapel-kmp checkout
+        uses: actions/checkout@v4
+        with:
+          repository: usestapel/stapel-kmp
+          path: siblings/stapel-kmp
+
       - name: Nav-manifest mirror is in sync with the real pairs
         env:
           SIBLING_ROOT: ${{ github.workspace }}/siblings
         run: python scripts/check_nav_manifest_sync.py
+
+      - name: Vendored stapel-kmp data equals its pin
+        run: python -m stapel_tools.composition.kmp.vendor --check
 
       # The suite's dependencies are DECLARED (the `test` extra), not typed out
       # here. They used to be typed out here, which is how the list and the

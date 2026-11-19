@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "train": "0.0.1",
+  "group": "io.github.usestapel",
+  "bom": "stapel-bom",
+  "catalog": "stapel-catalog",
+  "app": {
+    "artifact": "stapel-app",
+    "builder": "stapel.app.di.stapelApp",
+    "content": "stapel.app.di.StapelAppContent",
+    "brickInterface": "stapel.app.di.StapelBrick",
+    "offline": {
+      "artifact": "stapel-cache-room",
+      "module": "stapel.cache.room.di.cacheRoomModule"
+    }
+  },
+  "plugins": {
+    "codegen": {
+      "id": "io.github.usestapel.codegen",
+      "artifact": "stapel-codegen-gradle-plugin",
+      "version": "0.0.1"
+    },
+    "tokens": {
+      "id": "io.github.usestapel.tokens",
+      "artifact": "stapel-tokens-gradle-plugin",
+      "version": "0.0.1"
+    }
+  },
+  "artifacts": {
+    "stapel-app": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-auth": {
+      "version": "0.0.1",
+      "family": "brick-domain",
+      "released": false
+    },
+    "stapel-auth-testing": {
+      "version": "0.0.1",
+      "family": "brick-testing",
+      "released": false
+    },
+    "stapel-auth-ui": {
+      "version": "0.0.1",
+      "family": "brick-ui",
+      "released": false
+    },
+    "stapel-bom": {
+      "version": "0.0.1",
+      "family": "bom",
+      "released": false
+    },
+    "stapel-cache": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-cache-room": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-cache-session": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-cache-testing": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-captcha": {
+      "version": "0.0.1",
+      "family": "capability",
+      "released": false
+    },
+    "stapel-catalog": {
+      "version": "0.0.1",
+      "family": "catalog",
+      "released": false
+    },
+    "stapel-codegen-gradle-plugin": {
+      "version": "0.0.1",
+      "family": "gradle-plugin",
+      "released": false
+    },
+    "stapel-config": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-di": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-i18n": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-input": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-input-compose": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-mvi": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-mvi-compose": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-navigation": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-navigation-compose": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-network": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-result": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-runtime": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-session": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-shell": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-showcase": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-testing": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-tokens": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-tokens-gradle-plugin": {
+      "version": "0.0.1",
+      "family": "gradle-plugin",
+      "released": false
+    },
+    "stapel-ui": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-ui-material3": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-wire": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    }
+  },
+  "bricks": {
+    "auth": {
+      "brick": "auth",
+      "domain": "stapel-auth",
+      "ui": "stapel-auth-ui",
+      "testing": "stapel-auth-testing",
+      "descriptor": {
+        "class": "stapel.auth.ui.di.AuthBrick",
+        "call": "stapel.auth.ui.di.AuthBrick()",
+        "present": true
+      },
+      "entries": [
+        "auth.login",
+        "auth.security"
+      ],
+      "embeds": [
+        "auth.account_menu"
+      ],
+      "presentation": {
+        "auth.login": "screen",
+        "auth.security": "screen"
+      },
+      "requires": {
+        "auth.login": [],
+        "auth.security": []
+      }
+    }
+  }
+}

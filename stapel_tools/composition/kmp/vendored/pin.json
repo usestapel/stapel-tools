@@ -1,0 +1,36 @@
+{
+  "repository": "https://github.com/usestapel/stapel-kmp",
+  "commit": "87114b126cd7736ec2e0516713e2d259372255c4",
+  "gradle": {
+    "version": "9.7.0",
+    "wrapperJarSha256": "7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d",
+    "wrapperJarChecksumSource": "https://services.gradle.org/distributions/gradle-9.7.0-wrapper.jar.sha256"
+  },
+  "how": "python -m stapel_tools.composition.kmp.vendor --from <stapel-kmp checkout>",
+  "files": {
+    "kmp-registry.json": {
+      "source": "kmp-registry.json",
+      "sha256": "2d8dc52072bb4ef44e0527bf5c530f826bda9ff4fa980c3b299f0bbebf348a30"
+    },
+    "shell-templates.json": {
+      "source": "substrate/stapel-shell/shell-templates.json",
+      "sha256": "d123e290b7504a52a202c2d4211832aa997ef347735ea5ea51142299eca3ca28"
+    },
+    "gradle/gradle-wrapper.jar": {
+      "source": "gradle/wrapper/gradle-wrapper.jar",
+      "sha256": "7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d"
+    },
+    "gradle/gradle-wrapper.properties": {
+      "source": "samples/shop-mobile/gradle/wrapper/gradle-wrapper.properties",
+      "sha256": "da66a5ffe08e2edfed40553bb83548943a0b522603a833852bce317699e6fa9c"
+    },
+    "gradle/gradlew": {
+      "source": "gradlew",
+      "sha256": "a5a5c199ba02189ae8c46a334223371a20599d9c298ef65e7540ede4a3f72d59"
+    },
+    "nav-manifests/auth.json": {
+      "source": "bricks/auth/ui/nav-manifest.json",
+      "sha256": "3a1edab457118281720a85db3a0e4881c96f37b95e4c1241d18b67330b4e73d2"
+    }
+  }
+}

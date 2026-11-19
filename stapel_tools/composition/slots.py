@@ -5,7 +5,8 @@ so the scaffold, Studio's intake and the tests all ask the same function.
 Moved here from ``_shell_slots`` (which re-exports every name). The template
 table is the React shell's (``_shell_templates.SHELL_TEMPLATES``);
 ``SHELL_TEMPLATES_BY_PLATFORM`` names each platform's, and the KMP row is
-empty until the mobile shell publishes its ``shell-templates.json``.
+read from stapel-kmp's ``shell-templates.json``, vendored and digest-pinned
+(``composition.kmp.vendor``).
 """
 from __future__ import annotations
 
@@ -23,8 +24,17 @@ NONE = "none"
 #: platform -> its shell template table (template id -> {"slots", "exclusive"}).
 SHELL_TEMPLATES_BY_PLATFORM: dict[str, dict] = {
     "react": SHELL_TEMPLATES,
-    "kmp": {},
+    "kmp": {},  # filled below from the vendored stapel-shell shell-templates.json
 }
+
+def _kmp_templates() -> dict:
+    from .kmp.registry import shell_templates
+
+    return {tid: {"slots": t["slots"], "exclusive": [], "chrome": t["chrome"]}
+            for tid, t in shell_templates().items()}
+
+
+SHELL_TEMPLATES_BY_PLATFORM["kmp"] = _kmp_templates()
 
 # Page slots: the page a scoped embed names renders them, never a chrome
 # (`@stapel/core` `SHELL_SLOT_IDS`, `NavEmbed.scope`). The shell-templates

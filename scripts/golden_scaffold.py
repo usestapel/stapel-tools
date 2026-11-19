@@ -11,7 +11,10 @@ For every case of a matrix of compositions it runs the real CLI in-process
 (``stapel-create-project`` / ``stapel-frontend-repo-init``) into a temporary
 directory and records ``{relative path: sha256}`` of every generated FRONTEND
 file: the whole ``frontend/`` tree of a project, the whole repository of a
-``stapel-frontend-repo-init`` case. The three generated secrets come from a
+``stapel-frontend-repo-init`` case, and for a ``mobile-*`` case the KMP
+emitter's tree (``mobile/`` plus ``service-configs/nginx/``, where it serves
+the deep-link association files). Mobile cases pass ``--mobile-maven-repo
+local``, never a path, so no machine's directory reaches a hash. The three generated secrets come from a
 deterministic source.
 
 Why not the backend half: the scaffold reads every selected module's
@@ -62,6 +65,12 @@ _COMMON = [
 
 def _create(*flags: str, name: str = "golden", project_type: str = "monolith"):
     return ("create", [name, "--type", project_type, *_COMMON, *flags])
+
+
+def _mobile(*flags: str, project_type: str = "monolith"):
+    """A case whose manifest is the KMP emitter's tree (mobile/ + what it adds to nginx)."""
+    return ("create-mobile", ["golden", "--type", project_type, *_COMMON, *flags,
+                              "--mobile", "kmp", "--mobile-maven-repo", "local"])
 
 
 def _repo_init(*flags: str):
@@ -126,6 +135,19 @@ def cases() -> dict[str, tuple[str, list[str]]]:
         "--surface", "public", "--pairs", "search,listings,categories",
         "--name", "golden-web", "--doc-type", "listing", "--locale", "ru")
     out["repo-init-delivery-github"] = _repo_init("--ci", "github")
+    # The KMP emitter: one mobile/ tree per composition, offline on and off.
+    mobile = {
+        "minimal-auth": _mobile("--modules", "auth", "--auth-model", "public",
+                                "--auth-kinds", "phone,email,password", "--posture", "prototype",
+                                project_type="minimal"),
+        "shop": _mobile("--modules", "shop"),
+        "classified": _mobile("--modules", "classified"),
+        "booking": _mobile("--modules", "booking"),
+        "social": _mobile("--modules", "social"),
+    }
+    for name, (tool, argv) in mobile.items():
+        out[f"mobile-{name}"] = (tool, argv)
+        out[f"mobile-{name}-offline"] = (tool, [*argv, "--mobile-offline"])
     return out
 
 
@@ -168,6 +190,22 @@ def run_case(name: str, spec: tuple[str, list[str]]) -> dict[str, str]:
             out_dir = Path(tmp)
             sink = io.StringIO()
             with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+                if tool == "create-mobile":
+                    sys.argv = ["stapel-create-project", *argv, "--output-dir", str(out_dir)]
+                    try:
+                        cp.main()
+                    except SystemExit as exc:
+                        if exc.code not in (None, 0):
+                            raise RuntimeError(
+                                f"case {name}: exit {exc.code}\n{sink.getvalue()}") from exc
+                    project = out_dir / argv[0]
+                    manifest = tree_manifest(project / "mobile")
+                    manifest = {f"mobile/{k}": v for k, v in manifest.items()}
+                    nginx = project / "service-configs" / "nginx"
+                    if nginx.is_dir():
+                        manifest.update({f"service-configs/nginx/{k}": v
+                                         for k, v in tree_manifest(nginx).items()})
+                    return manifest
                 if tool == "create":
                     sys.argv = ["stapel-create-project", *argv, "--output-dir", str(out_dir)]
                     try:

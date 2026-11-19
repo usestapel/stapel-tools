@@ -81,6 +81,7 @@ def registry_document() -> dict:
     from ..create_project import FRONTEND_COMPOSITES
     from .bricks import BRICK_UI, CONTAINER_PAGES, CONTAINER_ROOTS
     from .icons import NAV_ICONS
+    from .kmp.registry import kmp_bindings
     from .react.bindings import REACT_BINDINGS
 
     bricks: dict[str, dict] = {}
@@ -103,6 +104,15 @@ def registry_document() -> dict:
                 "released": binding.released,
                 "entries": list(binding.components),
                 "embeds": list(binding.embed_components),
+            }
+        kmp = kmp_bindings().get(key)
+        if kmp is not None and kmp.ui_artifact and kmp.descriptor_present:
+            platforms["kmp"] = {
+                "ui": kmp.ui_artifact,
+                "version": kmp.version,
+                "released": kmp.released,
+                "entries": list(kmp.entries),
+                "embeds": list(kmp.embeds),
             }
         doc["platforms"] = platforms
         bricks[key] = doc

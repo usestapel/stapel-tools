@@ -40,9 +40,10 @@ class Emitter(Protocol):
 
 
 def _emitters() -> dict[str, Emitter]:
+    from .kmp.emitter import KmpEmitter
     from .react.emitter import ReactEmitter
 
-    return {"react": ReactEmitter()}
+    return {"react": ReactEmitter(), "kmp": KmpEmitter()}
 
 
 #: platform -> emitter. Filled lazily so importing the model costs nothing.
@@ -81,6 +82,7 @@ def build_composition(
     backend_prefixes: Optional[list[str]] = None,
     backend_upstream_default: str = "",
     auto_anonymous_actions: tuple[str, ...] = (),
+    mobile: Optional[PlatformRequest] = None,
 ) -> Composition:
     """The only place the scaffold's CLI values are interpreted.
 
@@ -112,7 +114,7 @@ def build_composition(
         theme_json=render_theme_json(ctx["title"], theme),
         backend_prefixes=tuple(backend_prefixes or (ctx["slug"], "admin")),
         backend_upstream_default=backend_upstream_default,
-        platforms=(react,),
+        platforms=(react,) if mobile is None else (react, mobile),
         auto_anonymous_actions=tuple(auto_anonymous_actions),
     )
 
