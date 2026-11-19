@@ -86,6 +86,12 @@ def repo(tmp_path: Path) -> tuple[Path, Path]:
     run(work, "git", "config", "user.name", "Hook Test")
     run(work, "git", "config", "commit.gpgsign", "false")
     commit(work, "base.txt")
+    # The exposure stage runs --strict, which refuses a tree it cannot
+    # classify (EXP003). Declare the scratch repo so that stage passes and
+    # only the stage under test can refuse.
+    (work / ".stapel-visibility").write_text("private\n", encoding="utf-8")
+    run(work, "git", "add", "--", ".stapel-visibility")
+    run(work, "git", "commit", "-q", "-m", "declare visibility")
     run(work, "git", "remote", "add", "origin", str(origin))
     run(work, "git", "push", "-q", "-u", "origin", "main")
     run(work, "git", "remote", "set-head", "origin", "main")
@@ -316,7 +322,10 @@ def test_install_keeps_a_hand_maintained_hook(tmp_path):
     run(tmp_path, "git", "init", "-q", "-b", "main", str(work))
     hook = work / ".githooks" / "pre-push"
     hook.parent.mkdir()
-    hook.write_text("#!/bin/sh\n# stapel-hooks: pre-push v1\necho mine\n", encoding="utf-8")
+    hook.write_text(
+        f"#!/bin/sh\n# stapel-hooks: pre-push v{hooks.template_version('pre-push')}\necho mine\n",
+        encoding="utf-8",
+    )
     hook.chmod(0o755)
     assert hooks.main(["install", "--repo", str(work)]) == 0
     assert "echo mine" in hook.read_text(encoding="utf-8")

@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.81.3] — 2026-11-19
+
+- **`stapel-exposure-lint` recognises Gradle builds and says when it
+  recognises nothing.** A project is public when `.stapel-visibility` says
+  `public`, or its `pyproject.toml` / `package.json` (or a `packages/*`
+  member) is a `stapel-*` / `@stapel/*` one, or — new — its
+  `settings.gradle(.kts)` has `rootProject.name = "stapel-…"`. Before this a
+  public Gradle repository read "not applicable" and its pre-push stage
+  checked nothing. A directory none of these describe is now **NOT
+  RECOGNISED** (a loud note, distinct from "not applicable" for a private
+  project); `--strict` turns it into `EXP003`. `.stapel-visibility`
+  (`public` | `private`) declares a repository no manifest describes.
+- **The empty private-names state is a banner, and `--strict` refuses it.**
+  The banner names the list path and why it yielded nothing (missing,
+  unreadable, empty, only `!exceptions`). `--strict` implies
+  `--require-names` (`EXP000` outside CI too). A list holding only
+  `!exceptions` now counts as zero names.
+- **Generated pre-push hook v2 passes `--strict`** (`_library_templates.PRE_PUSH`,
+  this repo's `.githooks/pre-push`): a machine without the owner's list, or a
+  tree the lint cannot classify, refuses the push instead of passing it.
+  `stapel-hooks doctor` reports v1 hooks as outdated.
+- **Container healthcheck works under production settings.** The generated
+  service's compose probe asked `http://localhost:8000/<svc>/api/health/`;
+  with a production `ALLOWED_HOSTS` that is a 400, and with the host right
+  `SECURE_SSL_REDIRECT` sends it to `https://`. The probe now asks
+  `127.0.0.1` with `Host: <service dir>` (the alias `settings/base.py` adds to
+  `ALLOWED_HOSTS` under every tier), and `settings/prod.py` sets
+  `SECURE_REDIRECT_EXEMPT` for `^<svc>/api/health/` only.
+
 ## [0.81.2] — 2026-11-19
 
 - **Pin: stapel-auth 0.52.0** (contract profile 2 as `docs/schema.v2.json`,

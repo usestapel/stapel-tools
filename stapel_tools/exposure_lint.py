@@ -14,9 +14,7 @@ a reminder.
 Rules
 -----
 EXP001  (error) a private name appears in a tracked text file of a PUBLIC
-        project (a ``pyproject.toml`` whose ``name`` starts with ``stapel-``,
-        or a ``package.json`` whose ``name`` starts with ``@stapel/`` and is
-        not ``private``). Matching is case-insensitive substring over the
+        project (see "Scope" for how a project is recognised). Matching is case-insensitive substring over the
         names in the private list, so a domain (``client.example``), a repo
         (``client-fleet``) and a bare word are all one entry: ``client``.
 EXP002  (error) a private name appears in the message of a commit that is
@@ -59,14 +57,36 @@ does:
   the gate locally, or from a script that sets neither env var).
 * ``--allow-empty`` forces the local behaviour even inside CI — an explicit,
   visible opt-out, never the default.
+* ``--strict`` (what the generated pre-push hook passes) implies
+  ``--require-names`` and adds EXP003. A new machine without the owner's list
+  once pushed a release through a hook that had checked zero names; the hook
+  is where that must stop.
+
+The empty state is announced as a banner on stderr naming the path that was
+read and why it yielded nothing (missing, unreadable, empty, or exceptions
+only), never as a one-liner that scrolls past.
 
 The owner's machine, where every push originates, has the file.
 
 Scope
 -----
-A private project (a client fleet, a studio checkout) is where the names are
-SUPPOSED to be; the lint answers "not applicable" there rather than failing
-a repository for containing its own name. Generated artifacts are not
+A project is recognised, in this order, by:
+
+1. ``.stapel-visibility`` at the root, first word ``public`` or ``private`` —
+   an explicit declaration for a repository no manifest describes (a
+   generated example project, a docs repo);
+2. ``pyproject.toml`` — public when ``name`` starts with ``stapel-``;
+3. ``package.json`` — public when ``name`` starts with ``@stapel/`` and it is
+   not ``private``; a monorepo is public when one of ``packages/*`` is;
+4. ``settings.gradle.kts`` / ``settings.gradle`` — public when
+   ``rootProject.name`` starts with ``stapel-``.
+
+A recognised project that is not public (a client fleet, a studio checkout)
+is where the names are SUPPOSED to be; the lint answers "not applicable"
+there rather than failing a repository for containing its own name. A
+directory none of these describe is NOT RECOGNISED, which is a different
+answer: before 0.81.3 it read "not applicable" too, and a public Gradle
+repository passed every push having checked nothing. Generated artifacts are not
 skipped: ``docs/schema.json`` carries docstrings into the published wheel,
 so a hit there is exactly the one that matters — fix the docstring and
 regenerate.
@@ -121,13 +141,52 @@ def _ci_active() -> bool:
     return any(os.environ.get(v) == "true" for v in _CI_ENV_VARS)
 
 
+def names_state(path: Optional[Path] = None) -> str:
+    """Why the list resolved to zero names: missing | unreadable | empty |
+    exceptions-only. Only meaningful when it did."""
+    path = path or list_path()
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "missing"
+    except OSError:
+        return "unreadable"
+    lines = [ln.split("#", 1)[0].strip() for ln in text.splitlines()]
+    lines = [ln for ln in lines if ln]
+    if lines and all(ln.startswith("!") for ln in lines):
+        return "exceptions-only"
+    return "empty"
+
+
 def _empty_names_note() -> str:
-    """The one-line, always-printed summary for a zero-name resolution."""
-    if os.environ.get(LIST_ENV):
-        detail = f"list at {list_path()} is empty"
-    else:
-        detail = "STAPEL_PRIVATE_NAMES unset"
-    return f"stapel-exposure-lint: checked 0 private names ({detail}) — nothing verified"
+    """The banner printed whenever the list resolves to zero names.
+
+    Several lines on purpose: the one-line form scrolled past on a new
+    machine and a whole push went out having checked zero names."""
+    path = list_path()
+    state = names_state(path)
+    where = f"{path}" + ("" if os.environ.get(LIST_ENV) else f" (default; ${LIST_ENV} unset)")
+    why = {
+        "missing": "the file does not exist",
+        "unreadable": "the file cannot be read",
+        "empty": "the file holds no names",
+        "exceptions-only": "the file holds only !exceptions, no names",
+    }[state]
+    bar = "!" * 72
+    return (
+        f"{bar}\n"
+        f"stapel-exposure-lint: checked 0 private names — NOTHING VERIFIED\n"
+        f"  list: {where}\n"
+        f"  why:  {why}\n"
+        f"  A green run from here proves nothing. Restore the owner's list\n"
+        f"  (one name per line) before pushing; --strict refuses (EXP000).\n"
+        f"{bar}"
+    )
+
+
+def _plain_names(names: Optional[list[str]]) -> list[str]:
+    return [n for n in names or () if not n.startswith("!")]
+
 
 _SKIP_DIRS = frozenset({
     ".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
@@ -189,6 +248,26 @@ def load_private_names(path: Optional[Path] = None) -> Optional[list[str]]:
 # ---------------------------------------------------------------------------
 
 
+PUBLIC = "public"
+PRIVATE = "private"
+UNRECOGNISED = "unrecognised"
+
+VISIBILITY_FILE = ".stapel-visibility"
+GRADLE_SETTINGS = ("settings.gradle.kts", "settings.gradle")
+
+
+@dataclass(frozen=True)
+class Scope:
+    """What the lint decided about a project, and from which file."""
+
+    kind: str          # PUBLIC | PRIVATE | UNRECOGNISED
+    source: str        # the file that decided it, or "" when nothing did
+
+    @property
+    def public(self) -> bool:
+        return self.kind == PUBLIC
+
+
 def _pyproject_name_of(text: Optional[str]) -> Optional[str]:
     if text is None:
         return None
@@ -203,8 +282,67 @@ def _package_json_is_public(text: Optional[str]) -> bool:
         data = json.loads(text)
     except ValueError:
         return False
+    if not isinstance(data, dict):
+        return False
     name = data.get("name") or ""
     return name.startswith("@stapel/") and not data.get("private", False)
+
+
+def _gradle_root_name_of(text: Optional[str]) -> Optional[str]:
+    """``rootProject.name`` of a Gradle settings script (Kotlin or Groovy)."""
+    if text is None:
+        return None
+    m = re.search(r'(?m)^\s*rootProject\.name\s*=\s*["\']([^"\']+)["\']', text)
+    return m.group(1) if m else None
+
+
+def _visibility_of(text: Optional[str]) -> Optional[str]:
+    if text is None:
+        return None
+    for raw in text.splitlines():
+        word = raw.split("#", 1)[0].strip().lower()
+        if word:
+            return word if word in (PUBLIC, PRIVATE) else None
+    return None
+
+
+def classify(read, package_manifests: Iterable[str] = ()) -> Scope:
+    """Decide the scope from *read* (relative path -> text or None).
+
+    One function for the working tree and for a committed tree, so the two
+    modes cannot disagree about what "public" means."""
+    marker = read(VISIBILITY_FILE)
+    if marker is not None:
+        kind = _visibility_of(marker)
+        if kind is not None:
+            return Scope(kind, VISIBILITY_FILE)
+    recognised = ""
+    pyproject = read("pyproject.toml")
+    if pyproject is not None:
+        recognised = recognised or "pyproject.toml"
+        name = _pyproject_name_of(pyproject)
+        if name and name.startswith("stapel-"):
+            return Scope(PUBLIC, "pyproject.toml")
+    package = read("package.json")
+    if package is not None:
+        recognised = recognised or "package.json"
+        if _package_json_is_public(package):
+            return Scope(PUBLIC, "package.json")
+    for manifest in package_manifests:
+        recognised = recognised or manifest
+        if _package_json_is_public(read(manifest)):
+            return Scope(PUBLIC, manifest)
+    for settings in GRADLE_SETTINGS:
+        text = read(settings)
+        if text is None:
+            continue
+        recognised = recognised or settings
+        name = _gradle_root_name_of(text)
+        if name and name.startswith("stapel-"):
+            return Scope(PUBLIC, settings)
+    if recognised:
+        return Scope(PRIVATE, recognised)
+    return Scope(UNRECOGNISED, "")
 
 
 def _read(path: Path) -> Optional[str]:
@@ -222,20 +360,40 @@ def _package_json_public(path: Path) -> bool:
     return _package_json_is_public(_read(path))
 
 
-def is_public_project(project: Path) -> bool:
-    """A ``stapel-*`` distribution, a public ``@stapel/*`` package, or a
-    monorepo whose ``packages/*`` contain one."""
-    name = _pyproject_name(project)
-    if name and name.startswith("stapel-"):
-        return True
-    if _package_json_public(project / "package.json"):
-        return True
+def project_scope(project: Path) -> Scope:
     packages = project / "packages"
+    manifests = []
     if packages.is_dir():
-        return any(
-            _package_json_public(p / "package.json") for p in packages.iterdir()
+        manifests = sorted(
+            f"packages/{p.name}/package.json" for p in packages.iterdir()
+            if (p / "package.json").is_file()
         )
-    return False
+    return classify(lambda rel: _read(project / rel), manifests)
+
+
+def is_public_project(project: Path) -> bool:
+    """A ``stapel-*`` distribution, a public ``@stapel/*`` package (or a
+    monorepo whose ``packages/*`` contain one), a ``stapel-*`` Gradle build,
+    or a directory that declares itself public in ``.stapel-visibility``."""
+    return project_scope(project).public
+
+
+def scope_note(scope: Scope) -> Optional[str]:
+    """The note a non-public scope prints; None for a public one."""
+    if scope.kind == PRIVATE:
+        return (
+            f"stapel-exposure-lint: not a public stapel project ({scope.source}) "
+            "— not applicable"
+        )
+    if scope.kind == UNRECOGNISED:
+        return (
+            "stapel-exposure-lint: NOT RECOGNISED — no .stapel-visibility, "
+            "pyproject.toml, package.json or settings.gradle(.kts) here, so "
+            "whether this tree is public was not decided and nothing was "
+            f"checked. Declare it: echo public > {VISIBILITY_FILE} (or "
+            "private). --strict refuses this state (EXP003)."
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -417,25 +575,26 @@ def _blobs(project: Path, sha: str, paths: list[str]) -> Iterable[tuple[str, str
             continue
 
 
-def is_public_tree(project: Path, sha: str, paths: Optional[list[str]] = None) -> bool:
-    """``is_public_project`` decided from the committed tree, not from disk."""
+def tree_scope(project: Path, sha: str, paths: Optional[list[str]] = None) -> Scope:
+    """``project_scope`` decided from the committed tree, not from disk."""
     if paths is None:
         paths = _tree_paths(project, sha)
     known = set(paths)
-    if "pyproject.toml" in known:
-        name = _pyproject_name_of(_blob(project, sha, "pyproject.toml"))
-        if name and name.startswith("stapel-"):
-            return True
-    if "package.json" in known and _package_json_is_public(
-        _blob(project, sha, "package.json")
-    ):
-        return True
-    return any(
-        p.startswith("packages/") and p.count("/") == 2
+    manifests = sorted(
+        p for p in paths
+        if p.startswith("packages/") and p.count("/") == 2
         and p.endswith("/package.json")
-        and _package_json_is_public(_blob(project, sha, p))
-        for p in paths
     )
+
+    def read(rel: str) -> Optional[str]:
+        return _blob(project, sha, rel) if rel in known else None
+
+    return classify(read, manifests)
+
+
+def is_public_tree(project: Path, sha: str, paths: Optional[list[str]] = None) -> bool:
+    """``is_public_project`` decided from the committed tree, not from disk."""
+    return tree_scope(project, sha, paths).public
 
 
 def lint_tree_at(
@@ -491,23 +650,23 @@ def lint_pushed(
     *,
     notes: Optional[list[str]] = None,
     names: Optional[list[str]] = None,
+    scope: Optional[Scope] = None,
 ) -> list[Finding]:
     """EXP001 over the committed tree at *local_sha*, EXP002 over the commit
     messages this push would publish. The working tree is never read."""
     project = project.resolve()
     if names is None:
         names = load_private_names()
-    if not names:
+    paths = _tree_paths(project, local_sha)
+    if scope is None:
+        scope = tree_scope(project, local_sha, paths)
+    if not _plain_names(names):
         if notes is not None:
             notes.append(_empty_names_note())
         return []
-    paths = _tree_paths(project, local_sha)
-    if not is_public_tree(project, local_sha, paths):
+    if not scope.public:
         if notes is not None:
-            notes.append(
-                "stapel-exposure-lint: not a public stapel distribution — "
-                "not applicable"
-            )
+            notes.append(scope_note(scope))
         return []
     findings: list[Finding] = lint_tree_at(project, local_sha, names, paths)
     for sha, message in _range_commits(project, local_sha, remote_sha):
@@ -527,7 +686,7 @@ def lint_pushed(
 #: session's. `--pushed <sha>` judges the commits being pushed instead. The
 #: canonical hook is stapel_tools._library_templates.PRE_PUSH.
 _WORKTREE_HOOK_RE = re.compile(
-    r"^\s*stapel-exposure-lint\s+(?!--pushed\b)[^\s|&;]", re.MULTILINE
+    r"^\s*stapel-exposure-lint(?![^\n]*--pushed\b)[ \t]+[^\s|&;]", re.MULTILINE
 )
 
 
@@ -562,20 +721,20 @@ def lint_project(
     commits: bool = False,
     notes: Optional[list[str]] = None,
     names: Optional[list[str]] = None,
+    scope: Optional[Scope] = None,
 ) -> list[Finding]:
     project = project.resolve()
     if names is None:
         names = load_private_names()
-    if not names:
+    if scope is None:
+        scope = project_scope(project)
+    if not _plain_names(names):
         if notes is not None:
             notes.append(_empty_names_note())
         return []
-    if not is_public_project(project):
+    if not scope.public:
         if notes is not None:
-            notes.append(
-                "stapel-exposure-lint: not a public stapel distribution — "
-                "not applicable"
-            )
+            notes.append(scope_note(scope))
         return []
     findings = lint_tree(project, names)
     if commits:
@@ -622,6 +781,12 @@ def main(argv: Optional[list] = None) -> int:
              "or in a workflow that sets neither $CI nor $GITHUB_ACTIONS).",
     )
     parser.add_argument(
+        "--strict", action="store_true",
+        help="What hooks pass: --require-names, and also exit non-zero "
+             "(EXP003) when the directory is not recognised as any project "
+             "— see 'Scope' above.",
+    )
+    parser.add_argument(
         "--allow-empty", action="store_true",
         help="Exit 0 with a warning when the private-names list resolves to "
              "zero names, even in CI. An explicit opt-out of the CI default "
@@ -633,8 +798,8 @@ def main(argv: Optional[list] = None) -> int:
         parser.error("--remote requires --pushed")
     if args.commits and args.pushed:
         parser.error("--commits is the working-tree mode; --pushed covers EXP002")
-    if args.require_names and args.allow_empty:
-        parser.error("--require-names and --allow-empty are mutually exclusive")
+    if (args.require_names or args.strict) and args.allow_empty:
+        parser.error("--require-names/--strict and --allow-empty are mutually exclusive")
 
     project = Path(args.project_dir)
     if not project.is_dir():
@@ -653,18 +818,40 @@ def main(argv: Optional[list] = None) -> int:
             print(f"Error: not a commit in {project}: {args.pushed}",
                   file=sys.stderr)
             return 2
-        findings = lint_pushed(project, args.pushed, args.remote, notes=notes, names=names)
+        scope = tree_scope(project.resolve(), args.pushed)
+        findings = lint_pushed(project, args.pushed, args.remote, notes=notes,
+                               names=names, scope=scope)
     else:
-        findings = lint_project(project, commits=args.commits, notes=notes, names=names)
+        scope = project_scope(project.resolve())
+        findings = lint_project(project, commits=args.commits, notes=notes,
+                                names=names, scope=scope)
 
-    if not names and not args.allow_empty and (args.require_names or _ci_active()):
+    empty = not _plain_names(names)
+    if empty and not args.allow_empty and (
+        args.require_names or args.strict or _ci_active()
+    ):
         findings = [
             *findings,
             Finding(
                 "<config>", 0, "EXP000",
-                "no private names configured — the gate verified nothing",
+                f"no private names configured ({names_state()} list at "
+                f"{list_path()}) — the gate verified nothing",
             ),
         ]
+    if scope.kind == UNRECOGNISED:
+        if empty:
+            # the names banner returned early; the scope still gets its say
+            notes.append(scope_note(scope))
+        if args.strict:
+            findings = [
+                *findings,
+                Finding(
+                    "<scope>", 0, "EXP003",
+                    "not recognised as a project — cannot tell whether this "
+                    f"tree is public; add {VISIBILITY_FILE} (public|private) "
+                    "or the manifest the project is built from",
+                ),
+            ]
 
     if args.json:
         print(json.dumps(

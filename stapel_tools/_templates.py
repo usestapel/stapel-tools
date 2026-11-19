@@ -610,6 +610,10 @@ JWT_COOKIE_SECURE = True
 # Blank means unset; moves to stapel_core.conf.env_bool with the core 0.96.0 pin.
 SECURE_SSL_REDIRECT = os.getenv("SECURE_SSL_REDIRECT", "").strip().lower() not in (  # noqa: CFG013
     "0", "false", "no", "off")
+# The container healthcheck (the service's compose file) asks over plain HTTP
+# from inside the container; redirecting it to https:// is a failed probe, not
+# hardening. Only the probe surface is exempt — it carries no credentials.
+SECURE_REDIRECT_EXEMPT = [r"^{{URL_PREFIX}}api/health/"]
 
 # HSTS ramp: start conservative — 1 day, no subdomains, no preload — and
 # raise SECURE_HSTS_SECONDS to 31536000 (1 year) once HTTPS has been verified
@@ -909,8 +913,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+    # The probe speaks to the process the way the edge does under EVERY
+    # settings tier: Host is the service's own name (settings/base.py adds it
+    # to ALLOWED_HOSTS after the env list), and prod.py exempts the health
+    # paths from SECURE_SSL_REDIRECT. "localhost" is not in a production
+    # ALLOWED_HOSTS, so the old probe got 400 (and with the host right, the
+    # redirect would send it to https://) — unhealthy on every real stand.
+    # 127.0.0.1, not localhost: gunicorn binds 0.0.0.0, never ::1.
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c 'import urllib.request; urllib.request.urlopen(\\"http://localhost:8000/{{URL_PREFIX}}api/health/\\")'"]
+      test: ["CMD-SHELL", "python3 -c 'import urllib.request as u; u.urlopen(u.Request(\\"http://127.0.0.1:8000/{{URL_PREFIX}}api/health/\\", headers={\\"Host\\": \\"{{DIR}}\\"}), timeout=4)'"]
       interval: 10s
       timeout: 5s
       retries: 3

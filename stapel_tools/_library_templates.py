@@ -1181,7 +1181,7 @@ fi
 '''
 
 PRE_PUSH = '''#!/usr/bin/env bash
-# stapel-hooks: pre-push v1
+# stapel-hooks: pre-push v2
 # Scan WHAT IS BEING PUSHED, never the working tree: git names each ref on
 # stdin, and the committed tree behind it is the only thing this push can
 # publish. Scanning "." made two sessions sharing one worktree block each
@@ -1308,11 +1308,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # commit message (stapel-exposure-lint EXP001/EXP002; the list is
     # ~/.stapel/private-names, outside every repo). Skipped where the tool is
     # not on PATH — a checkout without stapel-tools is not the owner's.
+    # --strict: a list that resolves to zero names (EXP000) or a tree the
+    # lint cannot classify (EXP003) refuses the push — a new machine once
+    # pushed through this stage having checked nothing.
     if command -v stapel-exposure-lint >/dev/null 2>&1; then
         if [ -z "$remote_sha" ] || [ "$remote_sha" = "$zero" ]; then
-            stapel-exposure-lint --pushed "$local_sha"
+            stapel-exposure-lint --strict --pushed "$local_sha"
         else
-            stapel-exposure-lint --pushed "$local_sha" --remote "$remote_sha"
+            stapel-exposure-lint --strict --pushed "$local_sha" --remote "$remote_sha"
         fi
     fi
 

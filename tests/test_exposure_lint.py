@@ -14,12 +14,16 @@ import pytest
 
 from stapel_tools.exposure_lint import (
     LIST_ENV,
+    PRIVATE,
+    UNRECOGNISED,
     is_public_project,
     lint_project,
     lint_pushed,
     load_private_names,
     main,
+    project_scope,
     stale_hook_note,
+    tree_scope,
 )
 
 
@@ -389,3 +393,164 @@ class TestTheHookScansWhatIsPushed:
         self._hook(root, "#!/usr/bin/env bash\nstapel-exposure-lint . --commits\n")
         assert main([str(root), "--pushed", _git(root, "rev-parse", "HEAD")]) == 0
         assert "WORKING TREE" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Gradle recognition, the unrecognised state, --strict (0.81.3)
+# ---------------------------------------------------------------------------
+
+
+def _gradle(tmp_path, name="stapel-kmp", kts=True, body="val x = 1\n") -> Path:
+    root = tmp_path / name
+    root.mkdir()
+    settings = "settings.gradle.kts" if kts else "settings.gradle"
+    quote = '"' if kts else "'"
+    (root / settings).write_text(
+        f"pluginManagement {{}}\nrootProject.name = {quote}{name}{quote}\n",
+        encoding="utf-8",
+    )
+    (root / "Thing.kt").write_text(body, encoding="utf-8")
+    return root
+
+
+class TestGradleScope:
+    """The public stapel-kmp repository is a Gradle build with no pyproject
+    or package.json; before 0.81.3 the lint answered "not applicable" there
+    and its hook had to plant a synthetic pyproject to get checked at all."""
+
+    def test_stapel_gradle_build_is_public_kts_and_groovy(self, tmp_path):
+        assert is_public_project(_gradle(tmp_path))
+        assert is_public_project(_gradle(tmp_path, name="stapel-other", kts=False))
+
+    def test_other_gradle_build_is_private_not_unrecognised(self, tmp_path):
+        scope = project_scope(_gradle(tmp_path, name="acme-app"))
+        assert scope.kind == PRIVATE and scope.source == "settings.gradle.kts"
+
+    def test_hit_in_a_gradle_repo_is_exp001(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = _gradle(tmp_path, body='val host = "acme.example"\n')
+        assert [f.rule for f in lint_project(root)] == ["EXP001"]
+
+    def test_pushed_mode_reads_gradle_scope_from_the_tree(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = tmp_path / "repo"
+        root.mkdir()
+        _git(root, "init", "-q", "-b", "main")
+        (root / "settings.gradle.kts").write_text(
+            'rootProject.name = "stapel-kmp"\n', encoding="utf-8")
+        (root / "Thing.kt").write_text("// acme\n", encoding="utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "seen at acme")
+        sha = _git(root, "rev-parse", "HEAD")
+        rules = sorted(f.rule for f in lint_pushed(root, sha))
+        assert rules == ["EXP001", "EXP002"]
+        assert tree_scope(root.resolve(), sha).source == "settings.gradle.kts"
+
+    def test_visibility_file_declares_and_wins(self, tmp_path):
+        root = tmp_path / "example"
+        root.mkdir()
+        assert project_scope(root).kind == UNRECOGNISED
+        (root / ".stapel-visibility").write_text("public  # an example app\n", encoding="utf-8")
+        assert is_public_project(root)
+        lib = _lib(tmp_path)
+        (lib / ".stapel-visibility").write_text("private\n", encoding="utf-8")
+        assert not is_public_project(lib)
+
+    def test_a_garbage_visibility_word_is_ignored(self, tmp_path):
+        root = tmp_path / "x"
+        root.mkdir()
+        (root / ".stapel-visibility").write_text("maybe\n", encoding="utf-8")
+        assert project_scope(root).kind == UNRECOGNISED
+
+
+class TestStrict:
+    def test_unrecognised_is_a_loud_note_and_exit_zero_without_strict(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = tmp_path / "bare"
+        root.mkdir()
+        assert main([str(root)]) == 0
+        err = capsys.readouterr().err
+        assert "NOT RECOGNISED" in err
+        assert "not applicable" not in err
+
+    def test_strict_refuses_unrecognised_with_exp003(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = tmp_path / "bare"
+        root.mkdir()
+        assert main([str(root), "--strict"]) == 1
+        assert "EXP003" in capsys.readouterr().out
+
+    def test_strict_passes_a_private_project(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        assert main([str(_lib(tmp_path, name="acme-fleet", body="acme\n")), "--strict"]) == 0
+
+    def test_strict_passes_a_clean_public_project(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        assert main([str(_gradle(tmp_path)), "--strict"]) == 0
+
+    def test_strict_implies_require_names_outside_ci(self, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("CI", raising=False)
+        monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+        monkeypatch.setenv(LIST_ENV, str(tmp_path / "absent"))
+        assert main([str(_lib(tmp_path)), "--strict"]) == 1
+        out = capsys.readouterr()
+        assert "EXP000" in out.out
+        assert "missing list" in out.out
+
+    def test_strict_reports_both_an_empty_list_and_an_unrecognised_tree(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        monkeypatch.setenv(LIST_ENV, str(tmp_path / "absent"))
+        root = tmp_path / "bare"
+        root.mkdir()
+        assert main([str(root), "--strict"]) == 1
+        out = capsys.readouterr().out
+        assert "EXP000" in out and "EXP003" in out
+
+    def test_strict_and_allow_empty_are_mutually_exclusive(self, tmp_path):
+        with pytest.raises(SystemExit):
+            main([str(tmp_path), "--strict", "--allow-empty"])
+
+    def test_strict_in_pushed_mode(self, tmp_path, monkeypatch):
+        monkeypatch.setenv(LIST_ENV, str(_names_file(tmp_path, "acme")))
+        root = tmp_path / "repo"
+        root.mkdir()
+        _git(root, "init", "-q", "-b", "main")
+        (root / "notes.txt").write_text("hi\n", encoding="utf-8")
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "-m", "init")
+        sha = _git(root, "rev-parse", "HEAD")
+        assert main([str(root), "--pushed", sha]) == 0
+        assert main([str(root), "--pushed", sha, "--strict"]) == 1
+
+
+class TestTheEmptyBanner:
+    """It once checked zero names on a new machine and nobody saw the
+    one-line note. The banner names the path and why it yielded nothing."""
+
+    @pytest.mark.parametrize("content,why", [
+        (None, "does not exist"),
+        ("# nothing yet\n", "holds no names"),
+        ("!acme-widget\n", "only !exceptions"),
+    ])
+    def test_banner_names_the_reason(self, tmp_path, monkeypatch, content, why):
+        path = tmp_path / "private-names"
+        if content is not None:
+            path.write_text(content, encoding="utf-8")
+        monkeypatch.setenv(LIST_ENV, str(path))
+        notes = []
+        assert lint_project(_lib(tmp_path, body="acme\n"), notes=notes) == []
+        banner = "\n".join(notes)
+        assert "NOTHING VERIFIED" in banner
+        assert why in banner
+        assert str(path) in banner
+
+    def test_exceptions_only_list_is_zero_names_for_exp000(self, tmp_path, monkeypatch):
+        path = tmp_path / "private-names"
+        path.write_text("!acme-widget\n", encoding="utf-8")
+        monkeypatch.setenv(LIST_ENV, str(path))
+        assert main([str(_lib(tmp_path)), "--strict"]) == 1

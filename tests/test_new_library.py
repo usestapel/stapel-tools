@@ -248,9 +248,13 @@ def _git(root, *args):
     )
 
 
-def _repo_with_hook(tmp_path):
+def _repo_with_hook(tmp_path, visibility="private"):
     """A scratch repo whose pre-push hook is the generated template, wired to
-    a local bare remote so a real `git push` runs it."""
+    a local bare remote so a real `git push` runs it.
+
+    The hook's exposure stage runs --strict and refuses a tree it cannot
+    classify (EXP003), so the repo declares itself in a first commit unless
+    the test brings its own manifest (``visibility=None``)."""
     from stapel_tools._library_templates import PRE_PUSH
 
     remote = tmp_path / "remote.git"
@@ -265,6 +269,10 @@ def _repo_with_hook(tmp_path):
     hook.chmod(0o755)
     _git(root, "config", "core.hooksPath", ".githooks")
     _git(root, "remote", "add", "origin", str(remote))
+    if visibility is not None:
+        (root / ".stapel-visibility").write_text(f"{visibility}\n", encoding="utf-8")
+        _git(root, "add", ".stapel-visibility")
+        _git(root, "commit", "-q", "-m", "declare visibility")
     return root
 
 
@@ -339,7 +347,7 @@ class TestPrePushScansWhatIsPushed:
         _skip_unless_push_tools(exposure=True)
         _configured_names(tmp_path, monkeypatch, "acme")
 
-        root = _repo_with_hook(tmp_path)
+        root = _repo_with_hook(tmp_path, visibility=None)
         (root / "pyproject.toml").write_text(
             '[project]\nname = "stapel-thing"\nversion = "0.1.0"\n', encoding="utf-8"
         )
@@ -368,14 +376,12 @@ class TestPrePushGateWithNoNamesConfigured:
     the worktree rule and nothing else; this is where the unconfigured state
     is judged on purpose.
 
-    The hook shells out to `stapel-exposure-lint` passing neither
-    `--allow-empty` nor `--require-names`, so it inherits that tool's
-    empty-list contract verbatim: exit 0 for a developer without the owner's
-    list, EXP000 non-zero where `$CI`/`$GITHUB_ACTIONS` say the run is
-    automated. That inheritance is the choice being pinned — a hook that
-    smothered EXP000 would turn a gate verifying nothing into a pass."""
+    The hook passes `--strict`: a list that resolves to zero names refuses
+    the push everywhere, a developer machine included. Before that the hook
+    inherited the tool's local default (exit 0 with a one-line note), and a
+    new machine without the owner's list pushed having checked nothing."""
 
-    def test_no_list_on_a_developer_machine_lets_the_push_through(
+    def test_no_list_on_a_developer_machine_refuses_the_push(
         self, tmp_path, monkeypatch
     ):
         _skip_unless_push_tools(exposure=True)
@@ -387,8 +393,12 @@ class TestPrePushGateWithNoNamesConfigured:
         _git(root, "add", "clean.py")
         _git(root, "commit", "-q", "-m", "feat: a clean file")
 
-        pushed = _git(root, "push", "-q", "origin", "main")
-        assert pushed.returncode == 0, pushed.stdout + pushed.stderr
+        blocked = _git(root, "push", "-q", "origin", "main")
+        text = blocked.stdout + blocked.stderr
+        assert blocked.returncode != 0, text
+        assert "EXP000" in text
+        assert "NOTHING VERIFIED" in text
+        assert "does not exist" in text
 
     def test_no_list_in_an_automated_context_refuses_the_push(
         self, tmp_path, monkeypatch
@@ -404,6 +414,38 @@ class TestPrePushGateWithNoNamesConfigured:
         blocked = _git(root, "push", "-q", "origin", "main")
         assert blocked.returncode != 0
         assert "EXP000" in blocked.stdout + blocked.stderr
+
+
+class TestPrePushGateOnAGradleRepository:
+    """A public Gradle repository (stapel-kmp) used to be "not applicable":
+    the hook's exposure stage checked nothing on every push."""
+
+    def test_a_committed_name_in_a_gradle_repo_is_refused(self, tmp_path, monkeypatch):
+        _skip_unless_push_tools(exposure=True)
+        _configured_names(tmp_path, monkeypatch, "acme")
+        root = _repo_with_hook(tmp_path, visibility=None)
+        (root / "settings.gradle.kts").write_text(
+            'rootProject.name = "stapel-thing"\n', encoding="utf-8"
+        )
+        (root / "Build.kt").write_text("val host = \"acme.example\"\n", encoding="utf-8")
+        _git(root, "add", "settings.gradle.kts", "Build.kt")
+        _git(root, "commit", "-q", "-m", "feat: gradle")
+
+        blocked = _git(root, "push", "-q", "origin", "main")
+        assert blocked.returncode != 0
+        assert "EXP001" in blocked.stdout + blocked.stderr
+
+    def test_an_unrecognised_tree_is_refused_not_passed(self, tmp_path, monkeypatch):
+        _skip_unless_push_tools(exposure=True)
+        _configured_names(tmp_path, monkeypatch, "acme")
+        root = _repo_with_hook(tmp_path, visibility=None)
+        (root / "notes.txt").write_text("hello\n", encoding="utf-8")
+        _git(root, "add", "notes.txt")
+        _git(root, "commit", "-q", "-m", "docs: notes")
+
+        blocked = _git(root, "push", "-q", "origin", "main")
+        assert blocked.returncode != 0
+        assert "EXP003" in blocked.stdout + blocked.stderr
 
 
 class TestATagIsRefusedOverStaleContractArtifacts:
