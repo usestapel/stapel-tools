@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.81.2] — 2026-11-19
+
+- **Pin: stapel-auth 0.52.0** (contract profile 2 as `docs/schema.v2.json`,
+  nine success bodies declared). Generated requirements read
+  `stapel-auth>=0.52.0,<0.53`; PIN002 refuses the `<0.52` ceiling once 0.52.0
+  is on PyPI.
+
 ## [0.81.1] — 2026-11-19
 
 - **Pin: stapel-core 0.97.0.** Generated requirements read
