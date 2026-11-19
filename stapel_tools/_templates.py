@@ -147,6 +147,13 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.base")
 app = Celery("{{MODULE}}")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()
+# Constructing the app makes it current only in the importing thread
+# (celery._state keeps the current app thread-local). A request served on any
+# other thread — runserver, gunicorn --threads, daphne — falls back to the
+# process DEFAULT app, which Celery otherwise creates unconfigured
+# (amqp://localhost), and the first .delay() there 500s. Make this the
+# default for every thread.
+app.set_default()
 """
 
 CONFIG_INIT_PY = """\

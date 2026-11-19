@@ -304,6 +304,13 @@ MINIMAL_REQUIREMENTS = """\
 #
 # The Stapel lib line(s) below are appended by stapel-create-project /
 # stapel-assemble (STAPEL_LIBS registry) — stapel_core is always present.
+
+# config/celery.py binds every @shared_task; tasks run eagerly (no broker).
+# Libraries import celery at module level from their tasks.py (stapel-auth's
+# login notification runs inside session issuance) without declaring it, so
+# without this line a fresh project cannot sign anyone in. The service tier
+# carries the same line.
+celery>=5.3
 """
 
 MINIMAL_REQUIREMENTS_DEV = """\
