@@ -48,10 +48,11 @@ FLEET_REGISTRY = "registry.gitlab.com/stapel-studio/stapel-images"
 
 #: One stapel-images pipeline tag. stapel-runtime and node-build of that
 #: pipeline carry it together: one base date per host.
-#: stapel-images pipeline 3066965037 (stapel-tools v0.80.2 closure, whose
-#: catalog this release carries unchanged; multi-arch: linux/amd64 +
-#: linux/arm64, so it resolves to the building host's architecture).
-FLEET_IMAGE_TAG: Optional[str] = "20261113-ac3ea3a1"
+#: stapel-images pipeline 3091199435 (stapel-tools v0.82.1 closure, whose
+#: catalog this release carries unchanged: stapel-core 0.98.1, stapel-auth
+#: 0.53.0; multi-arch: linux/amd64 + linux/arm64, so it resolves to the
+#: building host's architecture).
+FLEET_IMAGE_TAG: Optional[str] = "20261119-d6b695c0"
 
 #: Overrides FLEET_IMAGE_TAG (CI builds against its own pipeline's tag).
 FLEET_TAG_ENV = "STAPEL_FLEET_IMAGE_TAG"

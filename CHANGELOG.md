@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.82.2] — 2026-11-19
+
+- **`--image-base fleet` defaults to stapel-images `20261119-d6b695c0`**
+  (`FLEET_IMAGE_TAG`): its stapel-runtime carries the closure of 0.82.1
+  (stapel-core 0.98.1, stapel-auth 0.53.0), multi-arch amd64 + arm64. The
+  catalog is 0.82.1's unchanged, so a scaffold's requirements install nothing
+  on top of that runtime.
+
 ## [0.82.1] — 2026-11-19
 
 - **Pin: stapel-auth 0.53.0.** Generated requirements read
