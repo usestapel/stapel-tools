@@ -60,8 +60,10 @@ STAPEL_LIBS = {
         # not pin a core that has never heard of it — the project would boot
         # with a socket every browser is turned away from.
         # 0.95.0: `manage.py run_seeds`, which the generated bootstrap.sh calls.
-        "pin": "0.96.0",
-        "ahead_of_pypi": False,  # PyPI 0.96.0 @ 2026-11-13
+        # 0.97.0: contract profile 2 (additive; PIN002 refuses a ceiling below
+        # the newest release).
+        "pin": "0.97.0",
+        "ahead_of_pypi": False,  # PyPI 0.97.0 @ 2026-11-19
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",

@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.81.1] — 2026-11-19
+
+- **Pin: stapel-core 0.97.0.** Generated requirements read
+  `stapel-core>=0.97.0,<0.98`. 0.81.0 was tagged but never published: its
+  publish gate (`check_pypi_pins.py --strict`, PIN002) refused the
+  `<0.97` ceiling once stapel-core 0.97.0 reached PyPI. Contents otherwise
+  as 0.81.0.
+
 ## [0.81.0] — 2026-11-19
 
 - **Contract profile 2** — `emit_schema(out, contract_profile=2)` (and
