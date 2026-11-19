@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.80.3"
+version = "0.81.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -42,7 +42,7 @@ test = [
     # DRF 3.18.0 dropped the `cc_delim_re` import Django 6.1 removed.
     "djangorestframework>=3.18",
     "drf-spectacular",
-    "stapel-core>=0.45.0,<1",
+    "stapel-core>=0.97.0,<1",  # contract profile 2 (tests/test_contract_profile.py)
     # `stapel-fixture-lint`'s VOC001 goes through the shipped JSON Schema when
     # this is installed and through the structural checks alone when it is not.
     # Declared here so CI really takes the schema branch: an optional import

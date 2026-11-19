@@ -1,0 +1,419 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "",
+    "version": "0.0.0"
+  },
+  "paths": {
+    "/api/account/": {
+      "get": {
+        "operationId": "api_account_retrieve",
+        "tags": [
+          "api"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "description": "**Permissions:** `IsAuthenticated`"
+      },
+      "delete": {
+        "operationId": "api_account_destroy",
+        "tags": [
+          "api"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "description": "**Permissions:** `IsAuthenticated`"
+      }
+    },
+    "/api/items/": {
+      "get": {
+        "operationId": "api_items_list",
+        "parameters": [
+          {
+            "name": "anchor",
+            "required": false,
+            "in": "query",
+            "description": "Anchor value to paginate from (exclusive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "direction",
+            "required": false,
+            "in": "query",
+            "description": "Pagination direction",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "next",
+                "prev",
+                "center"
+              ],
+              "default": "next"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "description": "Number of items (default 100, max 1000)",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "tags": [
+          "api"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          },
+          {}
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedItemList"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "description": "**Permissions:** `AllowAny`"
+      }
+    },
+    "/auth/register/": {
+      "post": {
+        "operationId": "auth_register_create",
+        "tags": [
+          "auth"
+        ],
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignedIn"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "description": "**Permissions:** `OpenUnlessFlagged`"
+      }
+    },
+    "/auth/sign-in/": {
+      "post": {
+        "operationId": "auth_sign_in_create",
+        "tags": [
+          "auth"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "security": [
+          {
+            "JWTCookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignInResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StapelError"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "description": "**Permissions:** `OpenUnlessFlagged`"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Challenge": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ChallengeStatusEnum"
+          },
+          "challenge_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "challenge_token",
+          "status"
+        ]
+      },
+      "ChallengeStatusEnum": {
+        "enum": [
+          "CHALLENGE"
+        ],
+        "type": "string",
+        "description": "* `CHALLENGE` - CHALLENGE"
+      },
+      "Item": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ]
+      },
+      "Page": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "next": {
+            "type": "integer",
+            "nullable": true
+          }
+        },
+        "required": [
+          "count",
+          "next",
+          "results"
+        ]
+      },
+      "PaginatedItemList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            }
+          },
+          "next_anchor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "nullable": true,
+            "description": "Anchor value for next page. The raw value of the ordering field: a string for a datetime anchor, an integer for a sequence one. Set `anchor_type` on the paginator to narrow this."
+          },
+          "prev_anchor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              }
+            ],
+            "nullable": true,
+            "description": "Anchor value for previous page. The raw value of the ordering field: a string for a datetime anchor, an integer for a sequence one. Set `anchor_type` on the paginator to narrow this."
+          },
+          "has_next": {
+            "type": "boolean",
+            "description": "Whether there are more items after this page"
+          },
+          "has_prev": {
+            "type": "boolean",
+            "description": "Whether there are items before this page"
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of items in current page"
+          }
+        },
+        "required": [
+          "items",
+          "has_next",
+          "has_prev",
+          "count"
+        ]
+      },
+      "SignInRequest": {
+        "type": "object",
+        "description": "DRF serializer mixin that validates a ``captcha_token`` field.\n\nAdd this mixin **before** ``serializers.Serializer`` in the MRO so that\n``validate_captcha_token`` runs during DRF field-level validation.\n\nCall ``self._require_captcha_if_configured(attrs)`` from ``validate()``\nto return ``ERR_400_CAPTCHA_REQUIRED`` when captcha is active but the\nclient omitted the token entirely.",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "code": {
+            "type": "string"
+          },
+          "captcha_token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "email"
+        ]
+      },
+      "SignInResponse": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SignedIn"
+          },
+          {
+            "$ref": "#/components/schemas/Challenge"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "status",
+          "mapping": {
+            "null": "#/components/schemas/Challenge"
+          }
+        }
+      },
+      "SignedIn": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SignedInStatusEnum"
+              }
+            ],
+            "description": "Outcome\n\n* `LOGGED_IN` - LOGGED_IN\n* `REGISTERED` - REGISTERED"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "user_id"
+        ]
+      },
+      "SignedInStatusEnum": {
+        "enum": [
+          "LOGGED_IN",
+          "REGISTERED"
+        ],
+        "type": "string",
+        "description": "* `LOGGED_IN` - LOGGED_IN\n* `REGISTERED` - REGISTERED"
+      },
+      "StapelError": {
+        "type": "object",
+        "description": "Structured error returned by all Stapel API endpoints.",
+        "properties": {
+          "localizable_error": {
+            "type": "string",
+            "description": "Translation key for client-side localization",
+            "example": "error.404.not_found"
+          },
+          "error": {
+            "type": "string",
+            "description": "Human-readable fallback/debug message — not reliably English,"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": {},
+            "description": "Context values for template placeholders",
+            "example": {
+              "retry_after": 30
+            }
+          },
+          "error_language": {
+            "type": "string",
+            "description": "The language `error` is written in (e.g. 'en', 'ru'),"
+          }
+        },
+        "required": [
+          "error",
+          "localizable_error"
+        ]
+      }
+    },
+    "securitySchemes": {
+      "JWTCookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "stapel_jwt",
+        "description": "JWT token stored in cookie. Login via /auth/admin/ to get the cookie."
+      }
+    }
+  }
+}

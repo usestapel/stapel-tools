@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.81.0] — 2026-11-19
+
+- **Contract profile 2** — `emit_schema(out, contract_profile=2)` (and
+  `python -m stapel_tools.codegen --contract-profile 2`, which writes
+  `schema.v2.json` beside `schema.json`). A client-generatable description of
+  the same surface, opt-in per module; `contract_profile=1` (the default) is
+  the historical document byte for byte — `tests/test_contract_profile.py`
+  holds a golden emitted by 0.80.3 on stapel-core 0.96.0. Profile 2 runs
+  drf-spectacular under stapel-core 0.97.0's profile hooks (bearer scheme,
+  public operations from the running permission gate, `x-stapel-errors` per
+  response, `x-stapel-captcha`) and then a post-pass:
+  `x-stapel-flows` / `x-stapel-verification` (core's hook, which the default
+  emission never ran), discriminator mappings keyed by the values the
+  property takes on the wire (`wire_discriminators`; a variant with no enum
+  or a value claimed twice refuses the emission), `x-stapel-pagination`
+  named from the envelope (`anchor` / `page` / `revision_page` / `offset`,
+  on the operation and the envelope component), a refusal of 2xx responses
+  without a body schema, and `info["x-stapel-contract"] = 2`.
+  Needs stapel-core>=0.97.0 only when profile 2 is asked for.
+
 ## [0.80.3] — 2026-11-14
 
 - **`--image-base fleet` defaults to stapel-images `20261113-ac3ea3a1`**
