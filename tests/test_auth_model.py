@@ -73,20 +73,8 @@ class TestResolve:
         assert set(AUTH_KINDS.values()) <= set(axes)
         assert [k for k, v in axes.items() if v] == ["AUTH_PHONE_LOGIN", "AUTH_OAUTH_LOGIN"]
 
-    def test_kinds_close_the_registration_doors_of_unlisted_kinds_only(self):
-        """A channel is open while its login OR registration axis is on
-        (stapel_auth.W015), so an unlisted kind is closed on both axes; a
-        listed kind keeps the posture's door, and no door is ever opened."""
-        comp = resolve("public", "phone,password", auth_selected=True)
-        regs = {k: v for k, v in comp.auth_axes().items() if k.endswith("_REGISTRATION")}
-        assert regs == {
-            "AUTH_EMAIL_REGISTRATION": False,
-            "AUTH_OAUTH_REGISTRATION": False,
-            "AUTH_SSO_REGISTRATION": False,
-        }
-
-    def test_no_kinds_no_registration_axes(self):
-        comp = resolve("public", auth_selected=True)
+    def test_kinds_never_touch_registration_doors(self):
+        comp = resolve("public", "password", auth_selected=True)
         assert not any(k.endswith("_REGISTRATION") for k in comp.auth_axes())
 
     @pytest.mark.parametrize("args", [

@@ -1,21 +1,21 @@
 # Changelog
 
-## [Unreleased]
+## [0.82.1] — 2026-11-19
 
 - **Pin: stapel-auth 0.53.0.** Generated requirements read
   `stapel-auth[…]>=0.53.0,<0.54`. Celery is an optional extra of stapel-auth
   since 0.53.0; a project whose requirements declare `celery` (every project
   type does) installs `stapel-auth[celery]` (registry key `celery_extra`), so
   its tasks run on the project's worker instead of in the request (W014).
-- **`--auth-kinds` closes the kinds it leaves out on both axes.** A channel
-  stays open while its login OR registration axis is on; the scaffold set only
-  the login axes, so a `--auth-kinds phone` project still let a stranger
-  register by email. Unlisted kinds with a registration axis (email,
-  password, oauth, sso) now render `AUTH_<KIND>_REGISTRATION: False`;
-  stapel-auth's W015 is silent on a fresh scaffold. Needs stapel-core >= 0.98.1,
-  which reports a shut door under `public_space` as presets.W001, not E001.
-  `tests/test_auth_kinds_doors.py` scaffolds `--auth-kinds phone`, reads
-  capabilities and knocks on the excluded doors (403), with an inversion.
+- **`--auth-kinds` still switches login axes only.** On stapel-auth 0.53 a
+  fresh `--auth-kinds phone` project reports `stapel_auth.W015` for email,
+  oauth and sso: their login axis is off while the posture keeps their
+  registration door open, so those channels still answer. Shutting the doors
+  from the scaffold trips `stapel_core.presets.E001` on stapel-core 0.98.0
+  (a shut door under `public_space` counts as a security override), so it
+  waits for a core that tells narrowing from weakening.
+  `tests/test_auth_kinds_doors.py` pins that state: W015 per excluded kind,
+  no E001, the excluded email door answering.
 - `tests/test_minimal_sign_in.py`: stapel-auth 0.53 no longer fails a sign-in
   whose enqueue fails, so the inversion observes the failed enqueue (the
   logged warning) instead of a 500.
