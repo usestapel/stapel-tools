@@ -78,9 +78,14 @@ STAPEL_LIBS = {
         # the service conftest's pytest_plugins.
         "pytest_plugin": "stapel_auth.testing",
         # 0.52.0: docs/schema.v2.json (contract profile 2), nine declared
-        # success bodies.
-        "pin": "0.52.0",
-        "ahead_of_pypi": False,  # PyPI 0.52.0 @ 2026-11-19
+        # success bodies. 0.53.0: celery became the optional extra
+        # `stapel-auth[celery]` (see "celery_extra"), check W015 for a channel
+        # whose login axis is off and registration axis on.
+        "pin": "0.53.0",
+        "ahead_of_pypi": False,  # PyPI 0.53.0 @ 2026-11-19
+        # The extra a project whose requirements declare celery installs: the
+        # library's background tasks run there (stapel_auth.W014 otherwise).
+        "celery_extra": "celery",
     },
     "billing": {
         "repo": "https://github.com/usestapel/stapel-billing.git",
@@ -2781,6 +2786,13 @@ def _vendor_unreleased(
                   + (f" (stapel-react checkout {snap.commit[:12]})" if snap.commit else ""))
 
 
+def _is_celery_requirement(line: str) -> bool:
+    """A requirements.txt line that installs celery itself (``celery>=5.3``,
+    ``celery[redis]``), not a comment or another package starting with it."""
+    name = re.split(r"[\[<>=!~;\s]", line.strip(), maxsplit=1)[0]
+    return name.lower() == "celery"
+
+
 def _setup_pip_deps(
     project_dir: Path,
     modules: list[str],
@@ -2790,11 +2802,14 @@ def _setup_pip_deps(
     if not reqs.exists():
         return
     lines = reqs.read_text().splitlines()
+    has_celery = any(_is_celery_requirement(line) for line in lines)
     for key in modules:
         info = STAPEL_LIBS[key]
         pin = info.get("pin")
         pypi_name = _pypi_name(info)
         extras = _extras_for_lib(key, module_config)
+        if has_celery and info.get("celery_extra"):
+            extras = sorted({*extras, info["celery_extra"]})
         extras_suffix = f"[{','.join(extras)}]" if extras else ""
         if info.get("ahead_of_pypi"):
             # NOT resolvable from PyPI at this pin today (owner publishes

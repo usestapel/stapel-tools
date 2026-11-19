@@ -46,9 +46,12 @@ def _pip_entry(key: str) -> str:
     honestly resolvable from PyPI yet), a plain version pin otherwise."""
     info = STAPEL_LIBS[key]
     pypi_name = info["repo"].rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+    # Every generated project declares celery, so a lib with a celery extra
+    # carries it (stapel-auth[celery]).
+    extra = f"[{info['celery_extra']}]" if info.get("celery_extra") else ""
     if info.get("ahead_of_pypi"):
-        return f"-e ../{pypi_name}"
-    return f"{pypi_name}>={info['pin']}"
+        return f"-e ../{pypi_name}{extra}"
+    return f"{pypi_name}{extra}>={info['pin']}"
 
 
 def _tree(root):
@@ -136,7 +139,7 @@ class TestRegistryPins:
         assert STAPEL_LIBS["auth"]["ahead_of_pypi"] is False
         result = assemble_scaffold("app", libs=["auth"], output_dir=tmp_path, verify=False)
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert f"stapel-auth>={STAPEL_LIBS['auth']['pin']}" in reqs
+        assert f"{_pip_entry('auth')}" in reqs
         assert "git+" not in reqs
         assert "@v" not in reqs
 
@@ -374,9 +377,9 @@ class TestAuthPipExtras:
     saml->lxml/signxml) must land their extra in requirements.txt, or the
     project installs fine and crashes at runtime the moment that code path is
     hit. Covers: single axis -> single extra, several axes -> sorted
-    de-duplicated extras, no dependency-bearing axis -> a bare pin (no
-    ``[...]`` at all — auth's password/email/qr/passkey/magic-link axes ship
-    in-package, no extra)."""
+    de-duplicated extras, no dependency-bearing axis -> no axis extra (auth's
+    password/email/qr/passkey/magic-link axes ship in-package). Every
+    generated project declares celery, so ``celery`` is always among them."""
 
     def test_oauth_axis_adds_oauth_extra(self, tmp_path):
         result = assemble_scaffold(
@@ -385,7 +388,7 @@ class TestAuthPipExtras:
             output_dir=tmp_path, verify=False,
         )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert f"stapel-auth[oauth]{_AUTH_RANGE}" in reqs
+        assert f"stapel-auth[celery,oauth]{_AUTH_RANGE}" in reqs
 
     def test_phone_axis_adds_phone_extra(self, tmp_path):
         result = assemble_scaffold(
@@ -394,7 +397,7 @@ class TestAuthPipExtras:
             output_dir=tmp_path, verify=False,
         )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert f"stapel-auth[phone]{_AUTH_RANGE}" in reqs
+        assert f"stapel-auth[celery,phone]{_AUTH_RANGE}" in reqs
 
     def test_saml_axis_adds_saml_extra(self, tmp_path):
         result = assemble_scaffold(
@@ -403,7 +406,7 @@ class TestAuthPipExtras:
             output_dir=tmp_path, verify=False,
         )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert f"stapel-auth[saml]{_AUTH_RANGE}" in reqs
+        assert f"stapel-auth[celery,saml]{_AUTH_RANGE}" in reqs
 
     def test_multiple_dep_bearing_axes_produce_sorted_deduped_extras(self, tmp_path):
         result = assemble_scaffold(
@@ -416,7 +419,7 @@ class TestAuthPipExtras:
             output_dir=tmp_path, verify=False,
         )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert f"stapel-auth[oauth,phone]{_AUTH_RANGE}" in reqs
+        assert f"stapel-auth[celery,oauth,phone]{_AUTH_RANGE}" in reqs
 
     def test_no_dep_bearing_axis_stays_a_bare_pin(self, tmp_path):
         result = assemble_scaffold(
@@ -425,8 +428,7 @@ class TestAuthPipExtras:
             output_dir=tmp_path, verify=False,
         )
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert f"stapel-auth{_AUTH_RANGE}" in reqs
-        assert "stapel-auth[" not in reqs
+        assert f"stapel-auth[celery]{_AUTH_RANGE}" in reqs  # only the project's celery
 
     def test_no_config_at_all_stays_a_bare_pin(self, tmp_path):
         # No module_config -> nothing is known to have been turned on, so no
@@ -434,8 +436,7 @@ class TestAuthPipExtras:
         # from module_config renders no settings key either).
         result = assemble_scaffold("app", libs=["auth"], output_dir=tmp_path, verify=False)
         reqs = (result.project_dir / "requirements.txt").read_text()
-        assert f"stapel-auth{_AUTH_RANGE}" in reqs
-        assert "stapel-auth[" not in reqs
+        assert f"stapel-auth[celery]{_AUTH_RANGE}" in reqs  # only the project's celery
 
 
 class TestMonolithGates:

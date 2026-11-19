@@ -7,6 +7,8 @@ public --posture prototype`): the email OTP verify answered 500 twice over.
    ``tasks.py`` imports it at module level and session issuance calls
    ``evaluate_login_notification.delay`` — ``ModuleNotFoundError`` on the
    first verify.
+   stapel-auth 0.53 made celery the ``[celery]`` extra; a project that
+   declares celery installs ``stapel-auth[celery]``.
 2. With celery installed, a request served on another thread (gunicorn
    ``--threads``, runserver) used Celery's process DEFAULT app instead of the
    project's: constructing the app makes it current only in the importing
@@ -47,6 +49,14 @@ call_command("migrate", "--noinput", verbosity=0)
 from django.test import Client
 from django.urls import reverse
 from stapel_auth.conf import auth_settings
+import logging
+
+class _Seen(logging.Handler):
+    def emit(self, record):
+        out.setdefault("logged", []).append(record.getMessage())
+_log = logging.getLogger("stapel_auth.sessions.services")
+_log.addHandler(_Seen(level=logging.WARNING))
+_log.setLevel(logging.WARNING)
 
 out = {}
 def sign_in():
@@ -58,6 +68,7 @@ def sign_in():
                content_type="application/json")
     out["verify"] = r.status_code
     out["body"] = r.content[:300].decode("utf-8", "replace")
+    out["enqueue_failed"] = any("enqueue failed" in m for m in out.get("logged", []))
 t = threading.Thread(target=sign_in)
 t.start(); t.join()
 print(json.dumps(out))
@@ -92,6 +103,12 @@ def test_requirements_declare_celery(project):
     assert any(ln.startswith("celery") for ln in lines if not ln.startswith("#"))
 
 
+def test_a_project_with_celery_installs_the_auth_celery_extra(project):
+    lines = (project / "requirements.txt").read_text().splitlines()
+    auth = [ln for ln in lines if ln.startswith("stapel-auth")]
+    assert len(auth) == 1 and auth[0].startswith("stapel-auth[celery"), auth
+
+
 def test_celery_app_is_the_default_for_every_thread(project):
     assert "app.set_default()" in (project / "config" / "celery.py").read_text()
 
@@ -101,6 +118,7 @@ def test_a_generated_minimal_project_signs_someone_in_from_a_worker_thread(proje
     got = _sign_in(project)
     assert got["request"] == 200, got
     assert got["verify"] == 200, got
+    assert got["enqueue_failed"] is False, got  # the task reached the project's app
 
 
 @_needs_auth
@@ -111,4 +129,8 @@ def test_inversion_without_set_default_the_thread_gets_the_unconfigured_app(proj
     shutil.copytree(project, copy)
     celery_py = copy / "config" / "celery.py"
     celery_py.write_text(celery_py.read_text().replace("app.set_default()", ""))
-    assert _sign_in(copy)["verify"] == 500
+    got = _sign_in(copy)
+    # stapel-auth >= 0.53 no longer fails the sign-in when the enqueue does
+    # (it evaluates the alert in the request); the unconfigured app is still
+    # what the thread got, and the enqueue against it fails.
+    assert got["enqueue_failed"] is True, got

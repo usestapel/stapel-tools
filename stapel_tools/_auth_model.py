@@ -12,10 +12,13 @@ to hand edits:
 * **How they sign in** (``kinds``): the ``AUTH_<KIND>_LOGIN`` axes of
   stapel-auth. Listing kinds states every login axis explicitly (the ones not
   listed are off), so the SPA's ``AuthPanel`` — which reads
-  ``capabilities()`` — renders exactly the chosen methods. Registration doors
-  stay the posture's: the kinds never reopen a door the preset keeps shut
-  (password registration in both postures), so no security-relevant override
-  and no waiver is ever rendered.
+  ``capabilities()`` — renders exactly the chosen methods. A channel stays
+  open while its login OR its registration axis is on, so an unlisted kind
+  that has a registration axis gets ``AUTH_<KIND>_REGISTRATION = False`` too
+  (stapel-auth's W015 names the half-closed pair). Listed kinds keep the
+  posture's registration doors: the kinds never reopen a door the preset
+  keeps shut (password registration in both postures), so no
+  security-relevant override and no waiver is ever rendered.
 * **Is it launched** (``stage``): the posture's ``stage``. ``live`` (default)
   in the inherited base settings; the local settings module (``dev.py``)
   always declares ``prototype``, so stapel-auth (>= 0.38) resolves mock OTP
@@ -38,6 +41,16 @@ AUTH_KINDS: dict[str, str] = {
     "sso": "AUTH_SSO_LOGIN",
     "passkey": "AUTH_PASSKEY_LOGIN",
     "qr": "AUTH_QR_LOGIN",
+}
+
+#: kind -> stapel-auth registration axis, for the kinds that have one
+#: (stapel_auth.registration.REGISTRATION_METHODS).
+REGISTRATION_AXES: dict[str, str] = {
+    "phone": "AUTH_PHONE_REGISTRATION",
+    "email": "AUTH_EMAIL_REGISTRATION",
+    "password": "AUTH_PASSWORD_REGISTRATION",
+    "oauth": "AUTH_OAUTH_REGISTRATION",
+    "sso": "AUTH_SSO_REGISTRATION",
 }
 
 #: Kinds an explicitly chosen model gets when ``--auth-kinds`` is omitted.
@@ -93,6 +106,10 @@ class AuthComposition:
         axes: dict[str, bool] = {}
         if self.kinds is not None:
             axes = {axis: kind in self.kinds for kind, axis in AUTH_KINDS.items()}
+            axes.update({
+                axis: False for kind, axis in REGISTRATION_AXES.items()
+                if kind not in self.kinds
+            })
         if self.model == "internal":
             axes["AUTH_ANONYMOUS"] = False
         return axes

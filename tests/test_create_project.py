@@ -19,9 +19,12 @@ def _pip_entry(key: str) -> str:
     otherwise."""
     info = STAPEL_LIBS[key]
     pypi_name = info["repo"].rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+    # Every generated project declares celery, so a lib with a celery extra
+    # carries it (stapel-auth[celery]).
+    extra = f"[{info['celery_extra']}]" if info.get("celery_extra") else ""
     if info.get("ahead_of_pypi"):
-        return f"-e ../{pypi_name}"
-    return f"{pypi_name}>={info['pin']}"
+        return f"-e ../{pypi_name}{extra}"
+    return f"{pypi_name}{extra}>={info['pin']}"
 
 
 # stapel-gdpr declares DATA_OWNERS required (docs/capabilities.json
