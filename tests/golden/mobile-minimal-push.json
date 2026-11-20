@@ -30,7 +30,7 @@
  "mobile/iosApp/iosApp/Stapel/StapelFirebaseAnalytics.swift": "35b34cfe1ed7da88ca3529ac0ac266bc7be50d9013fc478aaabf3902da8356eb",
  "mobile/iosApp/iosApp/Stapel/StapelFirebasePush.swift": "e86f58b7a8f378952b36c7f3adb21cdeae3671c87d0f52de9a84af4c7f4fc2b1",
  "mobile/iosApp/iosApp/iOSApp.swift": "45c7e0457d5a08310ebed2ac3034a597ef00a6a341540b700a057b990c86f81c",
- "mobile/scripts/ios-smoke.sh": "be36d8ba5df9feee274e78516325656a60726039310d5fe6a9d9ef5d2fdc80d6",
+ "mobile/scripts/ios-smoke.sh": "345b0337ebc76eca37d64fb45f4072fe339217d3196f25a483ceb3140667d23f",
  "mobile/scripts/mobile-check.sh": "4c7c54a11e4c4bd5160f082adcb8f41aab61ba0f596edfa116c0d65cb9ec969e",
  "mobile/settings.gradle.kts": "b7004cfbb3ab8783529678aaa8556ce9b5321e3e653828b88f81a9154d004b59",
  "mobile/shared/build.gradle.kts": "f2bc943a5adae5a715b29aaccdbc303345846832fc08814ca226fffddf11720c",

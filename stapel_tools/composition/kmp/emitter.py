@@ -767,7 +767,7 @@ def _plan_features(f: dict, *, pkg: str, pkg_path: str, app_id: str) -> dict:
                 "ANDROID_IMPORTS", "ANDROID_EXTRA", "ACTIVITY_IMPORTS", "PUSH_INTENT", "PERMISSIONS",
                 "GRADLE_HEAD", "GRADLE_TAIL", "GITIGNORE_EXTRA", "DELEGATE", "BRIDGES", "PLIST_KEYS",
                 "PBX_BUILD_FILES", "PBX_FRAMEWORK_FILES", "PBX_PRODUCT_DEPS", "PBX_PACKAGE_REFS",
-                "PBX_PACKAGE_SECTIONS", "XCCONFIG_EXTRA"):
+                "PBX_PACKAGE_SECTIONS", "XCCONFIG_EXTRA", "SMOKE_MARKERS"):
         ctx[key] = ""
 
     # -- shared: dependencies, framework exports --------------------------------------------
@@ -927,6 +927,16 @@ def _plan_features(f: dict, *, pkg: str, pkg_path: str, app_id: str) -> dict:
         plist.append(("FirebaseAppDelegateProxyEnabled", False))
     if push is not None and "firebase" in push:
         plist.append(("FirebaseMessagingAutoInitEnabled", False))
+    # Without a config file each vendor provider says so at start, and the app runs (§6 rule 3).
+    markers = []
+    if firebase and "ios" not in config:
+        if push is not None:
+            markers.append("stapel.push unavailable")
+        if "firebase" in (sinks or ()):
+            markers.append("stapel.analytics unavailable firebase unconfigured")
+    if markers:
+        ctx["SMOKE_MARKERS"] = ("# The vendor providers without their config: named no-ops, the app runs.\n"
+                                + "".join(f"wait_for '{m}' 30\n" for m in markers))
     ctx["PLIST_KEYS"] = "".join(f"\t<key>{k}</key>\n\t<{'true' if v else 'false'}/>\n" for k, v in plist)
     if push is not None:
         files["iosApp/Configuration/iosApp.entitlements"] = ("iosApp.entitlements",

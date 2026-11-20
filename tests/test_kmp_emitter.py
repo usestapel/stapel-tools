@@ -360,21 +360,25 @@ elif not os.environ.get("STAPEL_KMP_MAVEN_REPO"):
 @pytest.mark.slow
 @pytest.mark.skipif(_TOOLCHAIN_REASON is not None, reason=_TOOLCHAIN_REASON or "")
 def test_generated_app_passes_every_gate_and_signs_in(tmp_path):
-    """Scaffold minimal+auth+profiles (avatar upload: cdn) with --mobile kmp,
-    bring the SAME backend up on a free local port, run
-    mobile/scripts/mobile-check.sh with the walk. STRICT: a gate this machine
-    cannot run fails the test instead of passing it."""
+    """Scaffold minimal+auth+profiles (avatar upload: cdn) + notifications with --mobile kmp,
+    Firebase analytics and push WITHOUT their config files (named no-ops), bring the SAME
+    backend up on a free local port, run mobile/scripts/mobile-check.sh with the walk.
+    STRICT: a gate this machine cannot run fails the test instead of passing it."""
     import socket
 
     repo = os.environ["STAPEL_KMP_MAVEN_REPO"]
     t0 = time.monotonic()
     project = TestCli()._run(
-        tmp_path, "--modules", "auth", "profiles", "--auth-model", "public",
+        tmp_path, "--modules", "auth", "profiles", "notifications", "--auth-model", "public",
         "--auth-kinds", "phone,email,password", "--posture", "prototype",
         "--mobile", "kmp", "--mobile-maven-repo", repo, "--mobile-avatar-upload",
+        "--mobile-analytics", "--mobile-push",
         name="ksbproof")
     app = (project / "mobile/shared/src/commonMain/kotlin/ksbproof/App.kt").read_text()
     assert "bricks(AuthBrick(), ProfilesBrick())" in app
+    assert "modules(cdnModule())" in app
+    assert (project / "mobile/shared/src/commonTest/kotlin/ksbproof/ProvidersGateTest.kt").is_file()
+    assert not (project / "mobile/androidApp/google-services.json").exists()
     venv = project / ".venv"
     subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
     subprocess.run([str(venv / "bin/pip"), "install", "-q", "-r", "requirements.txt"],
@@ -400,6 +404,10 @@ def test_generated_app_passes_every_gate_and_signs_in(tmp_path):
     print(f"scaffold -> all gates: {time.monotonic() - t0:.0f} s\n{result.stdout}")
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
     assert "NOT RUN" not in result.stdout
+    # No config: the desktop app started with both providers as named no-ops.
+    desktop = (project / "mobile/build/mobile-check/desktop-smoke.log").read_text()
+    assert "stapel.push unavailable" in desktop, desktop[-3000:]
+    assert "stapel.analytics unavailable firebase unsupported" in desktop, desktop[-3000:]
 
 
 # --------------------------------------------------------------------------- the profiles pair

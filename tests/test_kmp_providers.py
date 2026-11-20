@@ -345,6 +345,17 @@ class TestPush:
         gate = _text(plan, "mobile/shared/src/commonTest/kotlin/acme/ProvidersGateTest.kt")
         assert 'assertEquals(setOf("firebase"), app.koin.getAll<PushProvider>()' in gate
 
+    def test_ios_smoke_waits_for_the_named_noops_without_config(self, tmp_path):
+        smoke = _text(_plan(modules=PUSH_MODULES, push="", analytics=""), "mobile/scripts/ios-smoke.sh")
+        assert "wait_for 'stapel.push unavailable' 30\n" in smoke
+        assert "wait_for 'stapel.analytics unavailable firebase unconfigured' 30\n" in smoke
+        from stapel_tools.composition.kmp.providers import read_firebase_config
+
+        config = read_firebase_config(f"ios={_fake_ios_config(tmp_path)}")
+        configured = _text(_plan(modules=PUSH_MODULES, push="", firebase_config=config), "mobile/scripts/ios-smoke.sh")
+        assert "unavailable" not in configured
+        assert "unavailable" not in _text(_plan(), "mobile/scripts/ios-smoke.sh")
+
     def test_without_the_notifications_module_is_refused(self):
         message = _refused(push="")
         assert "stapel-notifications" in message and "Add notifications to --modules" in message

@@ -1,0 +1,75 @@
+name: KMP proof
+# The KMP emitter's generated app builds and runs (tests/test_kmp_emitter.py
+# test_generated_app_passes_every_gate_and_signs_in): a minimal project with auth, profiles
+# (avatar upload: cdn), notifications, Firebase analytics and push WITHOUT their config files is
+# scaffolded with --mobile kmp against the stapel-kmp commit pin.json names, its backend is brought
+# up, and mobile/scripts/mobile-check.sh runs every gate STRICT (generated code and tokens, the nav
+# and providers gates on jvm and the iOS simulator, Android assembleDebug, the desktop smoke, the
+# iOS launch smoke with the providers' "unavailable" markers, the sign-in walk on jvm and iOS).
+# A gate that cannot run fails the job; nothing is reported green that did not run.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "stapel_tools/composition/kmp/**"
+      - "stapel_tools/create_project.py"
+      - "tests/test_kmp_*.py"
+      - ".github/workflows/kmp-proof.yml"
+  push:
+    branches: [main]
+    paths:
+      - "stapel_tools/composition/kmp/**"
+      - "stapel_tools/create_project.py"
+      - "tests/test_kmp_*.py"
+      - ".github/workflows/kmp-proof.yml"
+  workflow_dispatch:
+
+jobs:
+  generated-app:
+    name: generated mobile app (auth, profiles, analytics, push; no vendor config) — every gate, STRICT
+    runs-on: macos-26
+    timeout-minutes: 120
+    concurrency:
+      group: kmp-proof-${{ github.event_name == 'pull_request' && github.ref || 'main' }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      # The Xcode stapel-kmp's own sample job builds with.
+      DEVELOPER_DIR: /Applications/Xcode_26.4.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: The stapel-kmp commit the vendored data is pinned to
+        id: pin
+        run: echo "commit=$(python -c 'import json; print(json.load(open("stapel_tools/composition/kmp/vendored/pin.json"))["commit"])')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: usestapel/stapel-kmp
+          ref: ${{ steps.pin.outputs.commit }}
+          path: siblings/stapel-kmp
+
+      - name: Android platform 37
+        run: |
+          ls "$ANDROID_HOME/platforms" | grep -q '^android-37' || "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0"
+
+      - name: Publish the pinned stapel-kmp to its staging repository
+        working-directory: siblings/stapel-kmp
+        run: ./gradlew --console=plain publishAllPublicationsToStagingRepository
+
+      - name: Install
+        run: pip install -e . pytest --quiet
+
+      - name: Generated app, every gate (STRICT)
+        env:
+          STAPEL_KMP_PROOF: "1"
+          STAPEL_KMP_MAVEN_REPO: ${{ github.workspace }}/siblings/stapel-kmp/build/staging-repo
+        run: pytest -m slow -s tests/test_kmp_emitter.py -k test_generated_app_passes_every_gate_and_signs_in

@@ -63,7 +63,7 @@ echo "[ios-smoke] launch"
 xcrun simctl launch "$UDID" "$BUNDLE_ID" >"$OUT/launch.txt"
 wait_for 'stapel.app.ready' 60
 wait_for 'stapel.nav ' 30
-xcrun simctl io "$UDID" screenshot "$OUT/launched.png" >/dev/null
+{{SMOKE_MARKERS}}xcrun simctl io "$UDID" screenshot "$OUT/launched.png" >/dev/null
 
 echo "[ios-smoke] system link $LINK (expect the system's open-in-app prompt)"
 xcrun simctl openurl "$UDID" "$LINK"
