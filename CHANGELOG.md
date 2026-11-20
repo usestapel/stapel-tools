@@ -63,9 +63,10 @@
   profiles brick's nav manifest); the mobile goldens move with it.
 - Registry pin: stapel-core 0.99.3 (examples on the paginator envelopes; the
   contract profile-1 golden is regenerated, its diff is only those examples).
-- A minimal project's beat block tolerates a helper that needs celery
-  (stapel-search 0.18.3 refuses without it; a minimal project installs none):
-  the jobs are then scheduled from cron, and `manage.py check` still boots.
+- The test extra carries `celery>=5.3`, which a generated project that
+  schedules beat jobs already requires: stapel-search 0.18.3's beat helper
+  refuses without it, and the live-composite boot test imports that settings
+  module in the test interpreter.
 
 ## [0.84.0] — 2026-11-20
 

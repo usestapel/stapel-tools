@@ -50,6 +50,12 @@ test = [
     # Declared here so CI really takes the schema branch: an optional import
     # that no runner ever satisfies is a rule nobody has ever run.
     "jsonschema",
+    # A generated project that schedules beat jobs requires celery (its own
+    # requirements.txt says so), and the live-composite boot test imports
+    # those settings in THIS interpreter: stapel-search 0.18.3's beat helper
+    # refuses without celery, so the test environment carries what the
+    # project carries.
+    "celery>=5.3",
     # These two are reached by a SUBPROCESS, not an import: the generator
     # tests boot a generated project's Django and resolve its URLs, and that
     # interpreter imports the libs the project selected. No AST here can see
