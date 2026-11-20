@@ -25,6 +25,10 @@ class ReactBinding:
     shell_provider: Optional[str] = None
     static_peer_pairs: tuple[str, ...] = ()
     released: bool = True
+    # An unreleased pair (no npm version to read a tag from): the stapel-react
+    # commit its mirror was taken from, pasted from `git rev-parse`. The nav
+    # gate compares the mirror with THAT commit; the moving head is a notice.
+    source_commit: Optional[str] = None
     # nav id -> (export, subpath) of the component that renders it
     components: dict = field(default_factory=dict)
     # embed id -> (export, subpath)

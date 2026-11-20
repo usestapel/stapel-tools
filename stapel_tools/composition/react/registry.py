@@ -185,6 +185,8 @@ def project_react(brick: BrickUi | None, binding: ReactBinding) -> dict:
     out: dict = {"package": binding.package, "version": binding.version}
     if not binding.released:
         out["released"] = False
+        if binding.source_commit is not None:
+            out["commit"] = binding.source_commit
     if binding.static_peer_pairs:
         out["static_peer_pairs"] = list(binding.static_peer_pairs)
     for name in ("provider", "create_runtime", "register_i18n", "default_component",

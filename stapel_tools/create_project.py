@@ -71,8 +71,8 @@ STAPEL_LIBS = {
         # declared error params (errors.json param_types) and the reworded-key
         # stale gate at generate_error_keys. 0.99.3: examples on the paginator
         # envelopes (the contract profile-1 golden follows it).
-        "pin": "0.99.4",
-        "ahead_of_pypi": False,  # PyPI 0.99.4 @ 2026-11-20 (pip index versions)
+        "pin": "0.99.5",
+        "ahead_of_pypi": False,  # PyPI 0.99.5 @ 2026-11-20 (pip index versions)
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
@@ -88,8 +88,8 @@ STAPEL_LIBS = {
         # `stapel-auth[celery]` (see "celery_extra"), check W015 for a channel
         # whose login axis is off and registration axis on. 0.54.0: tokens
         # carry their session (sid), user.session_expired, migration 0030.
-        "pin": "0.54.0",
-        "ahead_of_pypi": False,  # PyPI 0.54.0 @ 2026-11-20
+        "pin": "0.54.1",
+        "ahead_of_pypi": False,  # PyPI 0.54.1 @ 2026-11-20 (pip index versions)
         # The extra a project whose requirements declare celery installs: the
         # library's background tasks run there (stapel_auth.W014 otherwise).
         "celery_extra": "celery",
@@ -109,8 +109,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "File uploads & CDN",
         "default": False,
-        "pin": "0.31.2",
-        "ahead_of_pypi": False,  # PyPI 0.31.2 @ 2026-11-20 (pip index versions)
+        "pin": "0.31.3",
+        "ahead_of_pypi": False,  # PyPI 0.31.3 @ 2026-11-20 (pip index versions)
     },
     "notifications": {
         "repo": "https://github.com/usestapel/stapel-notifications.git",
@@ -165,8 +165,8 @@ STAPEL_LIBS = {
         "middleware": ["stapel_gdpr.guards.AccountClosureGuardMiddleware"],
         # 0.9.1: a timed-out account erasure can finish (late receipts
         # finalize it; gdpr_redrive_timeouts); 0.9.0 left it `deleting`.
-        "pin": "0.9.3",
-        "ahead_of_pypi": False,  # PyPI 0.9.3 @ 2026-11-20 (pip index versions)
+        "pin": "0.9.4",
+        "ahead_of_pypi": False,  # PyPI 0.9.4 @ 2026-11-20 (pip index versions)
     },
     # --- second onboarding wave (2026-07-11, static-scaffold-and-config.md §2
     # follow-up): 14 sibling checkouts brought into the registry. Dict order
@@ -186,8 +186,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "LLM facade (complete/translate/transcribe/summarize/image)",
         "default": False,
-        "pin": "0.40.0",
-        "ahead_of_pypi": False,  # PyPI 0.40.0 @ 2026-11-20 (scripts/check_pypi_pins.py)
+        "pin": "0.40.1",
+        "ahead_of_pypi": False,  # PyPI 0.40.1 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "agent/",
         "requires": [],
@@ -389,8 +389,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Mail trap (dev/test outbound email capture)",
         "default": False,
-        "pin": "0.2.0",
-        "ahead_of_pypi": False,  # PyPI 0.2.0 @ 2026-11-20
+        "pin": "0.2.1",
+        "ahead_of_pypi": False,  # PyPI 0.2.1 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "mailtrap/",
         "requires": [],

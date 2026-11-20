@@ -573,6 +573,7 @@ REACT_BINDINGS: dict[str, ReactBinding] = {
         create_runtime="createOrdersRuntime",
         register_i18n="registerOrdersI18n",
         released=False,
+        source_commit="6f7cd6c8a551c627a7c415324ccdb78bf5a393e5",
         components={
             "orders.cart": ("CartPage", "default"),
             "orders.checkout": ("CheckoutPage", "default"),

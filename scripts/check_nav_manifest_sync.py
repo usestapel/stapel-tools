@@ -33,7 +33,10 @@ The head is still read, and a head that differs from the pin is printed as
 version npm already serves is a STALE PIN (exit 1), as before. A pin whose
 tag or commit the checkout does not have fails: fetch it. A plain directory
 (no git history) stands in for the pinned files as they are; an unreleased
-pair (``released: False``) has no pin and is compared with the checkout.
+pair (``released: False``) has no version tag, so its binding names the
+stapel-react commit its mirror was taken from (``source_commit``) and that
+commit is read the same way; an unreleased pair the checkout carries with no
+such pin fails (it could only be compared with the moving head).
 
 One skip, one warning and three failures — the distinction is the point
 -----------------------------------------------------------------------
@@ -536,13 +539,46 @@ def check_react(
                         f"{key}: the registry pins {info['version']!r}, but npm already serves "
                         f"{head_version!r} (the checkout's head) — STALE PIN. Raise the "
                         "\"version\" in composition/react/bindings.py and re-mirror.")
+        elif not released and history:
+            # No npm release, so no version tag: the binding names the
+            # stapel-react commit its mirror was taken from (`source_commit`),
+            # and that commit is the reference exactly like a tag.
+            commit = info.get("commit")
+            head = _load_real_manifest(packages, key, info["package"])
+            if not commit:
+                if head is not None:
+                    mismatches.append(
+                        f"{key} (unreleased): the binding pins no source commit, so the mirror "
+                        "could only be compared with the checkout's moving head. Set "
+                        "`source_commit` in composition/react/bindings.py to the output of "
+                        f"`git -C {checkout} rev-parse 'HEAD^{{commit}}'` (the commit the mirror "
+                        "was taken from).")
+                    continue
+                real = None
+            elif git_commit(checkout, commit) is None:
+                mismatches.append(
+                    f"{key} (unreleased): the pinned source commit {commit} is not in {checkout} — "
+                    f"fetch it (git -C {checkout} fetch origin).")
+                continue
+            else:
+                real = _load_real_manifest(packages, key, info["package"], rev=commit)
+                if real is None:
+                    mismatches.append(
+                        f"{key} (unreleased): the pinned source commit {commit[:12]} has no "
+                        f"packages/{key}-react/nav-manifest.json — the pin names the wrong commit.")
+                    continue
+                if head != real:
+                    behind.append(
+                        f"the sibling checkout's head differs from the pinned source commit — "
+                        f"{key}: pinned {commit[:12]}, head "
+                        f"{'without the package' if head is None else repr(head.get('version'))}; "
+                        "move `source_commit` when the scaffold should follow.")
         else:
             real = _load_real_manifest(packages, key, info["package"])
         if info.get("released", True) is False:
-            # No npm release: the mirror tracks the pair's branch, so a
-            # checkout of the default branch may not carry it yet, and its
-            # version is the workspace placeholder. Entries and embeds are
-            # still compared whenever the checkout has the package.
+            # No npm release. Entries and embeds are compared with the pinned
+            # source commit (a git checkout) or the files as they are (a plain
+            # directory); a pair no commit carries is not compared.
             if real is None:
                 print(f"check_nav_manifest_sync: {key}: unreleased, and "
                       f"{packages / f'{key}-react'} is not in this checkout — not compared")

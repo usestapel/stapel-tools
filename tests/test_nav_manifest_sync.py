@@ -10,6 +10,7 @@ gate now has tests, a `make check` target and a CI step.
 """
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -587,3 +588,74 @@ def test_kmp_pin_missing_from_the_checkout_fails(gate, tmp_path, kmp_repo, monke
     monkeypatch.setattr(vendor, "load_pin", lambda: {**pin, "commit": "0" * 40})
     assert gate.check_kmp(tmp_path) == 1
     assert "cannot be confirmed" in capsys.readouterr().out
+
+
+# ── Unreleased pairs: pinned to the stapel-react commit their mirror came from ──
+
+def _unreleased_repo(root: Path, entries: list) -> tuple[Path, str]:
+    """A stapel-react checkout carrying an unreleased ``demo-react`` (no tag);
+    returns the repo and the commit that carries *entries*."""
+    _pair(root, "demo", "@stapel/demo-react", "0.0.0", entries)
+    repo = root / "stapel-react"
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "demo unreleased")
+    commit = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"],
+                            capture_output=True, text=True, check=True).stdout.strip()
+    return repo, commit
+
+
+def _unreleased(mirror: list, commit: str | None) -> dict:
+    info = {"package": "@stapel/demo-react", "version": "0.1.0", "released": False, "nav": mirror}
+    if commit is not None:
+        info["commit"] = commit
+    return {"demo": info}
+
+
+def test_an_unreleased_mirror_is_compared_with_its_pinned_commit_not_the_head(
+    gate, tmp_path, monkeypatch, capsys
+):
+    """The head moving on after the pin is a notice, exactly as for a tag."""
+    repo, commit = _unreleased_repo(tmp_path, [ENTRY])
+    _bump_head(repo, "0.0.0", [ENTRY, SECOND])
+    _registry(monkeypatch, _unreleased([ENTRY], commit))
+    assert gate.check_react(tmp_path) == 0
+    assert f"demo: pinned {commit[:12]}" in capsys.readouterr().out
+
+
+def test_an_unreleased_mirror_that_differs_from_its_pinned_commit_fails_when_the_head_agrees(
+    gate, tmp_path, monkeypatch
+):
+    repo, commit = _unreleased_repo(tmp_path, [ENTRY])
+    _bump_head(repo, "0.0.0", [ENTRY, SECOND])
+    _registry(monkeypatch, _unreleased([ENTRY, SECOND], commit))
+    assert gate.check_react(tmp_path) == 1
+
+
+def test_an_unreleased_pair_the_checkout_carries_with_no_pinned_commit_fails(
+    gate, tmp_path, monkeypatch, capsys
+):
+    _unreleased_repo(tmp_path, [ENTRY])
+    _registry(monkeypatch, _unreleased([ENTRY], None))
+    assert gate.check_react(tmp_path) == 1
+    assert "pins no source commit" in capsys.readouterr().out
+
+
+def test_an_unreleased_pin_the_checkout_does_not_have_fails(gate, tmp_path, monkeypatch, capsys):
+    _unreleased_repo(tmp_path, [ENTRY])
+    _registry(monkeypatch, _unreleased([ENTRY], "0" * 40))
+    assert gate.check_react(tmp_path) == 1
+    assert "is not in" in capsys.readouterr().out
+
+
+def test_every_unreleased_binding_a_published_commit_carries_is_pinned_by_full_sha():
+    """orders-react is on stapel-react main; feed/reservations are in no
+    published commit and have nothing to pin yet."""
+    import re
+
+    from stapel_tools.composition.react.bindings import REACT_BINDINGS
+
+    assert re.fullmatch(r"[0-9a-f]{40}", REACT_BINDINGS["orders"].source_commit or "")
+    for key, binding in REACT_BINDINGS.items():
+        if binding.released:
+            assert binding.source_commit is None, key
