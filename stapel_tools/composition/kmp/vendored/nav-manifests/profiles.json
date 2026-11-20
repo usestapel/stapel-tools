@@ -1,0 +1,90 @@
+{
+    "artifact": "io.github.usestapel:stapel-profiles-ui",
+    "destinations": [
+        {
+            "id": "profiles.settings",
+            "labelKey": "profiles.nav.settings",
+            "icon": "user",
+            "path": "settings",
+            "level": "top",
+            "parentId": null,
+            "menuVisibleDefault": true,
+            "requiresAuth": true,
+            "surface": null,
+            "order": 90,
+            "presentation": "screen",
+            "requires": []
+        },
+        {
+            "id": "profiles.language",
+            "labelKey": "profiles.nav.language",
+            "icon": "message",
+            "path": "language",
+            "level": "submenu",
+            "parentId": "profiles.settings",
+            "menuVisibleDefault": false,
+            "requiresAuth": true,
+            "surface": null,
+            "order": 20,
+            "presentation": "screen",
+            "requires": []
+        },
+        {
+            "id": "profiles.notifications",
+            "labelKey": "profiles.nav.notifications",
+            "icon": "bell",
+            "path": "notifications",
+            "level": "submenu",
+            "parentId": "profiles.settings",
+            "menuVisibleDefault": false,
+            "requiresAuth": true,
+            "surface": null,
+            "order": 30,
+            "presentation": "screen",
+            "requires": []
+        },
+        {
+            "id": "profiles.contacts",
+            "labelKey": "profiles.nav.contacts",
+            "icon": "message",
+            "path": "contacts",
+            "level": "submenu",
+            "parentId": "profiles.settings",
+            "menuVisibleDefault": true,
+            "requiresAuth": true,
+            "surface": null,
+            "order": 40,
+            "presentation": "screen",
+            "requires": []
+        },
+        {
+            "id": "profiles.connections",
+            "labelKey": "profiles.nav.connections",
+            "icon": "heart",
+            "path": "connections",
+            "level": "top",
+            "parentId": null,
+            "menuVisibleDefault": true,
+            "requiresAuth": true,
+            "surface": null,
+            "order": 91,
+            "presentation": "screen",
+            "requires": []
+        },
+        {
+            "id": "profiles.public",
+            "labelKey": "profiles.nav.public_profile",
+            "icon": "profile",
+            "path": "/u/:userId",
+            "level": "top",
+            "parentId": null,
+            "menuVisibleDefault": false,
+            "requiresAuth": false,
+            "surface": "public",
+            "order": 92,
+            "presentation": "screen",
+            "requires": []
+        }
+    ],
+    "embeds": []
+}

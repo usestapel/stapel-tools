@@ -58,6 +58,9 @@
   the binding is `released=False`, a selection names it pending, and the
   `shop` composite lists it under `pending`. `scripts/check_unreleased_pairs.py`
   (CI) fails the day npm serves it while the binding still says unreleased.
+- KMP emitter: iOS 15.0 floor and parity with the stapel-kmp reference app
+  (`ios_parity` gate). Vendored stapel-kmp data re-pinned to 5a9b3e7 (the
+  profiles brick's nav manifest); the mobile goldens move with it.
 
 ## [0.84.0] — 2026-11-20
 

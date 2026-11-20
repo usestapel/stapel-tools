@@ -971,6 +971,20 @@
             "profiles.public"
           ],
           "embeds": []
+        },
+        "kmp": {
+          "ui": "stapel-profiles-ui",
+          "version": "0.0.1",
+          "released": false,
+          "entries": [
+            "profiles.settings",
+            "profiles.language",
+            "profiles.notifications",
+            "profiles.contacts",
+            "profiles.connections",
+            "profiles.public"
+          ],
+          "embeds": []
         }
       }
     },

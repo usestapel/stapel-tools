@@ -249,7 +249,7 @@ class TestSyncGateRows:
         result = self._run(tmp_path)
         assert result.returncode == 0, result.stdout
         assert "NOT ARMED" not in result.stdout
-        assert "kmp: ARMED — 1 brick(s) with a present descriptor compared (auth)" in result.stdout
+        assert "kmp: ARMED — 2 brick(s) with a present descriptor compared (auth, profiles)" in result.stdout
 
     def test_neutral_row_fails_on_a_binding_disagreement(self, monkeypatch, capsys):
         """Inversion: an icon key without a React glyph turns the gate red."""

@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/usestapel/stapel-kmp",
-  "commit": "b17fa31408cbc2b7246e6fe7a4cb608de2b879e0",
+  "commit": "5a9b3e7c51c942b8fd5a0ed28161ab87cc10796c",
   "gradle": {
     "version": "9.7.0",
     "wrapperJarSha256": "7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d",
@@ -10,7 +10,7 @@
   "files": {
     "kmp-registry.json": {
       "source": "kmp-registry.json",
-      "sha256": "c814c2c84db0c91f40e90e322302eb7ed5260d14cb1a35dab0382cb96937dd19"
+      "sha256": "28fea57f35e25f9348d00cdbbf3f480267dad261bcb44e1a72975b4188f834bf"
     },
     "shell-templates.json": {
       "source": "substrate/stapel-shell/shell-templates.json",
@@ -34,7 +34,7 @@
     },
     "sample-ios/shared.build.gradle.kts": {
       "source": "samples/shop-mobile/shared/build.gradle.kts",
-      "sha256": "ce2789a8155001402d4e7c173e8a99108776c30bc14881062e8e845cd9cb7e5d"
+      "sha256": "67a9f9c284fe8f40a2a3892a0267de9f15a007f3982f5bec0518b77cdc409b2d"
     },
     "sample-ios/iOSApp.swift": {
       "source": "samples/shop-mobile/iosApp/iosApp/iOSApp.swift",
@@ -47,6 +47,10 @@
     "nav-manifests/auth.json": {
       "source": "bricks/auth/ui/nav-manifest.json",
       "sha256": "6ea7647242fd58ac0c27b291e3c916d0e4a57dcf175c5f0c4f84b6d8e081bccb"
+    },
+    "nav-manifests/profiles.json": {
+      "source": "bricks/profiles/ui/nav-manifest.json",
+      "sha256": "1bdc57f01149defc037eae594aa792ca37fa2a33b539b744a57172f80e42f6af"
     }
   }
 }

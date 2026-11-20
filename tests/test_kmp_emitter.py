@@ -114,8 +114,9 @@ class TestPlan:
     def test_pending_lists_every_selected_module_without_a_kmp_pair(self):
         comp, request = _comp(modules=("auth", "profiles", "listings"), project_type="monolith")
         plan = emitter_for("kmp").plan(comp, request)
-        assert [p["module"] for p in plan.composition["pending"]] == ["profiles", "listings"]
-        assert any("profiles is pending" in n for n in plan.notes)
+        # profiles has a KMP brick since stapel-kmp 5a9b3e7; listings has none yet.
+        assert [p["module"] for p in plan.composition["pending"]] == ["listings"]
+        assert any("listings is pending" in n for n in plan.notes)
 
     def test_environments_per_platform_and_prod_from_the_url(self):
         env = json.loads(_plan().files["mobile/stapel.environments.json"])

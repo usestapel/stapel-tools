@@ -152,6 +152,16 @@
       "family": "brick-domain",
       "released": false
     },
+    "stapel-profiles-testing": {
+      "version": "0.0.1",
+      "family": "brick-testing",
+      "released": false
+    },
+    "stapel-profiles-ui": {
+      "version": "0.0.1",
+      "family": "brick-ui",
+      "released": false
+    },
     "stapel-result": {
       "version": "0.0.1",
       "family": "substrate",
@@ -233,6 +243,42 @@
       "requires": {
         "auth.login": [],
         "auth.security": []
+      }
+    },
+    "profiles": {
+      "brick": "profiles",
+      "domain": "stapel-profiles",
+      "ui": "stapel-profiles-ui",
+      "testing": "stapel-profiles-testing",
+      "descriptor": {
+        "class": "stapel.profiles.ui.di.ProfilesBrick",
+        "call": "stapel.profiles.ui.di.ProfilesBrick()",
+        "present": true
+      },
+      "entries": [
+        "profiles.settings",
+        "profiles.language",
+        "profiles.notifications",
+        "profiles.contacts",
+        "profiles.connections",
+        "profiles.public"
+      ],
+      "embeds": [],
+      "presentation": {
+        "profiles.connections": "screen",
+        "profiles.contacts": "screen",
+        "profiles.language": "screen",
+        "profiles.notifications": "screen",
+        "profiles.public": "screen",
+        "profiles.settings": "screen"
+      },
+      "requires": {
+        "profiles.connections": [],
+        "profiles.contacts": [],
+        "profiles.language": [],
+        "profiles.notifications": [],
+        "profiles.public": [],
+        "profiles.settings": []
       }
     }
   }

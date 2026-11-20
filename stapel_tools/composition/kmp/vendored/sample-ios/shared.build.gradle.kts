@@ -45,6 +45,20 @@ val generateAppEnvironment = tasks.register("generateAppEnvironment") {
     }
 }
 
+// --- the profiles walk against a stand with auth + profiles + cdn: only with -Pstapel.walk.profilesBaseUrl=<url> ---
+val profilesWalkBaseUrl = providers.gradleProperty("stapel.walk.profilesBaseUrl")
+val generateProfilesWalkConfig = tasks.register("generateProfilesWalkConfig") {
+    val url = providers.gradleProperty("stapel.walk.profilesBaseUrl")
+    val out = layout.buildDirectory.dir("generated/profilesWalkConfig")
+    inputs.property("baseUrl", url.orElse(""))
+    outputs.dir(out)
+    doLast {
+        val f = out.get().asFile.resolve("shop/ProfilesWalkConfig.kt")
+        f.parentFile.mkdirs()
+        f.writeText("package shop\n\ninternal const val PROFILES_WALK_BASE_URL: String = \"${url.get()}\"\n")
+    }
+}
+
 // --- the sign-in walk against a real backend: only with -Pstapel.walk.baseUrl=<url> ---
 val walkBaseUrl = providers.gradleProperty("stapel.walk.baseUrl")
 val generateWalkConfig = tasks.register("generateWalkConfig") {
@@ -89,6 +103,7 @@ kotlin {
                 api(project.dependencies.platform(libs.stapel.bom))
                 api(libs.stapel.app)
                 implementation(libs.stapel.auth.ui)
+                implementation(libs.stapel.profiles.ui)
                 implementation(libs.stapel.ui.material3)
                 implementation(libs.stapel.wire)
                 implementation(libs.koin.core)
@@ -99,9 +114,14 @@ kotlin {
                 kotlin.srcDir("src/walkTest/kotlin")
                 kotlin.srcDir(generateWalkConfig)
             }
+            if (profilesWalkBaseUrl.isPresent) {
+                kotlin.srcDir("src/profilesWalkTest/kotlin")
+                kotlin.srcDir(generateProfilesWalkConfig)
+            }
             dependencies {
                 implementation(libs.kotlin.test)
                 implementation(libs.stapel.auth.testing)
+                implementation(libs.stapel.profiles.testing)
                 implementation(libs.compose.ui.test)
             }
         }
