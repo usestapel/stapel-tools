@@ -71,8 +71,8 @@ STAPEL_LIBS = {
         # declared error params (errors.json param_types) and the reworded-key
         # stale gate at generate_error_keys. 0.99.3: examples on the paginator
         # envelopes (the contract profile-1 golden follows it).
-        "pin": "0.99.3",
-        "ahead_of_pypi": False,  # PyPI 0.99.3 @ 2026-11-20
+        "pin": "0.99.4",
+        "ahead_of_pypi": False,  # PyPI 0.99.4 @ 2026-11-20 (pip index versions)
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",
@@ -100,8 +100,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Billing & subscriptions",
         "default": False,
-        "pin": "0.25.0",
-        "ahead_of_pypi": False,  # PyPI 0.25.0 @ 2026-11-13
+        "pin": "0.25.1",
+        "ahead_of_pypi": False,  # PyPI 0.25.1 @ 2026-11-20 (pip index versions)
     },
     "cdn": {
         "repo": "https://github.com/usestapel/stapel-cdn.git",
@@ -109,8 +109,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "File uploads & CDN",
         "default": False,
-        "pin": "0.31.0",
-        "ahead_of_pypi": False,  # PyPI 0.31.0 @ 2026-11-13 (answers user.deletion_cancelled: core 0.94 lifecycle.E001)
+        "pin": "0.31.2",
+        "ahead_of_pypi": False,  # PyPI 0.31.2 @ 2026-11-20 (pip index versions)
     },
     "notifications": {
         "repo": "https://github.com/usestapel/stapel-notifications.git",
@@ -118,8 +118,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Email/push notifications",
         "default": False,
-        "pin": "0.31.0",
-        "ahead_of_pypi": False,  # PyPI 0.31.0 @ 2026-11-20
+        "pin": "0.31.1",
+        "ahead_of_pypi": False,  # PyPI 0.31.1 @ 2026-11-20 (pip index versions)
     },
     "profiles": {
         "repo": "https://github.com/usestapel/stapel-profiles.git",
@@ -129,8 +129,8 @@ STAPEL_LIBS = {
         "default": False,
         # 0.23.0: the `profiles.social_graph` Function stapel-feed's home feed
         # reads (SOCIAL_GRAPH_FUNCTION); a lower pin answers 503 on /feed.
-        "pin": "0.23.0",
-        "ahead_of_pypi": False,  # PyPI 0.23.0 @ 2026-11-05 (scripts/check_pypi_pins.py)
+        "pin": "0.23.3",
+        "ahead_of_pypi": False,  # PyPI 0.23.3 @ 2026-11-20 (pip index versions)
         # The language catalogue (names + flags) a fresh app's settings screen
         # offers; empty until this runs (idempotent: fills only empty fields).
         "seed": ["python manage.py sync_languages"],
@@ -141,8 +141,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Translations & i18n",
         "default": False,
-        "pin": "0.9.0",
-        "ahead_of_pypi": False,  # PyPI 0.9.0 @ 2026-11-13
+        "pin": "0.9.1",
+        "ahead_of_pypi": False,  # PyPI 0.9.1 @ 2026-11-20 (pip index versions)
     },
     "workspaces": {
         "repo": "https://github.com/usestapel/stapel-workspaces.git",
@@ -150,8 +150,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Workspaces & multi-tenancy",
         "default": False,
-        "pin": "0.38.0",
-        "ahead_of_pypi": False,  # PyPI 0.38.0 @ 2026-11-13
+        "pin": "0.38.1",
+        "ahead_of_pypi": False,  # PyPI 0.38.1 @ 2026-11-20 (pip index versions)
     },
     "gdpr": {
         "repo": "https://github.com/usestapel/stapel-gdpr.git",
@@ -165,8 +165,8 @@ STAPEL_LIBS = {
         "middleware": ["stapel_gdpr.guards.AccountClosureGuardMiddleware"],
         # 0.9.1: a timed-out account erasure can finish (late receipts
         # finalize it; gdpr_redrive_timeouts); 0.9.0 left it `deleting`.
-        "pin": "0.9.1",
-        "ahead_of_pypi": False,  # PyPI 0.9.1 @ 2026-11-04
+        "pin": "0.9.3",
+        "ahead_of_pypi": False,  # PyPI 0.9.3 @ 2026-11-20 (pip index versions)
     },
     # --- second onboarding wave (2026-07-11, static-scaffold-and-config.md §2
     # follow-up): 14 sibling checkouts brought into the registry. Dict order
@@ -223,8 +223,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Reference vocabularies (levels, terms, edges) behind ref_select features",
         "default": False,
-        "pin": "0.4.4",
-        "ahead_of_pypi": False,  # PyPI 0.4.4 @ 2026-10-22
+        "pin": "0.4.5",
+        "ahead_of_pypi": False,  # PyPI 0.4.5 @ 2026-11-20 (pip index versions)
         # Its own `urls.py` contributes the `api/v1/` half, so the host mounts
         # it bare under `vocabularies/` — the third-wave shape, not
         # categories' `categories/api/`.
@@ -243,8 +243,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Calendar, events & scheduling",
         "default": False,
-        "pin": "0.8.0",
-        "ahead_of_pypi": False,  # PyPI 0.8.0 @ 2026-10-15
+        "pin": "0.8.1",
+        "ahead_of_pypi": False,  # PyPI 0.8.1 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "calendar/",
         "requires": [],
@@ -255,8 +255,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Category tree & feature schema",
         "default": False,
-        "pin": "0.25.0",
-        "ahead_of_pypi": False,  # PyPI 0.25.0 @ 2026-10-22
+        "pin": "0.25.3",
+        "ahead_of_pypi": False,  # PyPI 0.25.3 @ 2026-11-20 (pip index versions)
         "http": True,
         # Onboarded 2026-07-11 assuming the "bakes api/ into its own urls"
         # second-wave shape (like calendar/video) — actually reads the SAME
@@ -299,8 +299,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Chat & messaging (direct/group/support)",
         "default": False,
-        "pin": "0.12.0",
-        "ahead_of_pypi": False,  # PyPI 0.12.0 @ 2026-11-13
+        "pin": "0.12.1",
+        "ahead_of_pypi": False,  # PyPI 0.12.1 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "chat/",
         # Its sockets are built on stapel-realtime (stapel_chat.E010/E011 refuse
@@ -313,8 +313,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Currencies & exchange rates",
         "default": False,
-        "pin": "0.1.9",
-        "ahead_of_pypi": False,  # PyPI 0.1.9 @ 2026-10-15
+        "pin": "0.1.10",
+        "ahead_of_pypi": False,  # PyPI 0.1.10 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "currencies/",
         "requires": [],
@@ -328,8 +328,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Workspace documents (folders, revisions, snapshot/CRDT collab)",
         "default": False,
-        "pin": "0.10.1",
-        "ahead_of_pypi": False,  # PyPI 0.10.1 @ 2026-11-13
+        "pin": "0.10.2",
+        "ahead_of_pypi": False,  # PyPI 0.10.2 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "docs/",
         "requires": [],
@@ -340,8 +340,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Admin-defined forms (schemas, anonymous submissions, response review)",
         "default": False,
-        "pin": "0.6.4",
-        "ahead_of_pypi": False,  # PyPI 0.6.4 @ 2026-11-13
+        "pin": "0.6.5",
+        "ahead_of_pypi": False,  # PyPI 0.6.5 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "forms/",
         "requires": ["attributes"],  # pyproject dependency, hard
@@ -352,11 +352,11 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Geographic locations, geofiles & geocoding",
         "default": False,
-        "pin": "0.4.1",
+        "pin": "0.4.2",
         # PyPI has 0.2.1, but the workspace checkout is 0.2.2 with a fix the
         # release lacks and a failing test blocks re-publishing — kept editable
         # (ahead of the last publishable release) until that test is green.
-        "ahead_of_pypi": False,  # PyPI 0.4.1 @ 2026-10-15
+        "ahead_of_pypi": False,  # PyPI 0.4.2 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "geo/",
         "requires": [],
@@ -370,8 +370,8 @@ STAPEL_LIBS = {
         # 0.29.0: `listings.bookables`, the resolver the booking preset
         # registers for stapel-reservations' `listing` type (unpriced
         # listings included).
-        "pin": "0.30.0",
-        "ahead_of_pypi": False,  # PyPI 0.30.0 @ 2026-11-13 (scripts/check_pypi_pins.py)
+        "pin": "0.30.3",
+        "ahead_of_pypi": False,  # PyPI 0.30.3 @ 2026-11-20 (pip index versions)
         "http": True,
         # Same fix/rationale as "categories" above: stapel-listings/urls.py's
         # own docstring says hosts mount it under their own ".../api/"
@@ -401,8 +401,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Recording lifecycle, normalization & transcription",
         "default": False,
-        "pin": "0.44.0",
-        "ahead_of_pypi": False,  # PyPI 0.44.0 @ 2026-11-05
+        "pin": "0.44.1",
+        "ahead_of_pypi": False,  # PyPI 0.44.1 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "recordings/",
         "requires": [],
@@ -413,8 +413,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Reviews & ratings (target-generic)",
         "default": False,
-        "pin": "0.8.0",
-        "ahead_of_pypi": False,  # PyPI 0.8.0 @ 2026-10-22
+        "pin": "0.8.1",
+        "ahead_of_pypi": False,  # PyPI 0.8.1 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "reviews/",
         "requires": [],
@@ -425,8 +425,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Tasks & kanban boards",
         "default": False,
-        "pin": "0.4.0",
-        "ahead_of_pypi": False,  # PyPI 0.4.0 @ 2026-10-15
+        "pin": "0.4.1",
+        "ahead_of_pypi": False,  # PyPI 0.4.1 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "tasks/",
         # attributes is a SOFT/optional seam here (features.py: import guarded
@@ -454,8 +454,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Video calls (rooms, lobby, LiveKit-backed by default)",
         "default": False,
-        "pin": "0.14.0",
-        "ahead_of_pypi": False,  # PyPI 0.14.0 @ 2026-11-13
+        "pin": "0.14.1",
+        "ahead_of_pypi": False,  # PyPI 0.14.1 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "video/",
         # The lobby socket speaks the realtime v1 envelope (hard dependency).
@@ -472,8 +472,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Search index, facets, geo radius and ranking",
         "default": False,
-        "pin": "0.18.2",
-        "ahead_of_pypi": False,  # PyPI 0.18.2 @ 2026-10-22
+        "pin": "0.18.4",
+        "ahead_of_pypi": False,  # PyPI 0.18.4 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "search/",
         "requires": ["attributes"],
@@ -487,8 +487,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Cross-target moderation (reports, verdicts, sanctions, appeals)",
         "default": False,
-        "pin": "0.9.0",
-        "ahead_of_pypi": False,  # PyPI 0.9.0 @ 2026-11-13
+        "pin": "0.9.1",
+        "ahead_of_pypi": False,  # PyPI 0.9.1 @ 2026-11-20 (pip index versions)
         "http": True,
         "url_prefix": "moderation/",
         "requires": [],
@@ -505,8 +505,8 @@ STAPEL_LIBS = {
         "default": False,
         # 0.2.1: a visitor with no session reads the empty cart (200); 0.2.0
         # answered the cold guest read with 401.
-        "pin": "0.2.1",
-        "ahead_of_pypi": False,  # PyPI 0.2.1 @ 2026-11-13
+        "pin": "0.2.2",
+        "ahead_of_pypi": False,  # PyPI 0.2.2 @ 2026-11-20 (pip index versions)
         "http": True,
         # stapel_orders/urls.py contributes "v1/" under the host's prefix.
         "url_prefix": "orders/api/",
