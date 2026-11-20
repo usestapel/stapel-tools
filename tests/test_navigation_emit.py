@@ -66,6 +66,14 @@ def test_shop_mounts_sign_in_and_public_routes_inside_the_shell():
     assert "<MemberGate />" in inside
 
 
+def test_a_monolith_storefront_keeps_off_the_reserved_admin_prefix():
+    """`/admin` is the backend's in a monolith (stapel/no-reserved-backend-route);
+    the storefront shape mounts the admin section at `/staff` there."""
+    src = _routes(_plan(["shop"]))
+    assert '{ path: "/staff", element: <AdminHome /> }' in src
+    assert '"/admin' not in src
+
+
 def test_dashboard_wraps_the_member_area_inside_the_same_layout():
     src = _routes(_plan(["auth", "notifications"]))
     inside = src.split('id: "stapel-shell"', 1)[1]

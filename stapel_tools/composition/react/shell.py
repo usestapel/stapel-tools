@@ -28,6 +28,10 @@ APP_PACKAGE = "app"
 APP_PAGE_EXPORT = "AppPage"
 LAYOUT_ROUTE_ID = "stapel-shell"
 SIGN_IN_ENTRY = "auth.login"
+#: Where a MONOLITH's storefront mounts the admin section: `/admin` is the
+#: backend's reserved prefix in a monolith (nginx §57 canon, the
+#: `stapel/no-reserved-backend-route` lint), a split storefront owns its paths.
+MONOLITH_STOREFRONT_ADMIN_PATH = "/staff"
 _APP_ID_PREFIX = "app."
 _APP_KEYS = (
     "id", "labelKey", "shortLabelKey", "icon", "path", "level", "parentId",
@@ -215,7 +219,10 @@ def plan_react_shell(  # noqa: C901
 
     # Pass two: the route plan's own manifests.
     if routes == "public":
-        manifests = _storefront_manifests(nav_pairs, own, has_accounts, app_package)
+        manifests = _storefront_manifests(
+            nav_pairs, own, has_accounts, app_package,
+            admin_path=MONOLITH_STOREFRONT_ADMIN_PATH if comp.project_type == "monolith"
+            else None)
         route_plan = F.build_public_route_plan(manifests, declared=declared)
         paths = _storefront_paths(route_plan)
     else:
@@ -274,11 +281,19 @@ def plan_react_shell(  # noqa: C901
     )
 
 
-def _storefront_manifests(nav_pairs, own, has_accounts, app_package) -> list[dict]:
+def _storefront_manifests(nav_pairs, own, has_accounts, app_package, *,
+                          admin_path: Optional[str] = None) -> list[dict]:
     from ... import _frontend_templates as F
 
     if has_accounts:
         manifests = F.public_nav_manifests(nav_pairs, app_package=app_package)
+        if admin_path is not None:
+            for manifest in manifests:
+                manifest["entries"] = [
+                    {**e, "route": {**e["route"], "path": admin_path}}
+                    if e["id"] == F.ADMIN_ROOT_ENTRY["id"] else e
+                    for e in manifest["entries"]
+                ]
     else:
         manifests = [
             {"package": p["package"], "version": p["version"],

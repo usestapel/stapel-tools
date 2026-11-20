@@ -635,7 +635,7 @@ def render_modules_tsx(
         # container has registered it since it was written, and the monolith
         # never did, which is the asymmetry this closes.
         lines.append('import { registerShellI18n } from "@stapel/shell-react";')
-    if needs_antd:
+    if needs_antd and any(e.get("default_component") for e in entries):
         lines.append('import { ConfigProvider } from "antd";')
         lines.append('import { toAntdThemeConfig } from "@stapel/tokens-antd";')
     for e in entries:
@@ -3679,14 +3679,15 @@ HOME_TSX = '''\
  */
 import type { ReactElement } from "react";
 import { Typography } from "antd";
+import { useT } from "@stapel/core";
+import { STOREFRONT_I18N_KEYS } from "../i18n/keys.js";
 
 export function Home(): ReactElement {
+  const t = useT();
   return (
     <section data-testid="page-home">
-      <Typography.Title level={1}>{{TITLE}}</Typography.Title>
-      <Typography.Paragraph>
-        This is the scaffolded home page. Replace this copy with your own.
-      </Typography.Paragraph>
+      <Typography.Title level={1}>{t(STOREFRONT_I18N_KEYS.landingTitle)}</Typography.Title>
+      <Typography.Paragraph>{t(STOREFRONT_I18N_KEYS.landingBody)}</Typography.Paragraph>
     </section>
   );
 }
@@ -4581,8 +4582,6 @@ def render_shell_chrome_tsx(
     lines.append(f"export function {name}(): ReactElement {{")
     if has_accounts:
         lines.append('  const member = useActiveSessionStatus() === "authenticated";')
-    else:
-        lines.append("  const member = false;")
     if shape == "app" and auth_wired:
         lines.append("  const { user } = useAuthSessionState();")
     for src in sources:
@@ -4657,7 +4656,10 @@ def render_shell_chrome_tsx(
             opened = f"<{provider}>{opened}</{provider}>"
         lines.append("  // The member area's shared state (the active workspace) sits above")
         lines.append("  // the chrome and every member screen; a guest has none to share.")
-        lines.append(f"  return member ? {opened} : {wrapped};")
+        if has_accounts:
+            lines.append(f"  return member ? {opened} : {wrapped};")
+        else:
+            lines.append(f"  return {opened};")
     else:
         lines.append("  return (")
         lines.extend(body)

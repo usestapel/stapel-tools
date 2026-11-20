@@ -23,7 +23,9 @@
   the session's three-state status: a guest (also one minted by an anonymous
   action) sees the sign-in entry whenever the product has accounts, a member
   the account menu; the brand falls back to the product title. The member
-  gate (`ProtectedRoute`) reads the same three-state status.
+  gate (`ProtectedRoute`) reads the same three-state status. A monolith's
+  storefront mounts its admin section at `/staff` (`/admin` is the backend's
+  reserved prefix there).
 - **Default by archetype, and the goldens that move with it:** storefront
   composites (`shop`, `classified`, `booking`, or two of categories/listings/
   search/orders) now default to `shop` — `--nav-preset dashboard` restores the
