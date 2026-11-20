@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+- **Library pre-push v3: a release tag's contract check runs on the project's
+  interpreter.** v2 ran `make contract-check` with the Makefile's default
+  `python3`, so a tag pushed from a shell without the brick's venv first on
+  PATH was refused for an import error, not for drift. The stage now passes
+  `PYTHON=` the first of `$STAPEL_PYTHON`, the active venv, `./.venv`,
+  `./venv`, `python3` that imports the package named in `pyproject.toml`, and
+  refuses with the fix spelled out when none does. `stapel-hooks doctor`
+  reports v2 hooks as outdated.
+
 ## [0.85.3] — 2026-11-20
 
 - The wheel ships `composition/kmp/vendored/sample-ios/` (the stapel-kmp

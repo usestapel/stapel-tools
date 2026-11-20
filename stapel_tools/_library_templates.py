@@ -1181,7 +1181,7 @@ fi
 '''
 
 PRE_PUSH = '''#!/usr/bin/env bash
-# stapel-hooks: pre-push v2
+# stapel-hooks: pre-push v3
 # Scan WHAT IS BEING PUSHED, never the working tree: git names each ref on
 # stdin, and the committed tree behind it is the only thing this push can
 # publish. Scanning "." made two sessions sharing one worktree block each
@@ -1357,8 +1357,31 @@ while read -r local_ref local_sha remote_ref remote_sha; do
                 exit 1
             fi
             if [ -f Makefile ] && grep -q '^contract-check:' Makefile; then
-                echo "Release tag ${local_ref#refs/tags/}: checking contract artifacts..."
-                if ! make contract-check; then
+                # The project's interpreter, not whatever `python3` PATH
+                # offers: the check imports the package, and a bare system
+                # interpreter refuses every tag for a reason that is not drift.
+                # First that imports the package wins: $STAPEL_PYTHON, the
+                # active venv, ./.venv, ./venv, then python3 on PATH.
+                package="$(sed -n 's/^name *= *"//p' pyproject.toml 2>/dev/null | head -n 1 | sed 's/".*//' | tr '-' '_' || true)"
+                project_python=''
+                for candidate in "${STAPEL_PYTHON:-}" "${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python}" .venv/bin/python venv/bin/python python3; do
+                    [ -n "$candidate" ] || continue
+                    command -v "$candidate" >/dev/null 2>&1 || continue
+                    if [ -z "$package" ] || "$candidate" -c "import $package" >/dev/null 2>&1; then
+                        project_python="$candidate"
+                        break
+                    fi
+                done
+                if [ -z "$project_python" ]; then
+                    echo ""
+                    echo "REFUSING to push ${local_ref#refs/tags/}: no interpreter here"
+                    echo "imports '$package', so the contract check cannot run."
+                    echo "Activate the project's venv, or point STAPEL_PYTHON at its python:"
+                    echo "  STAPEL_PYTHON=/path/to/venv/bin/python git push origin ${local_ref#refs/tags/}"
+                    exit 1
+                fi
+                echo "Release tag ${local_ref#refs/tags/}: checking contract artifacts with $project_python..."
+                if ! make contract-check PYTHON="$project_python"; then
                     echo ""
                     echo "REFUSING to push ${local_ref#refs/tags/}: the committed"
                     echo "contract artifacts do not match what this code emits."

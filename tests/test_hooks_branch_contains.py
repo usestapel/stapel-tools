@@ -374,3 +374,72 @@ def test_doctor_passes_on_a_correct_install(tmp_path, capsys):
     capsys.readouterr()
     assert hooks.main(["doctor", "--repo", str(work)]) == 0
     assert "OK" in capsys.readouterr().out
+
+
+# ------------------------------------------- the tag stage's interpreter
+
+
+def _brick(work: Path, tmp_path: Path) -> tuple[Path, Path]:
+    """A repo shaped like a brick, an interpreter that imports it (a venv)
+    and a `python3` first on PATH that does not."""
+    import sys
+
+    (work / "pyproject.toml").write_text('[project]\nname = "demo-brick"\n', encoding="utf-8")
+    (work / "Makefile").write_text(
+        "PYTHON ?= python3\n\ncontract-check:\n\t@echo \"$(PYTHON)\" > \"$$HOOK_RECORD\"\n",
+        encoding="utf-8",
+    )
+    run(work, "git", "add", "--", "pyproject.toml", "Makefile")
+    run(work, "git", "commit", "-q", "-m", "brick shape")
+
+    site = tmp_path / "site"
+    (site / "demo_brick").mkdir(parents=True)
+    (site / "demo_brick" / "__init__.py").write_text("", encoding="utf-8")
+    venv = tmp_path / "venv"
+    (venv / "bin").mkdir(parents=True)
+    python = venv / "bin" / "python"
+    python.write_text(f'#!/bin/sh\nPYTHONPATH="{site}" exec "{sys.executable}" "$@"\n', encoding="utf-8")
+    python.chmod(0o755)
+
+    stubs = tmp_path / "stubs"
+    stubs.mkdir()
+    bare = stubs / "python3"
+    bare.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    bare.chmod(0o755)
+    return venv, stubs
+
+
+def test_a_release_tag_checks_the_contract_with_the_projects_interpreter(repo, tmp_path, monkeypatch):
+    """Red on the v2 template: it ran `make contract-check` with whatever
+    `python3` PATH offered, which cannot import the brick."""
+    work, _ = repo
+    venv, stubs = _brick(work, tmp_path)
+    record = tmp_path / "used-python.txt"
+    monkeypatch.setenv("PATH", f"{stubs}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.setenv("VIRTUAL_ENV", str(venv))
+    monkeypatch.delenv("STAPEL_PYTHON", raising=False)
+    monkeypatch.setenv("HOOK_RECORD", str(record))
+    run(work, "git", "tag", "-a", "v0.0.2", "-m", "release")
+
+    result = run(work, "git", "push", "origin", "v0.0.2", check=False)
+
+    assert result.returncode == 0, output(result)
+    assert record.read_text().strip() == str(venv / "bin" / "python")
+
+
+def test_a_release_tag_without_an_interpreter_that_imports_the_package_is_refused(repo, tmp_path, monkeypatch):
+    work, _ = repo
+    _venv, stubs = _brick(work, tmp_path)
+    record = tmp_path / "used-python.txt"
+    monkeypatch.setenv("PATH", f"{stubs}{os.pathsep}{os.environ['PATH']}")
+    monkeypatch.delenv("VIRTUAL_ENV", raising=False)
+    monkeypatch.delenv("STAPEL_PYTHON", raising=False)
+    monkeypatch.setenv("HOOK_RECORD", str(record))
+    run(work, "git", "tag", "-a", "v0.0.3", "-m", "release")
+
+    result = run(work, "git", "push", "origin", "v0.0.3", check=False)
+
+    assert result.returncode != 0
+    assert "imports 'demo_brick'" in output(result)
+    assert "STAPEL_PYTHON=" in output(result)
+    assert not record.exists()
