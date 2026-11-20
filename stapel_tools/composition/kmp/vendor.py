@@ -12,6 +12,8 @@ What is vendored, and from where in stapel-kmp:
 * ``shell-templates.json`` — ``substrate/stapel-shell/shell-templates.json``;
 * ``nav-manifests/<brick>.json`` — ``bricks/<brick>/ui/nav-manifest.json``,
   for every brick whose descriptor the registry marks present;
+* ``sample-ios/`` — ``samples/shop-mobile``'s Xcode project, ``shared`` build and Swift shell,
+  the reference ``ios_parity`` compares the iOS templates with;
 * ``gradle/`` — the Gradle wrapper (``gradle-wrapper.jar``, ``gradlew``,
   ``gradle-wrapper.properties``). The jar's sha256 is checked against the
   checksum Gradle publishes for that version AT VENDOR TIME (the only network
@@ -46,6 +48,12 @@ FIXED_SOURCES: dict[str, str] = {
     "gradle/gradle-wrapper.jar": "gradle/wrapper/gradle-wrapper.jar",
     "gradle/gradle-wrapper.properties": "samples/shop-mobile/gradle/wrapper/gradle-wrapper.properties",
     "gradle/gradlew": "gradlew",
+    # The reference app's iOS shell: what ``ios_parity`` holds the templates to (the iOS floor,
+    # the availability fallbacks).
+    "sample-ios/project.pbxproj": "samples/shop-mobile/iosApp/iosApp.xcodeproj/project.pbxproj",
+    "sample-ios/shared.build.gradle.kts": "samples/shop-mobile/shared/build.gradle.kts",
+    "sample-ios/iOSApp.swift": "samples/shop-mobile/iosApp/iosApp/iOSApp.swift",
+    "sample-ios/ContentView.swift": "samples/shop-mobile/iosApp/iosApp/ContentView.swift",
 }
 
 

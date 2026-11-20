@@ -11,6 +11,9 @@ plugins {
     alias(libs.plugins.stapel.tokens)
 }
 
+// The minimum iOS version of the app (Kotlin/Native binaries and iosApp's IPHONEOS_DEPLOYMENT_TARGET).
+val IOS_FLOOR = "15.0"
+
 // The project's own backend modules (stapel.composition.json "custom"). Each one gets a generated
 // client once its contract is under contracts/<module>/ (`make contracts` after the backend has
 // endpoints); until then it is listed and skipped, never half-wired.
@@ -102,6 +105,12 @@ kotlin {
         target.binaries.framework {
             baseName = "Shared"
             isStatic = true
+        }
+        // The iOS floor (15.0): Kotlin/Native's minimum OS for every binary of this target, equal to the
+        // Xcode project's IPHONEOS_DEPLOYMENT_TARGET. Kotlin has no DSL for it; the documented route is
+        // the konan property override.
+        target.binaries.configureEach {
+            freeCompilerArgs += "-Xoverride-konan-properties=osVersionMin.ios_arm64=$IOS_FLOOR;osVersionMin.ios_simulator_arm64=$IOS_FLOOR"
         }
     }
     jvm { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }

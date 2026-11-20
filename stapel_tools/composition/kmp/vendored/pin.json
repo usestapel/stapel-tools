@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/usestapel/stapel-kmp",
-  "commit": "240953f447ea4e2e7735a39931e1bf3c6dfe7011",
+  "commit": "b17fa31408cbc2b7246e6fe7a4cb608de2b879e0",
   "gradle": {
     "version": "9.7.0",
     "wrapperJarSha256": "7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d",
@@ -10,7 +10,7 @@
   "files": {
     "kmp-registry.json": {
       "source": "kmp-registry.json",
-      "sha256": "2d8dc52072bb4ef44e0527bf5c530f826bda9ff4fa980c3b299f0bbebf348a30"
+      "sha256": "c814c2c84db0c91f40e90e322302eb7ed5260d14cb1a35dab0382cb96937dd19"
     },
     "shell-templates.json": {
       "source": "substrate/stapel-shell/shell-templates.json",
@@ -27,6 +27,22 @@
     "gradle/gradlew": {
       "source": "gradlew",
       "sha256": "a5a5c199ba02189ae8c46a334223371a20599d9c298ef65e7540ede4a3f72d59"
+    },
+    "sample-ios/project.pbxproj": {
+      "source": "samples/shop-mobile/iosApp/iosApp.xcodeproj/project.pbxproj",
+      "sha256": "033258276a7eb7965b487c0e4d73ee44019a9e52f29eae99a02531c0d466c0f3"
+    },
+    "sample-ios/shared.build.gradle.kts": {
+      "source": "samples/shop-mobile/shared/build.gradle.kts",
+      "sha256": "ce2789a8155001402d4e7c173e8a99108776c30bc14881062e8e845cd9cb7e5d"
+    },
+    "sample-ios/iOSApp.swift": {
+      "source": "samples/shop-mobile/iosApp/iosApp/iOSApp.swift",
+      "sha256": "fb334b4f95800ec49f02f422b549f3a76a7dced2a87e4966b1299fb35b631125"
+    },
+    "sample-ios/ContentView.swift": {
+      "source": "samples/shop-mobile/iosApp/iosApp/ContentView.swift",
+      "sha256": "95c5317ddf042aadc39fb60851e80cf866166188ca8bebef0c72f98b7f2498ce"
     },
     "nav-manifests/auth.json": {
       "source": "bricks/auth/ui/nav-manifest.json",

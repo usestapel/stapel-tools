@@ -35,6 +35,11 @@ xcodebuild -project "$HERE/iosApp/iosApp.xcodeproj" -scheme iosApp -configuratio
     CODE_SIGNING_ALLOWED=NO build >"$OUT/xcodebuild.log" 2>&1 || { tail -40 "$OUT/xcodebuild.log"; exit 1; }
 APP="$(find "$DERIVED/Build/Products" -maxdepth 2 -name '{{IOS_PRODUCT}}.app' | head -1)"
 [[ -d "$APP" ]] || { echo "[ios-smoke] no {{IOS_PRODUCT}}.app built"; exit 1; }
+# The app is built for the project's deployment target (the iOS floor).
+FLOOR="$(sed -n 's/.*IPHONEOS_DEPLOYMENT_TARGET = \([0-9.]*\);.*/\1/p' "$HERE/iosApp/iosApp.xcodeproj/project.pbxproj" | sort -u)"
+MINOS="$(otool -l "$APP/{{IOS_PRODUCT}}" | awk '/LC_BUILD_VERSION/{b=1} b&&/minos/{print $2; exit}')"
+echo "[ios-smoke] deployment target $FLOOR, app binary minos $MINOS"
+[[ "$MINOS" == "$FLOOR" ]] || { echo "[ios-smoke] the app binary's minos ($MINOS) is not the deployment target ($FLOOR)"; exit 1; }
 
 xcrun simctl boot "$UDID" 2>/dev/null || true
 xcrun simctl bootstatus "$UDID" -b >/dev/null

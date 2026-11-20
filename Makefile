@@ -60,6 +60,7 @@ nav-sync:
 # network). Re-vendor with: python -m stapel_tools.composition.kmp.vendor --from <stapel-kmp>
 kmp-vendor:
 	$(PYTHON) -m stapel_tools.composition.kmp.vendor --check
+	$(PYTHON) -m stapel_tools.composition.kmp.ios_parity
 
 # The golden whole-tree gate over generated projects (scripts/golden_scaffold.py):
 # every case of the composition matrix must generate byte-identical trees.
