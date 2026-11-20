@@ -1,7 +1,76 @@
 # Changelog
 
-## [Unreleased]
+## [0.87.0] — 2026-11-20
 
+The scaffold does itself what generated projects used to work around.
+
+- **Own pages carry their labels.** `frontend/src/app.labels.json`
+  (`{"en": {"<labelKey>": "Parts"}}`) is the project's, written once and never
+  regenerated; the generated `src/app.labels.generated.ts` registers it and
+  `modules.tsx` calls it, so nobody edits a GENERATED file to label a page. An
+  own page without a label is NAV-E11 under `--strict` and shows
+  `app.<id> (no label in src/app.labels.json)` otherwise
+  (`resolved.labels.missing`).
+- **`make nav-regenerate`** in the project's Makefile; the AGENTS template
+  names it (declare, bind, label, regenerate).
+- **Audiences.** Under the storefront chrome the admin section belongs to a
+  `staff` audience (`resolved.audiences.staff`, `RESOLVED_NAV_STAFF`, chosen by
+  the session's `is_staff`); a member no longer sees it. AppShell keeps its
+  listed-and-switched-off admin section. A storefront archetype hides member
+  destinations from a guest by default (the foreman's addendum to ruling 7);
+  `navigation.guest.wall` / `guest.hide` are per-destination exceptions.
+  `destinations.hidden` on a parent hides its subtree (hiding `admin.root`
+  alone was NAV-E06 for every admin child under `--strict`).
+- **The header search slot** takes an own component, `slots.search:
+  "app.<id>"` bound in `app.pages.ts` (NAV-E09 under `--strict` when unbound),
+  or the search pair's `search.box` embed once its mirror carries one; with a
+  search control mounted `/s` is reached from it and leaves `pending`.
+  `stapel-shell-lint` NAV003 accepts a slot component without an app-nav entry.
+- **Every destination reachable at every size class** (new NAV-E10, the
+  planner's invariant). `@stapel/shell-react` 0.20.1's dock has no "More": a
+  default or preset `island` past five destinations becomes the drawer (the
+  dock still floats under it) with a note naming the stranded destinations;
+  an explicit `primary.compact=island` is refused instead.
+- **A real home page.** `LandingPage`, `StorefrontHome`, the app-shape `Home`
+  and the account/admin indexes are built from the resolved navigation: the
+  product title, the composition's one-line `pitch` (`--pitch`, composition
+  key `pitch`), the sign-in entry for a guest and a link to each top
+  destination; nothing to link is an empty state. "This is a scaffolded
+  landing page", "Compose it here" and the other instructions to a developer
+  are gone from every generated page. `NavPlaceholder` carries
+  `data-stapel-placeholder`.
+- **Provenance.** The root `stapel.composition.json` carries `provenance`
+  (`stapel.provenance/1`): tool, version, `recipe` (from the composition's
+  `recipe` key), and the sha256 of every file under `frontend/` and `mobile/`,
+  with the subset `stapel-nav-regenerate` owns (`regenerated`, restamped by a
+  regenerate, `regeneratedBy`). Verifiable with sha256 alone; README documents
+  the fields.
+- `stapel-nav-plan --bound id,id | --assume-bound` plans, under `--strict`,
+  own pages a change is about to add; `--app-labels` reads their labels.
+- **KMP: analytics and push.** `--mobile-analytics [firebase,appmetrica]`,
+  `--mobile-consent opt-in|opt-out` (default opt-in), `--mobile-push
+  [firebase]`, `--mobile-push-ask on-demand|after-sign-in`,
+  `--mobile-firebase-config android=PATH,ios=PATH` (the file's app id must
+  equal `--mobile-id`). The emitter writes the stapel-analytics hub with the
+  consent default and the bricks' event registries, the push controller with
+  the notifications device registry, the vendored Swift bridges into the iOS
+  shell, Info.plist consent/auto-init/proxy keys, the `aps-environment`
+  entitlement, `POST_NOTIFICATIONS`, Swift package references and catalog
+  aliases. Without a vendor config each provider is a no-op that logs a named
+  marker; a release build refuses without it. Refused before anything is
+  written: push without `notifications`, AppMetrica push (no backend
+  addressing yet), push without a completable sign-in, a config of another
+  app. The provider facts stapel-kmp's registry does not carry
+  (`composition/kmp/providers.py`) are read from the vendored files. Echoed in
+  `mobile/stapel.composition.json` (`analytics`, `push`, `providers`).
+- **KMP: avatar upload wires `cdnModule()`** next to `ProfilesBrick()`.
+- **KMP: re-vendored stapel-kmp f14da51** (Swift provider bridges, the
+  reference Info.plist and androidApp build); `ios_parity` green. A new
+  `kmp-proof` workflow builds the generated app (auth, profiles, avatar
+  upload, notifications, analytics, push, no vendor config) through every
+  mobile gate on macOS.
+- An own child path given absolute under `account.root` (`/account/orders`)
+  resolved to `/account//account/orders`; it is its address now.
 - **ui-wiring protocol 3: routes are judged by the app's navigation plan.**
   `scripts/ui-wiring.mjs` reads `stapel.composition.json` (`resolved.react`,
   or the frontend copy's `navigation.resolved`), `stapel.app-nav.json` and
@@ -18,6 +87,11 @@
   the routes were not regenerated from); `--project` names the root when the
   script runs from outside it. `parse_result` reads protocols 1–3 into one
   shape; a pristine protocol-2 script is upgraded.
+- **Pins** to what PyPI serves: core 0.99.5, auth 0.54.1, cdn 0.31.3, gdpr
+  0.9.4, agent 0.40.1, mailtrap 0.2.1. The unreleased `orders` pair is compared
+  with the stapel-react commit its mirror came from (`source_commit`,
+  6f7cd6c8), the moving head is a notice; an unreleased pair the checkout
+  carries without a pinned commit fails the nav gate.
 
 ## [0.86.1] — 2026-11-20
 
