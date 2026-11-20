@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# stapel-hooks: pre-push v2
+# stapel-hooks: pre-push v3
 # Scan WHAT IS BEING PUSHED, never the working tree: git names each ref on
 # stdin, and the committed tree behind it is the only thing this push can
 # publish. Scanning "." made two sessions sharing one worktree block each
@@ -136,4 +136,79 @@ while read -r local_ref local_sha remote_ref remote_sha; do
             stapel-exposure-lint --strict --pushed "$local_sha" --remote "$remote_sha"
         fi
     fi
+
+    # A RELEASE TAG may not be cut over stale contract artifacts.
+    #
+    # CI already refuses to publish one — the drift tests fail and the
+    # publish workflow's ci-gate waits on a green CI run for the tagged
+    # commit, which is what stopped stapel-gdpr 0.7.3 and stapel-profiles
+    # 0.20.5 from ever reaching PyPI. That half works. What it does not do is
+    # stop the TAG, so the tag lands, CI goes red, and the version number is
+    # burned: two were burned in one night that way, each needing a re-cut
+    # under a new number with a changelog entry explaining the hole.
+    #
+    # This is the cheap half — it costs a `make contract-check` on a tag push
+    # and nothing at all on a branch push. The expensive half stays in CI,
+    # because only CI can prove the artifacts regenerate on a clean checkout
+    # with the pinned toolchain rather than on whatever this laptop has.
+    case "$local_ref" in
+        refs/tags/v*)
+            # `make contract-check` regenerates into a temp dir and compares
+            # with the artifacts ON DISK. That is only a check of the TAG when
+            # the disk matches the tag. Twice in one night it did not: the
+            # disk was right, `make contract` had just run, and the COMMIT was
+            # stale because the pathspec `git add` named one file and `make
+            # contract` writes four. Both tags went out green here, went red
+            # in CI on drift, and burned a version number each.
+            #
+            # So ask the cheap question first. Tracked content only —
+            # scratch files are not drift, and an untracked file that would
+            # change what the artifacts emit is not in the tag either.
+            if ! git diff --quiet "$local_sha" --; then
+                echo ""
+                echo "REFUSING to push ${local_ref#refs/tags/}: the working tree"
+                echo "does not match the commit this tag points at, so nothing"
+                echo "checked here would be a check of the TAG. Files that differ:"
+                git diff --name-only "$local_sha" -- | sed 's/^/  /'
+                echo ""
+                echo "Commit them (or stash them), move the tag, and push again."
+                exit 1
+            fi
+            if [ -f Makefile ] && grep -q '^contract-check:' Makefile; then
+                # The project's interpreter, not whatever `python3` PATH
+                # offers: the check imports the package, and a bare system
+                # interpreter refuses every tag for a reason that is not drift.
+                # First that imports the package wins: $STAPEL_PYTHON, the
+                # active venv, ./.venv, ./venv, then python3 on PATH.
+                package="$(sed -n 's/^name *= *"//p' pyproject.toml 2>/dev/null | head -n 1 | sed 's/".*//' | tr '-' '_' || true)"
+                project_python=''
+                for candidate in "${STAPEL_PYTHON:-}" "${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python}" .venv/bin/python venv/bin/python python3; do
+                    [ -n "$candidate" ] || continue
+                    command -v "$candidate" >/dev/null 2>&1 || continue
+                    if [ -z "$package" ] || "$candidate" -c "import $package" >/dev/null 2>&1; then
+                        project_python="$candidate"
+                        break
+                    fi
+                done
+                if [ -z "$project_python" ]; then
+                    echo ""
+                    echo "REFUSING to push ${local_ref#refs/tags/}: no interpreter here"
+                    echo "imports '$package', so the contract check cannot run."
+                    echo "Activate the project's venv, or point STAPEL_PYTHON at its python:"
+                    echo "  STAPEL_PYTHON=/path/to/venv/bin/python git push origin ${local_ref#refs/tags/}"
+                    exit 1
+                fi
+                echo "Release tag ${local_ref#refs/tags/}: checking contract artifacts with $project_python..."
+                if ! make contract-check PYTHON="$project_python"; then
+                    echo ""
+                    echo "REFUSING to push ${local_ref#refs/tags/}: the committed"
+                    echo "contract artifacts do not match what this code emits."
+                    echo "CI would fail this tag and the version number would be"
+                    echo "burned. Run 'make contract', commit the result, move the"
+                    echo "tag, and push again."
+                    exit 1
+                fi
+            fi
+            ;;
+    esac
 done
