@@ -10,7 +10,7 @@
  "index.html": "2e0804847fe9728421ca4376bde078166c51c7ba2baf3cfe26b20695915000da",
  "package.json": "480df32fa419bb5f3c54839da362ec8bee960ef53b643bc3ce4dee6d1116785e",
  "reserved-paths.json": "1008afa3e99b90dd5a42c10e404ee99214c6996380d3b3e84354ee93d7b7e5fa",
- "scripts/ui-wiring.mjs": "17a258c6b2e179979bf33efe43876269ce1ac8ff5cbb87a69086b5e16e228190",
+ "scripts/ui-wiring.mjs": "a46056138234842ee7326a263a2f8a3647970d50ed5c35f06f7e516584296353",
  "src/NavPlaceholder.tsx": "752358e860a663f264b76e9a6d20067515232e743006604b781c06d2b76da64e",
  "src/StorefrontHome.tsx": "2fb7683ab3853a2ce45cfe210a5c231d955511f5f9fcb8e501f9ddd07dce61fd",
  "src/StorefrontShell.tsx": "fd5b08164f94384b5359fe4ef8ede6fc3369308999076dd8c260ef3b86ceebab",

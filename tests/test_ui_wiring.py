@@ -113,7 +113,7 @@ def test_the_script_ships_in_the_package():
     shipped = ui_wiring.script_source()
     assert "UI_WIRING_RESULT" in shipped
     stamp = shipped.splitlines()[1]
-    assert stamp.startswith("// stapel-tools ") and " ui-wiring protocol 2 sha256 " in stamp
+    assert stamp.startswith("// stapel-tools ") and " ui-wiring protocol 3 sha256 " in stamp
     assert shipped.replace(stamp + "\n", "", 1) == SCRIPT.read_text()
 
 
@@ -134,7 +134,8 @@ def test_the_monolith_scaffold_writes_the_script_and_the_make_target(tmp_path):
 
 def test_parse_result_reads_the_last_tagged_line():
     out = "PASS x\nUI_WIRING_RESULT {\"ok\": false, \"checks\": 3, \"failed\": 1}\n"
-    assert ui_wiring.parse_result(out) == {"ok": False, "checks": 3, "failed": 1}
+    assert ui_wiring.parse_result(out) == {"ok": False, "checks": 3, "failed": 1, "protocol": 1,
+                                           "unverifiable": 0, "routes": "literal", "criteria": []}
     assert ui_wiring.parse_result("make: *** [frontend-wiring] Error 2") is None
 
 
@@ -159,9 +160,10 @@ def test_the_wired_button_is_green(tmp_path):
                               "catalog/PartPage.tsx": WIRED_PART})
     rc, out, result = _run(tmp_path, fe, ADD_TO_CART)
     assert rc == 0, out
-    assert result == {"ok": True, "checks": 7, "failed": 0, "unverifiable": 0, "protocol": 2,
+    assert result == {"ok": True, "checks": 7, "failed": 0, "unverifiable": 0, "protocol": 3,
+                      "routes": "literal",
                       "criteria": [{"task": "T-003-frontend", "id": "C5", "ok": True,
-                                    "failed": [], "unverifiable": []}]}
+                                    "failed": [], "unverifiable": [], "stale": []}]}
     assert "POST /acme/api/orders/v1/cart/items/ in src/api/orders.ts:2" in out
     assert "PASS C5 /parts/<id> base: 3 API path(s) under /acme/api" in out
 
@@ -531,7 +533,7 @@ def test_the_public_surface_repo_gets_the_script_and_its_own_target(tmp_path):
 
 def test_the_stamp_identifies_a_pristine_script():
     stamp = ui_wiring.inspect_script(ui_wiring.script_source())
-    assert stamp.protocol == ui_wiring.PROTOCOL == 2 and stamp.pristine
+    assert stamp.protocol == ui_wiring.PROTOCOL == 3 and stamp.pristine
     edited = ui_wiring.script_source().replace("process.exit(failed ? 1", "process.exit(0 ? 1")
     assert ui_wiring.inspect_script(edited).pristine is False
 
@@ -552,7 +554,7 @@ def test_the_backfill_keeps_upgrades_or_refuses():
         assert "would answer green" in decision.reason
     edited = ui_wiring.script_source().replace("UNVERIFIABLE", "PASS")
     assert ui_wiring.backfill_decision(edited).action == "refuse"
-    newer = ui_wiring.script_source().replace(" ui-wiring protocol 2 ", " ui-wiring protocol 9 ", 1)
+    newer = ui_wiring.script_source().replace(" ui-wiring protocol 3 ", " ui-wiring protocol 9 ", 1)
     refused = ui_wiring.backfill_decision(newer)
     assert refused.action == "refuse" and refused.current.protocol == 9
 
@@ -595,5 +597,5 @@ def test_the_shipped_script_is_a_registered_release():
 
 
 def test_a_released_body_under_a_wrong_protocol_claim_is_not_pristine():
-    lied = ui_wiring.script_source().replace(" ui-wiring protocol 2 ", " ui-wiring protocol 1 ", 1)
+    lied = ui_wiring.script_source().replace(" ui-wiring protocol 3 ", " ui-wiring protocol 2 ", 1)
     assert ui_wiring.inspect_script(lied).pristine is False

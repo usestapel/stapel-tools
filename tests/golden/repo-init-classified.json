@@ -10,7 +10,7 @@
  "index.html": "9a03d357237bd6b2b06accbe2286365598a14a87b269b6910a847e39f244d228",
  "package.json": "480df32fa419bb5f3c54839da362ec8bee960ef53b643bc3ce4dee6d1116785e",
  "reserved-paths.json": "54cfa1a0bec6b97eefafc7805c468dff81ffe4e6be1246fddb40c084d6c47bd7",
- "scripts/ui-wiring.mjs": "17a258c6b2e179979bf33efe43876269ce1ac8ff5cbb87a69086b5e16e228190",
+ "scripts/ui-wiring.mjs": "a46056138234842ee7326a263a2f8a3647970d50ed5c35f06f7e516584296353",
  "src/AccountHome.tsx": "63e3fcefc5e414b1b708f36142a9c34f65b1a5548eeeed6048cc3fe3621eb905",
  "src/AdminGate.tsx": "43c07be1dcfa13c47c0e976ba8dac90cd8437bfb58e413969132b97dd417840d",
  "src/AdminHome.tsx": "d568e1df062928383abdeefd3a654af85484974c0a5e89caa00913e64f244e71",

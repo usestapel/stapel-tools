@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+- **ui-wiring protocol 3: routes are judged by the app's navigation plan.**
+  `scripts/ui-wiring.mjs` reads `stapel.composition.json` (`resolved.react`,
+  or the frontend copy's `navigation.resolved`), `stapel.app-nav.json` and
+  `src/app.pages.ts`, and walks the generated route tree: the home index route
+  inside the shell's pathless layout, pathless gates, relative children, a
+  `section` root (`/account/orders` is the dashboard's `/app/account/orders`),
+  `/parts/<id>` = `/parts/:id`, own pages mounted by id, bindings through a
+  barrel. Protocol 2 was red on `/` of every generated app and green on an own
+  page nobody bound. Reds name the fix: bind the page in `app.pages.ts`; add an
+  own page to `stapel.app-nav.json` and bind it; regenerate. The page's first
+  testid must be rendered by the mounted page or a module it imports. A project
+  without a plan keeps the literal route check. The result carries `routes`
+  (`plan` | `literal`) and, per criterion, `stale` (declared, bound own pages
+  the routes were not regenerated from); `--project` names the root when the
+  script runs from outside it. `parse_result` reads protocols 1–3 into one
+  shape; a pristine protocol-2 script is upgraded.
+
 ## [0.86.1] — 2026-11-20
 
 - **`AuthStateReplay` drops every credential the document names.** Besides

@@ -11,6 +11,23 @@ scope sits outside the project's canon base (``API_BASE``). What cannot be
 resolved statically is UNVERIFIABLE: never green, exit 3. One run takes about
 a second; nothing is built or served.
 
+Routes (protocol 3). A generated project carries its navigation plan:
+``stapel.composition.json`` ``resolved.react`` (``paths``: entry id -> absolute
+path, ``reach``, ``home``), ``stapel.app-nav.json`` (the project's own pages)
+and ``frontend/src/app.pages.ts`` (own page id -> component). The generated
+route tree is not a list of path literals (the home is an index route inside
+the shell's pathless layout, sections carry relative children, own pages are
+mounted by id), so with a plan the script judges a manifest route through it:
+the plan names the entry (``/`` is the home; ``/parts/<id>`` equals
+``/parts/:id``; a route under a ``section`` root such as the dashboard's
+``/app`` matches too), the tree under ``src/`` mounts it, an own page is bound,
+and the page's first testid is rendered by the mounted page module or a module
+it imports. Each red names its fix (bind the page in ``app.pages.ts``; add an
+own page to ``stapel.app-nav.json``; regenerate). A route line red only because
+declared, bound own pages were not regenerated is also listed under the
+criterion's ``stale``. A project with no plan (an older scaffold) keeps the
+literal route check of protocol 2; the result says which (``routes``).
+
 The script lives at the repo root (``scripts/``), not under ``frontend/``: the
 frontend's own lint, build and test sets stay as generated.
 
@@ -45,8 +62,18 @@ RESULT_TAG = "UI_WIRING_RESULT"
 #: Printed before the result when the check could not run (exit 2).
 ERROR_TAG = "UI_WIRING_ERROR"
 #: Output protocol. 1: 0.74.0 (path after ``/api`` only, PASS/FAIL).
-#: 2: full request path with its base, ``base`` check, UNVERIFIABLE (exit 3).
-PROTOCOL = 2
+#: 2: 0.75.0, full request path with its base, ``base`` check, UNVERIFIABLE (exit 3).
+#: 3: 0.87.0, routes judged by the navigation plan; ``routes`` ("plan" | "literal")
+#: in the result, ``stale`` per criterion.
+PROTOCOL = 3
+
+#: What each protocol sees that the one before it answered green on: the
+#: reason an older pristine script is upgraded.
+PROTOCOL_GAINS = {
+    2: "request base, unverifiable values",
+    3: "routes through the navigation plan: an unbound own page, a path no page is "
+       "mounted at, a root testid outside the mounted page",
+}
 
 #: sha256 of every script text a stapel-tools release shipped, with the first
 #: release that shipped it and its protocol. A project's script is pristine
@@ -57,6 +84,7 @@ PROTOCOL = 2
 #: to this table).
 RELEASED_SCRIPTS: dict[str, tuple[str, int]] = {
     "d6e8e747fef4017c12a96e665a98c53e8d60aff56d10d86501747c05d50a0310": ("0.75.0", 2),
+    "9f839b9864017f56a5384ebb790a5387ba3081cfdc3c34157abc987d0bab9b09": ("0.87.0", 3),
 }
 
 #: The 0.74.0 script carried no stamp; its text is known.
@@ -181,9 +209,10 @@ def backfill_decision(existing: str | None) -> Backfill:
             f"the project's checker is stapel-tools {theirs}, newer than the caller's "
             f"{mine}: upgrade the caller's stapel-tools, its parser predates that output"), stamp)
     if stamp.protocol < PROTOCOL:
+        gains = "; ".join(PROTOCOL_GAINS[p] for p in range(max(stamp.protocol + 1, 2), PROTOCOL + 1))
         return Backfill("upgrade", (
             f"the project's checker {theirs} is blind to what protocol {PROTOCOL} checks "
-            f"(request base, unverifiable values) and would answer green there; "
+            f"({gains}) and would answer green there; "
             f"replacing it with stapel-tools {mine}"), stamp)
     return Backfill("keep", f"the project's checker {theirs} is pristine; kept as pinned", stamp)
 
@@ -193,9 +222,12 @@ def parse_result(output: str) -> dict | None:
     carries none (the script never ran: make, node or the install failed).
 
     The payload: ``{"ok": bool, "checks": int, "failed": int, "unverifiable":
-    int, "protocol": int, "criteria": [{"task", "id", "ok", "failed": [str],
-    "unverifiable": [str]}]}`` (protocol 1 has no ``unverifiable``); a run that
-    could not check anything has ``"error"`` and ``checks == 0``."""
+    int, "protocol": int, "routes": "plan" | "literal", "criteria": [{"task",
+    "id", "ok", "failed": [str], "unverifiable": [str], "stale": [str]}]}``; a
+    run that could not check anything has ``"error"`` and ``checks == 0``.
+    Every protocol reads into that shape: what an older one does not print is
+    filled in (protocol 1: no ``protocol``, no ``unverifiable``; 1 and 2: routes
+    by literal, no ``stale``)."""
     payload = None
     for line in (output or "").splitlines():
         if line.startswith(RESULT_TAG + " "):
@@ -203,7 +235,22 @@ def parse_result(output: str) -> dict | None:
                 payload = json.loads(line[len(RESULT_TAG) + 1:])
             except ValueError:
                 payload = None
-    return payload if isinstance(payload, dict) else None
+    if not isinstance(payload, dict):
+        return None
+    protocol = payload.get("protocol")
+    if not isinstance(protocol, int):
+        protocol = 2 if "unverifiable" in payload else 1
+    if "error" in payload:
+        return {**payload, "protocol": protocol}
+    rows = [row for row in payload.get("criteria") or [] if isinstance(row, dict)]
+    return {
+        **payload,
+        "protocol": protocol,
+        "unverifiable": payload.get("unverifiable", 0),
+        "routes": payload.get("routes", "literal"),
+        "criteria": [{**row, "unverifiable": row.get("unverifiable", []),
+                      "stale": row.get("stale", [])} for row in rows],
+    }
 
 
 def manifest(task: str, criteria: dict[str, dict], *, api_base: str = "") -> dict:
@@ -222,7 +269,8 @@ def manifest(task: str, criteria: dict[str, dict], *, api_base: str = "") -> dic
 
 
 __all__ = [
-    "ERROR_TAG", "MAKEFILE_BLOCK", "MAKE_TARGET", "MANIFEST_DIR", "PROTOCOL", "RELEASED_SCRIPTS",
+    "ERROR_TAG", "MAKEFILE_BLOCK", "MAKE_TARGET", "MANIFEST_DIR", "PROTOCOL", "PROTOCOL_GAINS",
+    "RELEASED_SCRIPTS",
     "RESULT_TAG",
     "SCRIPT_PATH", "Backfill", "ScriptStamp", "backfill_decision", "inspect_script",
     "makefile_block", "manifest", "parse_result", "script_source",
