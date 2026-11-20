@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.85.3] — 2026-11-20
+
+- The wheel ships `composition/kmp/vendored/sample-ios/` (the stapel-kmp
+  reference app's iOS shell that `ios_parity` compares the templates with).
+  0.85.0–0.85.2 pinned those four files in `vendored/pin.json` without
+  packaging them, so `python -m stapel_tools.composition.kmp.vendor --check`
+  and `ios_parity` failed in an installed wheel (scaffolding was unaffected: the
+  emitter reads only the registry, shell templates and nav manifests). A test
+  now fails when a vendored file falls outside the package data.
+
 ## [0.85.2] — 2026-11-20
 
 - Registry pin: stapel-auth 0.54.0 (tokens carry their session as `sid`;

@@ -80,3 +80,21 @@ def test_inversion_a_drifted_content_view_fails(trees):
     tpl, smp = trees
     _edit(tpl / "ios/ContentView.swift", ".ignoresSafeArea()", ".ignoresSafeArea(.keyboard)")
     assert any("differs from the reference app's ContentView.swift" in p for p in parity_problems(tpl, smp))
+
+
+def test_every_vendored_directory_ships_in_the_wheel():
+    """0.85.2 shipped pin.json naming sample-ios/* without the files: vendor --check failed when installed."""
+    import fnmatch
+    import tomllib
+
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    patterns = tomllib.loads(pyproject.read_text(encoding="utf-8"))["tool"]["setuptools"]["package-data"][
+        "stapel_tools.composition.kmp"
+    ]
+    vendored = TEMPLATES.parent / "vendored"
+    missing = [
+        p.relative_to(TEMPLATES.parent).as_posix()
+        for p in vendored.rglob("*")
+        if p.is_file() and not any(fnmatch.fnmatch(p.relative_to(TEMPLATES.parent).as_posix(), pat) for pat in patterns)
+    ]
+    assert missing == [], f"vendored files outside package-data: {missing}"

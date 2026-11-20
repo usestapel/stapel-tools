@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.85.2"
+version = "0.85.3"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -194,7 +194,7 @@ include = ["stapel_tools*"]
 "stapel_tools" = ["data/*.mjs", "data/*.json", "data/route-plans/*.json"]
 # The KMP emitter's vendored stapel-kmp data (digest-pinned) and its templates.
 "stapel_tools.composition.kmp" = [
-    "vendored/*.json", "vendored/nav-manifests/*.json", "vendored/gradle/*",
+    "vendored/*.json", "vendored/nav-manifests/*.json", "vendored/gradle/*", "vendored/sample-ios/*",
     "templates/*", "templates/ios/*",
 ]
 
