@@ -136,6 +136,10 @@ class Composition:
     app_bindings: dict = field(default_factory=dict)
     # notes that mean "something asked for is not rendered" become refusals
     strict: bool = False
+    # the project's own label texts ({locale: {labelKey: text}}, src/app.labels.json)
+    app_labels: dict = field(default_factory=dict)
+    # the product in one line (the home page's lead); "" = not given
+    pitch: str = ""
 
     @property
     def auth_model(self) -> Optional[str]:

@@ -1087,6 +1087,15 @@ up: disk-guard
 down:
 \t$(COMPOSE) down
 
+# --- Navigation (stapel-tools `stapel-nav-regenerate`) ---------------------
+# Adding a screen: declare it in stapel.app-nav.json, bind it in
+# frontend/src/app.pages.ts, label it in frontend/src/app.labels.json, then
+# `make nav-regenerate`. It rewrites only the generated route tree, nav data,
+# chrome and gates; files the project owns are never touched.
+.PHONY: nav-regenerate
+nav-regenerate:
+\tstapel-nav-regenerate .
+
 # --- Smoke of the booted local stack ---------------------------------------
 # Health of every service, then a media round trip: a file the backend
 # stores must come back through nginx with its content type.

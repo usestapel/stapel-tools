@@ -284,6 +284,9 @@ def public_source_plan(
     # flat reservedPathPrefixes array cannot.
     proxy_targets = proxy_targets_for(modules)
 
+    staff = shell.resolved.get("staff")
+    index_args = dict(has_accounts=shell.has_accounts, sign_in_path=shell.sign_in_path,
+                      staff_tree=bool(staff))
     files: dict[str, str] = {
         "package.json": F.render_public_package_json(
             entries,
@@ -313,7 +316,10 @@ def public_source_plan(
         "src/mandateSource.ts": F.render_mandate_source_ts(),
         "src/nav.generated.ts": F.render_shell_nav_generated_ts(
             manifests, paths=shell.paths, has_accounts=shell.has_accounts,
-            guest_wall=shell.guest_wall),
+            guest_wall=shell.guest_wall,
+            staff_section=tuple([staff["section"]] if staff else []),
+            guest_walled=tuple(shell.resolved["guest"].get("wall", ())),
+            guest_hidden=tuple(shell.resolved["guest"].get("hide", ()))),
         "src/routes.tsx": F.render_public_routes_tsx(
             plan, options, pairs=selected,
             chrome=(chrome_file, f"./{chrome_file}.js"), gated=shell.has_accounts),
@@ -322,12 +328,13 @@ def public_source_plan(
             sign_in_path=shell.sign_in_path, has_accounts=shell.has_accounts,
             auth_wired=has_auth, badge_ids=[e["id"] for m in manifests for e in m["entries"]],
             phone_chrome="dock" if shell.nav.primary["compact"] == "island" else "drawer",
-            legal_links=shell.legal_links,
+            legal_links=shell.legal_links, staff_tree=bool(staff),
         ),
-        "src/StorefrontHome.tsx": F.STOREFRONT_HOME_TSX,
+        "src/StorefrontHome.tsx": F.render_index_page_tsx(
+            "StorefrontHome", "storefront-home", **index_args),
         "src/app.pages.ts": F.APP_PAGES_TS,
         "stapel.app-nav.json": F.render_app_nav_json(app_nav or ()),
-        "src/__tests__/nav.test.ts": F.render_shell_nav_test_ts(),
+        "src/__tests__/nav.test.ts": F.render_shell_nav_test_ts(staff=bool(staff)),
         "src/__tests__/shell.test.tsx": F.render_shell_test_tsx(
             has_modules=True, sign_in_path=shell.sign_in_path,
             shell_testid="public-shell" if shell.shape == "storefront" else "app-shell"),
@@ -349,7 +356,8 @@ def public_source_plan(
         m["entries"] and any(e["id"] == "admin.root" for e in m["entries"])
         for m in manifests
     ):
-        files["src/AdminHome.tsx"] = F.ADMIN_HOME_TSX
+        files["src/AdminHome.tsx"] = F.render_index_page_tsx(
+            "AdminHome", "admin-home", section="admin.root", **index_args)
         # The staff gate needs a staff fact; auth-react's session is where it
         # lives. Without that pair the admin routes stay member-gated and each
         # pane refuses on its own — no gate that only pretends to check.
@@ -357,7 +365,8 @@ def public_source_plan(
             files["src/AdminGate.tsx"] = F.ADMIN_GATE_TSX
     if shell.has_accounts:
         files["src/MemberGate.tsx"] = F.MEMBER_GATE_TSX
-        files["src/AccountHome.tsx"] = F.ACCOUNT_HOME_TSX
+        files["src/AccountHome.tsx"] = F.render_index_page_tsx(
+            "AccountHome", "account-home", section="account.root", **index_args)
     if embeds_source:
         files["src/embeds.generated.tsx"] = embeds_source
     if shell.app_entries:

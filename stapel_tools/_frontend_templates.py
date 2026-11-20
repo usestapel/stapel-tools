@@ -515,6 +515,7 @@ const ListingSubjectOwner: NonNullable<ChatSlots["subjectOwner"]> = ({ subject, 
 def render_modules_tsx(
     entries: list[dict], *, has_cdn: bool = False, shell_react: bool = False,
     container_i18n: bool = False, auto_anonymous_actions: tuple[str, ...] = (),
+    app_labels: bool = False,
 ) -> str:
     """Generates ``frontend/src/modules.tsx`` — the DATA-DRIVEN registry of
     every selected ``@stapel/<module>-react`` pair (create_project.py's
@@ -626,6 +627,10 @@ def render_modules_tsx(
         # storefront has registered this since it was written; the monolith
         # had no mount pass, so it had neither the file nor the line.
         lines.append('import { registerStorefrontI18n } from "./i18n/keys.js";')
+    if app_labels:
+        # The project's own label texts (src/app.labels.json) — registered here
+        # once, so a coder never edits this file to label a page.
+        lines.append('import { registerAppLabels } from "./app.labels.generated.js";')
     if shell_react:
         # The chrome's OWN catalogue. `<AppShell/>` draws "Open menu", the
         # admin section's staff-only reason and — from 0.10.0 — the four
@@ -710,6 +715,8 @@ def render_modules_tsx(
     if container_i18n:
         # The container's own copy goes on LAST — the documented order.
         lines.append('registerStorefrontI18n(i18n, "en");')
+    if app_labels:
+        lines.append("registerAppLabels(i18n);")
     if seams:
         lines.append("")
         lines.append("// Cross-pair seam(s): the implementing pair's factory, read by")
@@ -1504,64 +1511,6 @@ STAPEL_NAV_JSON = """\
 }
 """
 
-# ``frontend/src/LandingPage.tsx`` — plain scaffold template (only emitted
-# with --landing), a simple hero page styled entirely through §68 neutral
-# colour tokens (`cssVar("<role>")` from `@stapel/tokens` — already a
-# devDependency of every generated project; see PACKAGE_JSON above) — NEVER
-# a raw hex/rgb (`no-raw-colors`, AGENTS.md §6). `{{CTA_HREF}}` is "/login"
-# when auth is wired, else "/app" (rendered by ``_write_frontend_scaffold``
-# — never guessed here).
-LANDING_PAGE_TSX = """\
-import type { ReactElement } from "react";
-import { useT } from "@stapel/core";
-import { cssVar } from "@stapel/tokens";
-import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
-
-/**
- * Landing page scaffold (--landing) — replace with your real marketing
- * page; keep reading colours through `cssVar("<role>")`, never a literal
- * hex/rgb, and copy through `t()` (src/i18n/keys.ts holds the floor).
- */
-export function LandingPage(): ReactElement {
-  const t = useT();
-  return (
-    <section
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: "1rem",
-        textAlign: "center",
-        padding: "2rem",
-        background: cssVar("surface"),
-        color: cssVar("text"),
-      }}
-      data-testid="page-landing"
-    >
-      <h1 style={{ fontSize: "2.5rem", margin: 0 }}>{t(STOREFRONT_I18N_KEYS.landingTitle)}</h1>
-      <p style={{ color: cssVar("text-muted"), maxWidth: "32rem" }}>
-        {t(STOREFRONT_I18N_KEYS.landingBody)}
-      </p>
-      <a
-        href="{{CTA_HREF}}"
-        style={{
-          padding: "0.75rem 1.5rem",
-          borderRadius: "0.5rem",
-          textDecoration: "none",
-          fontWeight: 600,
-          background: cssVar("brand"),
-          color: cssVar("text-on-accent"),
-        }}
-        data-testid="landing-cta"
-      >
-        {t(STOREFRONT_I18N_KEYS.landingCta)}
-      </a>
-    </section>
-  );
-}
-"""
 
 
 # ``frontend/src/__tests__/nav.test.ts`` — the nav gate: every destination
@@ -1642,57 +1591,6 @@ NAV_GATE_EMBEDS_TEST_TS = NAV_GATE_TEST_TS.replace(
 )
 
 
-# The landing page of a selection with no react pair: no i18n engine is
-# installed, so the copy stays inline.
-LANDING_PAGE_STATIC_TSX = """\
-import type { ReactElement } from "react";
-import { cssVar } from "@stapel/tokens";
-
-/**
- * Landing page scaffold (--landing) — replace with your real marketing
- * page; keep reading colours through `cssVar("<role>")`, never a literal
- * hex/rgb.
- */
-export function LandingPage(): ReactElement {
-  return (
-    <section
-      style={{
-        fontFamily: "system-ui, sans-serif",
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: "1rem",
-        textAlign: "center",
-        padding: "2rem",
-        background: cssVar("surface"),
-        color: cssVar("text"),
-      }}
-      data-testid="page-landing"
-    >
-      <h1 style={{ fontSize: "2.5rem", margin: 0 }}>{{TITLE}}</h1>
-      <p style={{ color: cssVar("text-muted"), maxWidth: "32rem" }}>
-        Welcome. This is a scaffolded landing page — replace this copy with
-        your own.
-      </p>
-      <a
-        href="{{CTA_HREF}}"
-        style={{
-          padding: "0.75rem 1.5rem",
-          borderRadius: "0.5rem",
-          textDecoration: "none",
-          fontWeight: 600,
-          background: cssVar("brand"),
-          color: cssVar("text-on-accent"),
-        }}
-        data-testid="landing-cta"
-      >
-        Get started
-      </a>
-    </section>
-  );
-}
-"""
 
 VITE_ENV_D_TS = """\
 /// <reference types="vite/client" />
@@ -1788,60 +1686,134 @@ export default tseslint.config(
 );
 """
 
-# ``frontend/src/<Section>Section.tsx`` — the landing of a container-owned
-# section (`/app/account`, `/app/admin`). It exists because the SECTION exists:
-# a pair declaring `placement.parentId: "admin.root"` is naming a parent no
-# module owns, and until the container declared one those screens were dropped
-# as orphans with no log. The page itself is deliberately a named gap, like the
-# storefront's — what belongs on an account landing is product knowledge.
-SECTION_HOME_TSX = """\
-import type { ReactElement } from "react";
-import { useT } from "@stapel/core";
-import { cssVar } from "@stapel/tokens";
-import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
-
-/**
- * GENERATED — the landing of the {{SECTION_LABEL}} section.
- *
- * The section is this app's own: no pair owns "the {{SECTION_LOWER}} area", and
- * the screens under it ({{SECTION_CHILDREN}}) hang from it by
- * `placement.parentId`. Replace this page with the real landing; the routes
- * beneath it already work.
- */
-export function {{SECTION_COMPONENT}}(): ReactElement {
-  const t = useT();
-  return (
-    <section
-      style={{
-        padding: "2rem",
-        background: cssVar("surface"),
-        color: cssVar("text"),
-      }}
-    >
-      <h1 style={{ margin: 0 }}>{t(STOREFRONT_I18N_KEYS.{{SECTION_KEY}}Title)}</h1>
-      <p style={{ color: cssVar("text-muted"), maxWidth: "32rem" }}>
-        {t(STOREFRONT_I18N_KEYS.{{SECTION_KEY}}Body)}
-      </p>
-    </section>
-  );
-}
-"""
 
 
-def render_section_home_tsx(root_id: str, children: list[str]) -> str:
-    """One section landing page, named after the container root it belongs to.
-    `children` are the ids that hang from it — printed in the file's own
-    docstring so a reader learns WHY the section exists from the section."""
-    root = MONOLITH_CONTAINER_ROOTS[root_id]
-    label = MONOLITH_NAV_I18N_EN[root["labelKey"]]
-    listed = ", ".join(children) if children else "none yet"
-    return (
-        SECTION_HOME_TSX.replace("{{SECTION_COMPONENT}}", root["_local"])
-        .replace("{{SECTION_KEY}}", root_id.split(".")[0])
-        .replace("{{SECTION_LABEL}}", label)
-        .replace("{{SECTION_LOWER}}", label.lower())
-        .replace("{{SECTION_CHILDREN}}", listed)
-    )
+def render_index_page_tsx(
+    component: str,
+    testid: str,
+    *,
+    import_prefix: str = "./",
+    section: str | None = None,
+    has_accounts: bool = False,
+    sign_in_path: str | None = None,
+    has_pitch: bool = False,
+    staff_tree: bool = False,
+) -> str:
+    """A real index page built from the plan, never instructions to a developer.
+
+    ``section=None`` is the home: the product's title, its one-line pitch when
+    the composition gives one, the sign-in entry for a guest, and a link to
+    each top destination the visitor's menu shows. A section (``account.root``,
+    ``admin.root``) lists the screens under it. Where there is nothing to link
+    the page is an empty state the visitor can read. The destinations come from
+    the same resolved trees the chrome draws (``nav.generated.ts``), so a
+    regenerated menu changes this page with it.
+    """
+    home = section is None
+    key = "landing" if home else section.split(".")[0]
+    trees = ["RESOLVED_NAV_GUEST"]
+    if has_accounts:
+        trees.append("RESOLVED_NAV_MEMBER")
+    if section == "admin.root" and staff_tree:
+        tree_expr = "RESOLVED_NAV_STAFF"
+        trees = ["RESOLVED_NAV_STAFF"]
+    elif home and has_accounts:
+        tree_expr = "member ? RESOLVED_NAV_MEMBER : RESOLVED_NAV_GUEST"
+    elif has_accounts:
+        tree_expr = "RESOLVED_NAV_MEMBER"
+        trees = ["RESOLVED_NAV_MEMBER"]
+    else:
+        tree_expr = "RESOLVED_NAV_GUEST"
+    sign_in = home and has_accounts and sign_in_path is not None
+    core = ["useT"] + (["useActiveSessionStatus"] if home and has_accounts else [])
+    antd = ["Card", "Empty", "Flex", "Typography"] + (["Button"] if sign_in else [])
+    if home:
+        pick = ('  const destinations = nav.filter(\n'
+                '    (entry) => entry.id !== "account.root" && entry.id !== "admin.root"\n'
+                '  );')
+        empty_key = "homeTitle"
+        empty_detail = "homeBody"
+    else:
+        pick = (f'  const destinations =\n'
+                f'    nav.find((entry) => entry.id === {json.dumps(section)})?.children ?? [];')
+        empty_key = f"{key}Body"
+        empty_detail = None
+    lines = [
+        "/**",
+        f" * GENERATED at scaffold time, then yours — the {'home page' if home else section + ' index'}.",
+        " * It is built from the app's resolved navigation (src/nav.generated.ts), so",
+        " * every link here is a destination the menu also offers. Replace it with",
+        " * richer content whenever you like; keep the root data-testid and the h1.",
+        " */",
+        'import type { ReactElement } from "react";',
+        f'import {{ {", ".join(sorted(antd))} }} from "antd";',
+        'import { Link } from "react-router";',
+        f'import {{ {", ".join(sorted(core))} }} from "@stapel/core";',
+        f'import {{ {", ".join(trees)} }} from "{import_prefix}nav.generated.js";',
+        f'import {{ STOREFRONT_I18N_KEYS }} from "{import_prefix}i18n/keys.js";',
+        "",
+    ]
+    if home:
+        lines.append(f"/** The composition gives a one-line pitch: {'yes' if has_pitch else 'no'}. */")
+        lines.append(f"const HAS_PITCH = {'true' if has_pitch else 'false'};")
+    if sign_in:
+        lines.append(f"const SIGN_IN_PATH = {json.dumps(sign_in_path)};")
+    lines += [
+        "",
+        f"export function {component}(): ReactElement {{",
+        "  const t = useT();",
+    ]
+    if home and has_accounts:
+        lines.append('  const member = useActiveSessionStatus() === "authenticated";')
+    lines.append(f"  const nav = {tree_expr};")
+    lines.append(pick)
+    lines += [
+        "  return (",
+        f'    <Flex vertical gap="large" data-testid="{testid}">',
+        "      <div>",
+        f"        <Typography.Title level={{1}}>{{t(STOREFRONT_I18N_KEYS.{key}Title)}}</Typography.Title>",
+    ]
+    if home:
+        lines.append("        {HAS_PITCH ? (")
+        lines.append("          <Typography.Paragraph>{t(STOREFRONT_I18N_KEYS.landingBody)}</Typography.Paragraph>")
+        lines.append("        ) : null}")
+        if sign_in:
+            lines.append("        {member ? null : (")
+            lines.append('          <Link to={SIGN_IN_PATH} data-testid="landing-cta">')
+            lines.append('            <Button type="primary">{t(STOREFRONT_I18N_KEYS.landingCta)}</Button>')
+            lines.append("          </Link>")
+            lines.append("        )}")
+    lines += [
+        "      </div>",
+        "      {destinations.length === 0 ? (",
+        "        <Empty",
+        f"          description={{t(STOREFRONT_I18N_KEYS.{empty_key})}}",
+        f'          data-testid="{testid}-empty"',
+        "        >",
+    ]
+    if empty_detail:
+        lines.append(f"          <Typography.Text type=\"secondary\">{{t(STOREFRONT_I18N_KEYS.{empty_detail})}}</Typography.Text>")
+    lines += [
+        "        </Empty>",
+        "      ) : (",
+        f'        <Flex wrap gap="middle" data-testid="{testid}-destinations"'
+        + (' aria-label={t(STOREFRONT_I18N_KEYS.homeBrowse)}' if home else "") + ">",
+        "          {destinations.map((entry) => (",
+        "            <Link key={entry.id} to={entry.linkPath} data-testid={`destination-${entry.id}`}>",
+        "              <Card hoverable size=\"small\">",
+        "                {t(entry.labelKey)}",
+        "              </Card>",
+        "            </Link>",
+        "          ))}",
+        "        </Flex>",
+        "      )}",
+        "    </Flex>",
+        "  );",
+        "}",
+        "",
+    ]
+    return "\n".join(lines)
+
 
 
 # ``frontend/src/AdminGate.tsx`` — the staff gate over the `/app/admin`
@@ -2311,30 +2283,18 @@ def build_public_route_plan(manifests: list[dict], *, declared: set[str] | None 
 # key always resolves to a sentence rather than to a raw key.
 STOREFRONT_I18N_EN: dict[str, str] = {
     "storefront.landing.title": "Welcome",
-    "storefront.landing.body": (
-        "This is a scaffolded landing page. Replace this copy with your own."
-    ),
+    # The product's one-line pitch (composition `pitch`); empty = not drawn.
+    "storefront.landing.body": "",
     "storefront.landing.cta": "Get started",
     "storefront.nav.account": "Account",
     "shell.nav.admin": "Admin",
     "storefront.admin.title": "Admin",
-    "storefront.admin.body": (
-        "The admin section belongs to this container: no pair owns it, and the "
-        "screens under it (privacy requests, usage) are declared by pairs that "
-        "hang from it. Compose the landing here; the screens are mounted."
-    ),
-    "storefront.home.title": "Storefront home",
-    "storefront.home.body": (
-        "The home page is a composite screen — a category carousel from one "
-        "pair over a newest-first result list from another — so it belongs to "
-        "the container that composes them, not to either pair. Compose it "
-        "here."
-    ),
+    "storefront.admin.body": "There are no admin screens in this app yet.",
+    "storefront.home.title": "Nothing to browse yet",
+    "storefront.home.body": "New items appear here as soon as they are published.",
+    "storefront.home.browse": "Where to go",
     "storefront.account.title": "Account",
-    "storefront.account.body": (
-        "The account landing is the container's to compose from the member "
-        "sections in the menu."
-    ),
+    "storefront.account.body": "Your account has no sections yet.",
     "storefront.placeholder.title": "This screen is declared, not wired",
     "storefront.placeholder.body": (
         "An installed pair declares this screen in its nav manifest, and the "
@@ -2396,13 +2356,16 @@ def storefront_i18n_symbol(key: str) -> str:
     return head + "".join(word.capitalize() for word in rest)
 
 
-def render_storefront_i18n_ts(locale: str, *, title: str | None = None) -> str:
+def render_storefront_i18n_ts(locale: str, *, title: str | None = None,
+                              pitch: str = "") -> str:
     """``src/i18n/keys.ts`` — the container's own key registry, its English
     floor, and the registrar the app calls once at startup. ``title`` is the
     landing page's heading (the project's display name)."""
     copy = dict(STOREFRONT_I18N_EN)
     if title:
         copy["storefront.landing.title"] = title
+    if pitch:
+        copy["storefront.landing.body"] = pitch
     symbols = "\n".join(
         f'  {storefront_i18n_symbol(key)}: {json.dumps(key)},'
         for key in STOREFRONT_I18N_EN
@@ -2566,6 +2529,7 @@ export function NavPlaceholder(props: NavPlaceholderProps): ReactElement {
       type="info"
       showIcon
       data-testid="nav-placeholder"
+      data-stapel-placeholder={props.entryId}
       title={t(STOREFRONT_I18N_KEYS.placeholderTitle)}
       description={
         <Space direction="vertical" size="small">
@@ -3671,132 +3635,10 @@ def render_storefront_shell_tsx(
     )
 
 
-HOME_TSX = '''\
-/**
- * The home page inside the shell — written once by the scaffold, then yours.
- * It renders content only: the shell around it already draws the header,
- * the navigation and the sign-in entry.
- */
-import type { ReactElement } from "react";
-import { Typography } from "antd";
-import { useT } from "@stapel/core";
-import { STOREFRONT_I18N_KEYS } from "../i18n/keys.js";
-
-export function Home(): ReactElement {
-  const t = useT();
-  return (
-    <section data-testid="page-home">
-      <Typography.Title level={1}>{t(STOREFRONT_I18N_KEYS.landingTitle)}</Typography.Title>
-      <Typography.Paragraph>{t(STOREFRONT_I18N_KEYS.landingBody)}</Typography.Paragraph>
-    </section>
-  );
-}
-'''
 
 
-STOREFRONT_HOME_TSX = '''\
-/**
- * GENERATED — the storefront's `/`, and a named gap rather than a hero.
- *
- * On a marketplace the first page is the goods: a category carousel over one
- * pair and a newest-first result list over another. That makes it a COMPOSITE
- * screen, and a composite route belongs to the container that composes it —
- * no pair may claim `/`, because the second pair would then have nowhere to
- * put its half. So generation emits this page, which says what belongs here,
- * and the wiring step replaces it.
- */
-import type { ReactElement } from "react";
-import { Alert, Typography } from "antd";
-import { useT } from "@stapel/core";
-import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
 
-export function StorefrontHome(): ReactElement {
-  const t = useT();
-  return (
-    <Alert
-      type="info"
-      showIcon
-      data-testid="storefront-home"
-      title={t(STOREFRONT_I18N_KEYS.homeTitle)}
-      description={
-        <Typography.Paragraph>
-          {t(STOREFRONT_I18N_KEYS.homeBody)}
-        </Typography.Paragraph>
-      }
-    />
-  );
-}
-'''
 
-ACCOUNT_HOME_TSX = '''\
-/**
- * GENERATED — the index of `/account`.
- *
- * `account.root` is the container's own nav entry (no module owns "the
- * account section"), so its component is the container's too. Like `/`, the
- * landing itself is a composition of the member sections around it, and it is
- * emitted as a page that says so.
- */
-import type { ReactElement } from "react";
-import { Alert, Typography } from "antd";
-import { useT } from "@stapel/core";
-import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
-
-export function AccountHome(): ReactElement {
-  const t = useT();
-  return (
-    <Alert
-      type="info"
-      showIcon
-      data-testid="account-home"
-      title={t(STOREFRONT_I18N_KEYS.accountTitle)}
-      description={
-        <Typography.Paragraph>
-          {t(STOREFRONT_I18N_KEYS.accountBody)}
-        </Typography.Paragraph>
-      }
-    />
-  );
-}
-'''
-
-ADMIN_HOME_TSX = '''\
-/**
- * GENERATED — the landing of `/admin`.
- *
- * `admin.root` is the container's own nav entry: no module owns "the admin
- * section", and until the container declared one, every pair that hung a
- * screen from it (gdpr's privacy console, video's usage pane) lost that screen
- * to the orphan rule with no log. The landing itself is a composition of those
- * sections, so it is emitted as a page that says so.
- *
- * Access: this is a MEMBER route inside `<MemberGate/>`. Staff-ness is checked
- * by the panes themselves, which refuse by name — a staff screen is reachable
- * and says no, rather than being hidden from the person who needs to know it
- * exists.
- */
-import type { ReactElement } from "react";
-import { Alert, Typography } from "antd";
-import { useT } from "@stapel/core";
-import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
-
-export function AdminHome(): ReactElement {
-  const t = useT();
-  return (
-    <Alert
-      type="info"
-      showIcon
-      data-testid="admin-home"
-      title={t(STOREFRONT_I18N_KEYS.adminTitle)}
-      description={
-        <Typography.Paragraph>
-          {t(STOREFRONT_I18N_KEYS.adminBody)}
-        </Typography.Paragraph>
-      }
-    />
-  );
-}
-'''
 
 ADMIN_GATE_TSX = '''\
 /**
@@ -4341,6 +4183,8 @@ export default tseslint.config(
 
 def render_shell_nav_generated_ts(
     manifests: list[dict], *, paths: dict[str, str], has_accounts: bool, guest_wall: bool,
+    staff_section: tuple[str, ...] = (), guest_walled: tuple[str, ...] = (),
+    guest_hidden: tuple[str, ...] = (),
 ) -> str:
     """``src/nav.generated.ts`` for the shell: the installed manifests (the
     pairs', the container roots and the project's own pages), ``NAV_PATHS``
@@ -4365,6 +4209,33 @@ def render_shell_nav_generated_ts(
     member = "resolveMemberNav" if has_accounts else "resolvePublicNav"
     imports = sorted({member, "resolvePublicNav"})
     guest_tree = "RESOLVED_NAV_MEMBER" if (guest_wall and has_accounts) else "RESOLVED_NAV_PUBLIC"
+    extra = ""
+    if has_accounts and guest_wall and guest_hidden:
+        guest_tree = "RESOLVED_NAV_MEMBER.filter((entry) => !GUEST_HIDDEN.has(entry.id))"
+        extra += ("\n/** Member destinations a guest does not see (`guest.hide`). */\n"
+                  f"const GUEST_HIDDEN: ReadonlySet<string> = new Set({json.dumps(sorted(guest_hidden))});\n")
+    elif has_accounts and not guest_wall and guest_walled:
+        guest_tree = ("[\n  ...RESOLVED_NAV_PUBLIC,\n  ...RESOLVED_NAV_MEMBER.filter(\n"
+                      "    (entry) => GUEST_WALLED.has(entry.id) && "
+                      "!RESOLVED_NAV_PUBLIC.some((p) => p.id === entry.id)\n  ),\n]"
+                      ".sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))")
+        extra += ("\n/** Member destinations a guest sees as a wall to sign-in (`guest.wall`). */\n"
+                  f"const GUEST_WALLED: ReadonlySet<string> = new Set({json.dumps(sorted(guest_walled))});\n")
+    if has_accounts and staff_section:
+        member_block = f"""/** The staff section: shown to a member whose session says `is_staff` only. */
+const STAFF_SECTION: ReadonlySet<string> = new Set({json.dumps(sorted(staff_section))});
+
+/** What a signed-in member who is staff is shown. */
+export const RESOLVED_NAV_STAFF: readonly ResolvedNavEntry[] = anchor(
+  {"resolveMemberNav"}(INSTALLED_NAV_MANIFESTS, overrides)
+);
+
+/** What a signed-in member is shown (no staff section). */
+export const RESOLVED_NAV_MEMBER: readonly ResolvedNavEntry[] = RESOLVED_NAV_STAFF.filter(
+  (entry) => !STAFF_SECTION.has(entry.id)
+);"""
+    else:
+        member_block = None
     guest_note = (
         "a guest sees the member destinations too (`guest.memberDestinations: wall`):\n"
         " * opening one leads to sign-in with the way back, so nobody has to know a\n"
@@ -4405,11 +4276,11 @@ export const RESOLVED_NAV_PUBLIC: readonly ResolvedNavEntry[] = anchor(
   resolvePublicNav(INSTALLED_NAV_MANIFESTS, overrides)
 );
 
-/** What a signed-in member is shown. */
+{member_block or f"""/** What a signed-in member is shown. */
 export const RESOLVED_NAV_MEMBER: readonly ResolvedNavEntry[] = anchor(
   {member}(INSTALLED_NAV_MANIFESTS, overrides)
-);
-
+);"""}
+{extra}
 /** What the shell shows a guest: {guest_note}. */
 export const RESOLVED_NAV_GUEST: readonly ResolvedNavEntry[] = {guest_tree};
 
@@ -4471,6 +4342,8 @@ def render_shell_chrome_tsx(
     shell_providers: list[tuple[str, str]] = (),
     phone_chrome: str = "dock",
     legal_links: list[tuple[str, str]] = (),
+    staff_tree: bool = False,
+    own_search: str | None = None,
 ) -> str:
     """The chrome component (``src/chrome.generated.tsx`` in a monolith,
     ``src/StorefrontShell.tsx`` in a split storefront): ``<PublicShell/>``
@@ -4537,18 +4410,24 @@ def render_shell_chrome_tsx(
     if legal_links and shape == "storefront":
         shell_names.append("SiteLegalFooter")
     lines.append(f'import {{ {", ".join(shell_names)} }} from "@stapel/shell-react/default";')
-    if shape == "app" and auth_wired:
+    staff_tree = staff_tree and has_accounts and auth_wired
+    if (shape == "app" or staff_tree) and auth_wired:
         lines.append('import { useAuthSessionState } from "@stapel/auth-react";')
+    if own_search:
+        lines.append('import { APP_PAGES } from "./app.pages.js";')
     for src in sources:
         lines.append(f'import {{ {src["hook"]} }} from "{src["package"]}";')
     for package, provider in shell_providers:
         lines.append(f'import {{ {provider} }} from "{package}";')
-    lines.append(
-        'import { RESOLVED_NAV_GUEST, RESOLVED_NAV_MEMBER } from "./nav.generated.js";'
-        if has_accounts else 'import { RESOLVED_NAV_GUEST } from "./nav.generated.js";')
+    trees = ["RESOLVED_NAV_GUEST"] + (["RESOLVED_NAV_MEMBER"] if has_accounts else []) + (
+        ["RESOLVED_NAV_STAFF"] if staff_tree else [])
+    lines.append(f'import {{ {", ".join(trees)} }} from "./nav.generated.js";')
     embeds_import_at = len(lines)
     lines.append("")
     lines.append(f"const TITLE = {json.dumps(title)};")
+    if own_search:
+        lines.append("/** The project's own search control (slots.search, bound in src/app.pages.ts). */")
+        lines.append(f"const SearchControl = APP_PAGES[{json.dumps(own_search)}];")
     if sign_in:
         lines.append(f"const SIGN_IN_PATH = {json.dumps(sign_in_path)};")
     lines.append("")
@@ -4582,11 +4461,16 @@ def render_shell_chrome_tsx(
     lines.append(f"export function {name}(): ReactElement {{")
     if has_accounts:
         lines.append('  const member = useActiveSessionStatus() === "authenticated";')
-    if shape == "app" and auth_wired:
+    if (shape == "app" or staff_tree) and auth_wired:
         lines.append("  const { user } = useAuthSessionState();")
+    if staff_tree:
+        lines.append("  const staff = user?.is_staff === true;")
     for src in sources:
         lines.append(f'  const {src["var"]} = {src["hook"]}();')
     nav_expr = "member ? RESOLVED_NAV_MEMBER : RESOLVED_NAV_GUEST" if has_accounts else "RESOLVED_NAV_GUEST"
+    if staff_tree:
+        nav_expr = ("member ? (staff ? RESOLVED_NAV_STAFF : RESOLVED_NAV_MEMBER) : "
+                    "RESOLVED_NAV_GUEST")
 
     props: list[str] = [f"      nav={{{nav_expr}}}"]
     if not shell_self_themes():
@@ -4606,8 +4490,11 @@ def render_shell_chrome_tsx(
                            ("footer", "footer")):
             legal = ("<SiteLegalFooter />" "<LegalLinks />") if (
                 slot == "footer" and legal_links) else ""
-            member_jsx = slot_jsx(slot, True, legal)
-            guest_jsx = slot_jsx(slot, False, legal)
+            if slot == "topbar.center" and own_search:
+                member_jsx = guest_jsx = "SearchControl !== undefined ? <SearchControl /> : undefined"
+            else:
+                member_jsx = slot_jsx(slot, True, legal)
+                guest_jsx = slot_jsx(slot, False, legal)
             if member_jsx is None and guest_jsx is None:
                 continue
             if has_accounts and member_jsx != guest_jsx:
@@ -4625,17 +4512,26 @@ def render_shell_chrome_tsx(
         foot = ("sidenav.foot", "sheet.foot") if legal_links else ()
         member_slot_ids = list(dict.fromkeys([*filled, *foot]))
         for slot in member_slot_ids:
+            if own_search and slot == "topbar.center":
+                continue
             jsx = slot_jsx(slot, True, "<LegalLinks />" if slot in foot else "")
             if jsx:
                 member_slots.append(f"{json.dumps(slot)}: {jsx}")
         guest_slot_ids = list(dict.fromkeys([*filled, "topbar.end", *foot]))
         for slot in guest_slot_ids:
+            if own_search and slot == "topbar.center":
+                continue
             extra = account_guest_extra if slot == "topbar.end" else ""
             if slot in foot:
                 extra = "<LegalLinks />"
             jsx = slot_jsx(slot, False, extra)
             if jsx:
                 guest_slots.append(f"{json.dumps(slot)}: {jsx}")
+        if own_search:
+            own = ('"topbar.center": SearchControl !== undefined ? <SearchControl /> : '
+                   'undefined')
+            member_slots.append(own)
+            guest_slots.append(own)
         member_obj = "{ " + ", ".join(member_slots) + " }" if member_slots else "{}"
         guest_obj = "{ " + ", ".join(guest_slots) + " }" if guest_slots else "{}"
         if has_accounts and member_obj != guest_obj:
@@ -4673,19 +4569,57 @@ def render_shell_chrome_tsx(
     return "\n".join(lines)
 
 
+#: ``src/app.labels.json`` — the project's own label texts, written once and
+#: never regenerated. One object per locale: ``{"en": {"<labelKey>": "Parts"}}``.
+APP_LABELS_JSON = '{\n  "en": {}\n}\n'
+
+
+def render_app_labels_ts(own: list[dict], missing: tuple[str, ...] = ()) -> str:
+    """``src/app.labels.generated.ts``: registers ``src/app.labels.json`` with
+    the app's i18n, plus a visible placeholder for every own page whose label
+    key the file does not name (``--strict`` refuses that as NAV-E11)."""
+    placeholders = {
+        e["labelKey"]: f"{e['id']} (no label in src/app.labels.json)" for e in own
+        if e["id"] in missing}
+    return f"""/**
+ * GENERATED — registers the project's own label texts (src/app.labels.json,
+ * which is yours and is never regenerated) with the app's i18n. An own page
+ * whose label key that file does not name shows the placeholder below, so a
+ * missing label is visible on screen; Studio's strict mode refuses it.
+ */
+import type {{ I18nDictionary, I18nEngine }} from "@stapel/core";
+import labels from "./app.labels.json";
+
+const PLACEHOLDERS: I18nDictionary = {json.dumps(placeholders, indent=2, sort_keys=True)};
+
+export function registerAppLabels(i18n: I18nEngine): void {{
+  const byLocale = labels as Readonly<Record<string, I18nDictionary>>;
+  i18n.registerBundle("en", {{ ...PLACEHOLDERS, ...(byLocale["en"] ?? {{}}) }});
+  for (const [locale, bundle] of Object.entries(byLocale)) {{
+    if (locale !== "en") i18n.registerBundle(locale, bundle);
+  }}
+}}
+"""
+
+
 APP_PAGES_TS = '''\
 /**
  * The project's own pages — written once by the scaffold, then yours.
  *
- * Each screen you add is TWO lines in two files:
+ * Each screen you add is three lines in three files:
  *   1. an entry in stapel.app-nav.json (project root): its id (`app.<screen>`),
  *      label key, icon, path, where it sits (top or under a parent such as
  *      `account.root`), who sees it (`surface`), and `via` when it is reached
  *      from another screen rather than from the menu;
- *   2. a binding here: the id -> the page component.
- * Then run `stapel-nav-regenerate .` at the project root: the page is mounted
+ *   2. a binding here: the id -> the page component;
+ *   3. its label text in src/app.labels.json: {"en": {"<labelKey>": "Parts"}}.
+ * Then run `make nav-regenerate` at the project root: the page is mounted
  * inside the shell and placed in the navigation. A page renders its content
  * only — no own header, navigation or full-viewport frame.
+ *
+ * A component bound here can also fill the header's search slot: set
+ * `navigation.slots.search` to its id ("app.search_box") in
+ * stapel.composition.json and regenerate.
  */
 import type { ComponentType } from "react";
 
@@ -4727,11 +4661,11 @@ APP_NAV_JSON = """\
 """
 
 
-def render_shell_nav_test_ts() -> str:
+def render_shell_nav_test_ts(*, staff: bool = False) -> str:
     """G2 — the nav gate, both directions: every destination the menus offer
     is a mounted route, AND every mounted route is reached from the shell
     (`navigation.resolved.reach`) or declared a deliberate deep page."""
-    return """\
+    text = """\
 // @vitest-environment jsdom
 /**
  * GENERATED — the nav gate (G2), both directions:
@@ -4794,6 +4728,18 @@ describe("nav gate", () => {
   });
 });
 """
+    if staff:
+        # The staff tree is a menu too: its destinations are offered and mounted.
+        text = text.replace(
+            "import { NAV_PATHS, RESOLVED_NAV_GUEST, RESOLVED_NAV_MEMBER } from",
+            "import {\n  NAV_PATHS,\n  RESOLVED_NAV_GUEST,\n  RESOLVED_NAV_MEMBER,\n"
+            "  RESOLVED_NAV_STAFF,\n} from",
+        ).replace(
+            "[...linked(RESOLVED_NAV_MEMBER), ...linked(RESOLVED_NAV_GUEST)]",
+            "[\n      ...linked(RESOLVED_NAV_STAFF),\n      ...linked(RESOLVED_NAV_MEMBER),\n"
+            "      ...linked(RESOLVED_NAV_GUEST),\n    ]",
+        )
+    return text
 
 
 def render_shell_test_tsx(*, has_modules: bool, sign_in_path: str | None, shell_testid: str) -> str:

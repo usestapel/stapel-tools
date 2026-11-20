@@ -30,7 +30,7 @@ def test_one_wireframe_per_platform_audience_and_size_class(tmp_path):
     plan, out = _plan(tmp_path, "--modules", "shop", "--mobile", "kmp", "--title", "Acme")
     names = sorted(p.name for p in out.iterdir())
     assert names == sorted(f"{platform}-{audience}-{size}.svg" for platform in ("react", "kmp")
-                           for audience in ("guest", "member") for size in CANVAS)
+                           for audience in ("guest", "member", "staff") for size in CANVAS)
     for path in out.iterdir():
         xml.dom.minidom.parse(str(path))
 
@@ -61,9 +61,9 @@ def test_a_drawer_preset_draws_the_menu_button(tmp_path):
 def test_same_plan_same_bytes_and_labels_override(tmp_path):
     plan, _ = _plan(tmp_path, "--modules", "shop", svg=False)
     resolved = plan["react"]
-    assert render(resolved, "guest", "medium") == render(resolved, "guest", "medium")
-    dest = resolved["audiences"]["guest"]["medium"]["visible"][0]
-    assert "Shop now" in _texts(render(resolved, "guest", "medium", labels={dest: "Shop now"}))
+    assert render(resolved, "member", "medium") == render(resolved, "member", "medium")
+    dest = resolved["audiences"]["member"]["medium"]["visible"][0]
+    assert "Shop now" in _texts(render(resolved, "member", "medium", labels={dest: "Shop now"}))
 
 
 def test_labels_read_the_id():
@@ -75,7 +75,8 @@ def test_labels_read_the_id():
 def test_write_wireframes_skips_nothing_the_plan_has(tmp_path):
     plan, _ = _plan(tmp_path, "--modules", "shop", svg=False)
     written = write_wireframes(plan, tmp_path / "w")
-    assert len(written) == 2 * len(CANVAS)
+    assert len(written) == len(plan["react"]["audiences"]) * len(CANVAS)
+    assert set(plan["react"]["audiences"]) == {"guest", "member", "staff"}
 
 
 @pytest.mark.parametrize("carrier", ["bottom-tabs", "island", "top-tabs", "rail", "side-panel",

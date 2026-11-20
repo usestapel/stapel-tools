@@ -8,7 +8,7 @@ Static, no node, no browser. Reads a project built by ``stapel-create-project``
 |---|---|
 | NAV001 | a route mounted outside the shell layout route (``id: "stapel-shell"``) in ``src/routes*.tsx``, or route files with no shell layout at all |
 | NAV002 | a page module under ``src/pages/**`` that neither ``src/app.pages.ts`` nor a route file references |
-| NAV003 | a ``stapel.app-nav.json`` entry with no ``app.pages.ts`` binding, or a binding with no entry |
+| NAV003 | a ``stapel.app-nav.json`` entry with no ``app.pages.ts`` binding, or a binding with no entry (an own slot component, ``slots.search: "app.x"``, needs none) |
 | NAV004 | a generated file whose SHA-256 differs from ``navigation.resolved.generated`` (or is missing) |
 | NAV005 | ``stapel.composition.json`` has no ``navigation.resolved``, or ``signIn`` is set and ``slots.account`` resolved to nothing |
 
@@ -165,11 +165,16 @@ def check_app_nav(project: Path) -> list[Finding]:
     pages_ts = _frontend(project) / "src" / "app.pages.ts"
     entries = {e.get("id") for e in load_app_nav(app_nav) if e.get("id")}
     bound = bound_app_pages(pages_ts)
+    resolved, _ = _resolved(project)
+    # An own component that fills a semantic slot (`slots.search: "app.x"`) is
+    # bound like a page and has no app-nav entry by design.
+    slot_fillers = {v for v in ((resolved or {}).get("slots") or {}).values()
+                    if isinstance(v, str) and v.startswith("app.")}
     out = []
     for dest in sorted(entries - bound):
         out.append(Finding("NAV003", _rel(project, app_nav), 0,
                            f"{dest}: an entry with no binding in {_rel(project, pages_ts)}"))
-    for dest in sorted(bound - entries):
+    for dest in sorted(bound - entries - slot_fillers):
         out.append(Finding("NAV003", _rel(project, pages_ts), 0,
                            f"{dest}: a binding with no entry in {_rel(project, app_nav)}"))
     return out

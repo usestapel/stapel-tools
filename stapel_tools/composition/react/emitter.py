@@ -26,7 +26,7 @@ ROOT = "frontend"
 GENERATED_NAV_FILES: tuple[str, ...] = (
     "src/routes.tsx", "src/nav.generated.ts", "src/chrome.generated.tsx",
     "src/StorefrontShell.tsx", "src/AppChrome.tsx", "src/embeds.generated.tsx",
-    "src/AppPage.tsx",
+    "src/AppPage.tsx", "src/app.labels.generated.ts",
 )
 
 #: Physical slots each chrome renders, and the PublicShell prop each feeds.
@@ -173,8 +173,13 @@ class ReactEmitter:
                                            page_embeds=page_plan.pages)
         write("src/modules.tsx", F.render_modules_tsx(
             react_entries, has_cdn=has_cdn, shell_react=True, container_i18n=True,
-            auto_anonymous_actions=comp.auto_anonymous_actions,
+            auto_anonymous_actions=comp.auto_anonymous_actions, app_labels=True,
         ))
+        # The project's own label texts: the JSON is the project's (written
+        # once), the registration is generated.
+        write("src/app.labels.json", F.APP_LABELS_JSON)
+        write("src/app.labels.generated.ts", F.render_app_labels_ts(
+            shell.app_entries, tuple((nav.resolved.get("labels") or {}).get("missing", ()))))
         if needs_cdn_avatar_lib:
             write("src/lib/cdn.ts", F.render_cdn_lib_ts(comp.slug))
         # The mandate source modules.tsx mounts (auth without workspaces).
@@ -186,6 +191,10 @@ class ReactEmitter:
         write("src/nav.generated.ts", F.render_shell_nav_generated_ts(
             shell.manifests, paths=shell.paths, has_accounts=shell.has_accounts,
             guest_wall=shell.guest_wall,
+            staff_section=tuple([nav.resolved["staff"]["section"]] if nav.resolved.get("staff")
+                                else []),
+            guest_walled=tuple(nav.resolved["guest"].get("wall", ())),
+            guest_hidden=tuple(nav.resolved["guest"].get("hide", ())),
         ))
         write("stapel.nav.json", F.render_shell_nav_overrides_json(
             shell.overrides, seed_account=storefront and shell.has_accounts))
@@ -196,17 +205,24 @@ class ReactEmitter:
             shell_providers=F._shell_providers(pair_keys) if shell.routes == "app" else [],
             phone_chrome="dock" if nav.primary["compact"] == "island" else "drawer",
             legal_links=shell.legal_links,
+            staff_tree=bool(nav.resolved.get("staff")),
+            own_search=(nav.resolved["slots"].get("search") or "")
+            if (nav.resolved["slots"].get("search") or "").startswith("app.") else None,
         ))
         if embeds_source:
             write("src/embeds.generated.tsx", embeds_source)
 
         home = ("Home", "./pages/Home.js")
+        staff_tree = bool(nav.resolved.get("staff"))
+        index_args = dict(has_accounts=shell.has_accounts, sign_in_path=shell.sign_in_path,
+                          has_pitch=bool(comp.pitch), staff_tree=staff_tree)
         if storefront:
             if want_landing:
                 home = ("LandingPage", "./LandingPage.js")
             else:
                 home = ("StorefrontHome", "./StorefrontHome.js")
-                write("src/StorefrontHome.tsx", F.STOREFRONT_HOME_TSX)
+                write("src/StorefrontHome.tsx", F.render_index_page_tsx(
+                    "StorefrontHome", "storefront-home", **index_args))
             write("src/routes.tsx", F.render_public_routes_tsx(
                 route_plan, {}, pairs=pair_keys,
                 chrome=("AppChrome", "./chrome.generated.js"), home=home,
@@ -214,27 +230,25 @@ class ReactEmitter:
             ))
             if shell.has_accounts:
                 write("src/MemberGate.tsx", F.MEMBER_GATE_TSX)
-                write("src/AccountHome.tsx", F.ACCOUNT_HOME_TSX)
+                write("src/AccountHome.tsx", F.render_index_page_tsx(
+                    "AccountHome", "account-home", section="account.root", **index_args))
             if any(e["id"] == "admin.root" for m in shell.manifests for e in m["entries"]):
-                write("src/AdminHome.tsx", F.ADMIN_HOME_TSX)
+                write("src/AdminHome.tsx", F.render_index_page_tsx(
+                    "AdminHome", "admin-home", section="admin.root", **index_args))
                 if "auth" in pair_keys:
                     write("src/AdminGate.tsx", F.ADMIN_GATE_TSX)
         else:
             app_route_present = auth_wired or bool(route_plan["app_children"])
             if not want_landing and not app_route_present:
-                write("src/pages/Home.tsx", r(F.HOME_TSX))
+                write("src/pages/Home.tsx", F.render_index_page_tsx(
+                    "Home", "page-home", import_prefix="../", **index_args))
             if auth_wired and "admin.root" in route_plan["container_roots"]:
                 write("src/AdminGate.tsx", F.ADMIN_GATE_APP_TSX)
             for root_id in route_plan["container_roots"]:
                 component = F.MONOLITH_CONTAINER_ROOTS[root_id]["_local"]
-                children = [
-                    entry["id"]
-                    for pair in shell.nav_pairs
-                    for entry in pair["nav"]
-                    if entry["placement"].get("parentId") == root_id
-                ] + [e["id"] for e in shell.app_entries
-                     if e["placement"].get("parentId") == root_id]
-                write(f"src/{component}.tsx", F.render_section_home_tsx(root_id, children))
+                write(f"src/{component}.tsx", F.render_index_page_tsx(
+                    component, f"{root_id.split('.')[0]}-home", section=root_id,
+                    **index_args))
             write("src/routes.tsx", F.render_routes_tsx(
                 route_plan, auth_wired=auth_wired, want_landing=bool(want_landing),
                 app_route_present=app_route_present, has_cdn=has_cdn, pairs=pair_keys,
@@ -248,20 +262,20 @@ class ReactEmitter:
         write("src/NotFoundPage.tsx", F.NOT_FOUND_PAGE_TSX)
         if mounts["pages"] or mounts["needs_placeholder"] or shell.app_entries:
             write("src/NavPlaceholder.tsx", F.NAV_PLACEHOLDER_TSX)
-        write("src/i18n/keys.ts", F.render_storefront_i18n_ts("en", title=comp.title))
+        write("src/i18n/keys.ts", F.render_storefront_i18n_ts(
+            "en", title=comp.title, pitch=comp.pitch))
         for rel, content in mounts["pages"].items():
             files[f"{ROOT}/{rel}"] = content
         if want_landing:
-            write("src/LandingPage.tsx", render_tokens(
-                F.LANDING_PAGE_TSX, {**render_ctx, "CTA_HREF": shell.sign_in_path or "/"},
-            ))
+            write("src/LandingPage.tsx", F.render_index_page_tsx(
+                "LandingPage", "page-landing", **index_args))
         # The own-pages seam: the binding file is the project's (written once),
         # the mount is generated.
         write("src/app.pages.ts", F.APP_PAGES_TS)
         if shell.app_entries:
             write("src/AppPage.tsx", F.APP_PAGE_TSX)
 
-        write("src/__tests__/nav.test.ts", F.render_shell_nav_test_ts())
+        write("src/__tests__/nav.test.ts", F.render_shell_nav_test_ts(staff=staff_tree))
         write("src/__tests__/shell.test.tsx", F.render_shell_test_tsx(
             has_modules=True, sign_in_path=shell.sign_in_path,
             shell_testid="public-shell" if shell.shape == "storefront" else "app-shell",

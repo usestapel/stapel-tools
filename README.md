@@ -134,6 +134,54 @@ sign-in with no account slot). A baselined finding is a warning. It cannot see a
 route tree built at run time (the generated vitest gates walk the router) nor
 mobile screens (NAV006, queued).
 
+### A project's own pages, labels, search control and home
+
+- **A screen of your own:** one entry in `stapel.app-nav.json` (project root),
+  one binding in `frontend/src/app.pages.ts`, its label text in
+  `frontend/src/app.labels.json` (`{"en": {"app.nav.parts": "Parts"}}`), then
+  `make nav-regenerate`. The two `.ts`/`.json` files are the project's and are
+  never regenerated; `src/app.labels.generated.ts` registers the labels. An own
+  page without a label is NAV-E11 under `--strict` and shows
+  `app.<id> (no label in src/app.labels.json)` otherwise.
+- **Who sees what:** `navigation.guest.memberDestinations` is `hide` for a
+  storefront archetype and `wall` elsewhere; `guest.wall` / `guest.hide` list
+  per-destination exceptions. Under the storefront header the admin section is
+  the `staff` audience's (`resolved.audiences.staff`, a member whose session
+  says `is_staff`). `destinations.hidden` on a parent hides its subtree.
+- **The header search:** `slots.search` takes the search pair's `search.box`
+  embed (`auto`) or an own component, `"app.<id>"`, bound in `app.pages.ts`
+  like a page; once filled, `/s` is reached from it and no longer pending.
+- **Reachability:** every destination of every audience is reachable at every
+  size class (NAV-E10). `@stapel/shell-react` 0.20.1's dock has no "More", so a
+  default or preset `island` past its cap of five becomes the drawer (the dock
+  still floats under it) and `resolved.notes` says why; an explicit one is refused.
+- **The home page** (`--pitch "…"`, composition key `pitch`): the title, the
+  pitch, the sign-in entry for a guest and a link to each top destination of
+  the visitor's menu — read from `nav.generated.ts`. Nothing to link is an
+  empty state, never instructions. Account and admin indexes list their screens.
+- `stapel-nav-plan --app-nav FILE --assume-bound` (or `--bound id,id`) plans,
+  under `--strict`, the own pages a change is about to add; `--app-labels FILE`
+  reads their labels.
+
+### Project provenance (`stapel.composition.json` → `provenance`)
+
+A control plane can check what generated a project, and whether its files are
+still what the scaffold wrote, with nothing but sha256:
+
+| Field | Meaning |
+|---|---|
+| `schema` | `stapel.provenance/1` |
+| `tool`, `version` | `stapel-tools` and the release that generated the project |
+| `recipe` | the composition's `recipe` object (e.g. `{"name": "shop", "version": 2}`), or `null` |
+| `hash` | `sha256` — lowercase hex of the file's bytes as written |
+| `files` | `{project-relative path: hash}` for every file under `frontend/` and `mobile/` at generation |
+| `regenerated` | the subset `stapel-nav-regenerate` owns: it rewrites them, updates their hashes and sets `regeneratedBy` |
+| `regeneratedBy` | the release of the last regenerate, when there was one |
+
+A file in `regenerated` whose hash differs was edited by hand (the generated
+gate fails on it too); any other listed file is the project's after
+generation, so a difference there is the project's own work, not drift.
+
 ### `stapel-new-service` — add a service to an existing project
 
 ```bash

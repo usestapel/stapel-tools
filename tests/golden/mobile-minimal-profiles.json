@@ -36,7 +36,7 @@
  "mobile/shared/src/jvmMain/kotlin/golden/DesktopApp.kt": "3d6559cbca0b51152268e04a8030507de4e288cd66caf5ad1cc8fb040e6e08e8",
  "mobile/shared/src/jvmTest/kotlin/golden/TestPlatform.jvm.kt": "cf74a6d46b398fac8e870174c8909e2b67e5915cd25d6a8804af69fba8c3427a",
  "mobile/shared/src/walkTest/kotlin/golden/SignInWalkTest.kt": "436decf1b5dcaf46d8f73070fb9d61f63492c9dcfed0fe0ddbbf73c317fb6ddc",
- "mobile/stapel.composition.json": "15b4c5ee96e78b571c1f026ea6cff432268832fe6a45b559cb7a1d68eca51527",
+ "mobile/stapel.composition.json": "f756f9eba99e38b96b610180a3efdec25421b2b5578bc55ab62b3874ad13ec6d",
  "mobile/stapel.environments.json": "c00f6b0cc2d10456722a14245e1bd8228d9fe8bdeae9228f9bd63b1ed53bdd7a",
  "mobile/stapel.theme.json": "bb583db61a21e4c4fc95a3d4a265916a7ba9d3e62d92b7bdbee49a2728593b22",
  "mobile/well-known/apple-app-site-association": "edb79008810f148e0940109f0f64c8340db6e9f0ff1f8e88e987b785a913485a",

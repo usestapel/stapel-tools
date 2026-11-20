@@ -192,7 +192,11 @@ FRONTEND_SECTION = """
   `stapel.app-nav.json` (project root: id `app.<screen>`, label key, icon,
   path, `parentId` such as `account.root`, `surface`, and `via` when it is
   reached from another screen rather than the menu) and ONE binding in
-  `frontend/src/app.pages.ts`, then run `stapel-nav-regenerate .`. A page
+  `frontend/src/app.pages.ts` and its label text in
+  `frontend/src/app.labels.json` (`{"en": {"<labelKey>": "Parts"}}`), then run
+  `make nav-regenerate` (it calls `stapel-nav-regenerate .`; never edit a
+  generated file to add a screen, and never register labels in
+  `frontend/src/modules.tsx`). A page
   draws content only: no own header, navigation or full-viewport frame.
   The navigation pattern itself is `navigation` in `stapel.composition.json`.
 - No raw colours: every colour is a design token (`@stapel/eslint-plugin`

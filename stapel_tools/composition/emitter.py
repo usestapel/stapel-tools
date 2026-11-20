@@ -87,6 +87,8 @@ def build_composition(
     app_nav: tuple = (),
     app_bindings: Optional[dict] = None,
     strict: bool = False,
+    app_labels: Optional[dict] = None,
+    pitch: str = "",
 ) -> Composition:
     """The only place the scaffold's CLI values are interpreted.
 
@@ -132,6 +134,8 @@ def build_composition(
         app_nav=tuple(app_nav or ()),
         app_bindings=dict(app_bindings or {}),
         strict=bool(strict),
+        app_labels=dict(app_labels or {}),
+        pitch=(pitch or "").strip(),
     )
 
 

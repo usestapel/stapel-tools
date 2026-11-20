@@ -25,7 +25,7 @@ COMPOSITION_KEYS: dict[str, str] = {
     "modules": "modules", "auth": "want_auth", "landing": "want_landing",
     "authModel": "auth_model", "authKinds": "auth_kinds", "posture": "posture",
     "theme": "theme", "shell": "shell", "slots": "slots", "mobile": "mobile",
-    "strict": "strict",
+    "strict": "strict", "pitch": "pitch", "recipe": "recipe",
 }
 
 _BINDING_RE = re.compile(r"""^\s*["'](app\.[a-z0-9_.-]+)["']\s*:""", re.MULTILINE)
@@ -105,7 +105,7 @@ def load_composition_file(path: Path) -> dict:
         raise SystemExit(f"Error: --composition {path}: expected a JSON object")
     flat = dict(doc.get("input") or {})
     flat.update({k: v for k, v in doc.items() if k not in ("input", "resolved", "version",
-                                                            "generator")})
+                                                            "generator", "provenance")})
     out: dict[str, Any] = {}
     unknown = []
     for key, value in flat.items():
@@ -166,6 +166,14 @@ def plan_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--mobile-shell", default=None)
     parser.add_argument("--app-nav", type=Path, default=None,
                         help="A stapel.app-nav.json to plan the project's own pages from.")
+    bound = parser.add_mutually_exclusive_group()
+    bound.add_argument("--bound", default=None, metavar="ID,ID",
+                       help="Own page ids the plan treats as bound in src/app.pages.ts.")
+    bound.add_argument("--assume-bound", action="store_true",
+                       help="Treat every --app-nav entry (and an own slot component) as "
+                            "bound: plan, under --strict, the pages a change is about to add.")
+    parser.add_argument("--app-labels", type=Path, default=None, metavar="JSON",
+                        help="The project's src/app.labels.json (own page label texts).")
     parser.add_argument("--svg", type=Path, default=None, metavar="DIR",
                         help="Also write one SVG wireframe per platform, audience and size "
                              "class (<platform>-<audience>-<class>.svg) into DIR.")
@@ -188,6 +196,14 @@ def plan_main(argv: Optional[list[str]] = None) -> int:
         want_auth = base.get("want_auth")
         if want_auth is None:
             want_auth = auth_comp.has_login_route if auth_comp else "auth" in feats
+        app_nav = tuple(load_app_nav(args.app_nav)) if args.app_nav else ()
+        if args.assume_bound:
+            nav_block = navigation_from_args(args, base.get("navigation"))
+            own_slots = [v for v in (nav_block.get("slots") or {}).values()
+                         if isinstance(v, str) and v.startswith("app.")]
+            bound_ids = {e["id"] for e in app_nav} | set(own_slots)
+        else:
+            bound_ids = {i.strip() for i in (args.bound or "").split(",") if i.strip()}
         mobile = None
         if (args.mobile or base.get("mobile")) == "kmp":
             mobile = PlatformRequest("kmp", shell=args.mobile_shell)
@@ -197,7 +213,10 @@ def plan_main(argv: Optional[list[str]] = None) -> int:
             want_landing=landing, auth_comp=auth_comp,
             shell=args.shell or base.get("shell"), slots=base.get("slots"),
             mobile=mobile, navigation=navigation_from_args(args, base.get("navigation")),
-            app_nav=tuple(load_app_nav(args.app_nav)) if args.app_nav else (),
+            app_nav=app_nav,
+            app_bindings={"react": tuple(sorted(bound_ids))},
+            app_labels=load_app_labels(args.app_labels) if args.app_labels else {},
+            pitch=base.get("pitch") or "",
             strict=bool(args.strict if args.strict is not None else base.get("strict")),
         )
         resolved = plan_navigation(comp)
@@ -225,10 +244,26 @@ REGENERATED: tuple[str, ...] = (
     "src/StorefrontShell.tsx", "src/AppChrome.tsx", "src/embeds.generated.tsx",
     "src/AppPage.tsx", "src/__tests__/nav.test.ts", "src/__tests__/shell.test.tsx",
     "src/__tests__/shell-lint.test.ts", "src/__tests__/generated.test.ts",
-    "stapel.composition.json",
+    "src/app.labels.generated.ts", "stapel.composition.json",
 )
 #: Written only when missing (the page they render may need them).
-WRITE_IF_MISSING: tuple[str, ...] = ("src/NavPlaceholder.tsx", "src/app.pages.ts")
+WRITE_IF_MISSING: tuple[str, ...] = (
+    "src/NavPlaceholder.tsx", "src/app.pages.ts", "src/app.labels.json")
+
+
+def load_app_labels(path: Path) -> dict:
+    """``src/app.labels.json``: ``{locale: {labelKey: text}}``; absent = ``{}``."""
+    if not path.exists():
+        return {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"Error: {path}: {exc}") from None
+    if not isinstance(doc, dict) or not all(
+            isinstance(v, dict) and all(isinstance(t, str) for t in v.values())
+            for v in doc.values()):
+        raise SystemExit(f'Error: {path}: expected {{"<locale>": {{"<labelKey>": "<text>"}}}}')
+    return doc
 
 
 def regenerate(project_dir: Path) -> list[str]:
@@ -266,6 +301,8 @@ def regenerate(project_dir: Path) -> list[str]:
         auto_anonymous_actions=_auto_anonymous_actions(feats, auth_comp, None),
         navigation=doc.get("navigation") or {}, app_nav=tuple(app_nav),
         app_bindings={"react": tuple(sorted(bound))}, strict=bool(inp.get("strict")),
+        app_labels=load_app_labels(front / "src" / "app.labels.json"),
+        pitch=inp.get("pitch") or "",
     )
     plan = emitter_for("react").plan(comp, comp.platform("react"))
     written = _write_selected(root, plan.files, prefix="frontend/")
@@ -274,9 +311,28 @@ def regenerate(project_dir: Path) -> list[str]:
     (root / "stapel.composition.json").write_text(json.dumps(doc, indent=2) + "\n",
                                                   encoding="utf-8")
     written.append("stapel.composition.json")
+    _restamp_provenance(root, doc, written)
     for note in plan.notes:
         print(f"  note: {note}")
     return written
+
+
+def _restamp_provenance(root: Path, doc: dict, written: list[str]) -> None:
+    """Move the hashes of the files a regenerate rewrote, and say who did."""
+    import hashlib
+
+    provenance = doc.get("provenance")
+    if not isinstance(provenance, dict) or not isinstance(provenance.get("files"), dict):
+        return
+    from .create_project import _tools_version
+
+    for rel in written:
+        path = root / rel
+        if rel in provenance["files"] or rel in provenance.get("regenerated", ()):
+            provenance["files"][rel] = hashlib.sha256(path.read_bytes()).hexdigest()
+    provenance["regeneratedBy"] = _tools_version()
+    (root / "stapel.composition.json").write_text(json.dumps(doc, indent=2) + "\n",
+                                                  encoding="utf-8")
 
 
 def _write_selected(root: Path, files: dict, *, prefix: str) -> list[str]:

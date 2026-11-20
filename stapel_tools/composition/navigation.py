@@ -104,6 +104,9 @@ EMBED_ROLES: dict[str, str] = {
     "translate.language_switcher": "language",
     "orders.cart_badge": "cart",
     "workspaces.switcher": "workspace",
+    # The header search field of @stapel/search-react (slice R5); fills the
+    # search slot the day the pair's mirror carries it.
+    "search.box": "search",
 }
 
 #: semantic slot -> the role an embed needs to fill it.
@@ -125,6 +128,15 @@ VIA: dict[str, str] = {
     "profiles.notifications": "profiles.settings",
     "search.ranking": "search.results",
 }
+
+#: The staff section: this destination and its subtree are shown to the
+#: ``staff`` audience (a member whose session says ``is_staff``) only.
+STAFF_ROOT = "admin.root"
+
+#: An own component that fills a semantic slot: ``slots.<slot>: "app.<id>"``,
+#: bound in the platform's own-pages file like a page.
+OWN_SLOTS: frozenset[str] = frozenset({"search"})
+_OWN_PREFIX = "app."
 
 #: Legal destinations every screen must reach (a policy disclosure, the
 #: personal-data request form): the shell draws them in its footer region.
@@ -210,12 +222,26 @@ PLATFORM_CHROMES: dict[str, list[dict]] = {
             "chrome": "PublicShell", "template": "topbar-only", "headers": ["storefront"],
             "primary": {"compact": ["island", "drawer"], "medium": ["top-tabs"],
                         "expanded": ["top-tabs"]},
+            # Where a destination past the cap is still reached: the wide
+            # horizontal menu folds it into its overflow item; the 0.20.1
+            # dock shows the first five and has no More.
+            "overflow": {"compact": [], "medium": ["top-tabs"], "expanded": ["top-tabs"]},
+            # The chrome draws one tree per audience: the staff section is
+            # in the staff tree only.
+            "staffSection": "hidden",
+            "noMore": {"island": "@stapel/shell-react 0.20.1 NavDock has no More "
+                                 "(NavShell adds it)"},
         },
         {
             # AppShell: drawer below 768, glyph rail from 768, labelled sider from 1200.
             "chrome": "AppShell", "template": "topbar-sidenav", "headers": ["app"],
             "primary": {"compact": ["drawer"], "medium": ["rail"],
                         "expanded": ["side-panel"]},
+            # The glyph rail is a collapsed menu: every destination is in it.
+            "overflow": {"compact": [], "medium": ["rail"], "expanded": []},
+            # AppShell lists the staff section for everyone, switched off with
+            # its staff-only reason for a member (`staff` prop).
+            "staffSection": "disabled",
         },
     ],
     "kmp": [
@@ -225,10 +251,15 @@ PLATFORM_CHROMES: dict[str, list[dict]] = {
             "headers": ["app", "storefront"],
             "primary": {"compact": ["bottom-tabs"], "medium": ["rail"],
                         "expanded": ["side-panel"]},
+            # BottomBar's last item is "More" on overflow; the rail lists all.
+            "overflow": {"compact": ["bottom-tabs"], "medium": ["rail"], "expanded": []},
+            "staffSection": "hidden",
         },
         {
             "chrome": "Stack", "template": "Stack", "headers": ["app", "storefront"],
             "primary": {"compact": ["stack"], "medium": ["stack"], "expanded": ["stack"]},
+            "overflow": {"compact": [], "medium": [], "expanded": []},
+            "staffSection": "hidden",
         },
     ],
 }
@@ -306,7 +337,9 @@ def navigation_schema() -> dict:
                 "properties": {slot: slot_value for slot in SEMANTIC_SLOTS},
             },
             "guest": {"type": "object", "additionalProperties": False,
-                      "properties": {"memberDestinations": {"enum": ["wall", "hide"]}}},
+                      "properties": {"memberDestinations": {"enum": ["wall", "hide"]},
+                                     "wall": {"$ref": "#/$defs/ids"},
+                                     "hide": {"$ref": "#/$defs/ids"}}},
             "secondary": {"enum": ["auto", "breadcrumbs", "none"]},
             "platforms": {
                 "type": "object", "additionalProperties": False,
@@ -418,9 +451,15 @@ def validate_block(block: Any) -> dict:
         _check_slots(block["slots"], ".slots")
     guest = block.get("guest")
     if guest is not None:
-        _check_keys(guest, ("memberDestinations",), ".guest")
+        _check_keys(guest, ("memberDestinations", "wall", "hide"), ".guest")
         if guest.get("memberDestinations", "wall") not in ("wall", "hide"):
             raise _schema_error(".guest.memberDestinations", "wall or hide")
+        for key in ("wall", "hide"):
+            if key in guest:
+                _check_ids(guest[key], f".guest.{key}")
+        both = set(guest.get("wall", ())) & set(guest.get("hide", ()))
+        if both:
+            raise _schema_error(".guest", f"{', '.join(sorted(both))} is both walled and hidden")
     if block.get("secondary", "auto") not in ("auto", "breadcrumbs", "none"):
         raise _schema_error(".secondary", "auto, breadcrumbs or none")
     platforms = block.get("platforms")
@@ -619,12 +658,25 @@ def destinations_from_manifest(entries: Iterable[dict]) -> list[Destination]:
     return out
 
 
+def _walled(entry_id: str, guest_mode: str, wall: frozenset = frozenset(),
+            hide: frozenset = frozenset()) -> bool:
+    """Does a guest see this member destination (as a wall to sign-in)?"""
+    if entry_id in wall:
+        return True
+    return guest_mode == "wall" and entry_id not in hide
+
+
 def _candidates(dests: list[Destination], audience: str, guest_mode: str,
-                hidden: set[str], order: dict[str, int], action_id: Optional[str]) -> list[str]:
+                hidden: set[str], order: dict[str, int], action_id: Optional[str],
+                *, staff: frozenset = frozenset(), wall: frozenset = frozenset(),
+                hide: frozenset = frozenset()) -> list[str]:
     tops = [d for d in dests if d.top and d.menu_visible and d.id not in hidden
             and d.id != action_id]
+    if audience != "staff":
+        tops = [d for d in tops if d.id not in staff]
     if audience == "guest":
-        tops = [d for d in tops if d.surface == "public" or guest_mode == "wall"]
+        tops = [d for d in tops
+                if d.surface == "public" or _walled(d.id, guest_mode, wall, hide)]
     tops.sort(key=lambda d: (order.get(d.id, d.order), d.id))
     return [d.id for d in tops]
 
@@ -704,17 +756,24 @@ def plan_platform(  # noqa: C901
     size_classes: Optional[dict] = None,
     strict: bool = False,
     pending: Iterable[str] = (),
+    own_bound: Optional[Iterable[str]] = None,
 ) -> PlatformNavigation:
     """Resolve *block* for *platform* over *destinations*; raises
-    :class:`NavigationError` (NAV-E01…E08) for what cannot be drawn."""
+    :class:`NavigationError` (NAV-E01…E10) for what cannot be drawn.
+
+    *own_bound* is the set of own ids the platform binds (``app.pages.ts``),
+    which an own slot component (``slots.search: "app.<id>"``) must be in;
+    ``None`` = the platform has no own-component binding at all."""
     block = validate_block(block or {})
     has_accounts = auth_model not in (None, "none")
-    guest_mode_default = "hide" if auth_model == "internal" else "wall"
     embeds = list(embeds)
     probe_candidates = _candidates(destinations, "member" if has_accounts else "guest",
                                    "wall", set(), {}, None)
     default = default_preset(modules=modules, has_accounts=has_accounts, landing=landing,
                              candidates=len(probe_candidates))
+    # Ruling 7 and its addendum: a guest of a storefront archetype sees the
+    # public destinations only; elsewhere member destinations stay as a wall.
+    guest_mode_default = "hide" if auth_model == "internal" or default == "shop" else "wall"
     notes: list[str] = []
     eff, preset, source = effective(block, platform, default)
     if source == "default":
@@ -802,6 +861,27 @@ def plan_platform(  # noqa: C901
             resolved_slots[slot] = None
             excluded.extend(offered)
             continue
+        if choice != "auto" and choice.startswith(_OWN_PREFIX):
+            if slot not in OWN_SLOTS:
+                raise NavigationError(
+                    "NAV-E06", f"slots.{slot}={choice}: an own component fills only "
+                    + ", ".join(sorted(OWN_SLOTS)))
+            if own_bound is None:
+                notes.append(f"{slot}: {choice} is an own component, which {platform} cannot "
+                             "bind yet — slot empty")
+                resolved_slots[slot] = None
+            elif choice in set(own_bound):
+                resolved_slots[slot] = choice
+            elif strict:
+                raise NavigationError(
+                    "NAV-E09", f"slots.{slot}={choice}: no binding — add {choice} to "
+                    "src/app.pages.ts (APP_PAGES)")
+            else:
+                notes.append(f"{slot}: {choice} has no binding in src/app.pages.ts — slot "
+                             "empty until it does")
+                resolved_slots[slot] = None
+            excluded.extend(offered)
+            continue
         if choice != "auto":
             if slot == "primaryAction":
                 if choice not in known:
@@ -851,9 +931,22 @@ def plan_platform(  # noqa: C901
     action_id = resolved_slots.get("primaryAction")
 
     # Audiences.
-    guest_mode = (eff.get("guest") or {}).get("memberDestinations", guest_mode_default)
-    audiences: dict[str, dict] = {}
+    guest_block = eff.get("guest") or {}
+    guest_mode = guest_block.get("memberDestinations", guest_mode_default)
+    guest_wall = frozenset(guest_block.get("wall", ()))
+    guest_hide = frozenset(guest_block.get("hide", ()))
+    unknown = sorted(i for i in guest_wall | guest_hide if i not in known)
+    if unknown:
+        raise NavigationError(
+            "NAV-E06", f"guest.wall / guest.hide: unknown id(s) {', '.join(unknown)}")
+    early_chrome = chrome_for(platform, header, primary)
+    staff_root = known.get(STAFF_ROOT)
+    staff = frozenset({STAFF_ROOT}) if (
+        has_accounts and staff_root is not None and staff_root.top
+        and (early_chrome is None or early_chrome["staffSection"] == "hidden")) else frozenset()
     audience_names = ["guest", "member"] if has_accounts else ["guest"]
+    if staff:
+        audience_names.append("staff")
     capped = [
         (c, CARRIERS[primary[c]]["cap"][c]) for c in SIZE_CLASSES
         if CARRIERS[primary[c]]["overflow"] == "more"
@@ -866,44 +959,85 @@ def plan_platform(  # noqa: C901
                 "NAV-E02",
                 f"destinations.pinned has {len(pinned)} entries; the capped carriers allow "
                 f"{smallest}: {where} — use drawer / side-panel, or pin fewer")
-    short_missing: dict[str, None] = {}
-    for audience in audience_names:
-        internal_guest = audience == "guest" and auth_model == "internal"
-        cands = [] if internal_guest else _candidates(
-            destinations, audience, guest_mode, hidden, order, action_id)
-        per_class: dict[str, dict] = {}
+
+    def candidates_of(audience: str) -> list[str]:
+        if audience == "guest" and auth_model == "internal":
+            return []
+        return _candidates(destinations, audience, guest_mode, hidden, order, action_id,
+                           staff=staff, wall=guest_wall, hide=guest_hide)
+
+    def fit_all(primary: dict) -> tuple[dict, dict, list[str]]:
+        audiences: dict[str, dict] = {}
+        short_missing: dict[str, None] = {}
+        fit_notes: list[str] = []
+        for audience in audience_names:
+            internal_guest = audience == "guest" and auth_model == "internal"
+            cands = candidates_of(audience)
+            per_class: dict[str, dict] = {}
+            for size_class in SIZE_CLASSES:
+                carrier = "stack" if internal_guest else primary[size_class]
+                if carrier == "stack" and len(cands) >= 2:
+                    raise NavigationError(
+                        "NAV-E03",
+                        f"{size_class}=stack, and the {audience} has {len(cands)} destinations "
+                        f"({', '.join(cands)}) — choose a carrier or hide destinations")
+                drawn: Optional[str] = carrier
+                if carrier != "stack" and len(cands) < CARRIERS[carrier]["min"]:
+                    fit_notes.append(
+                        f"{audience} {size_class}: {carrier} is not drawn — {len(cands)} "
+                        f"destination(s), it needs {CARRIERS[carrier]['min']}; the header "
+                        "carries the brand and the account entry")
+                    drawn = None
+                pins = pinned if drawn and CARRIERS[drawn]["overflow"] == "more" else []
+                cap = CARRIERS[drawn]["cap"][size_class] if drawn else None
+                if pins and cap is not None and len(pins) > cap - 1 and len(cands) > len(pins):
+                    raise NavigationError(
+                        "NAV-E02",
+                        f"destinations.pinned has {len(pins)} entries and {size_class}={drawn} "
+                        f"has {cap} positions; with destinations left over one goes to More — "
+                        "pin fewer")
+                visible, more = _fit(cands, drawn, size_class, pins)
+                per_class[size_class] = {"carrier": drawn, "visible": visible, "more": more}
+                for entry_id in visible:
+                    if drawn and drawn != "stack" and CARRIERS[drawn]["cap"][size_class] \
+                            and not known[entry_id].short_label:
+                        short_missing.setdefault(entry_id, None)
+            audiences[audience] = per_class
+            if internal_guest:
+                fit_notes.append("guest: internal accounts — the sign-in screen inside the "
+                                 "shell, header only")
+        return audiences, short_missing, fit_notes
+
+    audiences, short_missing, fit_notes = fit_all(primary)
+    # A destination past a carrier's cap is reached only where the chrome draws
+    # an overflow for that carrier. Where it does not, a default or preset
+    # carrier gives way to one that lists everything; an explicit one is refused.
+    if early_chrome is not None:
         for size_class in SIZE_CLASSES:
-            carrier = "stack" if internal_guest else primary[size_class]
-            if carrier == "stack" and len(cands) >= 2:
+            stranded = _stranded(audiences, early_chrome, size_class)
+            if not stranded:
+                continue
+            carrier = primary[size_class]
+            reason = (early_chrome.get("noMore") or {}).get(
+                carrier, f"{early_chrome['chrome']} draws no More for {carrier}")
+            alternative = next(
+                (c for c in early_chrome["primary"][size_class]
+                 if c != carrier and CARRIERS[c]["cap"].get(size_class) is None), None)
+            explicit = size_class in ((block.get("primary") or {})) or size_class in (
+                ((block.get("platforms") or {}).get(platform) or {}).get("primary") or {})
+            if explicit or alternative is None:
                 raise NavigationError(
-                    "NAV-E03",
-                    f"{size_class}=stack, and the {audience} has {len(cands)} destinations "
-                    f"({', '.join(cands)}) — choose a carrier or hide destinations")
-            drawn: Optional[str] = carrier
-            if carrier != "stack" and len(cands) < CARRIERS[carrier]["min"]:
-                notes.append(
-                    f"{audience} {size_class}: {carrier} is not drawn — {len(cands)} "
-                    f"destination(s), it needs {CARRIERS[carrier]['min']}; the header "
-                    "carries the brand and the account entry")
-                drawn = None
-            pins = pinned if drawn and CARRIERS[drawn]["overflow"] == "more" else []
-            cap = CARRIERS[drawn]["cap"][size_class] if drawn else None
-            if pins and cap is not None and len(pins) > cap - 1 and len(cands) > len(pins):
-                raise NavigationError(
-                    "NAV-E02",
-                    f"destinations.pinned has {len(pins)} entries and {size_class}={drawn} "
-                    f"has {cap} positions; with destinations left over one goes to More — "
-                    "pin fewer")
-            visible, more = _fit(cands, drawn, size_class, pins)
-            per_class[size_class] = {"carrier": drawn, "visible": visible, "more": more}
-            for entry_id in visible:
-                if drawn and drawn != "stack" and CARRIERS[drawn]["cap"][size_class] \
-                        and not known[entry_id].short_label:
-                    short_missing.setdefault(entry_id, None)
-        audiences[audience] = per_class
-        if internal_guest:
-            notes.append("guest: internal accounts — the sign-in screen inside the shell, "
-                         "header only")
+                    "NAV-E10",
+                    f"primary.{size_class}={carrier}: {', '.join(stranded)} would be "
+                    f"unreachable on {size_class} — {reason}; choose "
+                    + (alternative or "a carrier that lists every destination")
+                    + f" for {size_class}, pin or hide destinations")
+            notes.append(
+                f"{size_class}: {carrier} -> {alternative} — {', '.join(stranded)} would be "
+                f"past the cap of {CARRIERS[carrier]['cap'][size_class]} and {reason}")
+            primary = {**primary, size_class: alternative}
+            audiences, short_missing, fit_notes = fit_all(primary)
+    notes.extend(fit_notes)
 
     if short_missing:
         notes.append(
@@ -921,10 +1055,7 @@ def plan_platform(  # noqa: C901
             f"today: {', '.join(drawable_presets(platform))}")
     if platform == "kmp" and header == "storefront":
         notes.append("kmp: the storefront header is drawn as the app top bar (until K3)")
-    if platform == "react" and chrome["chrome"] == "PublicShell":
-        notes.append(
-            "react: @stapel/shell-react 0.20.1 PublicShell's dock shows the first five "
-            "destinations and has no More (NavShell adds it)")
+    _check_reachable(audiences, chrome)
 
     pending = list(pending)
     if strict and pending:
@@ -941,8 +1072,11 @@ def plan_platform(  # noqa: C901
         "sizeClasses": dict(size_classes or {}),
         "header": header,
         "primary": dict(primary),
-        "guest": {"memberDestinations": guest_mode},
+        "guest": {"memberDestinations": guest_mode,
+                  **({"wall": sorted(guest_wall)} if guest_wall else {}),
+                  **({"hide": sorted(guest_hide)} if guest_hide else {})},
         "audiences": audiences,
+        **({"staff": {"section": STAFF_ROOT, "audience": "staff"}} if staff else {}),
         "slots": resolved_slots,
         "home": home_id,
         "signIn": sign_in_id if has_sign_in else None,
@@ -955,6 +1089,36 @@ def plan_platform(  # noqa: C901
         template=chrome["template"], header=header, primary=dict(primary),
         resolved=resolved, excluded_embeds=sorted(set(excluded)), notes=list(notes),
     )
+
+
+def _stranded(audiences: dict, chrome: dict, size_class: str) -> list[str]:
+    """Destinations put in "More" on *size_class* where *chrome* draws none."""
+    out: dict[str, None] = {}
+    for per_class in audiences.values():
+        cell = per_class[size_class]
+        if cell["carrier"] is None:
+            continue
+        if cell["more"] and cell["carrier"] not in chrome["overflow"].get(size_class, ()):
+            out.update(dict.fromkeys(cell["more"]))
+    return list(out)
+
+
+def _check_reachable(audiences: dict, chrome: dict) -> None:
+    """The planner's invariant: every destination of every audience is
+    reachable at every size class — on the carrier, or in an overflow the
+    chrome draws. A carrier not drawn for lack of destinations (§3.3 rule 5)
+    is the one exception: the header carries what is left."""
+    for audience, per_class in audiences.items():
+        for size_class, cell in per_class.items():
+            if cell["carrier"] is None:
+                continue
+            stranded = [i for i in cell["more"]
+                        if cell["carrier"] not in chrome["overflow"].get(size_class, ())]
+            if stranded:
+                raise NavigationError(
+                    "NAV-E10",
+                    f"{audience} {size_class}: {', '.join(stranded)} unreachable — "
+                    f"{chrome['chrome']} draws no overflow for {cell['carrier']}")
 
 
 def drawable_presets(platform: str) -> list[str]:

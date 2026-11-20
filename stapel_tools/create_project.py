@@ -2116,7 +2116,7 @@ def _billing_dev_hatch_needed(
     return supplied == default
 
 
-def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False, auth_comp=None, theme: str | None = None, shell: str | None = None, slots: dict[str, str] | None = None, navigation: dict | None = None, strict: bool = False):
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False, auth_comp=None, theme: str | None = None, shell: str | None = None, slots: dict[str, str] | None = None, navigation: dict | None = None, strict: bool = False, pitch: str = ""):
     from . import ui_wiring
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
@@ -2247,7 +2247,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         backend_prefixes=backend_prefixes,
         backend_upstream_default=backend_upstream_default,
         auto_anonymous_actions=_auto_anonymous_actions(feature_libs, auth_comp, module_config),
-        navigation=navigation, strict=strict,
+        navigation=navigation, strict=strict, pitch=pitch,
     )
     _write_frontend_scaffold(project_dir, ctx, backend_upstream_default, composition=composition)
     _write_deploy_scripts(project_dir)
@@ -3178,8 +3178,14 @@ def create_project(
     mobile_avatar_upload: bool = False,
     navigation: dict | None = None,
     strict: bool = False,
+    pitch: str = "",
+    recipe: dict | None = None,
 ):
-    """Generate a project. ``navigation`` is the navigation block
+    """Generate a project. ``recipe`` (``{"name", "version"}``) names the
+    recipe a control plane composed this project from; it is echoed into
+    ``stapel.composition.json`` ``provenance.recipe``. ``pitch`` is the
+    product in one line (the home page's lead; absent, the home shows the
+    title and its destinations only). ``navigation`` is the navigation block
     (navigation-templates spec §3.2: preset, carriers per size class,
     header, destinations, semantic slots); ``strict`` turns "asked for but
     not rendered" into a refusal (Studio's mode)."""
@@ -3518,7 +3524,7 @@ def create_project(
 
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only, want_auth=want_auth, want_landing=want_landing, auth_comp=auth_comp, theme=theme, shell=shell, slots=slots, navigation=navigation, strict=strict)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only, want_auth=want_auth, want_landing=want_landing, auth_comp=auth_comp, theme=theme, shell=shell, slots=slots, navigation=navigation, strict=strict, pitch=pitch)
     elif project_type == "minimal":
         _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"], module_config=module_config, auth_comp=auth_comp)
         use_submodules = False  # minimal uses pip
@@ -3558,7 +3564,8 @@ def create_project(
             project_dir, ctx=ctx, project_type=project_type, feature_libs=feature_only,
             want_auth=want_auth, want_landing=want_landing, auth_model=auth_model,
             auth_kinds=auth_kinds, posture=posture, theme=theme, shell=shell, slots=slots,
-            navigation=navigation, strict=strict, kmp_resolved=kmp_resolved,
+            navigation=navigation, strict=strict, kmp_resolved=kmp_resolved, pitch=pitch,
+            recipe=recipe,
         )
 
     if project_type in ("monolith", "minimal"):
@@ -3601,11 +3608,59 @@ def create_project(
 
 ROOT_COMPOSITION = "stapel.composition.json"
 
+#: The provenance block's shape (README "Project provenance").
+PROVENANCE_SCHEMA = "stapel.provenance/1"
+#: The trees whose every file the provenance block hashes.
+PROVENANCE_TREES: tuple[str, ...] = ("frontend", "mobile")
+
+
+def _tools_version() -> str:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("stapel-tools")
+    except PackageNotFoundError:
+        return "0+unknown"
+
+
+def scaffold_provenance(project_dir: Path, *, recipe: dict | None = None) -> dict:
+    """``stapel.composition.json`` ``provenance``: who generated the project
+    and the sha256 of every file the scaffold wrote under ``frontend/`` and
+    ``mobile/``, as written. ``regenerated`` names the files
+    ``stapel-nav-regenerate`` owns (they must still match after a regenerate);
+    every other listed file is the project's from then on. A control plane
+    verifies it with sha256 over the file bytes, without stapel-tools."""
+    import hashlib
+
+    from .nav_cli import REGENERATED
+
+    root = Path(project_dir)
+    files: dict[str, str] = {}
+    for tree in PROVENANCE_TREES:
+        base = root / tree
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*")):
+            if path.is_file() and ".git" not in path.relative_to(root).parts:
+                files[path.relative_to(root).as_posix()] = hashlib.sha256(
+                    path.read_bytes()).hexdigest()
+    regenerated = sorted(f"frontend/{rel}" for rel in REGENERATED
+                         if f"frontend/{rel}" in files)
+    return {
+        "schema": PROVENANCE_SCHEMA,
+        "tool": "stapel-tools",
+        "version": _tools_version(),
+        "recipe": dict(recipe) if recipe else None,
+        "hash": "sha256",
+        "files": files,
+        "regenerated": regenerated,
+    }
+
 
 def _write_root_composition(
     project_dir: Path, *, ctx: dict, project_type: str, feature_libs, want_auth,
     want_landing, auth_model, auth_kinds, posture, theme, shell, slots, navigation,
-    strict, kmp_resolved,
+    strict, kmp_resolved, pitch: str = "", recipe: dict | None = None,
 ) -> None:
     """``stapel.composition.json`` at the project root: input and echo.
 
@@ -3633,12 +3688,14 @@ def _write_root_composition(
     doc = {
         "version": 1,
         "generator": "stapel-create-project",
+        "provenance": scaffold_provenance(project_dir, recipe=recipe),
         "input": {
             "name": ctx["name"], "slug": ctx["slug"], "type": project_type,
             "title": ctx["title"], "url": ctx["url"], "modules": list(feature_libs),
             "auth": want_auth, "landing": bool(want_landing), "authModel": auth_model,
             "authKinds": auth_kinds, "posture": posture, "theme": theme,
             "slots": dict(slots or {}), "strict": bool(strict), **frontend_input,
+            **({"pitch": pitch} if pitch else {}),
         },
         "navigation": block,
         "resolved": resolved,
@@ -3917,6 +3974,10 @@ def main():
         help="The profiles brick's avatar change: adds cdn (its uploader's backend) to the "
              "modules. The app still passes its picker: ProfilesBrick(picker = ...).",
     )
+    parser.add_argument(
+        "--pitch", default=None, metavar="TEXT",
+        help="The product in one line: the lead of the generated home page. Absent, the "
+             "home shows the title and the entry points to the top destinations.")
     add_nav_arguments(parser)
     args = parser.parse_args()
     from .composition.model import CompositionError
@@ -3929,7 +3990,7 @@ def main():
         ("company_email", "company_email"), ("modules", "modules"),
         ("auth_model", "auth_model"), ("auth_kinds", "auth_kinds"),
         ("posture", "posture"), ("theme", "theme"), ("shell", "shell"),
-        ("mobile", "mobile"),
+        ("mobile", "mobile"), ("pitch", "pitch"),
     ):
         if getattr(args, attr) is None and file_values.get(key) is not None:
             value = file_values[key]
@@ -4065,6 +4126,8 @@ def main():
         mobile_avatar_upload=args.mobile_avatar_upload,
         navigation=navigation or None,
         strict=strict,
+        pitch=args.pitch or "",
+        recipe=file_values.get("recipe"),
     )
 
 

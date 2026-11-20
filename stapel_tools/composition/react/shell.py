@@ -211,7 +211,7 @@ def plan_react_shell(  # noqa: C901
         platform="react", embeds=_embed_ids(react_entries), modules=comp.modules,
         auth_model=auth_model, has_sign_in=auth_wired and has_accounts,
         sign_in_id=SIGN_IN_ENTRY, landing=comp.landing, size_classes=size_classes,
-        strict=strict, pending=pending,
+        strict=strict, pending=pending, own_bound=bound,
     )
     probe = N.plan_platform(comp.navigation, destinations=_destinations(probe_entries), **common)
     shape = "storefront" if probe.chrome == "PublicShell" else "app"
@@ -239,6 +239,16 @@ def plan_react_shell(  # noqa: C901
         nav.resolved["signIn"] = None
     guest_wall = nav.resolved["guest"]["memberDestinations"] == "wall"
     overrides = _overrides(comp.navigation or {}, nav, entries)
+    unlabelled = _unlabelled(own, comp.app_labels)
+    if unlabelled and strict:
+        raise N.NavigationError(
+            "NAV-E11", "own page(s) with no label: " + ", ".join(
+                f"{i} ({key})" for i, key in unlabelled)
+            + " — add each label key to src/app.labels.json (" + '{"en": {"<labelKey>": '
+            '"<text>"}})')
+    for entry_id, key in unlabelled:
+        nav.notes.append(f"{entry_id}: no label for {key} in src/app.labels.json — the menu "
+                         "shows a placeholder")
     reach, unreachable, waiting = _reach(
         entries, paths, react_entries, nav, has_accounts=has_accounts,
         sign_in_path=sign_in_path, hidden=set(
@@ -273,12 +283,22 @@ def plan_react_shell(  # noqa: C901
     nav.resolved["notes"] = list(nav.notes)
     nav.resolved["reach"] = reach
     nav.resolved["paths"] = dict(paths)
+    if own:
+        nav.resolved["labels"] = {
+            "file": "src/app.labels.json", "missing": [i for i, _ in unlabelled]}
     return ReactShellPlan(
         nav=nav, shape=shape, routes=routes, nav_pairs=nav_pairs, manifests=manifests,
         route_plan=route_plan, paths=paths, reach=reach, sign_in_path=sign_in_path,
         has_accounts=has_accounts, guest_wall=guest_wall, app_entries=own,
         pending=pending, overrides=overrides,
     )
+
+
+def _unlabelled(own: list[dict], labels: dict) -> list[tuple[str, str]]:
+    """``(id, labelKey)`` of own entries the English labels file does not name."""
+    english = (labels or {}).get("en") or {}
+    return [(e["id"], e["labelKey"]) for e in own
+            if not isinstance(english.get(e["labelKey"]), str) or not english[e["labelKey"]]]
 
 
 def _storefront_manifests(nav_pairs, own, has_accounts, app_package, *,
@@ -375,6 +395,18 @@ def _reach(entries, paths, react_entries, nav, *, has_accounts, sign_in_path, hi
                 opened.setdefault(emb["opens"], emb["id"])
     via = {e["id"]: e["_via"] for e in entries if e.get("_via")}
     via.update({k: v for k, v in N.VIA.items() if k not in via})
+    parent_of = {e["id"]: e["placement"].get("parentId") for e in entries}
+
+    def hidden_with_ancestors(entry_id: str) -> bool:
+        seen: set[str] = set()
+        while entry_id and entry_id not in seen:
+            if entry_id in hidden:
+                return True
+            seen.add(entry_id)
+            entry_id = parent_of.get(entry_id)
+        return False
+
+    search_slot = (nav.resolved.get("slots") or {}).get("search")
     unreachable: list[tuple[str, str]] = []
     waiting: list[str] = []
     pending_via: list[tuple[str, str, str]] = []
@@ -389,8 +421,11 @@ def _reach(entries, paths, react_entries, nav, *, has_accounts, sign_in_path, hi
             reason = f"menu:{entry_id}"
         elif entry_id in opened:
             reason = f"embed:{opened[entry_id]}"
-        elif entry_id in hidden:
+        elif hidden_with_ancestors(entry_id):
             reason = "hidden"
+        elif entry_id in N.PENDING_EMBED_ENTRY and search_slot and \
+                N.PENDING_EMBED_ENTRY[entry_id].startswith("search."):
+            reason = f"slot:search:{search_slot}"
         elif entry_id in via and via[entry_id] in paths:
             pending_via.append((entry_id, path, via[entry_id]))
             continue

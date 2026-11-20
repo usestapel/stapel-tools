@@ -32,7 +32,7 @@ def _plan(block=None, *, n=3, auth_model="public", platform="react", modules=("a
 
 
 def _comp(modules, *, navigation=None, landing=False, auth=True, app_nav=(), bound=(),
-          strict=False, shell=None):
+          strict=False, shell=None, app_labels=None):
     from stapel_tools._auth_model import AuthComposition
     from stapel_tools.create_project import _expand_with_requires
 
@@ -43,6 +43,7 @@ def _comp(modules, *, navigation=None, landing=False, auth=True, app_nav=(), bou
         auth_comp=AuthComposition(model="public") if auth and "auth" in feats else None,
         want_landing=landing, navigation=navigation, app_nav=tuple(app_nav),
         app_bindings={"react": tuple(bound)}, strict=strict, shell=shell,
+        app_labels=app_labels,
     )
 
 
@@ -236,10 +237,100 @@ def test_nothing_is_dropped(n, preset):
 
 
 def test_a_capped_carrier_keeps_first_cap_minus_one_and_more():
+    # stapel-shell's BottomBar draws "More", so the cap holds there.
+    nav = _plan({"preset": "app"}, n=7, platform="kmp")
+    compact = nav.resolved["audiences"]["member"]["compact"]
+    assert compact["carrier"] == "bottom-tabs"
+    assert len(compact["visible"]) == 4 and len(compact["more"]) == 3
+
+
+# --- every destination reachable at every size class (NAV-E10) -------------
+
+
+def test_a_dock_past_its_cap_gives_way_to_the_drawer_and_says_why():
+    """PublicShell 0.20.1's dock has no More: six destinations on the island
+    would leave the sixth unreachable on a phone."""
     nav = _plan({"preset": "shop"}, n=7)
     compact = nav.resolved["audiences"]["member"]["compact"]
-    assert compact["carrier"] == "island"
-    assert len(compact["visible"]) == 4 and len(compact["more"]) == 3
+    assert compact["carrier"] == "drawer"
+    assert compact["more"] == [] and len(compact["visible"]) == 7
+    assert nav.primary["compact"] == "drawer"
+    assert any("island -> drawer" in n and "no More" in n for n in nav.notes)
+
+
+def test_a_dock_within_its_cap_stays_the_dock():
+    nav = _plan({"preset": "shop"}, n=5)
+    assert nav.resolved["audiences"]["member"]["compact"]["carrier"] == "island"
+    assert not any("island -> drawer" in n for n in nav.notes)
+
+
+def test_an_explicit_island_past_its_cap_is_refused_not_switched():
+    with pytest.raises(N.NavigationError) as err:
+        _plan({"preset": "shop", "primary": {"compact": "island"}}, n=7)
+    assert err.value.code == "NAV-E10"
+    assert "choose drawer for compact" in str(err.value)
+
+
+def test_the_reachability_check_fires_on_a_stranded_destination():
+    """Inversion: the invariant itself, fed a plan the fallback did not fix."""
+    chrome = N.PLATFORM_CHROMES["react"][0]
+    audiences = {"member": {"compact": {"carrier": "island", "visible": ["a"], "more": ["b"]},
+                            "medium": {"carrier": "top-tabs", "visible": ["a"], "more": ["b"]},
+                            "expanded": {"carrier": None, "visible": [], "more": ["a"]}}}
+    with pytest.raises(N.NavigationError) as err:
+        N._check_reachable(audiences, chrome)
+    assert err.value.code == "NAV-E10" and "member compact: b" in str(err.value)
+    audiences["member"]["compact"]["more"] = []
+    N._check_reachable(audiences, chrome)  # top-tabs overflow and an undrawn bar are fine
+
+
+# --- audiences: staff, guest per destination, hidden subtrees ---------------
+
+
+def _admin_dests():
+    return [_dest(0), _dest(1, surface="member"),
+            N.Destination(id="admin.root", top=True, parent=None, menu_visible=True,
+                          surface="member", order=90, path="/staff"),
+            N.Destination(id="admin.users", top=False, parent="admin.root", menu_visible=True,
+                          surface="member", order=1, path="users")]
+
+
+def test_the_admin_section_is_shown_to_staff_only_on_the_storefront_chrome():
+    nav = _plan({"preset": "shop"}, destinations=_admin_dests())
+    aud = nav.resolved["audiences"]
+    assert "admin.root" not in aud["member"]["expanded"]["visible"]
+    assert "admin.root" in aud["staff"]["expanded"]["visible"]
+    assert "admin.root" not in aud["guest"]["expanded"]["visible"]
+    assert nav.resolved["staff"] == {"section": "admin.root", "audience": "staff"}
+
+
+def test_appshell_keeps_the_admin_section_listed_and_switched_off_for_members():
+    nav = _plan({"preset": "dashboard"}, destinations=_admin_dests())
+    assert "staff" not in nav.resolved["audiences"]
+    assert "admin.root" in nav.resolved["audiences"]["member"]["expanded"]["visible"]
+
+
+def test_a_storefront_archetype_hides_member_destinations_from_a_guest_by_default():
+    nav = _plan(None, destinations=[_dest(0), _dest(1), _dest(2, surface="member")],
+                modules=("auth", "shop"))
+    assert nav.resolved["guest"]["memberDestinations"] == "hide"
+    assert "x.d2" not in nav.resolved["audiences"]["guest"]["expanded"]["visible"]
+    dash = _plan(None, destinations=[_dest(0), _dest(1), _dest(2, surface="member")])
+    assert dash.resolved["guest"]["memberDestinations"] == "wall"
+
+
+def test_guest_wall_and_hide_per_destination():
+    dests = [_dest(0), _dest(1, surface="member"), _dest(2, surface="member")]
+    nav = _plan({"preset": "shop", "guest": {"memberDestinations": "hide", "wall": ["x.d2"]}},
+                destinations=dests)
+    assert nav.resolved["audiences"]["guest"]["expanded"]["visible"] == ["x.d0", "x.d2"]
+    nav = _plan({"preset": "shop", "guest": {"memberDestinations": "wall", "hide": ["x.d2"]}},
+                destinations=dests)
+    assert nav.resolved["audiences"]["guest"]["expanded"]["visible"] == ["x.d0", "x.d1"]
+    with pytest.raises(N.NavigationError):
+        _plan({"guest": {"wall": ["x.d1"], "hide": ["x.d1"]}}, destinations=dests)
+    with pytest.raises(N.NavigationError):
+        _plan({"guest": {"wall": ["nope.x"]}}, destinations=dests)
 
 
 def test_a_bar_with_one_destination_is_not_drawn_and_says_so():
@@ -326,3 +417,68 @@ def test_orders_binding_mounts_once_released(monkeypatch):
     assert shell.reach["/cart"] == "embed:orders.cart_badge"
     assert shell.reach["/checkout"] == "via:orders.cart"
     assert shell.resolved["slots"]["cart"] == "orders.cart_badge"
+
+
+# --- own labels, own search control, hidden subtrees (plan_react_shell) -----
+
+_PARTS = {"id": "app.parts", "labelKey": "app.nav.parts", "icon": "apps", "path": "/parts"}
+
+
+def test_an_own_page_without_a_label_is_refused_under_strict():
+    comp = _comp(["shop"], strict=True, app_nav=[_PARTS], bound=["app.parts"])
+    with pytest.raises(N.NavigationError) as exc:
+        plan_react_shell(comp, react_entries(comp.modules))
+    assert _code(exc) == "NAV-E11" and "app.nav.parts" in str(exc.value)
+
+
+def test_an_own_page_with_its_label_plans_under_strict():
+    comp = _comp(["shop"], strict=True, app_nav=[_PARTS], bound=["app.parts"],
+                 app_labels={"en": {"app.nav.parts": "Parts"}})
+    shell = plan_react_shell(comp, react_entries(comp.modules))
+    assert shell.resolved["labels"] == {"file": "src/app.labels.json", "missing": []}
+
+
+def test_an_own_page_without_a_label_is_a_note_and_listed_otherwise():
+    comp = _comp(["shop"], app_nav=[_PARTS], bound=["app.parts"])
+    shell = plan_react_shell(comp, react_entries(comp.modules))
+    assert shell.resolved["labels"]["missing"] == ["app.parts"]
+    assert any("no label for app.nav.parts" in n for n in shell.resolved["notes"])
+
+
+def test_hiding_a_parent_hides_its_subtree_under_strict():
+    """Hiding admin.root alone used to be NAV-E06 for every admin.* child."""
+    comp = _comp(["shop"], strict=True,
+                 navigation={"destinations": {"hidden": ["admin.root"]}})
+    shell = plan_react_shell(comp, react_entries(comp.modules))
+    children = [e["id"] for m in shell.manifests for e in m["entries"]
+                if e["placement"].get("parentId") == "admin.root"]
+    assert children, "the shop has admin screens to hide"
+    for entry_id in children:
+        assert shell.reach[shell.paths[entry_id]] == "hidden", entry_id
+
+
+def test_an_own_search_control_fills_the_search_slot_and_ends_the_pending_results():
+    comp = _comp(["shop"], navigation={"slots": {"search": "app.search_box"}},
+                 bound=["app.search_box"])
+    shell = plan_react_shell(comp, react_entries(comp.modules))
+    assert shell.resolved["slots"]["search"] == "app.search_box"
+    results = shell.paths["search.results"]
+    assert shell.reach[results] == "slot:search:app.search_box"
+    assert not any(p.startswith("search.results") for p in shell.resolved["pending"])
+    bare = _comp(["shop"])
+    bare_shell = plan_react_shell(bare, react_entries(bare.modules))
+    assert any(p.startswith("search.results") for p in bare_shell.resolved["pending"])
+
+
+def test_an_unbound_own_search_control_is_e09_under_strict_and_empty_otherwise():
+    comp = _comp(["shop"], strict=True, navigation={"slots": {"search": "app.search_box"}})
+    with pytest.raises(N.NavigationError) as exc:
+        plan_react_shell(comp, react_entries(comp.modules))
+    assert _code(exc) == "NAV-E09"
+    loose = _comp(["shop"], navigation={"slots": {"search": "app.search_box"}})
+    shell = plan_react_shell(loose, react_entries(loose.modules))
+    assert shell.resolved["slots"]["search"] is None
+    with pytest.raises(N.NavigationError):
+        bad = _comp(["shop"], navigation={"slots": {"cart": "app.cart_box"}},
+                    bound=["app.cart_box"])
+        plan_react_shell(bad, react_entries(bad.modules))
