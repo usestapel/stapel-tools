@@ -69,9 +69,10 @@ STAPEL_LIBS = {
         # registration door under public_space is presets.W001, not E001 —
         # what lets --auth-kinds close the kinds it leaves out. 0.99.0:
         # declared error params (errors.json param_types) and the reworded-key
-        # stale gate at generate_error_keys.
-        "pin": "0.99.0",
-        "ahead_of_pypi": False,  # PyPI 0.99.0 @ 2026-11-20
+        # stale gate at generate_error_keys. 0.99.3: examples on the paginator
+        # envelopes (the contract profile-1 golden follows it).
+        "pin": "0.99.3",
+        "ahead_of_pypi": False,  # PyPI 0.99.3 @ 2026-11-20
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",

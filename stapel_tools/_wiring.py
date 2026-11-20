@@ -249,6 +249,28 @@ def render_beat_schedule(libs: list[str], *, flavor: str = "monolith") -> str:
     sources = sorted(sources)  # one import block, in the order ruff's isort keeps
     imports = "\n".join(f"from {mod} import {func}  # noqa: E402" for mod, func in sources)
     spreads = "\n".join(f"    **{func}()," for _mod, func in sources)
+    if flavor != "monolith":
+        # A minimal project installs no celery, and a helper that builds
+        # crontab entries refuses without it (stapel-search 0.18.3): the jobs
+        # are then scheduled from cron, and the warning that names them stays.
+        imports = "\n".join("    " + line for line in imports.splitlines())
+        spreads = "\n".join("    " + line for line in spreads.splitlines())
+        return f'''
+# ─── Scheduled jobs (celery beat) ───────────────────────────────────────────
+# Every selected module's own beat helper, written HERE so `manage.py check`
+# reads what beat will run. Without celery installed (this project does not
+# install it) a helper that builds crontab entries refuses: schedule the same
+# task callables from cron or a systemd timer instead.
+try:
+{imports}
+
+    CELERY_BEAT_SCHEDULE = {{
+        **(globals().get("CELERY_BEAT_SCHEDULE") or {{}}),
+{spreads}
+    }}
+except ImportError:
+    pass
+'''
     return f'''
 # ─── Scheduled jobs (celery beat) ───────────────────────────────────────────
 # Every selected module's own beat helper, written HERE so `manage.py check`

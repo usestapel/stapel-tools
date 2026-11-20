@@ -61,6 +61,11 @@
 - KMP emitter: iOS 15.0 floor and parity with the stapel-kmp reference app
   (`ios_parity` gate). Vendored stapel-kmp data re-pinned to 5a9b3e7 (the
   profiles brick's nav manifest); the mobile goldens move with it.
+- Registry pin: stapel-core 0.99.3 (examples on the paginator envelopes; the
+  contract profile-1 golden is regenerated, its diff is only those examples).
+- A minimal project's beat block tolerates a helper that needs celery
+  (stapel-search 0.18.3 refuses without it; a minimal project installs none):
+  the jobs are then scheduled from cron, and `manage.py check` still boots.
 
 ## [0.84.0] — 2026-11-20
 
