@@ -117,6 +117,23 @@ build (signing identities, bundle ids, the deep-link association files the
 monolith's nginx serves at `/.well-known/`). The stapel-kmp data the emitter
 reads is vendored and digest-pinned (`python -m stapel_tools.composition.kmp.vendor`).
 
+### `stapel-nav-plan --svg` and `stapel-shell-lint` — the navigation, before and after
+
+`stapel-nav-plan [create-project flags] --svg DIR [--labels labels.json]` prints
+every platform's resolved navigation and writes one wireframe per platform,
+audience and size class (`react-guest-compact.svg`, …): header slots, the carrier
+with the destinations it shows and its "More", the guest's sign-in entry. Drawn
+from the plan alone — deterministic, no browser.
+
+`stapel-shell-lint [PROJECT] [--baseline FILE] [--write-baseline FILE]` checks a
+scaffolded project statically: NAV001 a route outside the shell layout route,
+NAV002 a page module nothing binds or routes, NAV003 an `stapel.app-nav.json`
+entry without an `app.pages.ts` binding (or the reverse), NAV004 a generated nav
+file that differs from its recorded hash, NAV005 no `navigation.resolved` (or a
+sign-in with no account slot). A baselined finding is a warning. It cannot see a
+route tree built at run time (the generated vitest gates walk the router) nor
+mobile screens (NAV006, queued).
+
 ### `stapel-new-service` — add a service to an existing project
 
 ```bash

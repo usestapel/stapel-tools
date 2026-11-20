@@ -166,6 +166,12 @@ def plan_main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--mobile-shell", default=None)
     parser.add_argument("--app-nav", type=Path, default=None,
                         help="A stapel.app-nav.json to plan the project's own pages from.")
+    parser.add_argument("--svg", type=Path, default=None, metavar="DIR",
+                        help="Also write one SVG wireframe per platform, audience and size "
+                             "class (<platform>-<audience>-<class>.svg) into DIR.")
+    parser.add_argument("--labels", type=Path, default=None, metavar="JSON",
+                        help="With --svg: {destination id: label} for the wireframes "
+                             "(default: the id's last segment).")
     add_nav_arguments(parser)
     args = parser.parse_args(argv)
     base = load_composition_file(args.composition) if args.composition else {}
@@ -199,6 +205,13 @@ def plan_main(argv: Optional[list[str]] = None) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
     print(json.dumps(resolved, indent=2))
+    if args.svg is not None:
+        from .composition.wireframe import write_wireframes
+
+        labels = json.loads(args.labels.read_text(encoding="utf-8")) if args.labels else None
+        written = write_wireframes(resolved, args.svg, labels=labels,
+                                   title=args.title or base.get("title") or "")
+        print(f"stapel-nav-plan: {len(written)} wireframe(s) in {args.svg}", file=sys.stderr)
     return 0
 
 
