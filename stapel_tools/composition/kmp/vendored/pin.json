@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/usestapel/stapel-kmp",
-  "commit": "87114b126cd7736ec2e0516713e2d259372255c4",
+  "commit": "240953f447ea4e2e7735a39931e1bf3c6dfe7011",
   "gradle": {
     "version": "9.7.0",
     "wrapperJarSha256": "7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d",
@@ -30,7 +30,7 @@
     },
     "nav-manifests/auth.json": {
       "source": "bricks/auth/ui/nav-manifest.json",
-      "sha256": "3a1edab457118281720a85db3a0e4881c96f37b95e4c1241d18b67330b4e73d2"
+      "sha256": "6ea7647242fd58ac0c27b291e3c916d0e4a57dcf175c5f0c4f84b6d8e081bccb"
     }
   }
 }

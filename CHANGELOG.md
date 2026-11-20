@@ -14,6 +14,8 @@
 - Registry pin: stapel-core 0.99.0 (declared error params, `param_types` in
   `errors.json`; a key reworded by a package that does not own it fails the
   emission). `emit_errors` passes `param_types` through unchanged.
+- Vendored stapel-kmp data re-pinned to 240953f (auth's `nav-manifest.json`
+  no longer carries a version; the nav-sync gate refused the stale copy).
 
 ## [0.83.0] — 2026-11-20
 
