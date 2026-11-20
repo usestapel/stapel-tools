@@ -196,7 +196,7 @@ include = ["stapel_tools*"]
 # The KMP emitter's vendored stapel-kmp data (digest-pinned) and its templates.
 "stapel_tools.composition.kmp" = [
     "vendored/*.json", "vendored/nav-manifests/*.json", "vendored/gradle/*", "vendored/sample-ios/*",
-    "templates/*", "templates/ios/*",
+    "vendored/ios-bridges/*/*.swift", "templates/*", "templates/ios/*",
 ]
 
 [tool.pytest.ini_options]

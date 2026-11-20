@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/usestapel/stapel-kmp",
-  "commit": "7756fb8008cf2d93254ef0ce2db7d455c3e89cfd",
+  "commit": "f14da518faf7a35976070a0c69c235c3f5838005",
   "gradle": {
     "version": "9.7.0",
     "wrapperJarSha256": "7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d",
@@ -10,7 +10,7 @@
   "files": {
     "kmp-registry.json": {
       "source": "kmp-registry.json",
-      "sha256": "28fea57f35e25f9348d00cdbbf3f480267dad261bcb44e1a72975b4188f834bf"
+      "sha256": "0abfb2e68fea4a0b767dc61a980bf6468eace0755ba6e3a85198e98baa4163bf"
     },
     "shell-templates.json": {
       "source": "substrate/stapel-shell/shell-templates.json",
@@ -30,19 +30,47 @@
     },
     "sample-ios/project.pbxproj": {
       "source": "samples/shop-mobile/iosApp/iosApp.xcodeproj/project.pbxproj",
-      "sha256": "033258276a7eb7965b487c0e4d73ee44019a9e52f29eae99a02531c0d466c0f3"
+      "sha256": "fed4356d7f6b098691302be371021a4e940f379964298176cbc719cab0c60d31"
     },
     "sample-ios/shared.build.gradle.kts": {
       "source": "samples/shop-mobile/shared/build.gradle.kts",
-      "sha256": "67a9f9c284fe8f40a2a3892a0267de9f15a007f3982f5bec0518b77cdc409b2d"
+      "sha256": "b39098ef9f9ea89ae1cb28488913f2125e516fc59f0a1b8fe2779b3bd68cb0ba"
     },
     "sample-ios/iOSApp.swift": {
       "source": "samples/shop-mobile/iosApp/iosApp/iOSApp.swift",
-      "sha256": "fb334b4f95800ec49f02f422b549f3a76a7dced2a87e4966b1299fb35b631125"
+      "sha256": "92c166bfa3a4d9f23d80c67810ddbacb7c2b68ba5a832e800fb6bbab06cc504e"
     },
     "sample-ios/ContentView.swift": {
       "source": "samples/shop-mobile/iosApp/iosApp/ContentView.swift",
       "sha256": "95c5317ddf042aadc39fb60851e80cf866166188ca8bebef0c72f98b7f2498ce"
+    },
+    "sample-ios/Info.plist": {
+      "source": "samples/shop-mobile/iosApp/iosApp/Info.plist",
+      "sha256": "fa6794d44b085a1964fad6d0c2a1b9083fb8a4ce7b472da2a2d655b3998b20e8"
+    },
+    "ios-bridges/core/StapelAppDelegate.swift": {
+      "source": "ios-bridges/core/StapelAppDelegate.swift",
+      "sha256": "2887e07fb80a8308be6b9f7b36b57030eb2357c2f8a79daa08511fabd5adcd4b"
+    },
+    "ios-bridges/firebase/StapelFirebase.swift": {
+      "source": "ios-bridges/firebase/StapelFirebase.swift",
+      "sha256": "4a60a206769b1354256d67e024820cebf562307e1c249f02bdf9f5b8991a4a88"
+    },
+    "ios-bridges/firebase/StapelFirebasePush.swift": {
+      "source": "ios-bridges/firebase/StapelFirebasePush.swift",
+      "sha256": "e86f58b7a8f378952b36c7f3adb21cdeae3671c87d0f52de9a84af4c7f4fc2b1"
+    },
+    "ios-bridges/firebase/StapelFirebaseAnalytics.swift": {
+      "source": "ios-bridges/firebase/StapelFirebaseAnalytics.swift",
+      "sha256": "35b34cfe1ed7da88ca3529ac0ac266bc7be50d9013fc478aaabf3902da8356eb"
+    },
+    "ios-bridges/appmetrica/StapelAppMetrica.swift": {
+      "source": "ios-bridges/appmetrica/StapelAppMetrica.swift",
+      "sha256": "467d180bb2c647fdb03d2f969c2608eb90986d3af74d6158dea424f21b66892e"
+    },
+    "ios-bridges/appmetrica/StapelAppMetricaAnalytics.swift": {
+      "source": "ios-bridges/appmetrica/StapelAppMetricaAnalytics.swift",
+      "sha256": "ca03e7013bda06ef67446b2a532f958ce080d96b7e0a8fdaed4138cb2d4a1d27"
     },
     "nav-manifests/auth.json": {
       "source": "bricks/auth/ui/nav-manifest.json",

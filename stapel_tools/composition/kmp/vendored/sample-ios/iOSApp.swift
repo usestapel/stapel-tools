@@ -3,7 +3,13 @@ import Shared
 
 @main
 struct iOSApp: App {
+    // The one app delegate (ios-bridges/core): APNs and notification callbacks, forwarded explicitly.
+    @UIApplicationDelegateAdaptor(StapelAppDelegate.self) var delegate
+
     init() {
+        // The Firebase push bridge (ios-bridges/firebase) before the first screen creates the app.
+        StapelAppDelegate.handlers = [StapelFirebasePush.shared]
+        MainViewControllerKt.installPushBridge(bridge: StapelFirebasePush.shared)
         let args = ProcessInfo.processInfo.arguments
         // Launch argument `-stapelLogFile <name>`: the log records also go to Documents/<name> (the launch
         // smoke reads its markers from the app's data container, independent of unified-log filtering).

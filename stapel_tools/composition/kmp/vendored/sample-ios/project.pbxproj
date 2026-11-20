@@ -6,6 +6,13 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A1C0FFEE00000000000000F1 /* FirebaseMessaging in Frameworks */ = {isa = PBXBuildFile; productRef = A1C0FFEE00000000000000F2 /* FirebaseMessaging */; };
+		A1C0FFEE00000000000000D1 /* StapelAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FFEE00000000000000E1 /* StapelAppDelegate.swift */; };
+		A1C0FFEE00000000000000D2 /* StapelFirebase.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FFEE00000000000000E2 /* StapelFirebase.swift */; };
+		A1C0FFEE00000000000000D3 /* StapelFirebasePush.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FFEE00000000000000E3 /* StapelFirebasePush.swift */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		A1C0FFEE0000000000000007 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -19,6 +26,9 @@
 /* Begin PBXFileReference section */
 		A1C0FFEE0000000000000001 /* iosAppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = iosAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		EEF07B73B5DFA0FFD80A5EA6 /* ShopMobile.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ShopMobile.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A1C0FFEE00000000000000E1 /* StapelAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = core/StapelAppDelegate.swift; sourceTree = "<group>"; };
+		A1C0FFEE00000000000000E2 /* StapelFirebase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = firebase/StapelFirebase.swift; sourceTree = "<group>"; };
+		A1C0FFEE00000000000000E3 /* StapelFirebasePush.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = firebase/StapelFirebasePush.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -50,6 +60,7 @@
 			path = Configuration;
 			sourceTree = "<group>";
 		};
+
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,6 +68,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1C0FFEE00000000000000F1 /* FirebaseMessaging in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -75,6 +87,7 @@
 			children = (
 				0A93D1C41E6DD098306CF061 /* Configuration */,
 				8E3A7EE6C5B8C131B2837F84 /* iosApp */,
+				A1C0FFEE00000000000000F4 /* ios-bridges */,
 				A1C0FFEE0000000000000002 /* iosAppUITests */,
 				503C4B815DBB31EDFFC90309 /* Products */,
 			);
@@ -87,6 +100,17 @@
 				A1C0FFEE0000000000000001 /* iosAppUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A1C0FFEE00000000000000F4 /* ios-bridges */ = {
+			isa = PBXGroup;
+			children = (
+				A1C0FFEE00000000000000E1 /* StapelAppDelegate.swift */,
+				A1C0FFEE00000000000000E2 /* StapelFirebase.swift */,
+				A1C0FFEE00000000000000E3 /* StapelFirebasePush.swift */,
+			);
+			name = "ios-bridges";
+			path = "../../../ios-bridges";
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -110,6 +134,7 @@
 			);
 			name = iosApp;
 			packageProductDependencies = (
+				A1C0FFEE00000000000000F2 /* FirebaseMessaging */,
 			);
 			productName = iosApp;
 			productReference = EEF07B73B5DFA0FFD80A5EA6 /* ShopMobile.app */;
@@ -166,6 +191,9 @@
 			);
 			mainGroup = 4F520B36787FA1E9715D646E;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A1C0FFEE00000000000000F3 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 503C4B815DBB31EDFFC90309 /* Products */;
 			projectDirPath = "";
@@ -221,6 +249,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A1C0FFEE00000000000000D1 /* StapelAppDelegate.swift in Sources */,
+				A1C0FFEE00000000000000D2 /* StapelFirebase.swift in Sources */,
+				A1C0FFEE00000000000000D3 /* StapelFirebasePush.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -486,6 +517,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A1C0FFEE00000000000000F3 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/firebase/firebase-ios-sdk";
+			requirement = {
+				kind = exactVersion;
+				version = 13.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A1C0FFEE00000000000000F2 /* FirebaseMessaging */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1C0FFEE00000000000000F3 /* XCRemoteSwiftPackageReference "firebase-ios-sdk" */;
+			productName = FirebaseMessaging;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 6D7F262B4BEEEA5F5B15A7FA /* Project object */;
 }

@@ -27,6 +27,31 @@
     }
   },
   "artifacts": {
+    "stapel-analytics": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-analytics-appmetrica": {
+      "version": "0.0.1",
+      "family": "capability",
+      "released": false
+    },
+    "stapel-analytics-collector": {
+      "version": "0.0.1",
+      "family": "capability",
+      "released": false
+    },
+    "stapel-analytics-firebase": {
+      "version": "0.0.1",
+      "family": "capability",
+      "released": false
+    },
+    "stapel-analytics-testing": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
     "stapel-app": {
       "version": "0.0.1",
       "family": "substrate",
@@ -80,6 +105,11 @@
     "stapel-catalog": {
       "version": "0.0.1",
       "family": "catalog",
+      "released": false
+    },
+    "stapel-cdn": {
+      "version": "0.0.1",
+      "family": "brick-domain",
       "released": false
     },
     "stapel-codegen-gradle-plugin": {
@@ -147,6 +177,16 @@
       "family": "substrate",
       "released": false
     },
+    "stapel-notifications": {
+      "version": "0.0.1",
+      "family": "brick-domain",
+      "released": false
+    },
+    "stapel-notifications-push": {
+      "version": "0.0.1",
+      "family": "brick-adapter",
+      "released": false
+    },
     "stapel-profiles": {
       "version": "0.0.1",
       "family": "brick-domain",
@@ -160,6 +200,21 @@
     "stapel-profiles-ui": {
       "version": "0.0.1",
       "family": "brick-ui",
+      "released": false
+    },
+    "stapel-push": {
+      "version": "0.0.1",
+      "family": "substrate",
+      "released": false
+    },
+    "stapel-push-firebase": {
+      "version": "0.0.1",
+      "family": "capability",
+      "released": false
+    },
+    "stapel-push-testing": {
+      "version": "0.0.1",
+      "family": "substrate",
       "released": false
     },
     "stapel-result": {

@@ -54,6 +54,16 @@ FIXED_SOURCES: dict[str, str] = {
     "sample-ios/shared.build.gradle.kts": "samples/shop-mobile/shared/build.gradle.kts",
     "sample-ios/iOSApp.swift": "samples/shop-mobile/iosApp/iosApp/iOSApp.swift",
     "sample-ios/ContentView.swift": "samples/shop-mobile/iosApp/iosApp/ContentView.swift",
+    "sample-ios/Info.plist": "samples/shop-mobile/iosApp/iosApp/Info.plist",
+    # The Swift halves of the vendor providers: the scaffold copies the selected ones into the app
+    # shell (ARCH-PUSH-ANALYTICS §4.3); never a second copy that can drift.
+    "ios-bridges/core/StapelAppDelegate.swift": "ios-bridges/core/StapelAppDelegate.swift",
+    "ios-bridges/firebase/StapelFirebase.swift": "ios-bridges/firebase/StapelFirebase.swift",
+    "ios-bridges/firebase/StapelFirebasePush.swift": "ios-bridges/firebase/StapelFirebasePush.swift",
+    "ios-bridges/firebase/StapelFirebaseAnalytics.swift": "ios-bridges/firebase/StapelFirebaseAnalytics.swift",
+    "ios-bridges/appmetrica/StapelAppMetrica.swift": "ios-bridges/appmetrica/StapelAppMetrica.swift",
+    "ios-bridges/appmetrica/StapelAppMetricaAnalytics.swift":
+        "ios-bridges/appmetrica/StapelAppMetricaAnalytics.swift",
 }
 
 

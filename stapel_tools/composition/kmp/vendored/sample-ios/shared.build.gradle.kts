@@ -86,6 +86,8 @@ kotlin {
         target.binaries.framework {
             baseName = "Shared"
             isStatic = true
+            // The Firebase push bridge protocol keeps its plain name in the header (the Swift half conforms to it).
+            export(libs.stapel.push.firebase)
         }
         // The iOS floor (15.0): Kotlin/Native's minimum OS for every binary of this target, equal to the
         // Xcode project's IPHONEOS_DEPLOYMENT_TARGET. Kotlin has no DSL for it; the documented route is
@@ -102,12 +104,20 @@ kotlin {
             dependencies {
                 api(project.dependencies.platform(libs.stapel.bom))
                 api(libs.stapel.app)
+                implementation(libs.stapel.analytics)
                 implementation(libs.stapel.auth.ui)
                 implementation(libs.stapel.profiles.ui)
+                implementation(libs.stapel.cdn)
                 implementation(libs.stapel.ui.material3)
                 implementation(libs.stapel.wire)
+                implementation(libs.stapel.push)
+                implementation(libs.stapel.push.firebase)
+                implementation(libs.stapel.notifications.push)
                 implementation(libs.koin.core)
             }
+        }
+        iosMain.dependencies {
+            api(libs.stapel.push.firebase)
         }
         commonTest {
             if (walkBaseUrl.isPresent) {
@@ -152,4 +162,12 @@ providers.gradleProperty("stapel.ios.simulator").orNull?.let { udid ->
 
 tasks.withType<Test>().configureEach {
     testLogging { events("passed", "failed", "skipped"); exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL }
+}
+
+// Analytics vendor provider (README "Analytics and Firebase"): off by default (the log sink alone);
+// -Pshop.firebase=true adds Google Analytics for Firebase on Android.
+val shopFirebase = providers.gradleProperty("shop.firebase").orNull == "true"
+kotlin.sourceSets.named("androidMain") {
+    kotlin.srcDir(if (shopFirebase) "src/androidFirebase/kotlin" else "src/androidNoVendor/kotlin")
+    if (shopFirebase) dependencies { implementation(libs.stapel.analytics.firebase) }
 }
