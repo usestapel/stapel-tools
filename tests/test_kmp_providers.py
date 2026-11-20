@@ -416,8 +416,9 @@ def test_plan_with_every_provider_opens_no_file(monkeypatch, tmp_path):
 
 class TestCli:
     def _run(self, tmp_path, *flags):
-        from stapel_tools.create_project import main
         import sys
+
+        from stapel_tools.create_project import main
 
         argv = ["stapel-create-project", "mob", "--type", "minimal", "--title", "Mob",
                 "--url", "https://mob.example", "--company-name", "Acme",

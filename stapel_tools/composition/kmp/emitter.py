@@ -377,10 +377,8 @@ class KmpEmitter:
     def plan(self, comp: Composition, request: PlatformRequest) -> EmitPlan:  # noqa: C901
         from ..bricks import BRICK_UI
         from ..react.bindings import REACT_BINDINGS
-        from .registry import kmp_bindings, kmp_registry, shell_templates
-
         from .providers import PUSH_MODULE
-        from .registry import KMP_AVATAR_UPLOAD_MODULE
+        from .registry import KMP_AVATAR_UPLOAD_MODULE, kmp_bindings, kmp_registry, shell_templates
 
         reg = kmp_registry()
         bindings = kmp_bindings()
