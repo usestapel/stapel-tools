@@ -117,8 +117,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Email/push notifications",
         "default": False,
-        "pin": "0.30.1",
-        "ahead_of_pypi": False,  # PyPI 0.30.1 @ 2026-11-13
+        "pin": "0.31.0",
+        "ahead_of_pypi": False,  # PyPI 0.31.0 @ 2026-11-20
     },
     "profiles": {
         "repo": "https://github.com/usestapel/stapel-profiles.git",
@@ -182,8 +182,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "LLM facade (complete/translate/transcribe/summarize/image)",
         "default": False,
-        "pin": "0.39.0",
-        "ahead_of_pypi": False,  # PyPI 0.39.0 @ 2026-11-05 (scripts/check_pypi_pins.py)
+        "pin": "0.40.0",
+        "ahead_of_pypi": False,  # PyPI 0.40.0 @ 2026-11-20 (scripts/check_pypi_pins.py)
         "http": True,
         "url_prefix": "agent/",
         "requires": [],
@@ -385,8 +385,8 @@ STAPEL_LIBS = {
         "required": False,
         "description": "Mail trap (dev/test outbound email capture)",
         "default": False,
-        "pin": "0.1.8",
-        "ahead_of_pypi": False,  # PyPI 0.1.8 @ 2026-10-15
+        "pin": "0.2.0",
+        "ahead_of_pypi": False,  # PyPI 0.2.0 @ 2026-11-20
         "http": True,
         "url_prefix": "mailtrap/",
         "requires": [],

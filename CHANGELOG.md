@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.85.1] — 2026-11-20
+
+- Registry pins: stapel-notifications 0.31.0, stapel-agent 0.40.0,
+  stapel-mailtrap 0.2.0 (published while 0.85.0's publish ran; its PIN002
+  gate refused the tag, and a pushed tag is never moved).
+
 ## [0.85.0] — 2026-11-20
 
 - **Navigation model** (navigation-templates spec, slice W0). One
