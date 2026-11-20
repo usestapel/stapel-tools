@@ -6,7 +6,7 @@
 	objectVersion = 77;
 	objects = {
 
-/* Begin PBXFileReference section */
+{{PBX_BUILD_FILES}}/* Begin PBXFileReference section */
 		EEF07B73B5DFA0FFD80A5EA6 /* {{IOS_PRODUCT}}.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = {{IOS_PRODUCT}}.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -41,7 +41,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-			);
+{{PBX_FRAMEWORK_FILES}}			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -85,7 +85,7 @@
 			);
 			name = iosApp;
 			packageProductDependencies = (
-			);
+{{PBX_PRODUCT_DEPS}}			);
 			productName = iosApp;
 			productReference = EEF07B73B5DFA0FFD80A5EA6 /* {{IOS_PRODUCT}}.app */;
 			productType = "com.apple.product-type.application";
@@ -114,7 +114,7 @@
 			);
 			mainGroup = 4F520B36787FA1E9715D646E;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
+{{PBX_PACKAGE_REFS}}			preferredProjectObjectVersion = 77;
 			productRefGroup = 503C4B815DBB31EDFFC90309 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -368,6 +368,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-	};
+{{PBX_PACKAGE_SECTIONS}}	};
 	rootObject = 6D7F262B4BEEEA5F5B15A7FA /* Project object */;
 }

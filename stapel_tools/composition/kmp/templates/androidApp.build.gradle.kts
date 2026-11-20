@@ -1,4 +1,4 @@
-plugins {
+{{GRADLE_HEAD}}plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.compose.compiler)
 }
@@ -30,3 +30,4 @@ android {
     buildFeatures { compose = true }
     // Release signing: see mobile/README.md (the owner provides the keystore; nothing is generated).
 }
+{{GRADLE_TAIL}}

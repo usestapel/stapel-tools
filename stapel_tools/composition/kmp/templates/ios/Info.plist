@@ -17,7 +17,7 @@
 			</array>
 		</dict>
 	</array>
-	<key>NSAppTransportSecurity</key>
+{{PLIST_KEYS}}	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>

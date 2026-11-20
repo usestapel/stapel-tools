@@ -79,7 +79,7 @@ val generateAppClients = tasks.register("generateAppClients") {
     }
 }
 
-// --- the sign-in walk against a real backend: only with -Pstapel.walk.baseUrl=<url> ---
+{{SECRETS_TASK}}// --- the sign-in walk against a real backend: only with -Pstapel.walk.baseUrl=<url> ---
 val walkBaseUrl = providers.gradleProperty("stapel.walk.baseUrl")
 val generateWalkConfig = tasks.register("generateWalkConfig") {
     val walkBaseUrl = providers.gradleProperty("stapel.walk.baseUrl")
@@ -105,7 +105,7 @@ kotlin {
         target.binaries.framework {
             baseName = "Shared"
             isStatic = true
-        }
+{{FRAMEWORK_EXPORTS}}        }
         // The iOS floor (15.0): Kotlin/Native's minimum OS for every binary of this target, equal to the
         // Xcode project's IPHONEOS_DEPLOYMENT_TARGET. Kotlin has no DSL for it; the documented route is
         // the konan property override.
@@ -119,15 +119,15 @@ kotlin {
         commonMain {
             kotlin.srcDir(generateAppEnvironment)
             kotlin.srcDir(generateAppClients)
-            dependencies {
+{{SECRETS_SRC}}            dependencies {
                 api(project.dependencies.platform(libs.stapel.bom))
                 api(libs.stapel.app)
-{{BRICK_DEPS}}                implementation(libs.stapel.ui.material3)
+{{BRICK_DEPS}}{{FEATURE_DEPS}}                implementation(libs.stapel.ui.material3)
                 implementation(libs.stapel.wire)
 {{OFFLINE_DEP}}                implementation(libs.koin.core)
             }
         }
-        commonTest {
+{{IOS_MAIN_DEPS}}        commonTest {
             if (walkBaseUrl.isPresent) {
                 kotlin.srcDir("src/walkTest/kotlin")
                 kotlin.srcDir(generateWalkConfig)

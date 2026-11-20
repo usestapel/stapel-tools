@@ -7,3 +7,4 @@ local.properties
 xcuserdata/
 *.xcuserstate
 iosApp/DerivedData/
+{{GITIGNORE_EXTRA}}

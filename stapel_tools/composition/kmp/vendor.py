@@ -64,6 +64,10 @@ FIXED_SOURCES: dict[str, str] = {
     "ios-bridges/appmetrica/StapelAppMetrica.swift": "ios-bridges/appmetrica/StapelAppMetrica.swift",
     "ios-bridges/appmetrica/StapelAppMetricaAnalytics.swift":
         "ios-bridges/appmetrica/StapelAppMetricaAnalytics.swift",
+    # The vendor Swift packages at the exact versions the bridges are compiled against (CI job
+    # ios-bridges), and the Android Gradle plugin version the reference app applies.
+    "ios-bridges/Package.swift": "ios-bridges/Package.swift",
+    "sample-android/androidApp.build.gradle.kts": "samples/shop-mobile/androidApp/build.gradle.kts",
 }
 
 

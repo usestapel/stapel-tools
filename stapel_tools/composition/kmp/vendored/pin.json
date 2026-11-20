@@ -72,6 +72,14 @@
       "source": "ios-bridges/appmetrica/StapelAppMetricaAnalytics.swift",
       "sha256": "ca03e7013bda06ef67446b2a532f958ce080d96b7e0a8fdaed4138cb2d4a1d27"
     },
+    "ios-bridges/Package.swift": {
+      "source": "ios-bridges/Package.swift",
+      "sha256": "390fa355994bc8e3d226fbd3fdc230f221d1130f58bf077211c646b886ce7e10"
+    },
+    "sample-android/androidApp.build.gradle.kts": {
+      "source": "samples/shop-mobile/androidApp/build.gradle.kts",
+      "sha256": "2138d7fceac42f1e0e318cd6c2ceb15ef0351ed165497083da663ae76e39a021"
+    },
     "nav-manifests/auth.json": {
       "source": "bricks/auth/ui/nav-manifest.json",
       "sha256": "6ea7647242fd58ac0c27b291e3c916d0e4a57dcf175c5f0c4f84b6d8e081bccb"

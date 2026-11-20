@@ -54,13 +54,13 @@ fun createApp(
     )
 {{OFFLINE_LINE}}{{BRICKS_LINE}}    screens(::appScreens)
     modules(appClientsModule())
-    navigation(
+{{FEATURE_LINES}}    navigation(
         home = DestinationId("{{HOME_ID}}"),
         deepLinks = DeepLinkConfig(schemes = setOf("{{SCHEME}}"), hosts = setOf({{HOSTS}})),
     )
     theme { content -> StapelMaterialTheme(tokens = AppTokens, content = content) }
     configure()
-}
+}{{AFTER_BUILD}}
 
 /** The app UI. */
 @Composable
@@ -73,12 +73,12 @@ fun appScreens(context: BrickContext): NavContribution = navContribution("app:{{
     destination<HomeRoute>(
         id = "{{HOME_ID}}", path = "home", labelKey = "app.nav.home", icon = NavIcons.Home,
         codec = PathCodec.constant(HomeRoute), requiresAuth = {{HOME_REQUIRES_AUTH}}, order = 0,
-    ) { HomeScreen() }
+    ) { HomeScreen({{HOME_ARGS}}) }
 }
 
 @Composable
-private fun HomeScreen() {
+private fun HomeScreen({{HOME_PARAMS}}) {
     StapelPage(Modifier.testTag("{{HOME_ID}}")) {
         StapelText({{TITLE_KT_STRING}})
-    }
+{{HOME_EXTRAS}}    }
 }

@@ -61,14 +61,24 @@ def _load_templates() -> dict[str, str]:
 def _load_vendored() -> dict:
     """Everything plan() reads from the vendored stapel-kmp data, read once at import —
     plan() itself touches no file (the golden gate and Studio call it in memory)."""
-    from . import registry, vendor
+    from . import providers, registry, vendor
 
     registry.kmp_bindings()
     registry.shell_templates()
+    providers.swift_packages()
+    providers.google_services_plugin_version()
+    swift = {providers.APP_DELEGATE_FILE}
+    for provider in providers.PROVIDERS.values():
+        swift.update(f for f in (provider.core_file,) if f)
+        for cap in (provider.analytics, provider.push):
+            if cap is not None and cap.bridge_file:
+                swift.add(cap.bridge_file)
+                providers.bridge_abi(cap.bridge_file)
     return {
         "commit": vendor.load_pin()["commit"],
         **{rel: vendor.read_bytes(rel) for rel in (
             "gradle/gradle-wrapper.jar", "gradle/gradle-wrapper.properties", "gradle/gradlew")},
+        **{rel: vendor.read_bytes(rel).decode("utf-8") for rel in sorted(swift)},
     }
 
 
@@ -171,6 +181,40 @@ def plan_routes(entries, home_requires_auth: bool) -> tuple[dict[str, str], list
     return routes, notes
 
 
+#: The media uploader the profiles avatar change talks to (stapel-kmp ``bricks/cdn/domain``).
+KMP_AVATAR_UPLOAD_ARTIFACT = "stapel-cdn"
+KMP_AVATAR_UPLOAD_FACTORY = "stapel.cdn.di.cdnModule"
+
+
+def _feature_artifacts(f: dict) -> list[str]:
+    """Every stapel-kmp artifact the analytics / push selection adds to the app."""
+    from . import providers as pv
+
+    out: list[str] = []
+    if f.get("avatar"):
+        out.append(KMP_AVATAR_UPLOAD_ARTIFACT)
+    if f["analytics"] is not None:
+        out.append(pv.ANALYTICS_ARTIFACT)
+        out += [pv.PROVIDERS[s].analytics.artifact for s in f["analytics"]]
+    if f["push"] is not None:
+        out += list(pv.PUSH_ARTIFACTS)
+        out += [pv.PROVIDERS[p].push.artifact for p in f["push"] if pv.PROVIDERS[p].push]
+    return out
+
+
+def reg_released(artifact: str) -> bool:
+    from .registry import kmp_registry
+
+    return bool(kmp_registry().get("artifacts", {}).get(artifact, {}).get("released", False))
+
+
+def _pbx_id(name: str) -> str:
+    """A stable 24-hex object id for an object the emitter adds to the Xcode project."""
+    import hashlib
+
+    return hashlib.sha256(f"stapel-kmp:{name}".encode()).hexdigest()[:24].upper()
+
+
 class KmpEmitter:
     platform: ClassVar[str] = "kmp"
 
@@ -232,7 +276,11 @@ class KmpEmitter:
             raise CompositionError(
                 "--mobile-avatar-upload: the avatar upload is the profiles brick's and needs "
                 f"stapel-{KMP_AVATAR_UPLOAD_MODULE} on the backend; select profiles")
+        features = self._features(comp, request)
+        self._validate_features(comp, request, features)
         missing = unreleased_artifacts(installed, offline=bool(request.option("offline")))
+        missing = sorted(set(missing) | {a for a in _feature_artifacts(features)
+                                         if not reg_released(a)})
         if missing and request.option("repo", "central") == "central":
             raise CompositionError(
                 "--mobile kmp: these stapel-kmp artifacts are not on Maven Central yet: "
@@ -241,12 +289,98 @@ class KmpEmitter:
                 "publishToMavenLocal` in a stapel-kmp checkout) or --mobile-maven-repo <dir> "
                 "(its `publishAllPublicationsToStagingRepository` output).")
 
+    # -- analytics and push ---------------------------------------------------------------------
+
+    def _features(self, comp: Composition, request: PlatformRequest) -> dict:
+        """The resolved ``--mobile-analytics`` / ``--mobile-push`` selection (ARCH-PUSH-ANALYTICS §7).
+
+        ``analytics`` / ``push`` are None when the flag is absent; a bare flag means firebase. The
+        first-party sink joins whenever the backend has the analytics module."""
+        from . import providers as pv
+
+        sinks = pv.parse_list(request.option("analytics"), pv.ANALYTICS_SINKS, "--mobile-analytics")
+        if sinks is not None:
+            sinks = sinks or ["firebase"]
+            if pv.ANALYTICS_MODULE in comp.modules and "stapel" not in sinks:
+                sinks.append("stapel")
+        push = pv.parse_list(request.option("push"), pv.PUSH_PROVIDERS, "--mobile-push")
+        if push is not None:
+            push = push or ["firebase"]
+        consent = request.option("consent") or "opt-in"
+        ask = request.option("push_ask") or "on-demand"
+        config = request.option("firebase_config") or {}
+        return {"analytics": sinks, "push": push, "consent": consent, "ask": ask, "config": config,
+                "avatar": bool(request.option("avatar_upload"))}
+
+    def _validate_features(self, comp: Composition, request: PlatformRequest, f: dict) -> None:
+        from . import providers as pv
+        from .registry import kmp_registry
+
+        if f["consent"] not in pv.CONSENT_DEFAULTS:
+            raise CompositionError(f"--mobile-consent {f['consent']!r}: one of {', '.join(pv.CONSENT_DEFAULTS)}")
+        if f["ask"] not in pv.PUSH_ASK:
+            raise CompositionError(f"--mobile-push-ask {f['ask']!r}: one of {', '.join(pv.PUSH_ASK)}")
+        sinks, push = f["analytics"], f["push"]
+        if sinks is not None and "stapel" in sinks and pv.ANALYTICS_MODULE not in comp.modules:
+            raise CompositionError(
+                "--mobile-analytics stapel: the first-party sink posts to the project's own "
+                f"stapel-{pv.ANALYTICS_MODULE} backend, which is not among the modules. Add "
+                f"{pv.ANALYTICS_MODULE} to --modules, or choose firebase / appmetrica.")
+        if push is not None:
+            if push == ["appmetrica"]:
+                raise CompositionError(
+                    "--mobile-push appmetrica: the notifications backend addresses Firebase registration "
+                    "tokens only and cannot reach AppMetrica-held ones (backend follow-up N5). Use "
+                    "--mobile-push firebase, or firebase,appmetrica once stapel-kmp ships an AppMetrica "
+                    "push provider.")
+            if pv.PUSH_MODULE not in comp.modules:
+                raise CompositionError(
+                    f"--mobile-push: push registers each device with the {pv.PUSH_MODULE} backend module "
+                    f"(stapel-{pv.PUSH_MODULE}), which is not among the modules. Add {pv.PUSH_MODULE} to "
+                    "--modules, or drop --mobile-push.")
+            if not self._auth_installed(comp):
+                raise CompositionError(
+                    "--mobile-push: a device is registered for a signed-in account and this project's "
+                    "app has no completable sign-in (auth not selected, --no-auth or --auth-model none). "
+                    "Select auth with a sign-in model, or drop --mobile-push.")
+            for key in push:
+                if pv.PROVIDERS[key].push is None:
+                    raise CompositionError(
+                        f"--mobile-push {','.join(push)}: stapel-kmp ships no {key} push provider at the "
+                        f"vendored commit (only analytics). Use --mobile-push firebase.")
+        artifacts = kmp_registry().get("artifacts", {})
+        absent = [a for a in _feature_artifacts(f) if a not in artifacts]
+        if absent:
+            raise CompositionError(
+                "--mobile kmp: the vendored stapel-kmp registry names no artifact "
+                f"{', '.join(absent)}; re-vendor stapel-kmp (python -m stapel_tools.composition.kmp.vendor "
+                "--from <stapel-kmp>) or drop the provider.")
+        config = f["config"]
+        if config:
+            firebase = "firebase" in (sinks or ()) or "firebase" in (push or ())
+            if not firebase:
+                raise CompositionError(
+                    "--mobile-firebase-config: firebase is selected by neither --mobile-analytics nor "
+                    "--mobile-push; select it, or drop the config.")
+            app_id = request.option("app_id") or default_app_id(comp.slug, comp.url)
+            for platform, meta in sorted(config.items()):
+                if app_id not in meta["ids"]:
+                    what = "package_name" if platform == "android" else "BUNDLE_ID"
+                    raise CompositionError(
+                        f"--mobile-firebase-config {platform}={meta['path']}: its {what} "
+                        f"{', '.join(meta['ids']) or '(none)'} is not the app id {app_id} (--mobile-id). "
+                        f"Download the config of the Firebase app registered for {app_id}, or pass "
+                        f"--mobile-id {meta['ids'][0] if meta['ids'] else '<its id>'}.")
+
     # -- plan -----------------------------------------------------------------------------------
 
     def plan(self, comp: Composition, request: PlatformRequest) -> EmitPlan:  # noqa: C901
         from ..bricks import BRICK_UI
         from ..react.bindings import REACT_BINDINGS
         from .registry import kmp_bindings, kmp_registry, shell_templates
+
+        from .providers import PUSH_MODULE
+        from .registry import KMP_AVATAR_UPLOAD_MODULE
 
         reg = kmp_registry()
         bindings = kmp_bindings()
@@ -289,6 +423,9 @@ class KmpEmitter:
                 installed.append(key)
             elif key == "auth" and binding is not None:
                 pending.append({"module": key, "reason": "auth is not wired (--no-auth / --auth-model none)"})
+            elif (key == KMP_AVATAR_UPLOAD_MODULE and request.option("avatar_upload")) or (
+                    key == PUSH_MODULE and request.option("push") is not None):
+                headless.append(key)
             elif key in BRICK_UI or key in REACT_BINDINGS:
                 pending.append({"module": key, "reason": "no stapel-kmp library registered"})
             else:
@@ -352,6 +489,11 @@ class KmpEmitter:
                 + ("" if uploader else f"; it also needs stapel-{KMP_AVATAR_UPLOAD_MODULE} on the "
                    "backend (--mobile-avatar-upload)"))
 
+        features = self._features(comp, request)
+        features["installed"] = tuple(installed)
+        fx = _plan_features(features, pkg=pkg, pkg_path=pkg_path, app_id=app_id)
+        notes.extend(fx["notes"])
+
         composition = {
             "platform": "kmp",
             "shell": {"template": shell, "slots": slots, "overrides": {}, "dropped": dropped},
@@ -367,6 +509,7 @@ class KmpEmitter:
             "signInMethods": sign_in_methods,
             "routes": routes,
             **({"avatarUpload": avatar} if avatar is not None else {}),
+            **fx["echo"],
             "app": {"id": app_id, "name": title, "scheme": scheme, "package": pkg,
                     "iosProduct": product},
             "stapelKmp": {"train": reg["train"], "group": reg["group"],
@@ -379,6 +522,7 @@ class KmpEmitter:
             "TITLE_KT": title, "TITLE_KT_STRING": _kt_string(title), "TITLE_XML": _xml(title),
             "GROUP": reg["group"], "CATALOG": reg["catalog"], "TRAIN": reg["train"],
             "REPO": repo, "ROOT_NAME": f"{comp.slug}-mobile", "DEV_PORT": dev_port,
+            **fx["ctx"],
         }
 
         # -- Gradle build ------------------------------------------------------------------
@@ -389,7 +533,7 @@ class KmpEmitter:
         write("gradle/wrapper/gradle-wrapper.properties",
               _VENDORED["gradle/gradle-wrapper.properties"].decode("utf-8"))
         write("gradlew", _VENDORED["gradle/gradlew"].decode("utf-8"), 0o755)
-        write(".gitignore", _template("gitignore"))
+        write(".gitignore", _render("gitignore", ctx))
 
         def alias(artifact: str) -> str:
             return "libs." + artifact.replace("-", ".")
@@ -414,6 +558,7 @@ class KmpEmitter:
             b = bindings[key]
             imports.append(f"import {b.descriptor_class}\n")
             brick_calls.append(f"{b.descriptor_name}()")
+        imports += fx["imports"]
         offline_line = ""
         if offline:
             module = reg["app"]["offline"]["module"]
@@ -492,7 +637,7 @@ class KmpEmitter:
         write(f"{ios}/iosApp.xcodeproj/project.xcworkspace/contents.xcworkspacedata",
               _template("ios/contents.xcworkspacedata"))
         write(f"{ios}/Configuration/Config.xcconfig", _render("ios/Config.xcconfig", ctx))
-        write(f"{ios}/iosApp/iOSApp.swift", _template("ios/iOSApp.swift"))
+        write(f"{ios}/iosApp/iOSApp.swift", _render("ios/iOSApp.swift", ctx))
         write(f"{ios}/iosApp/ContentView.swift", _template("ios/ContentView.swift"))
         write(f"{ios}/iosApp/Info.plist", _render("ios/Info.plist", ctx))
         write(f"{ios}/iosApp/Assets.xcassets/Contents.json", _template("ios/Assets.Contents.json"))
@@ -502,6 +647,12 @@ class KmpEmitter:
               _template("ios/AppIcon.Contents.json"))
         write(f"{ios}/iosApp/Preview Content/Preview Assets.xcassets/Contents.json",
               _template("ios/Assets.Contents.json"))
+
+        for rel, content in fx["files"].items():
+            if isinstance(content, tuple):
+                name, extra = content
+                content = _render(name, {**ctx, **extra})
+            write(rel, content)
 
         # -- scripts, make, data -----------------------------------------------------------
         smoke_link = f"{scheme}://app/home"
@@ -582,6 +733,423 @@ class KmpEmitter:
         )
 
 
+def _alias(artifact: str) -> str:
+    return "libs." + artifact.replace("-", ".")
+
+
+def _lower_first(text: str) -> str:
+    return text[:1].lower() + text[1:]
+
+
+def _plan_features(f: dict, *, pkg: str, pkg_path: str, app_id: str) -> dict:
+    """What the analytics / push / avatar-upload selection adds: template values, files, echo, notes.
+
+    ARCH-PUSH-ANALYTICS §4.3 (iOS shell), §6 (config files), §7 (what is emitted per platform)."""
+    from . import providers as pv
+
+    sinks, push = f["analytics"], f["push"]
+    caps: list[tuple[str, str, pv.Capability]] = []   # (provider, "analytics" | "push", capability)
+    for key in sinks or ():
+        caps.append((key, "analytics", pv.PROVIDERS[key].analytics))
+    for key in push or ():
+        caps.append((key, "push", pv.PROVIDERS[key].push))
+    vendor_caps = [c for c in caps if c[0] != "stapel"]
+    bridged = [c for c in vendor_caps if c[2].bridge_file]
+    vendors = list(dict.fromkeys(c[0] for c in vendor_caps))
+    firebase = "firebase" in vendors
+    appmetrica = "appmetrica" in vendors
+    config = f["config"]
+    out: dict = {"ctx": {}, "files": {}, "notes": [], "echo": {}, "imports": []}
+    ctx = out["ctx"]
+    files = out["files"]
+    for key in ("FEATURE_DEPS", "FRAMEWORK_EXPORTS", "IOS_MAIN_DEPS", "SECRETS_SRC", "SECRETS_TASK",
+                "FEATURE_LINES", "AFTER_BUILD", "HOME_ARGS", "HOME_PARAMS", "HOME_EXTRAS",
+                "ANDROID_IMPORTS", "ANDROID_EXTRA", "ACTIVITY_IMPORTS", "PUSH_INTENT", "PERMISSIONS",
+                "GRADLE_HEAD", "GRADLE_TAIL", "GITIGNORE_EXTRA", "DELEGATE", "BRIDGES", "PLIST_KEYS",
+                "PBX_BUILD_FILES", "PBX_FRAMEWORK_FILES", "PBX_PRODUCT_DEPS", "PBX_PACKAGE_REFS",
+                "PBX_PACKAGE_SECTIONS", "XCCONFIG_EXTRA"):
+        ctx[key] = ""
+
+    # -- shared: dependencies, framework exports --------------------------------------------
+    ctx["FEATURE_DEPS"] = "".join(f"                implementation({_alias(a)})\n"
+                                  for a in _feature_artifacts(f))
+    if bridged:
+        ctx["FRAMEWORK_EXPORTS"] = (
+            "            // The provider bridges keep their plain names in the header (the Swift halves conform to them).\n"
+            + "".join(f"            export({_alias(c[2].artifact)})\n" for c in bridged))
+        ctx["IOS_MAIN_DEPS"] = ("        iosMain.dependencies {\n"
+                                + "".join(f"            api({_alias(c[2].artifact)})\n" for c in bridged)
+                                + "        }\n")
+
+    # -- App.kt ----------------------------------------------------------------------------
+    lines = []
+    if f.get("avatar"):
+        out["imports"].append(f"import {KMP_AVATAR_UPLOAD_FACTORY}\n")
+        lines.append("    // stapel-cdn: the media uploader the profiles avatar change sends the picture to.\n"
+                     f"    modules({KMP_AVATAR_UPLOAD_FACTORY.rsplit('.', 1)[1]}())\n")
+    if sinks is not None:
+        lines.append("    modules(*appAnalyticsModules(target).toTypedArray())\n")
+    if push is not None:
+        lines.append("    modules(*appPushModules().toTypedArray())\n")
+    if vendor_caps:
+        lines.append("    modules(*platformProviderModules().toTypedArray())\n")
+    ctx["FEATURE_LINES"] = "".join(lines)
+    if sinks is not None or push is not None:
+        ctx["AFTER_BUILD"] = (".also { app ->\n" + ("    attachPush(app)\n" if push is not None else "")
+                              + ("    bindAnalyticsIdentity(app)\n" if sinks is not None else "") + "}")
+        ctx["HOME_ARGS"] = "context"
+        ctx["HOME_PARAMS"] = "context: BrickContext"
+        ctx["HOME_EXTRAS"] = (("        AnalyticsConsentSheet(context.koin)\n" if sinks is not None else "")
+                              + ("        PushSwitch(context.koin)\n" if push is not None else ""))
+
+    if sinks is not None:
+        registries = [cls for brick, cls in pv.EVENT_REGISTRIES.items() if brick in f.get("installed", ())]
+        registry = " + ".join(f"{c.rsplit('.', 1)[1]}.registry" for c in registries) or "null"
+        imports = "".join(f"import {c}\n" for c in registries)
+        collector = ""
+        if "stapel" in sinks:
+            cap = pv.PROVIDERS["stapel"].analytics
+            imports += f"import {cap.module}\nimport stapel.analytics.collector.CollectorOptions\n"
+            collector = f"    {cap.module_name}(CollectorOptions(source = target)),\n"
+        files[f"shared/src/commonMain/kotlin/{pkg_path}/AppAnalytics.kt"] = ("AppAnalytics.kt", {
+            "ANALYTICS_IMPORTS": "".join(sorted(imports.splitlines(keepends=True))),
+            "CONSENT_DEFAULT": "OptIn" if f["consent"] == "opt-in" else "OptOut",
+            "REGISTRY": registry, "COLLECTOR_LINE": collector})
+    if push is not None:
+        files[f"shared/src/commonMain/kotlin/{pkg_path}/AppPush.kt"] = ("AppPush.kt", {
+            "ASK_POLICY": "OnDemand" if f["ask"] == "on-demand" else "AfterSignIn",
+            "ASK_DOC": ("only when the person turns notifications on ([PushSwitch])" if f["ask"] == "on-demand"
+                        else "after the first sign-in of an installation (iOS: provisional, no prompt)")})
+
+    # -- per-platform provider modules ----------------------------------------------------------
+    if vendor_caps:
+        files[f"shared/src/commonMain/kotlin/{pkg_path}/AppProviders.kt"] = ("AppProviders.kt", {})
+        for target in ("android", "ios", "jvm"):
+            imports, calls = [], []
+            for key, _kind, cap in vendor_caps:
+                imports.append(f"import {cap.module}\n")
+                if target == "ios":
+                    arg = _lower_first(cap.bridge_interface.rsplit(".", 1)[1])
+                elif key == "appmetrica":
+                    arg = "APPMETRICA_API_KEY"
+                else:
+                    arg = ""
+                calls.append(f"    {cap.module_name}({arg}),\n")
+            if appmetrica and target != "ios":
+                imports.append(f"import {pkg}.generated.APPMETRICA_API_KEY\n")
+            files[f"shared/src/{target}Main/kotlin/{pkg_path}/AppProviders.{target}.kt"] = (
+                "AppProviders.platform.kt", {"PROVIDER_IMPORTS": "".join(sorted(set(imports))),
+                                             "PROVIDER_CALLS": "".join(calls)})
+    if sinks is not None or push is not None:
+        asserts, gate_imports = [], ["import kotlin.test.assertNotNull\n"]
+        if sinks is not None:
+            gate_imports += ["import stapel.analytics.AnalyticsControl\n", "import stapel.analytics.AnalyticsSink\n"]
+            want = ", ".join(json.dumps(s) for s in sorted(["log", *sinks]))
+            asserts.append("            assertNotNull(app.koin.getOrNull<AnalyticsControl>())\n"
+                           f"            assertEquals(setOf({want}), app.koin.getAll<AnalyticsSink>().map {{ it.id }}.toSet())\n")
+        if push is not None:
+            gate_imports += ["import stapel.push.PushController\n", "import stapel.push.PushProvider\n"]
+            want = ", ".join(json.dumps(p) for p in sorted(push))
+            asserts.append("            assertNotNull(app.koin.getOrNull<PushController>())\n"
+                           f"            assertEquals(setOf({want}), app.koin.getAll<PushProvider>().map {{ it.id }}.toSet())\n")
+        files[f"shared/src/commonTest/kotlin/{pkg_path}/ProvidersGateTest.kt"] = ("ProvidersGateTest.kt", {
+            "GATE_IMPORTS": "".join(sorted(gate_imports)), "GATE_ASSERTS": "".join(asserts)})
+
+    # -- secrets (AppMetrica API key) -------------------------------------------------------------
+    if appmetrica:
+        ctx["SECRETS_SRC"] = "            kotlin.srcDir(generateAppSecrets)\n"
+        ctx["SECRETS_TASK"] = _SECRETS_TASK.replace("{{PKG_PATH}}", pkg_path).replace("{{PKG}}", pkg)
+        files["stapel.secrets.properties.example"] = (
+            "# Copy to stapel.secrets.properties (gitignored) or set the environment variable instead.\n"
+            "# STAPEL_APPMETRICA_API_KEY / appmetrica.apiKey: the AppMetrica application's API key.\n"
+            "appmetrica.apiKey=\n")
+
+    # -- Android ------------------------------------------------------------------------------
+    if push is not None:
+        ctx["PERMISSIONS"] = '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n'
+        ctx["ANDROID_IMPORTS"] = "import android.content.Intent\nimport stapel.push.firebase.handleFirebasePushIntent\n"
+        ctx["ANDROID_EXTRA"] = (
+            "\n/** Hands a tapped notification (the activity's `onNewIntent`) to the push provider; true when it was one. */\n"
+            "fun handlePushIntent(intent: Intent): Boolean = handleFirebasePushIntent(intent)\n")
+        ctx["ACTIVITY_IMPORTS"] = f"import {pkg}.handlePushIntent\n"
+        ctx["PUSH_INTENT"] = ("        // A tapped notification while the app runs; the launch intent's tap is read by the provider.\n"
+                              "        if (handlePushIntent(intent)) return\n")
+    if firebase:
+        ctx["GRADLE_HEAD"] = _GRADLE_FIREBASE_HEAD.replace("{{VERSION}}", pv.google_services_plugin_version())
+        ctx["GRADLE_TAIL"] = _GRADLE_FIREBASE_TAIL
+    ignored = []
+    if firebase:
+        ignored += ["androidApp/google-services.json", "iosApp/iosApp/GoogleService-Info.plist"]
+    if appmetrica:
+        ignored.append("stapel.secrets.properties")
+    if ignored:
+        ctx["GITIGNORE_EXTRA"] = ("\n# Deploy inputs (README \"Analytics and push\"); the *.example files show their shape.\n"
+                                  + "".join(f"{p}\n" for p in ignored))
+
+    # -- iOS shell ------------------------------------------------------------------------------
+    swift: list[str] = []
+    if push is not None:
+        swift.append(pv.APP_DELEGATE_FILE)
+    for key in vendors:
+        swift.append(pv.PROVIDERS[key].core_file)
+    swift += [c[2].bridge_file for c in bridged]
+    for rel in swift:
+        files[f"iosApp/iosApp/Stapel/{rel.rsplit('/', 1)[1]}"] = _VENDORED[rel]
+    bridge_lines = []
+    if appmetrica:
+        bridge_lines.append("        StapelAppMetrica.apiKey = IosBridgesKt.appMetricaApiKey()\n")
+    if push is not None:
+        push_bridges = ", ".join(f"{c[2].bridge_class}.shared" for c in bridged if c[1] == "push")
+        bridge_lines.append(f"        StapelAppDelegate.handlers = [{push_bridges}]\n")
+        ctx["DELEGATE"] = ("    // The one app delegate (Stapel/StapelAppDelegate.swift): APNs and notification callbacks,\n"
+                           "    // forwarded explicitly (no SDK swizzling).\n"
+                           "    @UIApplicationDelegateAdaptor(StapelAppDelegate.self) var delegate\n\n")
+    if bridged:
+        params = ", ".join(f"{_lower_first(c[2].bridge_interface.rsplit('.', 1)[1]).removesuffix('Bridge')}: "
+                           f"{c[2].bridge_class}.shared" for c in bridged)
+        bridge_lines.append(f"        IosBridgesKt.installBridges({params})\n")
+        ctx["BRIDGES"] = ("        // The vendor bridges (Stapel/), handed to Kotlin before the first screen creates the app.\n"
+                          + "".join(bridge_lines))
+        names = [(c[2].bridge_interface, _lower_first(c[2].bridge_interface.rsplit(".", 1)[1])) for c in bridged]
+        files[f"shared/src/iosMain/kotlin/{pkg_path}/IosBridges.kt"] = ("IosBridges.kt", {
+            "BRIDGE_IMPORTS": "".join(f"import {fq}\n" for fq, _ in sorted(names)),
+            "BRIDGE_VARS": "".join(f"internal var {v}: {fq.rsplit('.', 1)[1]}? = null\n" for fq, v in names),
+            "BRIDGE_PARAMS": ", ".join(f"{v.removesuffix('Bridge')}: {fq.rsplit('.', 1)[1]}?" for fq, v in names),
+            "BRIDGE_ASSIGN": "".join(f"    {v} = {v.removesuffix('Bridge')}\n" for _, v in names),
+            "BRIDGE_EXTRA": ("\n/** The AppMetrica API key of this build (stapel.secrets.properties / "
+                             "STAPEL_APPMETRICA_API_KEY); empty = unconfigured. */\n"
+                             f"fun appMetricaApiKey(): String = {pkg}.generated.APPMETRICA_API_KEY ?: \"\"\n")
+            if appmetrica else ""})
+    plist = []
+    if sinks is not None and "firebase" in sinks and f["consent"] == "opt-in":
+        plist.append(("FIREBASE_ANALYTICS_COLLECTION_ENABLED", False))
+    if firebase:
+        plist.append(("FirebaseAppDelegateProxyEnabled", False))
+    if push is not None and "firebase" in push:
+        plist.append(("FirebaseMessagingAutoInitEnabled", False))
+    ctx["PLIST_KEYS"] = "".join(f"\t<key>{k}</key>\n\t<{'true' if v else 'false'}/>\n" for k, v in plist)
+    if push is not None:
+        files["iosApp/Configuration/iosApp.entitlements"] = ("iosApp.entitlements",
+                                                             {"APS_ENVIRONMENT": "$(APS_ENVIRONMENT)"})
+        ctx["XCCONFIG_EXTRA"] = (
+            "\n// Push Notifications capability: the aps-environment entitlement (development; Release builds production).\n"
+            "CODE_SIGN_ENTITLEMENTS=Configuration/iosApp.entitlements\n"
+            "APS_ENVIRONMENT=development\n"
+            "APS_ENVIRONMENT[config=Release]=production\n")
+    packages: dict[str, list[str]] = {}
+    for key, _kind, cap in vendor_caps:
+        packages.setdefault(pv.PROVIDERS[key].swift_package, [])
+        packages[pv.PROVIDERS[key].swift_package] += [p for p in cap.products
+                                                      if p not in packages[pv.PROVIDERS[key].swift_package]]
+    if packages:
+        spm = pv.swift_packages()
+        products = [(pkg_name, product) for pkg_name, prods in packages.items() for product in prods]
+        ref = {p: _pbx_id(f"package:{p}") for p in packages}
+        prod = {x: _pbx_id(f"product:{x}") for _, x in products}
+        bf = {x: _pbx_id(f"buildfile:{x}") for _, x in products}
+        ctx["PBX_BUILD_FILES"] = (
+            "/* Begin PBXBuildFile section */\n"
+            + "".join(f"\t\t{bf[x]} /* {x} in Frameworks */ = {{isa = PBXBuildFile; productRef = {prod[x]} /* {x} */; }};\n"
+                      for _, x in products)
+            + "/* End PBXBuildFile section */\n\n")
+        ctx["PBX_FRAMEWORK_FILES"] = "".join(f"\t\t\t\t{bf[x]} /* {x} in Frameworks */,\n" for _, x in products)
+        ctx["PBX_PRODUCT_DEPS"] = "".join(f"\t\t\t\t{prod[x]} /* {x} */,\n" for _, x in products)
+        ctx["PBX_PACKAGE_REFS"] = (
+            "\t\t\tpackageReferences = (\n"
+            + "".join(f"\t\t\t\t{ref[p]} /* XCRemoteSwiftPackageReference \"{p}\" */,\n" for p in packages)
+            + "\t\t\t);\n")
+        ctx["PBX_PACKAGE_SECTIONS"] = (
+            "\n/* Begin XCRemoteSwiftPackageReference section */\n"
+            + "".join(f"\t\t{ref[p]} /* XCRemoteSwiftPackageReference \"{p}\" */ = {{\n"
+                      "\t\t\tisa = XCRemoteSwiftPackageReference;\n"
+                      f"\t\t\trepositoryURL = \"{spm[p]['url']}\";\n"
+                      "\t\t\trequirement = {\n\t\t\t\tkind = exactVersion;\n"
+                      f"\t\t\t\tversion = {spm[p]['exactVersion']};\n\t\t\t}};\n\t\t}};\n" for p in packages)
+            + "/* End XCRemoteSwiftPackageReference section */\n\n"
+            "/* Begin XCSwiftPackageProductDependency section */\n"
+            + "".join(f"\t\t{prod[x]} /* {x} */ = {{\n\t\t\tisa = XCSwiftPackageProductDependency;\n"
+                      f"\t\t\tpackage = {ref[p]} /* XCRemoteSwiftPackageReference \"{p}\" */;\n"
+                      f"\t\t\tproductName = {x};\n\t\t}};\n" for p, x in products)
+            + "/* End XCSwiftPackageProductDependency section */\n")
+
+    # -- config files (§6) ------------------------------------------------------------------------
+    if firebase:
+        files["androidApp/google-services.json.example"] = json.dumps(_firebase_android_example(app_id), indent=2) + "\n"
+        files["iosApp/GoogleService-Info.plist.example"] = _firebase_ios_example(app_id)
+        if "android" in config:
+            files["androidApp/google-services.json"] = config["android"]["data"]
+        if "ios" in config:
+            files["iosApp/iosApp/GoogleService-Info.plist"] = config["ios"]["data"]
+        missing = [name for platform, name in (("android", "mobile/androidApp/google-services.json"),
+                                               ("ios", "mobile/iosApp/iosApp/GoogleService-Info.plist"))
+                   if platform not in config]
+        if missing:
+            out["notes"].append(
+                "mobile: Firebase is wired without " + " and ".join(missing) + " — its providers report "
+                "unconfigured until the file is there (gitignored; the *.example next to it shows the "
+                "shape); an Android release build refuses without it")
+    configured = {"android": "android" in config, "ios": "ios" in config} if firebase else None
+
+    # -- the echo ---------------------------------------------------------------------------------
+    echo = out["echo"]
+    if sinks is not None:
+        echo["analytics"] = {"sinks": sinks, "consent": f["consent"]}
+    if push is not None:
+        echo["push"] = {"providers": push, "ask": f["ask"], "rich": False,
+                        "configured": configured if "firebase" in push else None}
+    if caps:
+        spm = pv.swift_packages()
+        provs: dict[str, dict] = {}
+        for key, kind, cap in caps:
+            entry = provs.setdefault(key, {"artifacts": {}})
+            entry["artifacts"][kind] = cap.artifact
+            if cap.bridge_file:
+                constant, abi = pv.bridge_abi(cap.bridge_file)
+                entry.setdefault("bridgeAbi", {})[kind] = {"constant": constant, "abi": abi}
+            p = pv.PROVIDERS[key]
+            if p.swift_package:
+                entry.setdefault("ios", {"spm": {**spm[p.swift_package], "products": []}})
+                entry["ios"]["spm"]["products"] += [x for x in cap.products if x not in entry["ios"]["spm"]["products"]]
+            if key == "firebase":
+                entry["ios"]["configFile"] = p.ios_config
+                entry["android"] = {"gradlePlugin": {"id": "com.google.gms.google-services",
+                                                     "version": pv.google_services_plugin_version()},
+                                    "configFile": p.android_config}
+                entry["configured"] = configured
+        echo["providers"] = provs
+    return out
+
+
+_SECRETS_TASK = '''// --- secrets of this build: stapel.secrets.properties (gitignored) or the environment -> AppSecrets.kt ---
+val generateAppSecrets = tasks.register("generateAppSecrets") {
+    val secretsFile = rootProject.layout.projectDirectory.file("stapel.secrets.properties").asFile
+    val envKey = providers.environmentVariable("STAPEL_APPMETRICA_API_KEY")
+    val out = layout.buildDirectory.dir("generated/appSecrets")
+    inputs.property("appmetrica", envKey.orElse(""))
+    inputs.property("secretsFilePresent", secretsFile.exists())
+    if (secretsFile.exists()) inputs.file(secretsFile)
+    outputs.dir(out)
+    doLast {
+        val props = java.util.Properties()
+        if (secretsFile.exists()) secretsFile.inputStream().use { props.load(it) }
+        val key = envKey.orNull?.takeIf { it.isNotBlank() } ?: props.getProperty("appmetrica.apiKey")?.takeIf { it.isNotBlank() }
+        require(key == null || key.matches(Regex("[A-Za-z0-9-]+"))) { "AppMetrica API key: letters, digits and '-' only" }
+        val f = out.get().asFile.resolve("{{PKG_PATH}}/generated/AppSecrets.kt")
+        f.parentFile.mkdirs()
+        f.writeText(
+            "// Generated from stapel.secrets.properties / the environment. Do not edit, never commit.\\npackage {{PKG}}.generated\\n\\n" +
+                "internal val APPMETRICA_API_KEY: String? = " + (key?.let { "\\"$it\\"" } ?: "null") + "\\n",
+        )
+    }
+}
+
+'''
+
+_GRADLE_FIREBASE_HEAD = '''// Firebase (stapel.composition.json "analytics" / "push"): androidApp/google-services.json is a gitignored
+// deploy input (google-services.json.example shows its shape). The google-services plugin is applied only when
+// the file is there; without it the Firebase providers report unconfigured and the app runs.
+buildscript {
+    if (projectDir.resolve("google-services.json").exists()) {
+        repositories { google(); mavenCentral() }
+        dependencies { classpath("com.google.gms:google-services:{{VERSION}}") }
+    }
+}
+
+'''
+
+_GRADLE_FIREBASE_TAIL = '''
+// Without google-services.json the Firebase providers are no-ops that say so (`stapel.analytics unavailable
+// firebase unconfigured google-services.json`, `stapel.push unavailable …`); a release build refuses instead.
+val firebaseConfig = layout.projectDirectory.file("google-services.json").asFile
+if (firebaseConfig.exists()) apply(plugin = "com.google.gms.google-services")
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    val config = firebaseConfig
+    doFirst {
+        if (!config.exists()) {
+            throw GradleException(
+                "Firebase: a release build without androidApp/google-services.json would ship analytics and push dead. " +
+                    "Put the Firebase app's file there (gitignored; google-services.json.example shows its shape).",
+            )
+        }
+    }
+}
+'''
+
+
+def _firebase_android_example(app_id: str) -> dict:
+    """The shape of google-services.json with fake identifiers (never a real key)."""
+    return {
+        "project_info": {"project_number": "000000000000", "project_id": "example-project",
+                         "storage_bucket": "example-project.firebasestorage.app"},
+        "client": [{
+            "client_info": {"mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+                            "android_client_info": {"package_name": app_id}},
+            "oauth_client": [],
+            "api_key": [{"current_key": "REPLACE_WITH_THE_FIREBASE_PROJECTS_KEY"}],
+            "services": {"appinvite_service": {"other_platform_oauth_client": []}},
+        }],
+        "configuration_version": "1",
+    }
+
+
+def _firebase_ios_example(app_id: str) -> str:
+    import plistlib
+
+    return plistlib.dumps({
+        "API_KEY": "REPLACE_WITH_THE_FIREBASE_PROJECTS_KEY",
+        "GCM_SENDER_ID": "000000000000",
+        "PLIST_VERSION": "1",
+        "BUNDLE_ID": app_id,
+        "PROJECT_ID": "example-project",
+        "STORAGE_BUCKET": "example-project.firebasestorage.app",
+        "IS_ADS_ENABLED": False,
+        "IS_ANALYTICS_ENABLED": False,
+        "IS_APPINVITE_ENABLED": True,
+        "IS_GCM_ENABLED": True,
+        "IS_SIGNIN_ENABLED": True,
+        "GOOGLE_APP_ID": "1:000000000000:ios:0000000000000000",
+    }, sort_keys=False).decode("utf-8")
+
+
+def _readme_features(composition: dict) -> list[str]:
+    analytics, push = composition.get("analytics"), composition.get("push")
+    if analytics is None and push is None:
+        return []
+    lines = ["", "## Analytics and push", ""]
+    if analytics is not None:
+        lines += [
+            f"Analytics sinks: {', '.join(f'`{s}`' for s in analytics['sinks'])} and the log sink; consent "
+            f"default `{analytics['consent']}` (`shared/.../AppAnalytics.kt`, with the consent sheet the home",
+            "screen shows while the answer is pending: nothing leaves the device before \"Allow\").",
+        ]
+    if push is not None:
+        lines += [
+            f"Push: {', '.join(f'`{p}`' for p in push['providers'])}, permission asked `{push['ask']}` "
+            "(`shared/.../AppPush.kt`); devices register with the notifications",
+            "backend for the signed-in account. iOS: the Push Notifications capability is the",
+            "`aps-environment` entitlement (`iosApp/Configuration/iosApp.entitlements`).",
+        ]
+    providers = composition.get("providers", {})
+    if "firebase" in providers:
+        lines += [
+            "",
+            "Firebase config files are deploy inputs, never committed (`.gitignore`): put the Firebase",
+            "app's `google-services.json` in `androidApp/` and its `GoogleService-Info.plist` in",
+            "`iosApp/iosApp/` (the `*.example` files show the shape; the app id must be the app's). Without",
+            "them the Firebase providers report unconfigured (`stapel.analytics unavailable firebase",
+            "unconfigured …`, `stapel.push unavailable …`) and the app runs; an Android release build refuses.",
+            "The iOS shell's Swift bridges (`iosApp/iosApp/Stapel/`) come from stapel-kmp `ios-bridges/`;",
+            "re-scaffold when a bridge's protocol version (`providers` in `stapel.composition.json`) moves.",
+        ]
+    if "appmetrica" in providers:
+        lines += [
+            "",
+            "AppMetrica's API key: `STAPEL_APPMETRICA_API_KEY` at build time or `stapel.secrets.properties`",
+            "(gitignored; `stapel.secrets.properties.example`). Without it the sink reports unconfigured.",
+        ]
+    return lines
+
+
 def _readme(ctx: dict, composition: dict, well_known_dir: str, serve: bool, dev_port: int,
             custom: list) -> str:
     app = composition["app"]
@@ -631,6 +1199,7 @@ def _readme(ctx: dict, composition: dict, well_known_dir: str, serve: bool, dev_
     if pending:
         lines += ["", "## Not on mobile yet", ""]
         lines += [f"- `{p['module']}`: {p['reason']}" for p in pending]
+    lines += _readme_features(composition)
     methods = composition.get("signInMethods")
     if methods and methods["absent"]:
         lines += ["", "## Sign-in methods left out", ""]

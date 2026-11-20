@@ -2347,11 +2347,18 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
 def _mobile_request(
     project_type: str, slug: str, *, mobile_offline: bool, mobile_id: str | None,
     mobile_name: str | None, mobile_shell: str | None, mobile_maven_repo: str | None,
-    mobile_avatar_upload: bool = False,
+    mobile_avatar_upload: bool = False, mobile_providers: dict | None = None,
 ):
     """The KMP PlatformRequest of this invocation: CLI values, plus the backend
-    facts the mobile app needs (dev port, the project's own module and its mount)."""
+    facts the mobile app needs (dev port, the project's own module and its mount).
+    ``mobile_providers``: the raw analytics / push flag values (``MOBILE_PROVIDER_FLAGS``);
+    the Firebase config files are read here, so the emitter's plan reads nothing."""
+    from .composition.kmp.providers import read_firebase_config
     from .composition.model import PlatformRequest
+
+    providers = dict(mobile_providers or {})
+    if providers.get("firebase_config"):
+        providers["firebase_config"] = read_firebase_config(providers["firebase_config"])
 
     module = slug.replace("-", "_")
     if project_type == "minimal":
@@ -2371,8 +2378,16 @@ def _mobile_request(
             ("repo", repo), ("dev_port", dev_port), ("custom", custom),
             ("serve_well_known", project_type == "monolith"),
             ("avatar_upload", bool(mobile_avatar_upload)),
+            *((k, v) for k, v in providers.items() if v is not None),
         ),
     )
+
+
+#: ``create_project(mobile_providers=…)`` key -> its CLI flag (ARCH-PUSH-ANALYTICS §7).
+MOBILE_PROVIDER_FLAGS = {
+    "analytics": "--mobile-analytics", "consent": "--mobile-consent", "push": "--mobile-push",
+    "push_ask": "--mobile-push-ask", "firebase_config": "--mobile-firebase-config",
+}
 
 
 def _mobile_composition(ctx, project_type, feature_libs, want_auth, auth_comp, theme,
@@ -3176,6 +3191,7 @@ def create_project(
     mobile_shell: str | None = None,
     mobile_maven_repo: str | None = None,
     mobile_avatar_upload: bool = False,
+    mobile_providers: dict | None = None,
     navigation: dict | None = None,
     strict: bool = False,
     pitch: str = "",
@@ -3290,7 +3306,7 @@ def create_project(
             ("--mobile-maven-repo", mobile_maven_repo),
             ("--mobile-avatar-upload", mobile_avatar_upload),
         ) if value
-    ]
+    ] + [MOBILE_PROVIDER_FLAGS[k] for k, v in (mobile_providers or {}).items() if v is not None]
     if mobile is None and mobile_flags:
         print(f"Error: {', '.join(mobile_flags)} need --mobile kmp", file=sys.stderr)
         sys.exit(1)
@@ -3416,7 +3432,7 @@ def create_project(
                 project_type, slug, mobile_offline=mobile_offline, mobile_id=mobile_id,
                 mobile_name=mobile_name, mobile_shell=mobile_shell,
                 mobile_maven_repo=mobile_maven_repo,
-                mobile_avatar_upload=mobile_avatar_upload,
+                mobile_avatar_upload=mobile_avatar_upload, mobile_providers=mobile_providers,
             )
             _mobile_composition(
                 {"slug": slug, "title": title, "url": url.rstrip("/")}, project_type,
@@ -3974,6 +3990,26 @@ def main():
         help="The profiles brick's avatar change: adds cdn (its uploader's backend) to the "
              "modules. The app still passes its picker: ProfilesBrick(picker = ...).",
     )
+    mobile_group.add_argument(
+        "--mobile-analytics", nargs="?", const="", default=None, metavar="SINKS",
+        help="Analytics behind the stapel-analytics hub: a comma list of firebase, appmetrica, "
+             "stapel (the project's own analytics backend). Bare: firebase (+ stapel when the "
+             "analytics module is selected).")
+    mobile_group.add_argument(
+        "--mobile-consent", choices=("opt-in", "opt-out"), default=None,
+        help="Analytics consent default. Default: opt-in (nothing is collected before consent).")
+    mobile_group.add_argument(
+        "--mobile-push", nargs="?", const="", default=None, metavar="PROVIDERS",
+        help="Push through stapel-push and the notifications module's device registry. Bare: "
+             "firebase. Needs notifications in --modules and a completable sign-in.")
+    mobile_group.add_argument(
+        "--mobile-push-ask", choices=("on-demand", "after-sign-in"), default=None,
+        help="When the OS notification permission is asked. Default: on-demand.")
+    mobile_group.add_argument(
+        "--mobile-firebase-config", metavar="android=PATH,ios=PATH",
+        help="The Firebase app's google-services.json / GoogleService-Info.plist (gitignored in "
+             "mobile/). Its package name / bundle id must equal the app id. Without it Firebase "
+             "is wired as a no-op that says so.")
     parser.add_argument(
         "--pitch", default=None, metavar="TEXT",
         help="The product in one line: the lead of the generated home page. Absent, the "
@@ -4124,6 +4160,7 @@ def main():
         mobile_shell=args.mobile_shell,
         mobile_maven_repo=args.mobile_maven_repo,
         mobile_avatar_upload=args.mobile_avatar_upload,
+        mobile_providers={k: getattr(args, f"mobile_{k}") for k in MOBILE_PROVIDER_FLAGS},
         navigation=navigation or None,
         strict=strict,
         pitch=args.pitch or "",

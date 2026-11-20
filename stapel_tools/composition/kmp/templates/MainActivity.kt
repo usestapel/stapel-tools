@@ -7,7 +7,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import {{PKG}}.App
 import {{PKG}}.createAndroidApp
-import stapel.app.di.StapelApp
+{{ACTIVITY_IMPORTS}}import stapel.app.di.StapelApp
 
 /** Holds the one app instance. */
 class MainApplication : Application() {
@@ -32,6 +32,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        intent.data?.let { app.openUrl(it.toString()) }
+{{PUSH_INTENT}}        intent.data?.let { app.openUrl(it.toString()) }
     }
 }
