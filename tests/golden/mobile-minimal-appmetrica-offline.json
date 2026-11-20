@@ -52,7 +52,7 @@
  "mobile/shared/src/jvmTest/kotlin/golden/TestDataDirectory.jvm.kt": "49032c7bc283f2e3df98fba2f4ec97e2df74eeb858bc175f4575c94d525301cf",
  "mobile/shared/src/jvmTest/kotlin/golden/TestPlatform.jvm.kt": "cf74a6d46b398fac8e870174c8909e2b67e5915cd25d6a8804af69fba8c3427a",
  "mobile/shared/src/walkTest/kotlin/golden/SignInWalkTest.kt": "eff26bd16629a2d9e08092f71454dd055c8bd304889dc9445e6cd4bc8d9b8061",
- "mobile/stapel.composition.json": "10e9fe00b3533bcbf60a84ac399fd47548c819b835f5090213888f663b456f93",
+ "mobile/stapel.composition.json": "2f0f1db7191da0d0620770196d1dacb50a9e9b8442ebd3bb6bd383f751c64c43",
  "mobile/stapel.environments.json": "c00f6b0cc2d10456722a14245e1bd8228d9fe8bdeae9228f9bd63b1ed53bdd7a",
  "mobile/stapel.secrets.properties.example": "87b748e35fd4a6bfdc02fe91417772947904f036cfd79eba30370930e3acb18c",
  "mobile/stapel.theme.json": "bb583db61a21e4c4fc95a3d4a265916a7ba9d3e62d92b7bdbee49a2728593b22",

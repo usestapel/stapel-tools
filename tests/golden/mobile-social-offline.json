@@ -43,7 +43,7 @@
  "mobile/shared/src/jvmTest/kotlin/golden/TestDataDirectory.jvm.kt": "49032c7bc283f2e3df98fba2f4ec97e2df74eeb858bc175f4575c94d525301cf",
  "mobile/shared/src/jvmTest/kotlin/golden/TestPlatform.jvm.kt": "cf74a6d46b398fac8e870174c8909e2b67e5915cd25d6a8804af69fba8c3427a",
  "mobile/shared/src/walkTest/kotlin/golden/SignInWalkTest.kt": "eff26bd16629a2d9e08092f71454dd055c8bd304889dc9445e6cd4bc8d9b8061",
- "mobile/stapel.composition.json": "8b315cad7eb77070da8543ef447dbbc45e57d3a1c4243b848b7bf924e6a096e9",
+ "mobile/stapel.composition.json": "c4389bc92ed265fbec0bf45517ba9d6d61d83b82d92bb57d32552e3a1640539b",
  "mobile/stapel.environments.json": "eea78f4ea7d97ff5fb85557a0648c4073e1c1ed22155f197badd701c00fe99b3",
  "mobile/stapel.theme.json": "bb583db61a21e4c4fc95a3d4a265916a7ba9d3e62d92b7bdbee49a2728593b22",
  "service-configs/nginx/nginx.conf": "ae46b85d269d641f430b8754f4d66bbf1aa7aa574a9ad183e300f997b616b2d0",

@@ -43,7 +43,7 @@
  "mobile/shared/src/jvmTest/kotlin/golden/TestDataDirectory.jvm.kt": "49032c7bc283f2e3df98fba2f4ec97e2df74eeb858bc175f4575c94d525301cf",
  "mobile/shared/src/jvmTest/kotlin/golden/TestPlatform.jvm.kt": "cf74a6d46b398fac8e870174c8909e2b67e5915cd25d6a8804af69fba8c3427a",
  "mobile/shared/src/walkTest/kotlin/golden/SignInWalkTest.kt": "eff26bd16629a2d9e08092f71454dd055c8bd304889dc9445e6cd4bc8d9b8061",
- "mobile/stapel.composition.json": "383b3543a3ddf27d59e2198b121b22d1d144dbf20b1a776200bc9748ee6f16c8",
+ "mobile/stapel.composition.json": "19541fbe67f99fcbbd61b2e816a3ff9d835b27012b3bdcf7eb0b8d1ecb410d06",
  "mobile/stapel.environments.json": "c00f6b0cc2d10456722a14245e1bd8228d9fe8bdeae9228f9bd63b1ed53bdd7a",
  "mobile/stapel.theme.json": "bb583db61a21e4c4fc95a3d4a265916a7ba9d3e62d92b7bdbee49a2728593b22",
  "mobile/well-known/apple-app-site-association": "edb79008810f148e0940109f0f64c8340db6e9f0ff1f8e88e987b785a913485a",
