@@ -1,7 +1,49 @@
 # Changelog
 
-## [Unreleased]
+## [0.86.0] — 2026-11-20
 
+- **Release gates no longer burn tags.** The registry-pin gate blocks on
+  `main` before the tag (CI on every push and daily, `make release-check`):
+  PIN001 not on PyPI, PIN002 a newer minor outside the ceiling, new PIN003 a
+  pin that is not a final release inside its rendered range. The publish
+  workflow runs `check_pypi_pins.py --publish`: PIN001/PIN003 still refuse,
+  a newer upstream that appeared after the tag is a warning, a step summary
+  and a follow-up issue. The nav-manifest mirror gate compares a released
+  pair's mirror with the pair's version tag in stapel-react and the vendored
+  stapel-kmp copy with the commit in `pin.json`; a sibling head that moved
+  past the pin is a notice. CI fetches both siblings with history.
+- **`make release-check`**: `release-check.sh`, `scripts/check_release_version.py`
+  (clean tree, HEAD = `origin/main`, `v<version>` unused locally and on
+  origin, a CHANGELOG section), the strict pin gate and `make check`, one exit
+  status. CONTRIBUTING documents the release in five steps.
+- **`stapel_tools.contract_gates`**: request examples are validated as
+  requests (readOnly forbidden) and response examples as responses (writeOnly
+  forbidden); `response_errors`, `operation_template`, `AuthStateReplay`
+  (replays every wire-recipe request with no session, as a guest and as a
+  stranger, and validates the real answers against the schema), `WireFinding`;
+  undiscriminated `$ref` unions read as alternations. Bricks import these and
+  drop their local `tests/_contract_gates_next.py`.
+- **KMP profiles pair**: `profiles` on `--mobile kmp` without the auth brick
+  (or with `--auth-model none`) is refused — `ProfilesBrick` owns no session;
+  `ProfilesBrick()` is emitted with no picker and the composition echoes
+  `avatarUpload`. `--mobile-avatar-upload` adds `cdn` (the uploader's
+  backend). Re-vendored stapel-kmp 7756fb8; new golden case
+  `mobile-minimal-profiles`; the opt-in generated-app proof runs auth +
+  profiles + avatar upload.
+- **Reference-data seeds**: the profiles row seeds the language catalogue
+  (`sync_languages`) in a monolith's `bootstrap.sh`, and a minimal project
+  runs the registry's seeds after `migrate` (README, `make run`, next steps).
+- **`stapel-nav-plan --svg DIR`** writes wireframes per platform, audience and
+  size class from the resolved plan; **`stapel-shell-lint`** (NAV001-NAV005)
+  checks a scaffolded project's shell, pages, app-nav bindings, generated
+  hashes and resolved navigation.
+- Registry pins: stapel-core 0.99.4, notifications 0.31.1, profiles 0.23.3,
+  categories 0.25.3, listings 0.30.3, search 0.18.4, cdn 0.31.2, billing
+  0.25.1, workspaces 0.38.1, gdpr 0.9.3, vocabularies 0.4.5, calendar 0.8.1,
+  chat 0.12.1, currencies 0.1.10, docs 0.10.2, forms 0.6.5, geo 0.4.2,
+  recordings 0.44.1, reviews 0.8.1, tasks 0.4.1, translate 0.9.1, video
+  0.14.1, moderation 0.9.1, orders 0.2.2 (auth 0.54.0, agent 0.40.0, mailtrap
+  0.2.0 already current).
 - **Library pre-push v3: a release tag's contract check runs on the project's
   interpreter.** v2 ran `make contract-check` with the Makefile's default
   `python3`, so a tag pushed from a shell without the brick's venv first on
