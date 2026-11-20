@@ -20,6 +20,21 @@ what lets CI check against a checkout that is not literally a sibling of
 this repo, and what makes this script testable against a fixture tree
 instead of the developer's own machine.
 
+The pinned commit is the reference, the sibling's head is a notice
+-----------------------------------------------------------------
+A registry pin names a commit: a released pair's version is the Changesets
+tag ``@stapel/<key>-react@<version>``, the vendored stapel-kmp copy is the
+commit in ``vendored/pin.json``. In a git checkout every blocking comparison
+below reads THAT commit (``git show <tag>:packages/<key>-react/nav-manifest.json``),
+so a commit that was in sync stays in sync when a sibling's main moves on
+afterwards — the comparison against the moving head burned release tags.
+The head is still read, and a head that differs from the pin is printed as
+"pin is behind the sibling's head" (exit 0); under ``--registry`` a head
+version npm already serves is a STALE PIN (exit 1), as before. A pin whose
+tag or commit the checkout does not have fails: fetch it. A plain directory
+(no git history) stands in for the pinned files as they are; an unreleased
+pair (``released: False``) has no pin and is compared with the checkout.
+
 One skip, one warning and three failures — the distinction is the point
 -----------------------------------------------------------------------
 The gate walks EVERY key of ``FRONTEND_REACT_LIBS``, not only the ones that
@@ -137,18 +152,70 @@ def packages_root(root: Path | None = None) -> Path:
     return (root or sibling_root()) / "stapel-react" / "packages"
 
 
-def _load_real_manifest(packages: Path, key: str, package: str) -> dict | None:
+def git_toplevel_is(checkout: Path) -> bool:
+    """Is *checkout* itself a git work tree (not a directory inside another
+    repository)? A plain directory (an unpacked tarball, a test fixture) has
+    no history to read a pin from."""
+    try:
+        proc = subprocess.run(
+            ["git", "-C", str(checkout), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError:
+        return False
+    if proc.returncode != 0:
+        return False
+    return Path(proc.stdout.strip()).resolve() == checkout.resolve()
+
+
+def git_show(checkout: Path, rev: str, path: str) -> bytes | None:
+    """``<rev>:<path>`` from *checkout*'s history; ``None`` when the file is
+    not in that commit. The caller has already checked *rev* resolves."""
+    proc = subprocess.run(
+        ["git", "-C", str(checkout), "show", f"{rev}:{path}"],
+        capture_output=True, check=False,
+    )
+    return proc.stdout if proc.returncode == 0 else None
+
+
+def git_commit(checkout: Path, rev: str) -> str | None:
+    """The commit *rev* names in *checkout*, or ``None`` when it is not there."""
+    proc = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "--verify", "--quiet", f"{rev}^{{commit}}"],
+        capture_output=True, text=True, check=False,
+    )
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+def pair_tag(package: str, version: str) -> str:
+    """The tag Changesets cuts for a published pair version
+    (``@stapel/auth-react@0.28.1``): the commit a registry pin stands for."""
+    return f"{package}@{version}"
+
+
+def _parse_manifest(data: bytes | str, where: str, package: str) -> dict:
+    parsed = json.loads(data)
+    assert parsed.get("package") == package, (
+        f"{where} declares package {parsed.get('package')!r}, mirror expected {package!r}"
+    )
+    return parsed
+
+
+def _load_real_manifest(
+    packages: Path, key: str, package: str, *, rev: str | None = None,
+) -> dict | None:
     """The real ``packages/<key>-react/nav-manifest.json`` this project's
     mirror claims to track — keyed by the FRONTEND_REACT_LIBS dict key,
-    which is always the ``<key>`` in ``@stapel/<key>-react``."""
+    which is always the ``<key>`` in ``@stapel/<key>-react``. With *rev*, the
+    file as it is in that commit of the checkout, not on disk."""
+    rel = f"packages/{key}-react/nav-manifest.json"
+    if rev is not None:
+        data = git_show(packages.parent, rev, rel)
+        return None if data is None else _parse_manifest(data, f"{rev}:{rel}", package)
     path = packages / f"{key}-react" / "nav-manifest.json"
     if not path.is_file():
         return None
-    data = json.loads(path.read_text())
-    assert data.get("package") == package, (
-        f"{path} declares package {data.get('package')!r}, mirror expected {package!r}"
-    )
-    return data
+    return _parse_manifest(path.read_text(), str(path), package)
 
 
 def _parts(text: str | None) -> tuple:
@@ -360,14 +427,25 @@ def check_kmp(root: Path | None = None) -> int:
 
     where = kmp_root(root)
     if where.is_dir() and (where / "kmp-registry.json").is_file():
-        drift = vendor.sibling_drift(where)
         hint = "re-vendor (python -m stapel_tools.composition.kmp.vendor --from <checkout>)"
-        problems += [f"kmp: stapel-kmp checkout {where}: {d} — {hint}"
-                     for d in drift if d.startswith("nav-manifests/")]
-        for d in drift:
-            if not d.startswith("nav-manifests/"):
-                print(f"check_nav_manifest_sync: kmp: the checkout moved past the vendored "
-                      f"copy: {d} ({hint} when the scaffold should follow)")
+        if vendor.is_git_checkout(where):
+            commit = vendor.load_pin()["commit"]
+            # Blocking: the vendored copy against the commit it is pinned to.
+            problems += [f"kmp: {d}" for d in vendor.pinned_drift(where)]
+            # Notice: stapel-kmp's head moved past the pin. Not this commit's defect.
+            head = vendor.sibling_drift(where)
+            for d in head:
+                print(f"check_nav_manifest_sync: kmp: notice: pin {commit[:12]} is behind the "
+                      f"sibling's head: {d} ({hint} when the scaffold should follow)")
+        else:
+            # A plain directory has no history: its files stand in for the pin.
+            drift = vendor.sibling_drift(where)
+            problems += [f"kmp: stapel-kmp files at {where}: {d} — {hint}"
+                         for d in drift if d.startswith("nav-manifests/")]
+            for d in drift:
+                if not d.startswith("nav-manifests/"):
+                    print(f"check_nav_manifest_sync: kmp: the checkout moved past the vendored "
+                          f"copy: {d} ({hint} when the scaffold should follow)")
     else:
         print(f"check_nav_manifest_sync: kmp: no stapel-kmp checkout at {where} — "
               "the vendored copy is compared with the neutral registry only.")
@@ -414,12 +492,52 @@ def check_react(
     sys.path.insert(0, str(REPO_ROOT))
     from stapel_tools.create_project import FRONTEND_REACT_LIBS
 
+    checkout = packages.parent
+    history = git_toplevel_is(checkout)
+    if history:
+        print(f"check_nav_manifest_sync: react: each released pair is compared with its pinned "
+              f"tag in {checkout} (the head is a notice)")
+    else:
+        print(f"check_nav_manifest_sync: react: {checkout} is not a git checkout — its files "
+              "stand in for the pinned versions")
+
     mismatches: list[str] = []
     ahead: list[str] = []
+    behind: list[str] = []
     checked = 0
     for key, info in FRONTEND_REACT_LIBS.items():
         mirrored_entries = info.get("nav")
-        real = _load_real_manifest(packages, key, info["package"])
+        released = info.get("released", True) is not False
+        if released and history:
+            tag = pair_tag(info["package"], info["version"])
+            if git_commit(checkout, tag) is None:
+                mismatches.append(
+                    f"{key}: the pin {info['version']!r} has no tag {tag!r} in {checkout} — "
+                    "the pinned commit cannot be read. Fetch the tags "
+                    f"(git -C {checkout} fetch --tags origin); a pin npm never published "
+                    "has no tag at all.")
+                continue
+            real = _load_real_manifest(packages, key, info["package"], rev=tag)
+            head = _load_real_manifest(packages, key, info["package"])
+            if head != real:
+                head_version = (head or {}).get("version")
+                surface = ((head or {}).get("entries") != (real or {}).get("entries")
+                           or (head or {}).get("embeds") != (real or {}).get("embeds"))
+                if _is_ahead(head_version, info["version"]):
+                    what, todo = "pin is behind the sibling's head", "move the pin when the pair publishes"
+                else:
+                    what, todo = "the sibling checkout's head differs from the pin", "update the checkout"
+                behind.append(
+                    f"{what} — {key}: pinned {info['version']} ({tag}), head {head_version!r}"
+                    + (" with different entries/embeds" if surface else "") + f"; {todo}.")
+                if (ask_registry and head_version and _is_ahead(head_version, info["version"])
+                        and published(info["package"], head_version)):
+                    mismatches.append(
+                        f"{key}: the registry pins {info['version']!r}, but npm already serves "
+                        f"{head_version!r} (the checkout's head) — STALE PIN. Raise the "
+                        "\"version\" in composition/react/bindings.py and re-mirror.")
+        else:
+            real = _load_real_manifest(packages, key, info["package"])
         if info.get("released", True) is False:
             # No npm release: the mirror tracks the pair's branch, so a
             # checkout of the default branch may not carry it yet, and its
@@ -544,6 +662,8 @@ def check_react(
                 f"  real:   {json.dumps(real_entries, indent=2, sort_keys=True)}"
             )
 
+    for line in behind:
+        print(f"check_nav_manifest_sync: notice: {line}")
     for line in ahead:
         print(f"check_nav_manifest_sync: UNPUBLISHED BUMP — {line}")
 

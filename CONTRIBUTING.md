@@ -82,6 +82,23 @@ over both. After editing either, `make registry-export` rewrites
 Conventional commits (`feat:`, `fix:`, `docs:`, `refactor:`); one logical
 change per commit; add a CHANGELOG entry under **Unreleased**.
 
+## Cutting a release
+
+1. On `main`: version in `pyproject.toml`, a `## [X.Y.Z]` CHANGELOG section,
+   registry pins current (`make pins-check`); commit, push, wait for CI green.
+2. `make release-check` — run it bare, never through a pipe; it runs
+   `release-check.sh`, `scripts/check_release_version.py` (clean tree,
+   HEAD = `origin/main`, `vX.Y.Z` unused, CHANGELOG section), the strict pin
+   gate and `make check`, and exits non-zero on the first red gate.
+3. `git tag -a vX.Y.Z -m "…" && git push origin vX.Y.Z` (annotated, by name).
+4. Wait for the Publish run. Its pin step refuses only a pin that is not on
+   PyPI or not a final release inside its range; a newer upstream that
+   appeared after the tag is a warning plus a follow-up issue — move the pin
+   in the next release.
+5. Verify on the index: `pip index versions stapel-tools --no-cache-dir` and
+   `https://pypi.org/pypi/stapel-tools/json`. A failed publish is never fixed
+   by moving the tag: bump the patch.
+
 ## Coverage policy (CI)
 
 Two Codecov statuses with different semantics (see `codecov.yml`):

@@ -171,6 +171,48 @@ def sibling_drift(checkout: Path) -> list[str]:
     return drift
 
 
+def _git(checkout: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(checkout), *args], capture_output=True, check=False)
+
+
+def is_git_checkout(checkout: Path) -> bool:
+    """*checkout* is itself a git work tree (a plain directory has no pin to read)."""
+    proc = _git(checkout, "rev-parse", "--show-toplevel")
+    return proc.returncode == 0 and Path(proc.stdout.decode().strip()).resolve() == checkout.resolve()
+
+
+def pinned_drift(checkout: Path) -> list[str]:
+    """Vendored files whose bytes differ from the PINNED commit of *checkout*.
+
+    This is the blocking comparison: the vendored copy claims to be stapel-kmp at
+    ``pin.json``'s commit, and that claim does not change when stapel-kmp's main moves
+    on. A checkout that does not contain the pinned commit cannot confirm it, which
+    is a finding (fetch it), never a pass."""
+    pin = load_pin()
+    commit = pin["commit"]
+    if _git(checkout, "rev-parse", "--verify", "--quiet", f"{commit}^{{commit}}").returncode != 0:
+        return [f"the pinned commit {commit[:12]} is not in {checkout} "
+                f"(git -C {checkout} fetch origin) — the vendored copy cannot be confirmed"]
+    drift = []
+    registry = _git(checkout, "show", f"{commit}:kmp-registry.json")
+    want = dict(FIXED_SOURCES)
+    if registry.returncode == 0:
+        for key, brick in sorted(json.loads(registry.stdout).get("bricks", {}).items()):
+            if (brick.get("descriptor") or {}).get("present"):
+                want[f"nav-manifests/{key}.json"] = f"bricks/{key}/ui/nav-manifest.json"
+    for rel, src in want.items():
+        shown = _git(checkout, "show", f"{commit}:{src}")
+        if shown.returncode != 0:
+            drift.append(f"{rel}: {src} is not in the pinned commit {commit[:12]}")
+        elif rel not in pin["files"]:
+            drift.append(f"{rel}: the pinned commit {commit[:12]} ships {src}, not vendored here")
+        elif sha256(shown.stdout) != pin["files"][rel]["sha256"]:
+            drift.append(f"{rel}: differs from {src} at the pinned commit {commit[:12]}")
+    for rel in sorted(set(pin["files"]) - set(want)):
+        drift.append(f"{rel}: vendored here, not shipped by the pinned commit {commit[:12]}")
+    return drift
+
+
 def read_bytes(rel: str) -> bytes:
     """A vendored file's bytes, refused when they are not the pinned ones."""
     pin = load_pin()

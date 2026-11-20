@@ -195,6 +195,9 @@ jobs:
   # the same job before build.
   e2e-generated-project:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write   # the pin gate's follow-up issue below
     services:
       postgres:
         image: postgres:16
@@ -259,10 +262,38 @@ jobs:
       - name: The scaffold's pins satisfy every pair's peer ranges
         run: python "$GITHUB_WORKSPACE/scripts/check_npm_peer_graph.py"
 
-      # 0.79.1 shipped stapel-listings>=0.28.0,<0.29 with 0.29.0 on PyPI: the
-      # registry row was not moved and nothing compared it with the index.
-      - name: Every registry pin's ceiling admits PyPI's newest release
-        run: python "$GITHUB_WORKSPACE/scripts/check_pypi_pins.py" --strict
+      # The blocking stale-ceiling check (PIN002) runs on main before the tag
+      # (ci.yml, make release-check). Here a pin that is not on PyPI or not a
+      # final release inside its range (PIN001/PIN003) still refuses; a newer
+      # upstream that appeared after the tag is a warning plus a follow-up
+      # issue, because a pushed tag is never moved and refusing it only burns
+      # the version.
+      - name: Every registry pin is on PyPI (newer upstream = follow-up, not refusal)
+        run: |
+          python "$GITHUB_WORKSPACE/scripts/check_pypi_pins.py" --publish \
+            --report "$RUNNER_TEMP/pin-follow-up.md"
+
+      - name: Open a follow-up issue for pins a newer upstream overtook
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          report="$RUNNER_TEMP/pin-follow-up.md"
+          if [ ! -s "$report" ]; then
+            echo "check-pypi-pins: no newer upstream since the tag — no follow-up"
+            exit 0
+          fi
+          cat "$report" >> "$GITHUB_STEP_SUMMARY"
+          title="Registry pins overtaken while $TAG was publishing"
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title \"$title\"" \
+               --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "follow-up already open: $title"
+          else
+            # The annotation and the step summary already carry the notice; a
+            # repository with issues off must not turn it into a refusal.
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body-file "$report" \
+              || echo "::warning title=check-pypi-pins::could not open the follow-up issue: $title"
+          fi
 
       # The 0.54.0 publish died right here on `No matching version found for
       # @stapel/auth-react@^0.16.1`: the scaffold's version mirror is copied

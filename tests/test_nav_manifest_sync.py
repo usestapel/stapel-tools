@@ -454,3 +454,136 @@ def test_every_mirrored_embed_targets_a_shell_slot():
         assert embed["slot"] in SHELL_SLOT_IDS, embed["id"]
         assert isinstance(embed["component"]["export"], str), embed["id"]
         assert embed["component"]["export"], embed["id"]
+
+
+# --- the pinned commit is the reference; the sibling's moving head is a notice ----------
+
+
+def _git(cwd: Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+
+def _react_repo(root: Path, version: str, entries: list) -> Path:
+    """A stapel-react git checkout whose ``@stapel/demo-react@<version>`` tag
+    carries *entries*."""
+    _pair(root, "demo", "@stapel/demo-react", version, entries)
+    repo = root / "stapel-react"
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", f"demo {version}")
+    _git(repo, "tag", f"@stapel/demo-react@{version}")
+    return repo
+
+
+def _bump_head(repo: Path, version: str, entries: list) -> None:
+    manifest = repo / "packages" / "demo-react" / "nav-manifest.json"
+    manifest.write_text(json.dumps(
+        {"package": "@stapel/demo-react", "version": version, "entries": entries}, indent=2) + "\n")
+    _git(repo, "commit", "-q", "-am", f"demo {version}")
+
+
+SECOND = {**ENTRY, "id": "demo.second", "route": {"path": "demo/second"}, "order": 20}
+
+
+def test_the_siblings_head_moving_on_is_a_notice_not_a_failure(gate, tmp_path, monkeypatch, capsys):
+    """The two burned tags' class: a commit whose mirror equals its pin turned
+    red because stapel-react's main moved after it. The pin is the reference."""
+    repo = _react_repo(tmp_path, "1.2.3", [ENTRY])
+    _bump_head(repo, "1.3.0", [ENTRY, SECOND])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
+    })
+    assert gate.check_react(tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "pin is behind the sibling's head — demo: pinned 1.2.3" in out
+    assert "with different entries/embeds" in out
+
+
+def test_a_mirror_that_differs_from_its_pinned_tag_fails_even_when_head_agrees(
+    gate, tmp_path, monkeypatch
+):
+    repo = _react_repo(tmp_path, "1.2.3", [ENTRY])
+    _bump_head(repo, "1.2.3", [ENTRY, SECOND])  # the head happens to equal the mirror
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY, SECOND]}
+    })
+    assert gate.check_react(tmp_path) == 1
+
+
+def test_a_pin_without_its_tag_fails(gate, tmp_path, monkeypatch, capsys):
+    _react_repo(tmp_path, "1.2.3", [ENTRY])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.4", "nav": [ENTRY]}
+    })
+    assert gate.check_react(tmp_path) == 1
+    assert "has no tag '@stapel/demo-react@1.2.4'" in capsys.readouterr().out
+
+
+def test_a_head_npm_already_serves_is_still_a_stale_pin_under_registry(gate, tmp_path, monkeypatch):
+    repo = _react_repo(tmp_path, "1.2.3", [ENTRY])
+    _bump_head(repo, "1.3.0", [ENTRY])
+    _registry(monkeypatch, {
+        "demo": {"package": "@stapel/demo-react", "version": "1.2.3", "nav": [ENTRY]}
+    })
+    assert gate.check_react(tmp_path, ask_registry=True, published=lambda *_: True,
+                            latest=lambda *_: None) == 1
+    assert gate.check_react(tmp_path, ask_registry=True, published=lambda *_: False,
+                            latest=lambda *_: None) == 0
+
+
+@pytest.fixture
+def kmp_repo(tmp_path, monkeypatch):
+    """A stapel-kmp git checkout laid out from the vendored copy, and the pin
+    pointed at its commit."""
+    from stapel_tools.composition.kmp import vendor
+
+    pin = vendor.load_pin()
+    repo = tmp_path / "stapel-kmp"
+    for rel, meta in pin["files"].items():
+        dest = repo / meta["source"]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes((vendor.VENDORED / rel).read_bytes())
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "pinned")
+    pinned = {**pin, "commit": _git(repo, "rev-parse", "HEAD")}
+    monkeypatch.setattr(vendor, "load_pin", lambda: pinned)
+    return repo
+
+
+def _touch_auth_manifest(repo: Path) -> None:
+    path = repo / "bricks" / "auth" / "ui" / "nav-manifest.json"
+    data = json.loads(path.read_text())
+    data["destinations"] = data.get("destinations", []) + [{"id": "auth.later"}]
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    _git(repo, "commit", "-q", "-am", "auth moves on")
+
+
+def test_kmp_head_moving_past_the_pin_is_a_notice(gate, tmp_path, kmp_repo, capsys):
+    _touch_auth_manifest(kmp_repo)
+    assert gate.check_kmp(tmp_path) == 0
+    out = capsys.readouterr().out
+    assert "is behind the sibling's head: nav-manifests/auth.json" in out
+
+
+def test_kmp_vendored_copy_that_is_not_its_pinned_commit_fails(gate, tmp_path, kmp_repo, monkeypatch):
+    from stapel_tools.composition.kmp import vendor
+
+    _touch_auth_manifest(kmp_repo)
+    moved = {**vendor.load_pin(), "commit": _git(kmp_repo, "rev-parse", "HEAD")}
+    monkeypatch.setattr(vendor, "load_pin", lambda: moved)
+    assert gate.check_kmp(tmp_path) == 1
+
+
+def test_kmp_pin_missing_from_the_checkout_fails(gate, tmp_path, kmp_repo, monkeypatch, capsys):
+    from stapel_tools.composition.kmp import vendor
+
+    pin = vendor.load_pin()
+    monkeypatch.setattr(vendor, "load_pin", lambda: {**pin, "commit": "0" * 40})
+    assert gate.check_kmp(tmp_path) == 1
+    assert "cannot be confirmed" in capsys.readouterr().out

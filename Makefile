@@ -35,7 +35,7 @@ PYTHON ?= python
 # `preset-gate` holds every composite's installed preset.py equal to
 # STAPEL_LIBS (apps, order, mounts, defaults shape, frontend pairs). It reads
 # the INSTALLED composites, so it needs the `test` extra.
-.PHONY: kmp-vendor check lint test nav-sync sibling-lint peer-graph pins-check hooks-doctor preset-gate composite-gates golden golden-update registry-export registry-export-check
+.PHONY: kmp-vendor check lint test nav-sync sibling-lint peer-graph pins-check hooks-doctor preset-gate composite-gates golden golden-update registry-export registry-export-check release-check
 
 check: hooks-doctor lint sibling-lint nav-sync kmp-vendor registry-export-check preset-gate golden test
 
@@ -97,3 +97,21 @@ pins-check:
 
 test:
 	$(PYTHON) -m pytest -q -p no:cacheprovider
+
+# `make release-check` — every pre-tag gate, one exit status. The tag is cut
+# only when this exits 0; run it bare, never through a pipe (`| tail` returns
+# tail's status and once let a red pin gate through to a burned tag). Each
+# line is its own recipe step, so the first red gate stops the target and
+# make exits non-zero.
+#   release-check.sh       on main, contains every earlier v* tag
+#   check_release_version  tree clean, HEAD == origin/main, v<version> unused, CHANGELOG section
+#   pins (strict)          PIN001/PIN002/PIN003 against PyPI — the blocking pin gate
+#   check                  everything CI runs that a laptop can run
+RELEASE_CHECK_SH ?= sh ./release-check.sh
+
+release-check:
+	$(RELEASE_CHECK_SH)
+	$(PYTHON) scripts/check_release_version.py
+	$(PYTHON) scripts/check_pypi_pins.py --strict
+	$(MAKE) --no-print-directory check PYTHON="$(PYTHON)"
+	@echo "release-check: every pre-tag gate is green — tag with: git tag -a v<version> -m ... && git push origin v<version>"

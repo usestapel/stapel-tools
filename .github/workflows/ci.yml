@@ -76,15 +76,21 @@ jobs:
         with:
           repository: usestapel/stapel-react
           path: siblings/stapel-react
+          # The gate reads the PINNED commit (a pair's version tag, the vendored
+          # pin), not this moving head, so it needs the history and the tags.
+          fetch-depth: 0
 
-      # The KMP row of the same gate compares the vendored stapel-kmp nav
-      # manifests with stapel-kmp's main (a brick that started shipping its
-      # descriptor there is drift until it is re-vendored here).
+      # The KMP row of the same gate compares the vendored stapel-kmp files
+      # with the commit pin.json names (blocking); stapel-kmp's main moving
+      # past that pin is printed as a notice, never a failure of this commit.
       - name: Fetch the sibling stapel-kmp checkout
         uses: actions/checkout@v4
         with:
           repository: usestapel/stapel-kmp
           path: siblings/stapel-kmp
+          # The gate reads the PINNED commit (a pair's version tag, the vendored
+          # pin), not this moving head, so it needs the history and the tags.
+          fetch-depth: 0
 
       - name: Nav-manifest mirror is in sync with the real pairs
         env:
@@ -93,6 +99,15 @@ jobs:
 
       - name: Vendored stapel-kmp data equals its pin
         run: python -m stapel_tools.composition.kmp.vendor --check
+
+      # The blocking registry-pin gate lives HERE, on main before any tag
+      # (PIN001 not on PyPI, PIN002 a newer minor outside the ceiling, PIN003
+      # not a final release inside its range). A tag cut from a commit whose
+      # CI passed this is publishable: publish.yml re-asks with --publish,
+      # where a newer upstream is a follow-up, not a refusal. The daily run
+      # turns red the morning a sibling ships a minor.
+      - name: Every registry pin is on PyPI and its ceiling admits the newest release
+        run: python scripts/check_pypi_pins.py --strict
 
       # The suite's dependencies are DECLARED (the `test` extra), not typed out
       # here. They used to be typed out here, which is how the list and the
@@ -432,6 +447,9 @@ jobs:
         with:
           repository: usestapel/stapel-react
           path: siblings/stapel-react
+          # The gate reads the PINNED commit (a pair's version tag, the vendored
+          # pin), not this moving head, so it needs the history and the tags.
+          fetch-depth: 0
 
       - name: Install tools + generated-project runtime deps
         run: |
