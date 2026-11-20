@@ -133,7 +133,7 @@ class TestRoutePlan:
         id and nothing else, so the container's own entry has to be a
         manifest. The override file still tunes it — that is the half of the
         channel that was ever real."""
-        overrides = json.loads(F.render_public_nav_overrides_json())
+        overrides = json.loads(F.render_shell_nav_overrides_json({}, seed_account=True))
         assert set(overrides["overrides"]) == {"account.root"}
         assert overrides["overrides"]["account.root"]["order"] == 100
 
@@ -160,7 +160,7 @@ class TestRoutesRenderer:
         monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION",
                             C.FRONTEND_SHELL_SELF_THEMING_FLOOR)
         src = F.render_storefront_shell_tsx()
-        assert "      nav={nav}" in src
+        assert "      nav={member ? RESOLVED_NAV_MEMBER : RESOLVED_NAV_GUEST}" in src
         assert "mode=" not in src
 
         monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION", "0.6.0")
@@ -797,8 +797,9 @@ class TestTheThreeNewPairsInAStorefront:
         assert "currencies" in composite_pairs("shop")
         for key in ("geo", "moderation", "currencies"):
             assert key in composite_pairs("classified")
-        for name in ("shop", "classified"):
-            assert FRONTEND_COMPOSITES[name]["pending"] == {}
+        assert FRONTEND_COMPOSITES["classified"]["pending"] == {}
+        # orders: registered, not on npm yet (FRONTEND_REACT_LIBS released: False).
+        assert set(FRONTEND_COMPOSITES["shop"]["pending"]) == {"orders"}
 
     def test_the_moderation_screens_are_routed_not_placeheld(self):
         files = _plan(pairs=[*STOREFRONT_PAIRS, "moderation"])["files"]

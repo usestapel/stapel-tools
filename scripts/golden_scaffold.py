@@ -125,6 +125,16 @@ def cases() -> dict[str, tuple[str, list[str]]]:
     for shell in sorted(MONOLITH_RENDERABLE):
         out[f"shell-{shell}"] = _create(
             "--modules", "auth", "notifications", "workspaces", "--shell", shell)
+    # The navigation presets each shape draws today, on a storefront and on an
+    # app-like selection (navigation-templates spec §7.4).
+    for preset in ("shop", "dashboard", "site"):
+        out[f"nav-{preset}"] = _create("--modules", "shop", "--nav-preset", preset)
+        out[f"nav-{preset}-app"] = _create(
+            "--modules", "auth", "profiles", "notifications", "--nav-preset", preset)
+    out["nav-explicit-drawer"] = _create(
+        "--modules", "shop", "--nav", "compact=drawer", "--nav-hide", "admin.root",
+        "--nav-order", "categories.catalog=1")
+    out["nav-default-no-accounts"] = _create("--modules", "categories", "listings")
     for preset in THEME_PRESETS:
         out[f"theme-{preset}"] = _create("--modules", "auth", "--theme", preset)
     for preset in ("shop", "classified", "booking", "social"):
@@ -135,6 +145,9 @@ def cases() -> dict[str, tuple[str, list[str]]]:
         "--surface", "public", "--pairs", "search,listings,categories",
         "--name", "golden-web", "--doc-type", "listing", "--locale", "ru")
     out["repo-init-delivery-github"] = _repo_init("--ci", "github")
+    out["repo-init-shop-dashboard"] = _repo_init(
+        "--surface", "public", "--preset", "shop", "--nav-preset", "dashboard",
+        "--name", "golden-web", "--title", "Golden Web")
     # The KMP emitter: one mobile/ tree per composition, offline on and off.
     mobile = {
         "minimal-auth": _mobile("--modules", "auth", "--auth-model", "public",

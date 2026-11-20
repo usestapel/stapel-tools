@@ -24,6 +24,7 @@ Usage (non-interactive):
 """
 
 import argparse
+import dataclasses
 import json
 import os
 import re
@@ -809,7 +810,14 @@ FRONTEND_COMPOSITES: dict[str, dict] = {
             "search",
             "vocabularies",
         ],
-        "pending": {},
+        "pending": {
+            "orders": (
+                "the cart, checkout and order history: the binding is written "
+                "(@stapel/orders-react 0.2.0) and installs the day npm serves the "
+                "package; until then cart, checkout and history are the project's "
+                "own pages, mounted inside the shell through stapel.app-nav.json"
+            ),
+        },
         "why": {
             "auth": "a storefront always generates sign-in",
             "currencies": (
@@ -1929,7 +1937,19 @@ def _frontend_react_entries(feature_libs: list[str]) -> list[dict]:
     return [
         {"key": key, **FRONTEND_REACT_LIBS[key]}
         for key in feature_libs
-        if key in FRONTEND_REACT_LIBS
+        if key in FRONTEND_REACT_LIBS and key not in pending_react_pairs(feature_libs)
+    ]
+
+
+def pending_react_pairs(feature_libs) -> list[str]:
+    """Selected modules whose BACKEND is released while the React pair is not
+    on npm (``released: False`` in its binding): the backend is installed, the
+    pair is not, and the scaffold names it pending. A pair whose backend is
+    unreleased too travels with ``--allow-unreleased`` (vendored), as before."""
+    return [
+        key for key in feature_libs
+        if FRONTEND_REACT_LIBS.get(key, {}).get("released", True) is False
+        and STAPEL_LIBS.get(key, {}).get("released", True) is not False
     ]
 
 
@@ -2091,7 +2111,7 @@ def _billing_dev_hatch_needed(
     return supplied == default
 
 
-def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False, auth_comp=None, theme: str | None = None, shell: str | None = None, slots: dict[str, str] | None = None):
+def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broker: str, task_broker: str = "none", module_config: dict | None = None, env_preset: str = "standalone", feature_libs: list[str] | None = None, want_auth: bool | None = None, want_landing: bool = False, auth_comp=None, theme: str | None = None, shell: str | None = None, slots: dict[str, str] | None = None, navigation: dict | None = None, strict: bool = False):
     from . import ui_wiring
     from ._compose_templates import (
         MONOLITH_COMPOSE_BASE,
@@ -2222,6 +2242,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
         backend_prefixes=backend_prefixes,
         backend_upstream_default=backend_upstream_default,
         auto_anonymous_actions=_auto_anonymous_actions(feature_libs, auth_comp, module_config),
+        navigation=navigation, strict=strict,
     )
     _write_frontend_scaffold(project_dir, ctx, backend_upstream_default, composition=composition)
     _write_deploy_scripts(project_dir)
@@ -2348,18 +2369,21 @@ def _mobile_request(
 
 
 def _mobile_composition(ctx, project_type, feature_libs, want_auth, auth_comp, theme,
-                        mobile_request, *, validate: bool = False):
+                        mobile_request, *, validate: bool = False, navigation=None):
     from ._auth_model import resolve as resolve_auth_model
     from .composition.emitter import build_composition, emitter_for
+    from .composition.navigation import plan_kmp_navigation
 
     if auth_comp is None and "auth" in feature_libs:
         auth_comp = resolve_auth_model(None, auth_selected=True)
     comp = build_composition(
         ctx=ctx, project_type=project_type, feature_libs=list(feature_libs),
         want_auth=want_auth, auth_comp=auth_comp, theme=theme, mobile=mobile_request,
+        navigation=navigation,
     )
     if validate:
         emitter_for("kmp").validate(comp, mobile_request)
+        plan_kmp_navigation(comp)
     return comp
 
 
@@ -2375,13 +2399,27 @@ _NGINX_SERVICE_MARKER = "    # stapel-new-service appends one location block per
 
 
 def _write_mobile(project_dir: Path, ctx: dict, project_type: str, feature_libs, want_auth,
-                  auth_comp, theme, mobile_request) -> None:
-    """``mobile/`` — the KMP emitter's plan, written; nginx and make wired to it."""
+                  auth_comp, theme, mobile_request, navigation=None) -> dict:
+    """``mobile/`` — the KMP emitter's plan, written; nginx and make wired to it.
+    The navigation block is echoed with its KMP plan into
+    ``mobile/stapel.composition.json``; the emitter draws what the plan's
+    chrome names (``AdaptiveTabs`` / ``Stack``). Returns the resolved plan."""
     from .composition.emitter import emitter_for, write_plan
+    from .composition.navigation import plan_kmp_navigation
 
     comp = _mobile_composition(ctx, project_type, feature_libs, want_auth, auth_comp, theme,
-                               mobile_request)
+                               mobile_request, navigation=navigation)
+    kmp_nav = plan_kmp_navigation(comp)
+    # The emitter draws the chrome the plan names (AdaptiveTabs / Stack).
+    mobile_request = dataclasses.replace(mobile_request, shell=kmp_nav.template)
+    comp = dataclasses.replace(comp, platforms=tuple(
+        mobile_request if p.platform == "kmp" else p for p in comp.platforms))
     plan = emitter_for("kmp").plan(comp, mobile_request)
+    echo_path = "mobile/stapel.composition.json"
+    if echo_path in plan.files:
+        echo = json.loads(plan.files[echo_path])
+        echo["navigation"] = {"block": comp.navigation, "resolved": kmp_nav.resolved}
+        plan.files[echo_path] = json.dumps(echo, indent=2) + "\n"
     write_plan(project_dir, plan)
     if plan.nginx_locations:
         conf = project_dir / "service-configs" / "nginx" / "nginx.conf"
@@ -2399,6 +2437,7 @@ def _write_mobile(project_dir: Path, ctx: dict, project_type: str, feature_libs,
     print("  mobile/ (stapel-kmp: Android, iOS, desktop) — see mobile/README.md")
     for note in plan.notes:
         print(f"  note: {note}")
+    return kmp_nav.resolved
 
 
 def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | None = None, module_config: dict | None = None, auth_comp=None):
@@ -3124,7 +3163,13 @@ def create_project(
     mobile_name: str | None = None,
     mobile_shell: str | None = None,
     mobile_maven_repo: str | None = None,
+    navigation: dict | None = None,
+    strict: bool = False,
 ):
+    """Generate a project. ``navigation`` is the navigation block
+    (navigation-templates spec §3.2: preset, carriers per size class,
+    header, destinations, semantic slots); ``strict`` turns "asked for but
+    not rendered" into a refusal (Studio's mode)."""
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", name):
         print("Error: project name must contain only letters, numbers, dashes, underscores", file=sys.stderr)
         sys.exit(1)
@@ -3279,28 +3324,31 @@ def create_project(
 
     # The shell composition is checked here, before anything is written, with
     # the same inputs the frontend scaffold will plan from.
-    if shell is not None or slots:
+    web_nav = {k: v for k, v in (navigation or {}).items() if k != "platforms"}
+    web_nav_platforms = {k for k in ((navigation or {}).get("platforms") or {}) if k != "kmp"}
+    if shell is not None or slots or web_nav or web_nav_platforms:
         if project_type != "monolith":
             print(
-                f"Error: --shell/--slot compose the generated SPA's chrome; "
+                f"Error: --shell/--slot/--nav* compose the generated SPA's chrome; "
                 f"{project_type} has none",
                 file=sys.stderr,
             )
             sys.exit(1)
     if project_type == "monolith":
-        from ._shell_slots import plan_slots
-        from ._shell_templates import DEFAULT_SHELL_TEMPLATE
+        from .composition.emitter import build_composition, emitter_for
+        from .composition.model import CompositionError
 
         selected = _expand_with_requires([m for m in modules if m != "core"])
         wants_auth = ("auth" in selected) if want_auth is None else bool(want_auth)
         try:
-            plan_slots(
-                shell or DEFAULT_SHELL_TEMPLATE,
-                _frontend_react_entries(selected),
-                auth_gated=wants_auth and "auth" in selected,
-                overrides=slots,
+            probe = build_composition(
+                ctx={"slug": _slugify(name), "title": title, "url": url},
+                project_type="monolith", feature_libs=selected, want_auth=wants_auth,
+                want_landing=want_landing, auth_comp=auth_comp, theme=theme, shell=shell,
+                slots=slots, navigation=navigation, strict=strict,
             )
-        except ValueError as exc:
+            emitter_for("react").validate(probe, probe.platform("react"))
+        except (CompositionError, ValueError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             sys.exit(1)
 
@@ -3342,6 +3390,7 @@ def create_project(
                 {"slug": slug, "title": title, "url": url.rstrip("/")}, project_type,
                 _expand_with_requires([m for m in modules if m != "core"]),
                 want_auth, auth_comp, theme, mobile_request, validate=True,
+                navigation=navigation,
             )
         except CompositionError as exc:
             print(f"Error: {exc}", file=sys.stderr)
@@ -3443,7 +3492,7 @@ def create_project(
 
     # Generate project structure
     if project_type == "monolith":
-        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only, want_auth=want_auth, want_landing=want_landing, auth_comp=auth_comp, theme=theme, shell=shell, slots=slots)
+        _create_monolith(project_dir, ctx, stapel_apps=feature_apps, broker=broker, task_broker=task_broker, module_config=module_config, env_preset=env_preset, feature_libs=feature_only, want_auth=want_auth, want_landing=want_landing, auth_comp=auth_comp, theme=theme, shell=shell, slots=slots, navigation=navigation, strict=strict)
     elif project_type == "minimal":
         _create_minimal(project_dir, ctx, feature_modules=[k for k in modules if k != "core"], module_config=module_config, auth_comp=auth_comp)
         use_submodules = False  # minimal uses pip
@@ -3469,9 +3518,22 @@ def create_project(
     if allow_unreleased and project_type in ("monolith", "minimal"):
         _vendor_unreleased(project_dir, ctx, feature_only, project_type, output_dir)
 
+    kmp_resolved = None
     if mobile_request is not None:
-        _write_mobile(project_dir, ctx, project_type, feature_only, want_auth, auth_comp,
-                      theme, mobile_request)
+        kmp_resolved = _write_mobile(project_dir, ctx, project_type, feature_only, want_auth,
+                                     auth_comp, theme, mobile_request, navigation=navigation)
+
+    # The project-root composition (navigation-templates spec §3.2, D3): the
+    # inputs this project was generated from and the navigation block with
+    # every platform's resolved plan — what `stapel-nav-regenerate` rebuilds
+    # from and what Studio reads.
+    if project_type == "monolith" or mobile_request is not None:
+        _write_root_composition(
+            project_dir, ctx=ctx, project_type=project_type, feature_libs=feature_only,
+            want_auth=want_auth, want_landing=want_landing, auth_model=auth_model,
+            auth_kinds=auth_kinds, posture=posture, theme=theme, shell=shell, slots=slots,
+            navigation=navigation, strict=strict, kmp_resolved=kmp_resolved,
+        )
 
     if project_type in ("monolith", "minimal"):
         _append_wiring_requirements(project_dir, ctx, feature_only, project_type)
@@ -3506,6 +3568,58 @@ def create_project(
         print("  # .env already created with generated secrets (SECRET_KEY, "
               "JWT_SECRET_KEY, POSTGRES_PASSWORD) — review, then:")
         print("  docker compose up -d")
+
+
+ROOT_COMPOSITION = "stapel.composition.json"
+
+
+def _write_root_composition(
+    project_dir: Path, *, ctx: dict, project_type: str, feature_libs, want_auth,
+    want_landing, auth_model, auth_kinds, posture, theme, shell, slots, navigation,
+    strict, kmp_resolved,
+) -> None:
+    """``stapel.composition.json`` at the project root: input and echo.
+
+    ``input`` is everything ``stapel-nav-regenerate`` needs to plan the
+    frontend again without the original command line; ``navigation`` the
+    block as given (aliases resolved); ``resolved`` each platform's plan, the
+    same objects ``frontend/`` and ``mobile/`` echo."""
+    from .composition.navigation import alias_block, merge_blocks
+
+    resolved: dict = {}
+    front = project_dir / "frontend" / ROOT_COMPOSITION
+    frontend_input: dict = {}
+    if front.exists():
+        echo = json.loads(front.read_text(encoding="utf-8"))
+        resolved["react"] = echo["navigation"]["resolved"]
+    if kmp_resolved is not None:
+        resolved["kmp"] = kmp_resolved
+    if project_type == "monolith":
+        dir_name = ctx["service_dir_name"]
+        frontend_input = {
+            "backendPrefixes": _reserved_backend_prefixes(ctx["slug"], list(feature_libs)),
+            "backendUpstreamDefault": f"{dir_name}:8000",
+        }
+    block = merge_blocks(alias_block(shell, None), navigation or {})
+    doc = {
+        "version": 1,
+        "generator": "stapel-create-project",
+        "input": {
+            "name": ctx["name"], "slug": ctx["slug"], "type": project_type,
+            "title": ctx["title"], "url": ctx["url"], "modules": list(feature_libs),
+            "auth": want_auth, "landing": bool(want_landing), "authModel": auth_model,
+            "authKinds": auth_kinds, "posture": posture, "theme": theme,
+            "slots": dict(slots or {}), "strict": bool(strict), **frontend_input,
+        },
+        "navigation": block,
+        "resolved": resolved,
+    }
+    _write(project_dir / ROOT_COMPOSITION, json.dumps(doc, indent=2) + "\n")
+    if project_type == "monolith" and not (project_dir / "stapel.app-nav.json").exists():
+        from ._frontend_templates import render_app_nav_json
+
+        # The project's own pages: written once, then the project's.
+        _write(project_dir / "stapel.app-nav.json", render_app_nav_json())
 
 
 def _random_secret(length: int = 64) -> str:
@@ -3703,12 +3817,13 @@ def main():
              "theme file copied as is. Monolith only.",
     )
     from ._shell_templates import SHELL_TEMPLATES
+    from .nav_cli import add_nav_arguments
 
     parser.add_argument(
         "--shell", choices=list(SHELL_TEMPLATES), default=None,
-        help="Shell template of the generated SPA (default topbar-sidenav: "
-             "top bar plus side menu). topbar-only and sidenav-only are "
-             "named but queued for the monolith. Monolith only.",
+        help="Legacy shell template id, an alias of a navigation preset: "
+             "topbar-sidenav = --nav-preset dashboard, topbar-only = --nav-preset "
+             "shop, sidenav-only = dashboard with --nav-header none. Monolith only.",
     )
     parser.add_argument(
         "--slot", action="append", metavar="SLOT=EMBED[,EMBED]|none", default=None,
@@ -3768,11 +3883,39 @@ def main():
              "mavenLocal (local) or a staging repository directory. Required while the "
              "train is unreleased; written to mobile/gradle.properties (stapel.repo).",
     )
+    add_nav_arguments(parser)
     args = parser.parse_args()
+    from .composition.model import CompositionError
+    from .nav_cli import load_composition_file, navigation_from_args
+
+    file_values = load_composition_file(args.composition) if args.composition else {}
+    for attr, key in (
+        ("name", "name"), ("project_type", "project_type"), ("title", "title"),
+        ("url", "url"), ("company_name", "company_name"),
+        ("company_email", "company_email"), ("modules", "modules"),
+        ("auth_model", "auth_model"), ("auth_kinds", "auth_kinds"),
+        ("posture", "posture"), ("theme", "theme"), ("shell", "shell"),
+        ("mobile", "mobile"),
+    ):
+        if getattr(args, attr) is None and file_values.get(key) is not None:
+            value = file_values[key]
+            if attr == "auth_kinds" and isinstance(value, list):
+                value = ",".join(value)
+            setattr(args, attr, value)
+    if args.auth is None and file_values.get("want_auth") is not None:
+        args.auth = file_values["want_auth"]
+    if not args.landing and file_values.get("want_landing"):
+        args.landing = True
+    strict = bool(args.strict if args.strict is not None else file_values.get("strict"))
+    try:
+        navigation = navigation_from_args(args, file_values.get("navigation"))
+    except CompositionError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
     from ._shell_slots import parse_slot_args
 
     try:
-        slot_choices = parse_slot_args(args.slot) or None
+        slot_choices = parse_slot_args(args.slot) or file_values.get("slots") or None
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         sys.exit(1)
@@ -3885,6 +4028,8 @@ def main():
         mobile_name=args.mobile_name,
         mobile_shell=args.mobile_shell,
         mobile_maven_repo=args.mobile_maven_repo,
+        navigation=navigation or None,
+        strict=strict,
     )
 
 

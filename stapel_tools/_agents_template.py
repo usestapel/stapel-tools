@@ -185,6 +185,16 @@ ACTUALLY serves — a fixed conf that was never deployed is still stale:
 FRONTEND_SECTION = """
 ## 6. Frontend — no hardcodes, typed events, repositories not raw storage
 
+- Every page renders inside the shell. `frontend/src/routes.tsx`,
+  `nav.generated.ts`, `chrome.generated.tsx` and `embeds.generated.tsx` are
+  generated (their hashes are in `frontend/stapel.composition.json`;
+  `npm test` fails on a hand edit). Add a screen with ONE entry in
+  `stapel.app-nav.json` (project root: id `app.<screen>`, label key, icon,
+  path, `parentId` such as `account.root`, `surface`, and `via` when it is
+  reached from another screen rather than the menu) and ONE binding in
+  `frontend/src/app.pages.ts`, then run `stapel-nav-regenerate .`. A page
+  draws content only: no own header, navigation or full-viewport frame.
+  The navigation pattern itself is `navigation` in `stapel.composition.json`.
 - No raw colours: every colour is a design token (`@stapel/eslint-plugin`
   rule `no-raw-colors`) — `cssVar("...")`, never a literal hex/rgb.
   Tokens are imported from the generated tokens package, never re-declared

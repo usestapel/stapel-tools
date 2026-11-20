@@ -785,6 +785,97 @@
         }
       }
     },
+    "orders": {
+      "nav": [
+        {
+          "id": "orders.cart",
+          "labelKey": "orders.nav.cart",
+          "icon": "cart",
+          "path": "/cart",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 60
+        },
+        {
+          "id": "orders.checkout",
+          "labelKey": "orders.nav.checkout",
+          "icon": "cart",
+          "path": "/checkout",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": false,
+          "surface": "public",
+          "order": 61
+        },
+        {
+          "id": "orders.mine",
+          "labelKey": "orders.nav.mine",
+          "icon": "list-ordered",
+          "path": "orders",
+          "level": "submenu",
+          "parentId": "account.root",
+          "menuVisibleDefault": true,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 40
+        },
+        {
+          "id": "orders.detail",
+          "labelKey": "orders.nav.detail",
+          "icon": "list-ordered",
+          "path": "/orders/:id",
+          "level": "top",
+          "parentId": null,
+          "menuVisibleDefault": false,
+          "requiresAuth": true,
+          "surface": "member",
+          "order": 62
+        }
+      ],
+      "embeds": [
+        {
+          "id": "orders.cart_badge",
+          "slot": "topbar.end",
+          "order": 20,
+          "surface": "any",
+          "opens": "orders.cart"
+        },
+        {
+          "id": "orders.add_to_cart",
+          "slot": "page.actions",
+          "order": 10,
+          "surface": "any",
+          "scopeNavEntry": "listings.detail",
+          "routeProps": {
+            "purchasableKey": "id"
+          },
+          "props": {
+            "purchasableType": "listing"
+          }
+        }
+      ],
+      "platforms": {
+        "react": {
+          "package": "@stapel/orders-react",
+          "version": "0.2.0",
+          "released": false,
+          "entries": [
+            "orders.cart",
+            "orders.checkout",
+            "orders.mine",
+            "orders.detail"
+          ],
+          "embeds": [
+            "orders.cart_badge",
+            "orders.add_to_cart"
+          ]
+        }
+      }
+    },
     "profiles": {
       "nav": [
         {

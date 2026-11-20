@@ -83,14 +83,26 @@ def build_composition(
     backend_upstream_default: str = "",
     auto_anonymous_actions: tuple[str, ...] = (),
     mobile: Optional[PlatformRequest] = None,
+    navigation: Optional[dict] = None,
+    app_nav: tuple = (),
+    app_bindings: Optional[dict] = None,
+    strict: bool = False,
 ) -> Composition:
     """The only place the scaffold's CLI values are interpreted.
 
     Defaults are resolved here, once: ``want_auth`` follows the selection
     when not given; ``backend_prefixes`` falls back to the project's own
     prefix plus ``admin``; the theme is rendered to the JSON every platform
-    writes byte-for-byte."""
+    writes byte-for-byte. A legacy ``shell`` (and the mobile request's
+    ``shell``) is resolved into the ``navigation`` block through its alias
+    (navigation-templates spec §3.4); explicit block keys win over it."""
     from .._theme_presets import render_theme_json
+    from .navigation import alias_block, merge_blocks, validate_block
+
+    nav_block = merge_blocks(
+        alias_block(shell, mobile.shell if mobile is not None else None),
+        validate_block(navigation or {}),
+    )
 
     modules = tuple(feature_libs or ())
     if want_auth is None:
@@ -116,6 +128,10 @@ def build_composition(
         backend_upstream_default=backend_upstream_default,
         platforms=(react,) if mobile is None else (react, mobile),
         auto_anonymous_actions=tuple(auto_anonymous_actions),
+        navigation=nav_block,
+        app_nav=tuple(app_nav or ()),
+        app_bindings=dict(app_bindings or {}),
+        strict=bool(strict),
     )
 
 

@@ -25,12 +25,13 @@ def test_router_ends_with_a_catch_all(tmp_path, composite):
     src = _front(tmp_path, [composite])
     routes = (src / "routes.tsx").read_text()
     assert 'import { NotFoundPage, RouteErrorPage } from "./NotFoundPage.js";' in routes
-    body = routes.split("createBrowserRouter([", 1)[1]
-    # One pathless root with the errorElement; the routes are its children.
+    body = routes.split("export const routes: RouteObject[] = [", 1)[1]
+    # One pathless root with the errorElement; the shell layout is its child
+    # and every route, the 404 included, is the shell's child.
     assert body.startswith("\n  {\n    errorElement: <RouteErrorPage />,\n    children: [\n")
-    top_level = re.findall(r'^      \{ path: "([^"]+)"', body, re.M)
+    top_level = re.findall(r'^          \{ path: "([^"]+)"', body, re.M)
     assert top_level[-1] == "*", top_level
-    assert '      { path: "*", element: <NotFoundPage /> },' in body
+    assert '          { path: "*", element: <NotFoundPage /> },' in body
     page = (src / "NotFoundPage.tsx").read_text()
     keys = (src / "i18n" / "keys.ts").read_text()
     for symbol in re.findall(r"STOREFRONT_I18N_KEYS\.(\w+)", page):

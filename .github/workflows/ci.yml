@@ -538,6 +538,11 @@ jobs:
       - name: The scaffold's pins satisfy every pair's peer ranges
         run: python "$GITHUB_WORKSPACE/scripts/check_npm_peer_graph.py"
 
+      # A binding marked unreleased (the scaffold installs nothing and names
+      # it pending) must not outlive the package's first publish.
+      - name: Pairs marked unreleased are not on npm
+        run: python "$GITHUB_WORKSPACE/scripts/check_unreleased_pairs.py"
+
       # …and the pair pins are the versions npm ACTUALLY SERVES.
       #
       # The `test` job above runs the same script WITHOUT --registry: offline,

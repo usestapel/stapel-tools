@@ -870,6 +870,82 @@ BRICK_UI: dict[str, BrickUi] = {
             ),
         ),
     ),
+    # The cart and the order history (the orders pair 0.2.0's
+    # nav-manifest.json). The cart is a public screen — a guest keeps a cart,
+    # and the first add-to-cart mints a guest session (the elevation seam);
+    # checkout is reached from the cart, history from the account section,
+    # one order by its id.
+    "orders": BrickUi(
+        key="orders",
+        nav=(
+            NavEntrySpec(
+                id="orders.cart",
+                label_key="orders.nav.cart",
+                icon="cart",
+                path="/cart",
+                level="top",
+                parent_id=None,
+                menu_visible_default=False,
+                requires_auth=False,
+                order=60,
+                surface="public",
+            ),
+            NavEntrySpec(
+                id="orders.checkout",
+                label_key="orders.nav.checkout",
+                icon="cart",
+                path="/checkout",
+                level="top",
+                parent_id=None,
+                menu_visible_default=False,
+                requires_auth=False,
+                order=61,
+                surface="public",
+            ),
+            NavEntrySpec(
+                id="orders.mine",
+                label_key="orders.nav.mine",
+                icon="list-ordered",
+                path="orders",
+                level="submenu",
+                parent_id="account.root",
+                menu_visible_default=True,
+                requires_auth=True,
+                order=40,
+                surface="member",
+            ),
+            NavEntrySpec(
+                id="orders.detail",
+                label_key="orders.nav.detail",
+                icon="list-ordered",
+                path="/orders/:id",
+                level="top",
+                parent_id=None,
+                menu_visible_default=False,
+                requires_auth=True,
+                order=62,
+                surface="member",
+            ),
+        ),
+        embeds=(
+            EmbedSpec(
+                id="orders.cart_badge",
+                slot="topbar.end",
+                order=20,
+                surface="any",
+                opens="orders.cart",
+            ),
+            EmbedSpec(
+                id="orders.add_to_cart",
+                slot="page.actions",
+                order=10,
+                surface="any",
+                scope_nav_entry="listings.detail",
+                route_props=(("purchasableKey", "id"),),
+                props=(("purchasableType", "listing"),),
+            ),
+        ),
+    ),
 }
 
 # Nav parents no brick owns, because no module owns "the account section" or

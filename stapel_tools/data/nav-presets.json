@@ -1,0 +1,123 @@
+{
+  "version": 1,
+  "presets": {
+    "shop": {
+      "titleKey": "nav.preset.shop.title",
+      "summaryKey": "nav.preset.shop.summary",
+      "header": "storefront",
+      "primary": {
+        "compact": "island",
+        "medium": "top-tabs",
+        "expanded": "top-tabs"
+      },
+      "platforms": {
+        "kmp": {
+          "primary": {
+            "compact": "bottom-tabs",
+            "medium": "rail",
+            "expanded": "side-panel"
+          }
+        }
+      },
+      "archetypes": [
+        "shop",
+        "classified",
+        "booking"
+      ]
+    },
+    "app": {
+      "titleKey": "nav.preset.app.title",
+      "summaryKey": "nav.preset.app.summary",
+      "header": "app",
+      "primary": {
+        "compact": "bottom-tabs",
+        "medium": "rail",
+        "expanded": "side-panel"
+      },
+      "platforms": {},
+      "archetypes": [
+        "social"
+      ]
+    },
+    "dashboard": {
+      "titleKey": "nav.preset.dashboard.title",
+      "summaryKey": "nav.preset.dashboard.summary",
+      "header": "app",
+      "primary": {
+        "compact": "drawer",
+        "medium": "rail",
+        "expanded": "side-panel"
+      },
+      "platforms": {
+        "kmp": {
+          "primary": {
+            "compact": "bottom-tabs",
+            "medium": "rail",
+            "expanded": "side-panel"
+          }
+        }
+      },
+      "archetypes": []
+    },
+    "site": {
+      "titleKey": "nav.preset.site.title",
+      "summaryKey": "nav.preset.site.summary",
+      "header": "storefront",
+      "primary": {
+        "compact": "drawer",
+        "medium": "top-tabs",
+        "expanded": "top-tabs"
+      },
+      "slots": {
+        "browse": "none"
+      },
+      "platforms": {
+        "kmp": {
+          "primary": {
+            "compact": "bottom-tabs",
+            "medium": "rail",
+            "expanded": "top-tabs"
+          }
+        }
+      },
+      "archetypes": []
+    },
+    "dock": {
+      "titleKey": "nav.preset.dock.title",
+      "summaryKey": "nav.preset.dock.summary",
+      "header": "app",
+      "primary": {
+        "compact": "island",
+        "medium": "island",
+        "expanded": "island"
+      },
+      "platforms": {},
+      "archetypes": []
+    },
+    "tool": {
+      "titleKey": "nav.preset.tool.title",
+      "summaryKey": "nav.preset.tool.summary",
+      "header": "app",
+      "primary": {
+        "compact": "stack",
+        "medium": "stack",
+        "expanded": "stack"
+      },
+      "platforms": {},
+      "archetypes": []
+    }
+  },
+  "drawable": {
+    "react": [
+      "shop",
+      "dashboard",
+      "site"
+    ],
+    "kmp": [
+      "shop",
+      "app",
+      "dashboard",
+      "tool"
+    ]
+  }
+}

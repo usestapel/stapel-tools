@@ -59,12 +59,11 @@ SHELL_TEMPLATES: dict[str, dict] = {
 
 DEFAULT_SHELL_TEMPLATE = "topbar-sidenav"
 
-# The templates the monolith route renderer can emit. `topbar-only` is the
-# storefront generator's chrome (`render_public_routes_tsx`); making it a
-# monolith option is its own queue item.
-MONOLITH_RENDERABLE: frozenset[str] = frozenset({"topbar-sidenav"})
+# The templates the monolith renders: `topbar-sidenav` (the `dashboard`
+# preset, AppShell) and `topbar-only` (the `shop` preset, PublicShell), each
+# as one layout route over every route (composition.react.shell).
+MONOLITH_RENDERABLE: frozenset[str] = frozenset({"topbar-sidenav", "topbar-only"})
 
 QUEUE_ITEMS: dict[str, str] = {
-    "topbar-only": "monolith --shell topbar-only",
     "sidenav-only": "sidenav-only chrome in shell-react",
 }

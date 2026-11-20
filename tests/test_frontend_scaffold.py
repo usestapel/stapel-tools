@@ -176,7 +176,8 @@ class TestFrontendScaffold:
         frontend = proj / "frontend"
         for rel in (
             "package.json", "vite.config.ts", "index.html",
-            "src/main.tsx", "src/App.tsx", "Dockerfile", ".gitignore",
+            "src/main.tsx", "src/routes.tsx", "src/chrome.generated.tsx",
+            "Dockerfile", ".gitignore",
             "stapel.theme.json",
         ):
             assert (frontend / rel).exists(), rel
@@ -286,12 +287,6 @@ class TestThemeJsonScaffold:
         assert "env.VITE_BACKEND_TARGET" in config
         assert "http://svc-app:8000" in config  # compose-network default
         assert '"/app/"' in config  # reserved backend prefix proxied
-
-    def test_app_tsx_calls_reserved_backend_prefix_not_absolute_url(self, tmp_path):
-        proj = _create(tmp_path, "app", "monolith")
-        app_tsx = (proj / "frontend" / "src" / "App.tsx").read_text()
-        assert 'fetch("/app/api/health/")' in app_tsx
-        assert "http://" not in app_tsx  # no absolute backend origin baked in
 
     def test_frontend_dockerfile_is_build_and_export_only_not_a_service(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith")
@@ -738,12 +733,14 @@ class TestFrontendReactWiring:
             modules=["core", "cdn", "reviews", "attributes"],
         )
         frontend = proj / "frontend"
-        app_tsx = (frontend / "src" / "App.tsx").read_text()
-        modules_tsx = (frontend / "src" / "modules.tsx").read_text()
+        sources = [
+            (frontend / "src" / rel).read_text()
+            for rel in ("main.tsx", "modules.tsx", "routes.tsx", "chrome.generated.tsx")
+        ]
         pkg = json.loads((frontend / "package.json").read_text())
         declared = {*pkg.get("dependencies", {}), *pkg.get("devDependencies", {})}
 
-        imported = self._imported_packages(app_tsx, modules_tsx)
+        imported = self._imported_packages(*sources)
         # "react" itself + every @stapel/*-react + support deps must resolve
         assert imported, "expected at least one non-relative import"
         missing = imported - declared
@@ -809,20 +806,17 @@ class TestFrontendReactWiring:
         assert "MembersManager" not in modules_tsx
         assert '@stapel/workspaces-react/default"' not in modules_tsx
 
-    def test_app_tsx_switches_to_module_aware_template_and_mounts_modules_provider(self, tmp_path):
+    def test_a_navless_pair_still_gets_the_shell_inside_its_providers(self, tmp_path):
         """"reviews" publishes no nav manifest (reviews render inside a
-        listing page and a seller page, never on a route of their own), so it
-        stays on the flat single-page App.tsx/ModulesPanel shape — a
-        nav-bearing selection like "profiles" or "billing" activates
-        react-router routing instead (P1, TestFrontendNavWiring)."""
+        listing page and a seller page, never on a route of their own). The
+        shell mounts anyway — "no shell" is not an output any more — and the
+        router sits inside the pairs' providers."""
         proj = _create(tmp_path, "app", "monolith", modules=["core", "reviews"])
-        app_tsx = (proj / "frontend" / "src" / "App.tsx").read_text()
-        assert 'from "./modules.js"' in app_tsx
-        assert "<ModulesProvider>" in app_tsx
-        assert "<ModulesPanel />" in app_tsx
-        # still hits the reserved backend prefix, never an absolute origin
-        assert 'fetch("/app/api/health/")' in app_tsx
-        assert "http://" not in app_tsx
+        main_tsx = (proj / "frontend" / "src" / "main.tsx").read_text()
+        assert 'from "./modules.js"' in main_tsx
+        assert "<ModulesProvider>" in main_tsx
+        assert "<RouterProvider router={router} />" in main_tsx
+        assert not (proj / "frontend" / "src" / "App.tsx").exists()
 
     def test_first_selected_pair_is_the_default_stapel_provider_client(self, tmp_path):
         proj = _create(tmp_path, "app", "monolith", modules=["core", "billing", "auth"])
@@ -832,10 +826,9 @@ class TestFrontendReactWiring:
         assert "client={authRuntime.client}" in modules_tsx
         assert "billing: billingRuntime.client," in modules_tsx
 
-    def test_only_non_react_paired_libs_produce_the_prior_clean_shell(self, tmp_path):
-        """Regression: a selection with zero react-paired modules must not
-        gain modules.tsx, must not switch App.tsx templates, and
-        package.json's dependencies stay exactly {react, react-dom}.
+    def test_only_non_react_paired_libs_install_no_pair(self, tmp_path):
+        """Regression: a selection with zero react-paired modules installs no
+        pair — only the shell, which always mounts — and registers none.
 
         This test used to use "gdpr", then "currencies" — each was the same
         shape until its pair shipped and FRONTEND_REACT_LIBS registered it
@@ -848,13 +841,12 @@ class TestFrontendReactWiring:
 
         proj = _create(tmp_path, "app", "monolith", modules=["core", "docs"])
         frontend = proj / "frontend"
-        assert not (frontend / "src" / "modules.tsx").exists()
-        app_tsx = (frontend / "src" / "App.tsx").read_text()
-        assert "./modules" not in app_tsx
-        assert "ModulesProvider" not in app_tsx
+        modules_tsx = (frontend / "src" / "modules.tsx").read_text()
+        assert "export const INSTALLED_REACT_MODULES = [] as const;" in modules_tsx
 
         pkg = json.loads((frontend / "package.json").read_text())
-        assert pkg["dependencies"] == {"react": "^19.1.0", "react-dom": "^19.1.0"}
+        pairs = [name for name in pkg["dependencies"] if name.endswith("-react")]
+        assert pairs == ["@stapel/shell-react"]
 
     def test_headless_lib_with_no_react_pair_scaffolds_with_zero_frontend_wiring(self, tmp_path):
         """vault (http=False, no @stapel/vault-react package exists) must not
@@ -943,33 +935,6 @@ class TestFrontendNavWiring:
             result.append({**top, "children": visible})
         return result
 
-    def test_no_flags_no_nav_module_scaffold_is_byte_identical_to_app_tsx(self, tmp_path):
-        """Regression (mirrors TestFrontendReactWiring's own byte-identical
-        test): no --auth, no --landing, no selected pair with nav entries
-        -> App.tsx/main.tsx are the EXACT prior clean-shell output, and no
-        routing artifact (routes.tsx/nav.generated.ts/ProtectedRoute.tsx/
-        stapel.nav.json/LandingPage.tsx) exists at all.
-
-        Uses "docs" rather than "gdpr"/"currencies" for the same reason as
-        TestFrontendReactWiring's sibling regression test above: both of those
-        are react-paired now (FRONTEND_REACT_LIBS), so neither fits a test
-        about the NO-nav-pair shell."""
-        import stapel_tools._frontend_templates as F
-        from stapel_tools._compose_templates import render_tokens
-
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "docs"])
-        frontend = proj / "frontend"
-        app_tsx = (frontend / "src" / "App.tsx").read_text()
-        expected_app_tsx = render_tokens(F.APP_TSX, {"SLUG": "app", "TITLE": "App"})
-        assert app_tsx == expected_app_tsx
-        assert (frontend / "src" / "main.tsx").read_text() == F.MAIN_TSX
-        assert (frontend / "tsconfig.json").read_text() == F.TSCONFIG_JSON
-        for rel in (
-            "src/routes.tsx", "src/nav.generated.ts", "src/ProtectedRoute.tsx",
-            "stapel.nav.json", "src/LandingPage.tsx",
-        ):
-            assert not (frontend / rel).exists(), rel
-
     def test_auth_profiles_notifications_wires_login_route_and_resolved_nav(self, tmp_path):
         """``--modules auth,profiles,notifications --auth --landing``:
         routes.tsx has a "/login" route importing AuthPanel, and
@@ -1022,64 +987,27 @@ class TestFrontendNavWiring:
             modules=["core", "auth", "profiles", "notifications"],
             want_auth=True,
         )
-        routes_tsx = (proj / "frontend" / "src" / "routes.tsx").read_text()
+        chrome_tsx = (proj / "frontend" / "src" / "chrome.generated.tsx").read_text()
         if shell_self_themes():
-            assert 'mode="light"' not in routes_tsx
+            assert 'mode="light"' not in chrome_tsx
         else:
-            assert 'mode="light"' in routes_tsx
+            assert 'mode="light"' in chrome_tsx
 
-    def test_the_staff_fact_is_handed_down_once_the_shell_pin_carries_the_prop(
-        self, monkeypatch
-    ):
+    def test_the_staff_fact_is_handed_down_to_the_chrome(self, tmp_path):
         """`<AppShell/>` reads no session by design (the rule that keeps
-        `resolveNav` pure), so the container hands down `user.is_staff` — the
+        `resolveNav` pure), so the chrome hands down `user.is_staff` — the
         very field `AdminGate` refuses on, so the menu and the screen cannot
-        disagree. Gated on the PIN, because the prop is not in every published
-        shell (see FRONTEND_SHELL_STAFF_PROP_FLOOR)."""
-        from stapel_tools import _frontend_templates as F
-        from stapel_tools import create_project as C
-
-        monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION",
-                            C.FRONTEND_SHELL_SELF_THEMING_FLOOR)
-        pairs = F.nav_wired_pairs(
-            [{"key": k, **C.FRONTEND_REACT_LIBS[k]} for k in ("auth", "profiles")],
-            auth_wired=True,
+        disagree."""
+        proj = _create(
+            tmp_path, "app", "monolith", modules=["core", "auth", "profiles"],
+            want_auth=True,
         )
-        src = F.render_routes_tsx(
-            F.build_nav_route_plan(pairs),
-            auth_wired=True, want_landing=False, app_route_present=True,
-        )
-        assert "function AppChrome()" in src
-        assert "      nav={RESOLVED_NAV}" in src
-        assert "      staff={user?.is_staff === true}" in src
-        assert 'import { useAuthSessionState } from "@stapel/auth-react";' in src
-        assert "<AppChrome />" in src
-        # This pin predates `navBadges`, so no count is handed down and no
-        # pair's counting hook is imported.
-        assert "navBadges" not in src
-
-    def test_a_shell_pin_without_the_prop_does_not_get_it_invented(self, monkeypatch):
-        """The 0.54.0 class in a TypeScript costume: the prop exists in the
-        stapel-react checkout and not in the published tarball, and a scaffold
-        that emitted it regardless generated a project that does not compile.
-        The pin decides, so the emission moves in the same commit the pin
-        does."""
-        from stapel_tools import _frontend_templates as F
-        from stapel_tools import create_project as C
-
-        monkeypatch.setattr(C, "FRONTEND_SHELL_REACT_VERSION", "0.6.0")
-        pairs = F.nav_wired_pairs(
-            [{"key": k, **C.FRONTEND_REACT_LIBS[k]} for k in ("auth", "profiles")],
-            auth_wired=True,
-        )
-        src = F.render_routes_tsx(
-            F.build_nav_route_plan(pairs),
-            auth_wired=True, want_landing=False, app_route_present=True,
-        )
-        assert "AppChrome" not in src
-        assert "staff=" not in src
-        # ...and it keeps the `mode` the published shell REQUIRES.
-        assert '<AppShell nav={RESOLVED_NAV} mode="light" />' in src
+        chrome = (proj / "frontend" / "src" / "chrome.generated.tsx").read_text()
+        assert "export function AppChrome()" in chrome
+        assert "staff={user?.is_staff === true}" in chrome
+        assert 'import { useAuthSessionState } from "@stapel/auth-react";' in chrome
+        routes = (proj / "frontend" / "src" / "routes.tsx").read_text()
+        assert "element: <AppChrome />," in routes
 
     def test_the_shell_floor_is_measured_not_remembered(self):
         from stapel_tools.create_project import (
@@ -1103,26 +1031,25 @@ class TestFrontendNavWiring:
         proj = _create(
             tmp_path, "app", "monolith", modules=["core", "notifications"],
         )
-        routes_tsx = (proj / "frontend" / "src" / "routes.tsx").read_text()
-        assert "staff=" not in routes_tsx
-        assert "useAuthSessionState" not in routes_tsx
-        assert "navBadges" in routes_tsx
+        chrome = (proj / "frontend" / "src" / "chrome.generated.tsx").read_text()
+        assert "staff=" not in chrome
+        assert "useAuthSessionState" not in chrome
+        assert "navBadges" in chrome
 
     def test_a_selection_with_no_badge_source_and_no_auth_mounts_the_shell_bare(
         self, tmp_path
     ):
-        """The other half of the same rule: nothing to hand down means no
-        local chrome component at all, and the shell is the route element."""
+        """The other half of the same rule: nothing to hand down means the
+        chrome reads no session and no count."""
         proj = _create(tmp_path, "app", "monolith", modules=["core", "billing"])
-        routes_tsx = (proj / "frontend" / "src" / "routes.tsx").read_text()
-        assert "element: <AppShell nav={RESOLVED_NAV}" in routes_tsx
-        assert "AppChrome" not in routes_tsx
-        assert "navBadges" not in routes_tsx
+        chrome = (proj / "frontend" / "src" / "chrome.generated.tsx").read_text()
+        assert "<AppShell" in chrome
+        assert "navBadges" not in chrome and "useAuthSessionState" not in chrome
 
     def test_landing_only_scaffold_has_landing_route_and_no_app_protected_tree(self, tmp_path):
         """``--landing`` with no auth, no nav-bearing module: "/" mounts
-        LandingPage, and there is no "/app" route at all (no ProtectedRoute,
-        no AppShell, no nav.generated.ts/@stapel/shell-react dependency)."""
+        LandingPage inside the shell (the `site` preset, PublicShell), and
+        there is no "/app" route at all and no ProtectedRoute."""
         import json
 
         proj = _create(tmp_path, "app", "monolith", modules=["core"], want_landing=True)
@@ -1131,16 +1058,14 @@ class TestFrontendNavWiring:
         assert 'element: <LandingPage />' in routes_tsx
         assert '"/app"' not in routes_tsx
         assert "ProtectedRoute" not in routes_tsx
-        assert "AppShell" not in routes_tsx
+        assert "<PublicShell" in (frontend / "src" / "chrome.generated.tsx").read_text()
         assert (frontend / "src" / "LandingPage.tsx").exists()
         assert not (frontend / "src" / "ProtectedRoute.tsx").exists()
-        assert not (frontend / "src" / "nav.generated.ts").exists()
-        assert not (frontend / "stapel.nav.json").exists()
 
         pkg = json.loads((frontend / "package.json").read_text())
         deps = pkg["dependencies"]
         assert "react-router" in deps
-        assert "@stapel/shell-react" not in deps
+        assert "@stapel/shell-react" in deps
 
     def test_generated_router_imports_resolve_to_declared_deps(self, tmp_path):
         """The numeric compile-conceptually gate (mirrors
@@ -1926,19 +1851,6 @@ class TestTheShellCatalogueIsRegisteredInTheMonolithToo:
         assert modules_tsx.index("registerShellI18n(i18n);") < modules_tsx.index(
             'i18n.registerBundle("en"'
         )
-
-    def test_a_container_with_no_shell_does_not_import_one(self, tmp_path):
-        """`@stapel/shell-react` is only a dependency when something mounts
-        it. Registering a catalogue from a package that is not installed is a
-        build error, not a missing string."""
-        import json
-
-        proj = _create(tmp_path, "app", "monolith", modules=["core", "cdn"])
-        pkg = json.loads((proj / "frontend" / "package.json").read_text())
-        assert "@stapel/shell-react" not in pkg["dependencies"]
-        modules_tsx = (proj / "frontend" / "src" / "modules.tsx").read_text()
-        assert "shell-react" not in modules_tsx
-
 
 class TestTheMonolithHonoursTheMountTable:
     """`NAV_ENTRY_MOUNTS` decides how a nav entry is mounted, and until now

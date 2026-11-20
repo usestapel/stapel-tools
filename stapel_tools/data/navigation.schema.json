@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://usestapel.dev/schema/navigation.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "preset": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "header": {
+      "enum": [
+        "app",
+        "storefront",
+        "none"
+      ]
+    },
+    "primary": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compact": {
+          "enum": [
+            "bottom-tabs",
+            "island",
+            "drawer",
+            "stack"
+          ]
+        },
+        "medium": {
+          "enum": [
+            "bottom-tabs",
+            "island",
+            "drawer",
+            "rail",
+            "side-panel",
+            "top-tabs",
+            "stack"
+          ]
+        },
+        "expanded": {
+          "enum": [
+            "island",
+            "rail",
+            "side-panel",
+            "top-tabs",
+            "stack"
+          ]
+        }
+      }
+    },
+    "destinations": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pinned": {
+          "$ref": "#/$defs/ids"
+        },
+        "hidden": {
+          "$ref": "#/$defs/ids"
+        },
+        "order": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          }
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "labelKey",
+              "items"
+            ],
+            "properties": {
+              "labelKey": {
+                "type": "string"
+              },
+              "items": {
+                "$ref": "#/$defs/ids"
+              }
+            }
+          }
+        }
+      }
+    },
+    "slots": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "brand": {
+          "type": "string",
+          "pattern": "^(auto|none|[a-z][a-z0-9_.-]*)$"
+        },
+        "search": {
+          "type": "string",
+          "pattern": "^(auto|none|[a-z][a-z0-9_.-]*)$"
+        },
+        "account": {
+          "type": "string",
+          "pattern": "^(auto|none|[a-z][a-z0-9_.-]*)$"
+        },
+        "cart": {
+          "type": "string",
+          "pattern": "^(auto|none|[a-z][a-z0-9_.-]*)$"
+        },
+        "notifications": {
+          "type": "string",
+          "pattern": "^(auto|none|[a-z][a-z0-9_.-]*)$"
+        },
+        "primaryAction": {
+          "type": "string",
+          "pattern": "^(auto|none|[a-z][a-z0-9_.-]*)$"
+        },
+        "language": {
+          "type": "string",
+          "pattern": "^(auto|none|[a-z][a-z0-9_.-]*)$"
+        },
+        "theme": {
+          "type": "string",
+          "pattern": "^(auto|none|[a-z][a-z0-9_.-]*)$"
+        },
+        "browse": {
+          "type": "string",
+          "pattern": "^(auto|none|[a-z][a-z0-9_.-]*)$"
+        },
+        "footer": {
+          "type": "string",
+          "pattern": "^(auto|none|[a-z][a-z0-9_.-]*)$"
+        }
+      }
+    },
+    "guest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "memberDestinations": {
+          "enum": [
+            "wall",
+            "hide"
+          ]
+        }
+      }
+    },
+    "secondary": {
+      "enum": [
+        "auto",
+        "breadcrumbs",
+        "none"
+      ]
+    },
+    "platforms": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "react": {
+          "$ref": "#/$defs/override"
+        },
+        "kmp": {
+          "$ref": "#/$defs/override"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_.-]*$"
+      }
+    },
+    "override": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "header": {
+          "$ref": "#/properties/header"
+        },
+        "primary": {
+          "$ref": "#/properties/primary"
+        },
+        "slots": {
+          "$ref": "#/properties/slots"
+        }
+      }
+    }
+  }
+}

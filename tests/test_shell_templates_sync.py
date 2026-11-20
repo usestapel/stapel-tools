@@ -45,6 +45,6 @@ def test_every_template_renders_only_vocabulary_slots():
 
 
 def test_monolith_renders_a_shipped_template_only():
-    assert MONOLITH_RENDERABLE == {"topbar-sidenav"}
+    assert MONOLITH_RENDERABLE == {"topbar-sidenav", "topbar-only"}
     for name in MONOLITH_RENDERABLE:
         assert SHELL_TEMPLATES[name]["status"] == "shipped"

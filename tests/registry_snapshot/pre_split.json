@@ -4848,6 +4848,438 @@
     }
    ],
    [
+    "orders",
+    {
+     "__dict__": [
+      [
+       "package",
+       "@stapel/orders-react"
+      ],
+      [
+       "version",
+       "0.2.0"
+      ],
+      [
+       "released",
+       false
+      ],
+      [
+       "provider",
+       "OrdersProvider"
+      ],
+      [
+       "create_runtime",
+       "createOrdersRuntime"
+      ],
+      [
+       "register_i18n",
+       "registerOrdersI18n"
+      ],
+      [
+       "nav",
+       {
+        "__list__": [
+         {
+          "__dict__": [
+           [
+            "id",
+            "orders.cart"
+           ],
+           [
+            "labelKey",
+            "orders.nav.cart"
+           ],
+           [
+            "icon",
+            "ShoppingCartOutlined"
+           ],
+           [
+            "route",
+            {
+             "__dict__": [
+              [
+               "path",
+               "/cart"
+              ]
+             ]
+            }
+           ],
+           [
+            "component",
+            {
+             "__dict__": [
+              [
+               "export",
+               "CartPage"
+              ],
+              [
+               "subpath",
+               "default"
+              ]
+             ]
+            }
+           ],
+           [
+            "placement",
+            {
+             "__dict__": [
+              [
+               "level",
+               "top"
+              ]
+             ]
+            }
+           ],
+           [
+            "menuVisibleDefault",
+            false
+           ],
+           [
+            "requiresAuth",
+            false
+           ],
+           [
+            "surface",
+            "public"
+           ],
+           [
+            "order",
+            60
+           ]
+          ]
+         },
+         {
+          "__dict__": [
+           [
+            "id",
+            "orders.checkout"
+           ],
+           [
+            "labelKey",
+            "orders.nav.checkout"
+           ],
+           [
+            "icon",
+            "ShoppingCartOutlined"
+           ],
+           [
+            "route",
+            {
+             "__dict__": [
+              [
+               "path",
+               "/checkout"
+              ]
+             ]
+            }
+           ],
+           [
+            "component",
+            {
+             "__dict__": [
+              [
+               "export",
+               "CheckoutPage"
+              ],
+              [
+               "subpath",
+               "default"
+              ]
+             ]
+            }
+           ],
+           [
+            "placement",
+            {
+             "__dict__": [
+              [
+               "level",
+               "top"
+              ]
+             ]
+            }
+           ],
+           [
+            "menuVisibleDefault",
+            false
+           ],
+           [
+            "requiresAuth",
+            false
+           ],
+           [
+            "surface",
+            "public"
+           ],
+           [
+            "order",
+            61
+           ]
+          ]
+         },
+         {
+          "__dict__": [
+           [
+            "id",
+            "orders.mine"
+           ],
+           [
+            "labelKey",
+            "orders.nav.mine"
+           ],
+           [
+            "icon",
+            "OrderedListOutlined"
+           ],
+           [
+            "route",
+            {
+             "__dict__": [
+              [
+               "path",
+               "orders"
+              ]
+             ]
+            }
+           ],
+           [
+            "component",
+            {
+             "__dict__": [
+              [
+               "export",
+               "OrderHistoryPane"
+              ],
+              [
+               "subpath",
+               "default"
+              ]
+             ]
+            }
+           ],
+           [
+            "placement",
+            {
+             "__dict__": [
+              [
+               "level",
+               "submenu"
+              ],
+              [
+               "parentId",
+               "account.root"
+              ]
+             ]
+            }
+           ],
+           [
+            "menuVisibleDefault",
+            true
+           ],
+           [
+            "requiresAuth",
+            true
+           ],
+           [
+            "surface",
+            "member"
+           ],
+           [
+            "order",
+            40
+           ]
+          ]
+         },
+         {
+          "__dict__": [
+           [
+            "id",
+            "orders.detail"
+           ],
+           [
+            "labelKey",
+            "orders.nav.detail"
+           ],
+           [
+            "icon",
+            "OrderedListOutlined"
+           ],
+           [
+            "route",
+            {
+             "__dict__": [
+              [
+               "path",
+               "/orders/:id"
+              ]
+             ]
+            }
+           ],
+           [
+            "component",
+            {
+             "__dict__": [
+              [
+               "export",
+               "OrderDetailPane"
+              ],
+              [
+               "subpath",
+               "default"
+              ]
+             ]
+            }
+           ],
+           [
+            "placement",
+            {
+             "__dict__": [
+              [
+               "level",
+               "top"
+              ]
+             ]
+            }
+           ],
+           [
+            "menuVisibleDefault",
+            false
+           ],
+           [
+            "requiresAuth",
+            true
+           ],
+           [
+            "surface",
+            "member"
+           ],
+           [
+            "order",
+            62
+           ]
+          ]
+         }
+        ]
+       }
+      ],
+      [
+       "embeds",
+       {
+        "__list__": [
+         {
+          "__dict__": [
+           [
+            "id",
+            "orders.cart_badge"
+           ],
+           [
+            "slot",
+            "topbar.end"
+           ],
+           [
+            "component",
+            {
+             "__dict__": [
+              [
+               "export",
+               "CartBadge"
+              ],
+              [
+               "subpath",
+               "default"
+              ]
+             ]
+            }
+           ],
+           [
+            "order",
+            20
+           ],
+           [
+            "surface",
+            "any"
+           ],
+           [
+            "opens",
+            "orders.cart"
+           ]
+          ]
+         },
+         {
+          "__dict__": [
+           [
+            "id",
+            "orders.add_to_cart"
+           ],
+           [
+            "slot",
+            "page.actions"
+           ],
+           [
+            "component",
+            {
+             "__dict__": [
+              [
+               "export",
+               "AddToCartButton"
+              ],
+              [
+               "subpath",
+               "default"
+              ]
+             ]
+            }
+           ],
+           [
+            "order",
+            10
+           ],
+           [
+            "surface",
+            "any"
+           ],
+           [
+            "scope",
+            {
+             "__dict__": [
+              [
+               "navEntry",
+               "listings.detail"
+              ]
+             ]
+            }
+           ],
+           [
+            "routeProps",
+            {
+             "__dict__": [
+              [
+               "purchasableKey",
+               "id"
+              ]
+             ]
+            }
+           ],
+           [
+            "props",
+            {
+             "__dict__": [
+              [
+               "purchasableType",
+               "listing"
+              ]
+             ]
+            }
+           ]
+          ]
+         }
+        ]
+       }
+      ]
+     ]
+    }
+   ],
+   [
     "reservations",
     {
      "__dict__": [
@@ -5392,7 +5824,12 @@
       [
        "pending",
        {
-        "__dict__": []
+        "__dict__": [
+         [
+          "orders",
+          "the cart, checkout and order history: the binding is written (@stapel/orders-react 0.2.0) and installs the day npm serves the package; until then cart, checkout and history are the project's own pages, mounted inside the shell through stapel.app-nav.json"
+         ]
+        ]
        }
       ],
       [
@@ -5421,7 +5858,7 @@
          ],
          [
           "vocabularies",
-          "the terms behind a category's ref_select features \u2014 a vendor/model list too large to inline. Without it every ref field in the composer draws the unsupported notice and blocks the submit"
+          "the terms behind a category's ref_select features — a vendor/model list too large to inline. Without it every ref field in the composer draws the unsupported notice and blocks the submit"
          ]
         ]
        }
@@ -5477,7 +5914,7 @@
          ],
          [
           "currencies",
-          "one formatter for the whole fleet \u2014 see the shop preset; a classified's prices are the same prices"
+          "one formatter for the whole fleet — see the shop preset; a classified's prices are the same prices"
          ],
          [
           "moderation",
@@ -5497,11 +5934,11 @@
          ],
          [
           "chat",
-          "buyer\u2194seller messaging is the classified's own surface"
+          "buyer↔seller messaging is the classified's own surface"
          ],
          [
           "vocabularies",
-          "the terms behind a category's ref_select features \u2014 a vendor/model list too large to inline. Without it every ref field in the composer draws the unsupported notice and blocks the submit"
+          "the terms behind a category's ref_select features — a vendor/model list too large to inline. Without it every ref field in the composer draws the unsupported notice and blocks the submit"
          ]
         ]
        }
@@ -5570,7 +6007,7 @@
          ],
          [
           "vocabularies",
-          "the terms behind a category's ref_select features \u2014 a vendor/model list too large to inline. Without it every ref field in the composer draws the unsupported notice and blocks the submit"
+          "the terms behind a category's ref_select features — a vendor/model list too large to inline. Without it every ref field in the composer draws the unsupported notice and blocks the submit"
          ]
         ]
        }
@@ -6286,6 +6723,42 @@
          [
           "userId",
           "string"
+         ]
+        ]
+       }
+      ]
+     ]
+    }
+   ],
+   [
+    "orders.cart",
+    {
+     "__dict__": []
+    }
+   ],
+   [
+    "orders.checkout",
+    {
+     "__dict__": []
+    }
+   ],
+   [
+    "orders.mine",
+    {
+     "__dict__": []
+    }
+   ],
+   [
+    "orders.detail",
+    {
+     "__dict__": [
+      [
+       "route_params",
+       {
+        "__dict__": [
+         [
+          "id",
+          "number"
          ]
         ]
        }

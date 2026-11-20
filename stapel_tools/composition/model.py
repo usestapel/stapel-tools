@@ -128,6 +128,14 @@ class Composition:
     platforms: tuple[PlatformRequest, ...] = ()
     # anonymous actions the auth model turns on for the frontend runtime
     auto_anonymous_actions: tuple[str, ...] = ()
+    # the navigation block (navigation-templates spec §3.2), as given; {} = defaults
+    navigation: dict = field(default_factory=dict)
+    # the project's own pages (stapel.app-nav.json entries, neutral shape)
+    app_nav: tuple = ()
+    # platform -> the own-page ids that platform has a binding for
+    app_bindings: dict = field(default_factory=dict)
+    # notes that mean "something asked for is not rendered" become refusals
+    strict: bool = False
 
     @property
     def auth_model(self) -> Optional[str]:

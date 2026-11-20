@@ -1,0 +1,328 @@
+"""The navigation model (navigation-templates spec §3): the block, its
+schema, the defaults by archetype, the per-size-class plan and every refusal
+NAV-E01…E09 — each one run, each one seen to fire."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from stapel_tools.composition import navigation as N
+from stapel_tools.composition.emitter import build_composition
+from stapel_tools.composition.react.registry import react_entries
+from stapel_tools.composition.react.shell import plan_react_shell
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _dest(i: int, *, surface: str = "public", top: bool = True, parent=None,
+          menu: bool = True) -> N.Destination:
+    return N.Destination(id=f"x.d{i}", top=top, parent=parent, menu_visible=menu,
+                         surface=surface, order=i, path=f"/d{i}")
+
+
+def _plan(block=None, *, n=3, auth_model="public", platform="react", modules=("auth",),
+          **kw) -> N.PlatformNavigation:
+    dests = kw.pop("destinations", [_dest(i) for i in range(n)])
+    return N.plan_platform(
+        block, platform=platform, destinations=dests, modules=modules,
+        auth_model=auth_model, has_sign_in=auth_model in ("public", "internal"),
+        sign_in_id="auth.login", **kw)
+
+
+def _comp(modules, *, navigation=None, landing=False, auth=True, app_nav=(), bound=(),
+          strict=False, shell=None):
+    from stapel_tools._auth_model import AuthComposition
+    from stapel_tools.create_project import _expand_with_requires
+
+    feats = _expand_with_requires(list(modules))
+    return build_composition(
+        ctx={"slug": "g", "title": "G"}, project_type="monolith", feature_libs=feats,
+        want_auth=auth and "auth" in feats,
+        auth_comp=AuthComposition(model="public") if auth and "auth" in feats else None,
+        want_landing=landing, navigation=navigation, app_nav=tuple(app_nav),
+        app_bindings={"react": tuple(bound)}, strict=strict, shell=shell,
+    )
+
+
+def _code(exc_info) -> str:
+    return exc_info.value.code
+
+
+# --- schema ---------------------------------------------------------------
+
+
+def test_shipped_schema_equals_the_generated_one():
+    shipped = json.loads((ROOT / "stapel_tools/data/navigation.schema.json").read_text())
+    assert shipped == N.navigation_schema()
+
+
+def test_shipped_presets_equal_the_table():
+    shipped = json.loads((ROOT / "stapel_tools/data/nav-presets.json").read_text())
+    assert shipped == N.presets_document()
+
+
+def test_schema_enum_per_size_class_is_the_validity_matrix():
+    schema = N.navigation_schema()
+    for size_class in N.SIZE_CLASSES:
+        enum = schema["properties"]["primary"]["properties"][size_class]["enum"]
+        assert enum == [c for c, spec in N.CARRIERS.items() if size_class in spec["validIn"]]
+
+
+def test_unknown_key_is_refused_before_planning():
+    with pytest.raises(N.NavigationError) as exc:
+        N.validate_block({"primry": {}})
+    assert _code(exc) == "NAV-E00"
+
+
+def test_presets_document_lists_what_each_platform_draws():
+    doc = N.presets_document()
+    assert set(doc["presets"]) == {"shop", "app", "dashboard", "site", "dock", "tool"}
+    assert {"shop", "dashboard"} <= set(doc["drawable"]["react"])
+    assert "app" not in doc["drawable"]["react"]
+
+
+# --- defaults -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("modules,expected", [
+    (["shop"], "shop"), (["classified"], "shop"), (["booking"], "shop"),
+    (["categories", "listings"], "shop"), (["social"], "app"), (["chat"], "app"),
+    (["auth", "notifications"], "dashboard"),
+])
+def test_default_preset_by_archetype(modules, expected):
+    assert N.default_preset(modules=modules, has_accounts=True, landing=False,
+                            candidates=3) == expected
+
+
+def test_default_without_accounts_and_destinations_is_tool_or_site():
+    assert N.default_preset(modules=[], has_accounts=False, landing=False, candidates=0) == "tool"
+    assert N.default_preset(modules=[], has_accounts=False, landing=True, candidates=1) == "site"
+
+
+def test_a_default_the_platform_cannot_draw_falls_back_with_a_note():
+    nav = _plan(None, modules=("social",))
+    assert nav.chrome == "AppShell" and nav.preset == "dashboard"
+    assert any("default preset app is not drawn on react" in n for n in nav.notes)
+
+
+def test_an_explicit_preset_the_platform_cannot_draw_is_e08():
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"preset": "app"})
+    assert _code(exc) == "NAV-E08"
+    assert "queued on this platform" in str(exc.value)
+
+
+def test_legacy_shell_ids_are_aliases():
+    assert N.alias_block("topbar-only") == {"preset": "shop"}
+    assert N.alias_block("topbar-sidenav") == {"preset": "dashboard"}
+    assert N.alias_block("sidenav-only") == {"preset": "dashboard", "header": "none"}
+    assert N.alias_block(None, "Stack")["platforms"]["kmp"]["primary"]["compact"] == "stack"
+
+
+# --- refusals -------------------------------------------------------------
+
+
+def test_e01_carrier_outside_its_size_class():
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"primary": {"compact": "side-panel"}})
+    assert _code(exc) == "NAV-E01"
+    assert "valid on compact" in str(exc.value)
+
+
+def test_e01_bottom_tabs_on_expanded_names_the_reason():
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"primary": {"expanded": "bottom-tabs"}})
+    assert _code(exc) == "NAV-E01" and "pointer" in str(exc.value)
+
+
+def test_e02_eight_pinned_with_a_bar():
+    dests = [_dest(i) for i in range(8)]
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"preset": "shop", "destinations": {"pinned": [d.id for d in dests]}},
+              destinations=dests)
+    assert _code(exc) == "NAV-E02"
+
+
+def test_e03_stack_with_two_destinations():
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"preset": "tool"}, n=2)
+    assert _code(exc) == "NAV-E03"
+
+
+def test_e04_account_none_with_a_sign_in_route():
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"slots": {"account": "none"}})
+    assert _code(exc) == "NAV-E04"
+
+
+def test_account_none_without_accounts_is_fine():
+    nav = _plan({"slots": {"account": "none"}}, auth_model=None)
+    assert nav.resolved["slots"]["account"] is None
+
+
+def test_e05_headerless_without_rail_or_panel():
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"preset": "shop", "header": "none"})
+    assert _code(exc) == "NAV-E05"
+
+
+def test_e06_unknown_ids():
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"destinations": {"hidden": ["nope.x"]}})
+    assert _code(exc) == "NAV-E06"
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"slots": {"search": "nope.box"}})
+    assert _code(exc) == "NAV-E06"
+
+
+def test_e06_role_mismatch():
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"slots": {"cart": "notifications.bell"}}, embeds=["notifications.bell"])
+    assert _code(exc) == "NAV-E06" and "role" in str(exc.value)
+
+
+def test_e06_hiding_the_sign_in_route():
+    dests = [_dest(0), N.Destination(id="auth.login", top=True, parent=None,
+                                     menu_visible=False, surface="public", order=0)]
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"destinations": {"hidden": ["auth.login"]}}, destinations=dests)
+    assert _code(exc) == "NAV-E06"
+
+
+def test_e07_two_candidates_for_an_exclusive_slot(monkeypatch):
+    monkeypatch.setitem(N.EMBED_ROLES, "x.account_two", "account")
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({}, embeds=["auth.account_menu", "x.account_two"])
+    assert _code(exc) == "NAV-E07"
+
+
+def test_e08_header_none_is_queued_on_react():
+    with pytest.raises(N.NavigationError) as exc:
+        _plan({"preset": "dashboard", "header": "none"})
+    assert _code(exc) == "NAV-E08"
+
+
+def test_e09_unbound_own_page_under_strict():
+    comp = _comp(["shop"], strict=True, app_nav=[
+        {"id": "app.cart", "labelKey": "app.nav.cart", "icon": "cart", "path": "/cart",
+         "menuVisibleDefault": False}])
+    with pytest.raises(N.NavigationError) as exc:
+        plan_react_shell(comp, react_entries(comp.modules))
+    assert _code(exc) == "NAV-E09"
+
+
+def test_unbound_own_page_without_strict_is_pending():
+    comp = _comp(["shop"], app_nav=[
+        {"id": "app.cart", "labelKey": "app.nav.cart", "icon": "cart", "path": "/cart",
+         "menuVisibleDefault": False, "via": "categories.catalog"}])
+    shell = plan_react_shell(comp, react_entries(comp.modules))
+    assert "app.cart" in shell.resolved["pending"]
+    assert shell.reach["/cart"] == "via:categories.catalog"
+
+
+# --- destinations ---------------------------------------------------------
+
+
+@pytest.mark.parametrize("n", [0, 1, 2, 4, 5, 6, 9])
+@pytest.mark.parametrize("preset", ["shop", "dashboard", "site"])
+def test_nothing_is_dropped(n, preset):
+    nav = _plan({"preset": preset}, n=n)
+    candidates = [f"x.d{i}" for i in range(n)]
+    for audience in nav.resolved["audiences"].values():
+        for plan in audience.values():
+            assert sorted(plan["visible"] + plan["more"]) == sorted(candidates)
+
+
+def test_a_capped_carrier_keeps_first_cap_minus_one_and_more():
+    nav = _plan({"preset": "shop"}, n=7)
+    compact = nav.resolved["audiences"]["member"]["compact"]
+    assert compact["carrier"] == "island"
+    assert len(compact["visible"]) == 4 and len(compact["more"]) == 3
+
+
+def test_a_bar_with_one_destination_is_not_drawn_and_says_so():
+    nav = _plan({"preset": "shop"}, n=1)
+    assert nav.resolved["audiences"]["member"]["compact"]["carrier"] is None
+    assert any("is not drawn" in n for n in nav.notes)
+
+
+def test_guest_wall_keeps_member_destinations_visible():
+    dests = [_dest(0), _dest(1), _dest(2, surface="member")]
+    wall = _plan({"preset": "shop"}, destinations=dests)
+    hide = _plan({"preset": "shop", "guest": {"memberDestinations": "hide"}},
+                 destinations=dests)
+    assert wall.resolved["audiences"]["guest"]["expanded"]["visible"] == [
+        "x.d0", "x.d1", "x.d2"]
+    assert hide.resolved["audiences"]["guest"]["expanded"]["visible"] == ["x.d0", "x.d1"]
+
+
+def test_internal_accounts_give_the_guest_a_header_only_shell():
+    nav = _plan({"preset": "dashboard"}, auth_model="internal")
+    assert nav.resolved["audiences"]["guest"]["compact"]["carrier"] == "stack"
+    assert nav.resolved["guest"]["memberDestinations"] == "hide"
+
+
+# --- the composition ------------------------------------------------------
+
+
+def test_storefront_composite_resolves_to_shop_on_public_shell():
+    comp = _comp(["shop"])
+    shell = plan_react_shell(comp, react_entries(comp.modules))
+    assert shell.shape == "storefront" and shell.routes == "public"
+    assert shell.resolved["preset"] == "shop" and shell.resolved["source"] == "default"
+    assert shell.resolved["signIn"] == "auth.login"
+    assert shell.sign_in_path == "/login"
+
+
+def test_dashboard_preset_on_a_shop_keeps_the_monolith_routes():
+    comp = _comp(["shop"], navigation={"preset": "dashboard"})
+    shell = plan_react_shell(comp, react_entries(comp.modules))
+    assert shell.shape == "app" and shell.routes == "app"
+
+
+def test_every_default_archetype_reaches_every_route():
+    for modules in (["shop"], ["classified"], ["booking"], ["social"], ["auth"], []):
+        comp = _comp(modules)
+        shell = plan_react_shell(comp, react_entries(comp.modules))
+        assert not [n for n in shell.nav.notes if n.startswith("unreachable")], modules
+
+
+def test_four_guarantees_of_any_default():
+    for modules in (["shop"], ["classified"], ["booking"], ["social"], ["auth"], []):
+        comp = _comp(modules)
+        resolved = plan_react_shell(comp, react_entries(comp.modules)).resolved
+        assert resolved["chrome"] in ("PublicShell", "AppShell")      # mounted
+        assert resolved["slots"]["brand"] == "shell.brand"             # a brand
+        assert resolved["home"] == "shell.home"                       # a home
+        assert resolved["slots"]["theme"] == "shell.theme"            # the theme switch
+        if "auth" in comp.modules:
+            assert resolved["signIn"] == "auth.login"                 # sign-in
+
+
+def test_orders_is_pending_until_npm_serves_it():
+    from stapel_tools.create_project import FRONTEND_REACT_LIBS, pending_react_pairs
+
+    assert FRONTEND_REACT_LIBS["orders"]["released"] is False
+    assert pending_react_pairs(["auth", "orders"]) == ["orders"]
+    comp = _comp(["shop", "orders"])
+    entries = react_entries(comp.modules)
+    assert "orders" not in {e["key"] for e in entries}
+    resolved = plan_react_shell(comp, entries).resolved
+    assert any(p.startswith("orders: @stapel/orders-react is not on npm") for p in
+               resolved["pending"])
+
+
+def test_orders_binding_mounts_once_released(monkeypatch):
+    from stapel_tools import create_project as cp
+
+    monkeypatch.setitem(cp.FRONTEND_REACT_LIBS, "orders",
+                        {k: v for k, v in cp.FRONTEND_REACT_LIBS["orders"].items()
+                         if k != "released"})
+    comp = _comp(["shop", "orders"])
+    shell = plan_react_shell(comp, react_entries(comp.modules))
+    assert shell.paths["orders.cart"] == "/cart"
+    assert shell.reach["/cart"] == "embed:orders.cart_badge"
+    assert shell.reach["/checkout"] == "via:orders.cart"
+    assert shell.resolved["slots"]["cart"] == "orders.cart_badge"

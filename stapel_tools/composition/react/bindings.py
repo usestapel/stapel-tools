@@ -558,6 +558,32 @@ REACT_BINDINGS: dict[str, ReactBinding] = {
             "feed.compose_fab": ("ComposeFab", "default"),
         },
     ),
+    # The cart, checkout and order history (stapel-react origin/main
+    # 6f7cd6c8, `packages/orders-react` 0.2.0). Not on npm yet (`npm view
+    # @stapel/orders-react` 404, 2026-11-20): its first publish is an owner
+    # bootstrap. Everything below is the binding as it will ship; `released`
+    # is the one fact that changes on publish, and
+    # `scripts/check_unreleased_pairs.py` (CI, against the registry) fails the
+    # day npm serves the package while this still says otherwise. Until then a
+    # selection with `orders` installs no orders pair and names it pending.
+    "orders": ReactBinding(
+        package="@stapel/orders-react",
+        version="0.2.0",
+        provider="OrdersProvider",
+        create_runtime="createOrdersRuntime",
+        register_i18n="registerOrdersI18n",
+        released=False,
+        components={
+            "orders.cart": ("CartPage", "default"),
+            "orders.checkout": ("CheckoutPage", "default"),
+            "orders.mine": ("OrderHistoryPane", "default"),
+            "orders.detail": ("OrderDetailPane", "default"),
+        },
+        embed_components={
+            "orders.cart_badge": ("CartBadge", "default"),
+            "orders.add_to_cart": ("AddToCartButton", "default"),
+        },
+    ),
     # The booking page and the booking detail are addressed by id; the two
     # histories hang from the container-owned `account.root`, and the
     # schedule editor is linked from the agenda (off the menu).

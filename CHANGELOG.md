@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.85.0] — 2026-11-20
+
+- **Navigation model** (navigation-templates spec, slice W0). One
+  platform-neutral `navigation` block — preset, a header kind, a destination
+  carrier per size class (`compact` / `medium` / `expanded` on the tokens'
+  768 / 1200 rungs; carriers `bottom-tabs`, `island`, `drawer`, `rail`,
+  `side-panel`, `top-tabs`, `stack`), destinations (pin, hide, order, groups),
+  semantic slots and the guest's view of member destinations — resolved once
+  per platform into `navigation.resolved` (`composition/navigation.py`, schema
+  `data/navigation.schema.json`, presets `data/nav-presets.json`). Refusals
+  before anything is written: NAV-E01 carrier outside its size class, E02 too
+  many pinned, E03 `stack` with several destinations, E04 no account entry in
+  a product with accounts, E05 header-less without rail/panel, E06 unknown or
+  misplaced id, E07 two embeds for an exclusive slot, E08 queued on this
+  platform, E09 an own page with no binding under `--strict`.
+- **The shell always mounts, over every route.** One layout route
+  (`stapel-shell`) carries the chrome over `/`, sign-in, every public screen
+  and the member area. React draws the shipped `@stapel/shell-react` 0.20.1:
+  presets `shop` (and `site`) through `PublicShell`, `dashboard` through
+  `AppShell`; the others are NAV-E08 until `NavShell` ships. The chrome reads
+  the session's three-state status: a guest (also one minted by an anonymous
+  action) sees the sign-in entry whenever the product has accounts, a member
+  the account menu; the brand falls back to the product title. The member
+  gate (`ProtectedRoute`) reads the same three-state status.
+- **Default by archetype, and the goldens that move with it:** storefront
+  composites (`shop`, `classified`, `booking`, or two of categories/listings/
+  search/orders) now default to `shop` — `--nav-preset dashboard` restores the
+  old chrome. Every monolith golden moved (one layout, the chrome file, the
+  gates); the four mobile goldens' `mobile/stapel.composition.json` echo the
+  block (the KMP emission is unchanged).
+- **Flags:** `--nav-preset`, `--nav CLASS=CARRIER`, `--nav-header`,
+  `--nav-pin`, `--nav-hide`, `--nav-order`, `--nav-slot`, `--nav-guest`,
+  `--mobile-nav-preset`, `--mobile-nav`, `--composition FILE` (the whole
+  composition from JSON, flags on top) and `--strict`; `--shell` ids are
+  aliases of presets (`topbar-only` is now rendered by the monolith).
+  `stapel-frontend-repo-init --surface public` takes the `--nav*` flags too.
+- **Project-root `stapel.composition.json`** (input and echo, every
+  platform's `resolved`), **`stapel-nav-plan`** (dry run: prints `resolved`)
+  and **`stapel-nav-regenerate`** (folds the project's own pages back in).
+- **Own pages:** `stapel.app-nav.json` (project root) + `src/app.pages.ts`
+  (written once, the project's): each entry is mounted inside the shell and
+  placed in the navigation; an unbound one renders a named placeholder and is
+  listed under `resolved.pending`.
+- **Generated gates:** `nav.test.ts` (G2, both directions: every menu
+  destination is a route, every route is reached from the shell or is a
+  declared deep page — `resolved.reach`), `shell.test.tsx` (G1: every route
+  under the layout; an anonymous `/` renders the shell and the sign-in entry),
+  `shell-lint.test.ts` (no second router, no full-viewport page frame) and
+  `generated.test.ts` (G4: generated nav files equal their recorded SHA-256).
+  The generated `vite.config.ts` inlines `@stapel/*` and `react-router` under
+  vitest so the app and the shell share one router instance.
+- **`orders` → `@stapel/orders-react`**: brick, binding and mounts written and
+  gated (the mirror equals orders-react 0.2.0's manifest); not on npm yet, so
+  the binding is `released=False`, a selection names it pending, and the
+  `shop` composite lists it under `pending`. `scripts/check_unreleased_pairs.py`
+  (CI) fails the day npm serves it while the binding still says unreleased.
+
 ## [0.84.0] — 2026-11-20
 
 - **`stapel_tools.contract_gates`**, the two contract gates a brick's test

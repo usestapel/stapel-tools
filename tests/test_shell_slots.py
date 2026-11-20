@@ -40,9 +40,9 @@ class TestTemplate:
         with pytest.raises(ValueError, match="queued"):
             plan_slots("sidenav-only", PAIRS, auth_gated=True)
 
-    def test_topbar_only_is_refused_for_the_monolith_naming_its_queue_item(self):
-        with pytest.raises(ValueError, match="monolith --shell topbar-only"):
-            plan_slots("topbar-only", PAIRS, auth_gated=True)
+    def test_topbar_only_is_rendered_by_the_monolith(self):
+        plan = plan_slots("topbar-only", PAIRS, auth_gated=True)
+        assert plan.template == "topbar-only"
 
 
 class TestOverrides:
@@ -170,7 +170,6 @@ class TestScaffoldExits:
         ({"slots": {"header.right": "notifications.bell"}}, "topbar.start"),
         ({"slots": {"topbar.end": "bogus.embed"}}, "notifications.bell"),
         ({"shell": "sidenav-only"}, "queued"),
-        ({"shell": "topbar-only"}, "monolith --shell topbar-only"),
     ])
     def test_exits_one_with_the_hint(self, tmp_path, capsys, kw, fragment):
         with pytest.raises(SystemExit) as exc:
@@ -205,12 +204,10 @@ class TestEmission:
         assert 'data-testid="embed-notifications.bell"' in embeds
         assert embeds.index("embed-notifications.bell") < embeds.index("embed-translate.language_switcher")
 
-        routes = (front / "src" / "routes.tsx").read_text()
-        assert 'import { TopbarEnd, TopbarStart } from "./embeds.generated.js";' in routes
-        assert (
-            'slots={{ "topbar.start": <TopbarStart />, "topbar.end": <TopbarEnd /> }}'
-            in routes
-        )
+        chrome = (front / "src" / "chrome.generated.tsx").read_text()
+        assert 'import { TopbarEnd, TopbarEndGuest, TopbarStart } from "./embeds.generated.js";' in chrome
+        assert '"topbar.start": <TopbarStart />, "topbar.end": <TopbarEnd />' in chrome
+        assert '"topbar.end": <><TopbarEndGuest /><SignInEntry /></>' in chrome
 
         composition = json.loads((front / "stapel.composition.json").read_text())
         assert composition["shell"] == {
@@ -229,8 +226,7 @@ class TestEmission:
         assert "notifications" in composition["modules"]
 
         gate = (front / "src" / "__tests__" / "nav.test.ts").read_text()
-        assert gate == F.NAV_GATE_EMBEDS_TEST_TS
-        assert 'import * as embeds from "../embeds.generated.js";' in gate
+        assert gate == F.render_shell_nav_test_ts()
 
     def test_no_literal_text_in_generated_jsx(self, tmp_path):
         """`stapel/no-hardcoded-text`: the only text between tags is markup."""
@@ -240,26 +236,16 @@ class TestEmission:
         embeds = (front / "src" / "embeds.generated.tsx").read_text()
         assert re.findall(r">\s*[A-Za-z][^<>{}]*<", embeds) == []
 
-    def test_selection_without_embeds_keeps_the_container_byte_identical(self, tmp_path):
+    def test_selection_without_embeds_writes_no_embed_file(self, tmp_path):
         import stapel_tools._frontend_templates as F
 
         modules = ["core", "billing", "gdpr"]
         front = _create(tmp_path, modules=modules) / "frontend"
         assert not (front / "src" / "embeds.generated.tsx").exists()
-        routes = (front / "src" / "routes.tsx").read_text()
-        assert "slots=" not in routes and "embeds.generated" not in routes
-        assert (front / "src" / "__tests__" / "nav.test.ts").read_text() == F.NAV_GATE_TEST_TS
-
-        from stapel_tools.create_project import _frontend_react_entries
-
-        entries = _frontend_react_entries(modules[1:])
-        nav_pairs = F.nav_wired_pairs(entries, auth_wired=False)
-        expected = F.render_routes_tsx(
-            F.build_nav_route_plan(nav_pairs), auth_wired=False, want_landing=False,
-            app_route_present=True, has_cdn=False, pairs=tuple(e["key"] for e in entries),
-            not_found=(front / "src" / "NotFoundPage.tsx").is_file(),
-        )
-        assert routes == expected
+        chrome = (front / "src" / "chrome.generated.tsx").read_text()
+        assert "embeds.generated" not in chrome
+        assert (front / "src" / "__tests__" / "nav.test.ts").read_text() == (
+            F.render_shell_nav_test_ts())
 
         from stapel_tools.create_project import _frontend_react_entries as entries_for
 
@@ -271,7 +257,7 @@ class TestEmission:
         silence = {"topbar.start": "none", "topbar.end": "none"}
         front = _create(tmp_path, modules=ACCEPTANCE, slots=silence) / "frontend"
         assert not (front / "src" / "embeds.generated.tsx").exists()
-        assert "slots=" not in (front / "src" / "routes.tsx").read_text()
+        assert "TopbarEnd" not in (front / "src" / "chrome.generated.tsx").read_text()
         composition = json.loads((front / "stapel.composition.json").read_text())
         assert composition["shell"]["slots"] == {}
         assert composition["shell"]["overrides"] == silence
@@ -290,14 +276,11 @@ class TestEmission:
         assert composition["auth"]["gated"] is False
         assert "note: embed notifications.bell is member-only" in capsys.readouterr().out
 
-    def test_below_the_slots_floor_nothing_is_emitted(self, tmp_path, monkeypatch):
+    def test_the_slots_floor_is_below_the_pin(self):
         import stapel_tools.create_project as cp
 
-        monkeypatch.setattr(cp, "FRONTEND_SHELL_REACT_VERSION", "0.19.1")
-        assert not cp.shell_has_slots()
-        front = _create(tmp_path, modules=ACCEPTANCE) / "frontend"
-        assert not (front / "src" / "embeds.generated.tsx").exists()
-        assert "slots=" not in (front / "src" / "routes.tsx").read_text()
+        assert cp.shell_has_slots()
+        assert not cp.shell_has_slots("0.19.1")
 
 
 class TestManifestAssembly:
@@ -345,19 +328,17 @@ class TestManifestAssembly:
 
     def test_the_selection_provider_wraps_the_member_shell(self, tmp_path):
         front = _create(tmp_path, modules=self.MODULES) / "frontend"
-        routes = (front / "src" / "routes.tsx").read_text()
-        assert 'import { WorkspaceSelectionProvider } from "@stapel/workspaces-react";' in routes
-        # Indented one level deeper under the router's pathless error root.
+        chrome = (front / "src" / "chrome.generated.tsx").read_text()
+        assert 'import { WorkspaceSelectionProvider } from "@stapel/workspaces-react";' in chrome
         assert (
-            "<ProtectedRoute>\n"
-            "            <WorkspaceSelectionProvider><AppChrome /></WorkspaceSelectionProvider>\n"
-            "          </ProtectedRoute>"
-        ) in routes
+            "return member ? <WorkspaceSelectionProvider>{chrome}</WorkspaceSelectionProvider>"
+            " : chrome;"
+        ) in chrome
 
     def test_without_workspaces_no_selection_provider(self, tmp_path):
         front = _create(tmp_path, modules=["core", "auth", "notifications"]) / "frontend"
-        routes = (front / "src" / "routes.tsx").read_text()
-        assert "WorkspaceSelectionProvider" not in routes
+        chrome = (front / "src" / "chrome.generated.tsx").read_text()
+        assert "WorkspaceSelectionProvider" not in chrome
         embeds = (front / "src" / "embeds.generated.tsx").read_text()
         # No account section is routed here: the menu mounts without onOpen
         # (sign-out only) rather than with a dead link.

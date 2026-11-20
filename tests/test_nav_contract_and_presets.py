@@ -371,7 +371,9 @@ class TestComposites:
         README is worse than no reason: it tells a reader a screen is missing
         that is right there."""
         for name, preset in FRONTEND_COMPOSITES.items():
-            stale = [k for k in preset["pending"] if k in FRONTEND_REACT_LIBS]
+            # Registered but not on npm (released: False) is still a gap.
+            stale = [k for k in preset["pending"] if k in FRONTEND_REACT_LIBS
+                     and FRONTEND_REACT_LIBS[k].get("released", True)]
             assert stale == [], (name, stale)
 
     def test_a_preset_bakes_the_container_roots_into_its_nav_bundle(self):

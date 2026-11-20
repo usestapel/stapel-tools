@@ -192,6 +192,10 @@ def public_source_plan(
     realtime: bool,
     extra_prefixes: list[str],
     doc_type: str = "",
+    navigation: Optional[dict] = None,
+    app_nav: Optional[list[dict]] = None,
+    bound: Optional[set[str]] = None,
+    strict: bool = False,
 ) -> dict:
     """Every file the SOURCE half of a public container consists of, as
     ``{relative path: content}`` — pure, so the whole emission is testable
@@ -228,15 +232,41 @@ def public_source_plan(
             "locale nobody translated and call it done."
         )
 
+    from ._auth_model import AuthComposition
+    from .composition.emitter import build_composition
+    from .composition.model import PlatformRequest
+    from .composition.react.emitter import nav_hashes, slot_plan_for
+    from .composition.react.shell import plan_react_shell
+
     entries = [{"key": key, **FRONTEND_REACT_LIBS[key]} for key in pairs]
-    nav_pairs = F.public_nav_pairs(entries)
-    manifests = F.public_nav_manifests(nav_pairs, app_package=name)
-    plan = F.build_public_route_plan(manifests)
+    has_auth = "auth" in pairs
+    # A public surface is a storefront by declaration: with no preset or
+    # carriers chosen, the `shop` preset.
+    block = dict(navigation or {})
+    if not any(k in block for k in ("preset", "primary", "header")):
+        block["preset"] = "shop"
+    comp = build_composition(
+        ctx={"slug": name, "title": title}, project_type="frontend-repo",
+        feature_libs=list(pairs), want_auth=has_auth,
+        auth_comp=AuthComposition(model="public") if has_auth else None,
+        navigation=block, app_nav=tuple(app_nav or ()),
+        app_bindings={"react": tuple(sorted(bound or ()))}, strict=strict,
+    )
+    shell = plan_react_shell(comp, entries, app_package=name, routes="public")
+    manifests = shell.manifests
+    plan = shell.route_plan
     options = {"doc_type": doc_type}
     # The selection itself is an input to mounting: a CROSS-PAIR screen (the
     # listing composer) is wired only when every pair it composes is installed.
     selected = tuple(pairs)
     mounts = F.public_mount_plan(plan, options, pairs=selected)
+    slot_plan = slot_plan_for(shell, entries, PlatformRequest("react"), auth_gated=has_auth)
+    filled = slot_plan.filled
+    embeds_source = None
+    if filled:
+        embeds_source, _ = F.render_embeds_generated_tsx(
+            filled, shell.paths, guest_variants=True)
+    chrome_file = "StorefrontShell" if shell.shape == "storefront" else "AppChrome"
 
     modules = []
     for key in (*ALWAYS_PROXIED, *pairs, *extra_prefixes):
@@ -273,21 +303,37 @@ def public_source_plan(
         ".gitignore": F.GITIGNORE,
         "reserved-paths.json": json.dumps({"reservedPathPrefixes": reserved}, indent=2) + "\n",
         "stapel.theme.json": F.THEME_JSON.replace("{{TITLE}}", title),
-        "stapel.nav.json": F.render_public_nav_overrides_json(),
+        "stapel.nav.json": F.render_shell_nav_overrides_json(
+            shell.overrides, seed_account=shell.has_accounts),
         "src/main.tsx": F.PUBLIC_MAIN_TSX,
         "src/vite-env.d.ts": F.VITE_ENV_D_TS,
         "src/modules.tsx": F.render_public_modules_tsx(
             entries, locale=locale, realtime=realtime
         ),
         "src/mandateSource.ts": F.render_mandate_source_ts(),
-        "src/nav.generated.ts": F.render_public_nav_generated_ts(manifests),
-        "src/routes.tsx": F.render_public_routes_tsx(plan, options, pairs=selected),
-        "src/MemberGate.tsx": F.MEMBER_GATE_TSX,
-        "src/StorefrontShell.tsx": F.render_storefront_shell_tsx(
-            [e["id"] for m in manifests for e in m["entries"]]
+        "src/nav.generated.ts": F.render_shell_nav_generated_ts(
+            manifests, paths=shell.paths, has_accounts=shell.has_accounts,
+            guest_wall=shell.guest_wall),
+        "src/routes.tsx": F.render_public_routes_tsx(
+            plan, options, pairs=selected,
+            chrome=(chrome_file, f"./{chrome_file}.js"), gated=shell.has_accounts),
+        f"src/{chrome_file}.tsx": F.render_shell_chrome_tsx(
+            shape=shell.shape, name=chrome_file, title=title, filled=filled,
+            sign_in_path=shell.sign_in_path, has_accounts=shell.has_accounts,
+            auth_wired=has_auth, badge_ids=[e["id"] for m in manifests for e in m["entries"]],
+            phone_chrome="dock" if shell.nav.primary["compact"] == "island" else "drawer",
+            legal_links=shell.legal_links,
         ),
         "src/StorefrontHome.tsx": F.STOREFRONT_HOME_TSX,
-        "src/AccountHome.tsx": F.ACCOUNT_HOME_TSX,
+        "src/app.pages.ts": F.APP_PAGES_TS,
+        "stapel.app-nav.json": F.render_app_nav_json(app_nav or ()),
+        "src/__tests__/nav.test.ts": F.render_shell_nav_test_ts(),
+        "src/__tests__/shell.test.tsx": F.render_shell_test_tsx(
+            has_modules=True, sign_in_path=shell.sign_in_path,
+            shell_testid="public-shell" if shell.shape == "storefront" else "app-shell"),
+        "src/__tests__/shell-lint.test.ts": F.SHELL_LINT_TEST_TS,
+        "src/__tests__/generated.test.ts": F.render_generated_hash_test_ts(
+            [], frontend_prefix=""),
         "src/i18n/keys.ts": F.render_storefront_i18n_ts(locale),
         # The static UI wiring check over this repo's src/ (`make frontend-wiring`).
         ui_wiring.SCRIPT_PATH: ui_wiring.script_source(),
@@ -309,7 +355,14 @@ def public_source_plan(
         # pane refuses on its own — no gate that only pretends to check.
         if "auth" in selected:
             files["src/AdminGate.tsx"] = F.ADMIN_GATE_TSX
-    if mounts["needs_placeholder"]:
+    if shell.has_accounts:
+        files["src/MemberGate.tsx"] = F.MEMBER_GATE_TSX
+        files["src/AccountHome.tsx"] = F.ACCOUNT_HOME_TSX
+    if embeds_source:
+        files["src/embeds.generated.tsx"] = embeds_source
+    if shell.app_entries:
+        files["src/AppPage.tsx"] = F.APP_PAGE_TSX
+    if mounts["needs_placeholder"] or shell.app_entries:
         files["src/NavPlaceholder.tsx"] = F.NAV_PLACEHOLDER_TSX
     files.update(mounts["pages"])
     # Route wrappers import RouteParamProblem from NavPlaceholder.tsx, so the
@@ -317,7 +370,21 @@ def public_source_plan(
     # placeholder itself.
     if mounts["pages"] and "src/NavPlaceholder.tsx" not in files:
         files["src/NavPlaceholder.tsx"] = F.NAV_PLACEHOLDER_TSX
-    return {"files": files, "plan": plan, "mounts": mounts, "entries": entries}
+    shell.resolved["generated"] = nav_hashes(files, "")
+    # The repository's composition: input (what `stapel-nav-regenerate`
+    # rebuilds from) and the navigation block with its resolved plan.
+    files["stapel.composition.json"] = json.dumps({
+        "version": 1,
+        "generator": "stapel-frontend-repo-init",
+        "input": {
+            "name": name, "title": title, "pairs": list(pairs), "locale": locale,
+            "realtime": bool(realtime), "prefixes": list(extra_prefixes),
+            "docType": doc_type, "strict": bool(strict),
+        },
+        "navigation": {"block": comp.navigation, "resolved": shell.resolved},
+    }, indent=2) + "\n"
+    return {"files": files, "plan": plan, "mounts": mounts, "entries": entries,
+            "navigation": shell.resolved, "notes": [*shell.nav.notes, *slot_plan.notes]}
 
 
 def render_public_readme(
@@ -438,6 +505,8 @@ def write_public_surface(
     extra_prefixes: list[str],
     doc_type: str = "",
     force: bool = False,
+    navigation: Optional[dict] = None,
+    strict: bool = False,
 ) -> list[str]:
     """Write the SOURCE half of a public container into *repo*, creating it if
     it does not exist yet (unlike the delivery half, this one is what MAKES
@@ -451,11 +520,20 @@ def write_public_surface(
         realtime=realtime,
         extra_prefixes=extra_prefixes,
         doc_type=doc_type,
+        navigation=navigation,
+        app_nav=_load_app_nav(repo),
+        bound=_bound_pages(repo),
+        strict=strict,
     )
     repo.mkdir(parents=True, exist_ok=True)
     out = [f"  surface: public ({len(result['files'])} files, pairs: {', '.join(pairs)})"]
     for rel, content in sorted(result["files"].items()):
-        out.append(_write(repo / rel, content, force=force))
+        # The project's own-pages files are its own once written: --force
+        # regenerates the container, never the screens a person added.
+        own = rel in ("src/app.pages.ts", "stapel.app-nav.json")
+        out.append(_write(repo / rel, content, force=force and not own))
+    for note in result["notes"]:
+        out.append(f"  note: {note}")
     placeholders = [
         entry_id
         for entry_id, element in result["mounts"]["elements"].items()
@@ -467,6 +545,18 @@ def write_public_surface(
             "broken mount): " + ", ".join(sorted(placeholders))
         )
     return out
+
+
+def _load_app_nav(repo: Path) -> list[dict]:
+    from .nav_cli import load_app_nav
+
+    return load_app_nav(repo / "stapel.app-nav.json")
+
+
+def _bound_pages(repo: Path) -> set[str]:
+    from .nav_cli import bound_app_pages
+
+    return bound_app_pages(repo / "src" / "app.pages.ts")
 
 
 def init_frontend_repo(repo: Path, *, ci: str = "gitlab", force: bool = False) -> list[str]:
@@ -629,7 +719,16 @@ def main(argv: Optional[list] = None) -> int:
     p.add_argument(
         "--force", action="store_true", help="overwrite files that already exist"
     )
+    from .nav_cli import add_nav_arguments, navigation_from_args
+
+    add_nav_arguments(p, mobile=False, composition=False)
     args = p.parse_args(argv)
+    from .composition.model import CompositionError
+
+    try:
+        navigation = navigation_from_args(args)
+    except CompositionError as exc:
+        raise SurfaceError(f"frontend-repo-init: {exc}") from exc
 
     repo = args.repo.resolve()
     if args.surface == "public":
@@ -656,21 +755,29 @@ def main(argv: Optional[list] = None) -> int:
         name = args.name or repo.name
         title = args.title or name
         extra = [k.strip() for k in args.prefixes.split(",") if k.strip()]
-        for line in write_public_surface(
-            repo,
-            name=name,
-            title=title,
-            pairs=pairs,
-            locale=args.locale,
-            realtime=args.realtime,
-            extra_prefixes=extra,
-            doc_type=args.doc_type,
-            force=args.force,
-        ):
+        try:
+            lines = write_public_surface(
+                repo,
+                name=name,
+                title=title,
+                pairs=pairs,
+                locale=args.locale,
+                realtime=args.realtime,
+                extra_prefixes=extra,
+                doc_type=args.doc_type,
+                force=args.force,
+                navigation=navigation,
+                strict=bool(args.strict),
+            )
+        except CompositionError as exc:
+            raise SurfaceError(f"frontend-repo-init: {exc}") from exc
+        for line in lines:
             print(line, file=sys.stderr)
-    elif args.pairs or args.preset or args.realtime or args.name or args.title or args.doc_type:
+    elif (args.pairs or args.preset or args.realtime or args.name or args.title
+          or args.doc_type or navigation or args.strict):
         raise SurfaceError(
-            "frontend-repo-init: --pairs/--preset/--realtime/--name/--title/--doc-type only mean "
+            "frontend-repo-init: --pairs/--preset/--realtime/--name/--title/--doc-type/--nav* "
+            "only mean "
             "something with --surface public. Passing them to the delivery "
             "half would do nothing, and doing nothing quietly is how a flag "
             "becomes folklore."

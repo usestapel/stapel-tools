@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "stapel-tools"
-version = "0.84.0"
+version = "0.85.0"
 description = "CLI scaffold and linting tools for Stapel/Django microservices"
 readme = "README.md"
 license = { text = "MIT" }
@@ -159,6 +159,8 @@ stapel-new-react-lib = "stapel_tools.new_react_lib:main"
 stapel-remove-service = "stapel_tools.remove_service:main"
 stapel-create-project = "stapel_tools.create_project:main"
 stapel-frontend-repo-init = "stapel_tools.frontend_repo_init:main"
+stapel-nav-plan = "stapel_tools.nav_cli:plan_main"
+stapel-nav-regenerate = "stapel_tools.nav_cli:regenerate_main"
 stapel-assemble = "stapel_tools.assemble_scaffold:main"
 stapel-codegen = "stapel_tools.codegen:main"
 stapel-analytics-report = "stapel_tools.analytics_report:main"

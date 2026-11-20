@@ -266,6 +266,12 @@ REACT_MOUNTS: dict[str, dict] = {
     "feed.author": {"route_params": {"userId": "string"}},
     # reservations-react 0.1.0: the booking page reads the bookable from its
     # address; the detail and the schedule editor read their ids.
+    # orders-react 0.2.0: the cart, checkout and history take only optional
+    # links (their defaults are the pair's own routes); one order by its id.
+    "orders.cart": {},
+    "orders.checkout": {},
+    "orders.mine": {},
+    "orders.detail": {"route_params": {"id": "number"}},
     "reservations.book": {"route_params": {"bookableType": "string", "bookableKey": "string"}},
     "reservations.mine": {},
     "reservations.detail": {"route_params": {"id": "number"}},

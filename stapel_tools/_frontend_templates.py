@@ -162,6 +162,7 @@ TSCONFIG_NODE_JSON = """\
 """
 
 VITE_CONFIG_TS = """\
+/// <reference types="vitest/config" />
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -186,6 +187,12 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    test: {
+      // One react-router instance for the app's modules and the shell's: an
+      // externalized dependency and an inlined one are two module instances,
+      // and a router context does not cross between them.
+      server: { deps: { inline: [/@stapel\\//, /react-router/] } },
+    },
     server: {
       host: true,
       port: 5173,
@@ -1042,7 +1049,12 @@ def monolith_mount_plan(
     local_imports: set[str] = set()
     needs_placeholder = False
 
+    app_page = False
     for entry in entries:
+        if entry.get("_app"):
+            app_page = True
+            elements[entry["id"]] = f'<AppPage id={json.dumps(entry["id"])} />'
+            continue
         if entry.get("_local"):
             local_imports.add(entry["_local"])
             elements[entry["id"]] = f'<{entry["_local"]} />'
@@ -1107,6 +1119,7 @@ def monolith_mount_plan(
         "imports": wrapper_imports,
         "pages": pages,
         "needs_placeholder": needs_placeholder,
+        "app_page": app_page,
         "_direct": direct,
         "_local": local_imports,
     }
@@ -1115,49 +1128,30 @@ def monolith_mount_plan(
 def render_routes_tsx(
     route_plan: dict, *, auth_wired: bool, want_landing: bool, app_route_present: bool,
     has_cdn: bool = False, pairs: tuple = (),
-    embed_slots: dict[str, str] | None = None,
     not_found: bool = False,
+    chrome: tuple[str, str] = ("AppChrome", "./chrome.generated.js"),
+    home: tuple[str, str] | None = None,
 ) -> str:
-    """``frontend/src/routes.tsx`` — react-router v7's ``createBrowserRouter``
-    (v7 ships v6-future behaviour as ITS OWN default; there is no
-    future-flags object to pass here, unlike v6). The decision tree (owner
-    directive, P1):
+    """``frontend/src/routes.tsx`` for the ``app`` shape (``<AppShell/>``):
+    ONE layout route (id ``stapel-shell``, the chrome) over every route.
 
-    - ``"/"`` — ``<LandingPage/>`` when ``--landing``, else a redirect to
-      "/app" (only reachable when routing is active at all, which this
-      function assumes — ``_write_frontend_scaffold`` only calls it then).
-    - one sibling route per ``route_plan["absolute_routes"]`` entry (e.g.
-      "/login" -> ``<AuthPanel/>`` when auth is wired).
-    - "/app" — present when ``app_route_present`` (auth wired, or at least
-      one selected pair contributed a nav entry): ``<AppShell
-      nav={{RESOLVED_NAV}}/>``, wrapped in a local ``AppChrome`` that hands it
-      ``staff={{user?.is_staff === true}}`` when auth is wired — AppShell
-      renders its own
-      ``<Outlet/>`` internally (its props carry no ``children`` slot), so
-      this never re-nests one — wrapped in ``<ProtectedRoute>`` only when
-      ``auth_wired`` (an unprotected "/app" is valid too: a nav-bearing
-      module with no auth installed just never gates the shell). Children:
-      one route per ``route_plan["app_children"]`` entry.
+    - ``"/"`` (the index) — ``<LandingPage/>`` with ``--landing``, else a
+      redirect to "/app" when there is a member area, else *home* (the
+      project's own home page inside the shell).
+    - one route per ``route_plan["absolute_routes"]`` entry ("/login" ->
+      ``<AuthPanel/>`` when auth is wired), each honouring its own
+      ``requiresAuth`` — "/login" itself is never gated, since the gate
+      redirects there.
+    - "/app" — the member area: ``<ProtectedRoute>`` around an ``<Outlet/>``
+      when auth is wired (the chrome stays mounted while the gate decides),
+      with one child per ``route_plan["app_children"]`` entry; the admin
+      subtree behind ``<AdminGate/>``.
 
-    ``has_cdn`` (cdn auto-wiring, cdn-scaffold-autowire.md): profiles' nav
-    entry mounts ``ProfileSettings`` as a route (this is the LIVE path for
-    it, not ``render_modules_tsx``'s ``ModulesPanel`` — profiles always
-    carries a ``"nav"`` mirror, so ``app_route_present`` is always true once
-    profiles is selected) — wired with the ``avatarUrlFor`` stopgap prop the
-    same way ``render_modules_tsx`` wires its own (dead, but kept in sync)
-    copy.
-
-    ``embed_slots`` (``{slotId: ComponentName}``, from
-    ``embeds.generated.tsx``) becomes the chrome's ``slots`` prop; empty or
-    absent leaves the output exactly as it was before slots existed.
-
-    A selected pair's ``shell_provider`` (registry field) wraps the "/app"
-    chrome, inside the session gate: state the member area shares — the
-    active workspace the switcher writes and the workspace screens read —
-    lives above every screen and every slot of the shell.
+    The chrome reads the session and the counts itself
+    (``render_shell_chrome_tsx``). ``has_cdn``: profiles' settings screen is
+    mounted with the ``avatarUrlFor`` stopgap. ``not_found`` adds the
+    product's 404 inside the shell and one error element over the tree.
     """
-    embed_slots = embed_slots if app_route_present else None
-    shell_providers = _shell_providers(pairs) if app_route_present else []
     absolute_routes = route_plan["absolute_routes"]
     app_children = route_plan["app_children"]
     # A second gate over the admin section: "/app" establishes a session,
@@ -1176,210 +1170,121 @@ def render_routes_tsx(
     )
     needs_cdn_avatar_helper = has_cdn and uses_profile_settings
 
-    # "/" redirects to "/app" only when there's an "/app" to redirect TO and
-    # nothing already claimed "/" (LandingPage) — the only place `Navigate`
-    # is used, so only import it then (an unused import would fail
-    # `no-unused-vars` under strict TS/eslint).
     needs_navigate = app_route_present and not want_landing
-    router_import = (
-        'import { createBrowserRouter, Navigate } from "react-router";'
-        if needs_navigate else
-        'import { createBrowserRouter } from "react-router";'
-    )
+    router_names = ["createBrowserRouter"]
+    if needs_navigate:
+        router_names.append("Navigate")
+    if app_route_present and auth_wired:
+        router_names.append("Outlet")
     lines: list[str] = [
         "/**",
-        " * GENERATED — react-router v7 route tree (scripted-fullstack",
-        " * navigation, P1 owner directive: one scripted command produces a",
-        " * working navigated fullstack, no LLM in the loop). react-router v7",
-        " * ships v6-future behaviour as its OWN default — there is no",
-        " * future-flags object to configure here.",
+        " * GENERATED — react-router v7 route tree: one layout route (the shell)",
+        " * over every route — the landing, sign-in, every public screen and the",
+        " * gated member area alike. react-router v7 ships v6-future behaviour as",
+        " * its own default; there is no future-flags object to configure here.",
+        " *",
+        " * Do not hand-edit the tree: add a screen through stapel.app-nav.json",
+        " * and src/app.pages.ts, then regenerate.",
         " */",
-        router_import,
+        f'import {{ {", ".join(router_names)} }} from "react-router";',
+        'import type { RouteObject } from "react-router";',
+        f'import {{ {chrome[0]} }} from "{chrome[1]}";',
     ]
-    if app_route_present:
-        lines.append('import { AppShell } from "@stapel/shell-react/default";')
-        lines.append('import { RESOLVED_NAV } from "./nav.generated.js";')
-    if embed_slots:
-        names = ", ".join(sorted(set(embed_slots.values())))
-        lines.append(f'import {{ {names} }} from "./embeds.generated.js";')
-    for package, name in shell_providers:
-        lines.append(f'import {{ {name} }} from "{package}";')
     if auth_wired:
         lines.append('import { ProtectedRoute } from "./ProtectedRoute.js";')
     if admin_gated:
         lines.append('import { AdminGate } from "./AdminGate.js";')
     if want_landing:
         lines.append('import { LandingPage } from "./LandingPage.js";')
+    elif not app_route_present and home is not None:
+        lines.append(f'import {{ {home[0]} }} from "{home[1]}";')
     for (package, subpath), exports in component_imports.items():
         lines.append(f'import {{ {", ".join(sorted(exports))} }} from "{package}/{subpath}";')
     for name in sorted(local_imports):
         lines.append(f'import {{ {name} }} from "./{name}.js";')
     if mounts["needs_placeholder"]:
         lines.append('import { NavPlaceholder } from "./NavPlaceholder.js";')
+    if mounts["app_page"]:
+        lines.append('import { AppPage } from "./AppPage.js";')
     if not_found:
         lines.append('import { NotFoundPage, RouteErrorPage } from "./NotFoundPage.js";')
     lines.extend(mounts["imports"])
     if needs_cdn_avatar_helper:
         lines.append('import { avatarUrlFor } from "./lib/cdn.js";')
-
-    # `<AppShell/>` reads no session, on purpose: the same rule that keeps
-    # `resolveNav` pure keeps the session in ONE place, the container. So the
-    # container answers the one question the chrome cannot — does this member
-    # operate the product — with `user.is_staff`, the very field `AdminGate`
-    # refuses on, so the menu and the screen can never disagree. It has to be a
-    # component: a route object cannot call a hook.
-    from .create_project import shell_has_phone_chrome, shell_self_themes
-
-    # Below the floor the published shell REQUIRES `mode` and has no `staff`
-    # (see FRONTEND_SHELL_SELF_THEMING_FLOOR) — the generated container speaks
-    # the contract that is actually installable.
-    self_theming = shell_self_themes()
-    shell_props = "" if self_theming else ' mode="light"'
-    slots_prop = _slots_prop(embed_slots)
-    if slots_prop:
-        shell_props += f" {slots_prop}"
-    staff_prop = auth_wired and self_theming
-    # Counts for the destinations this container actually mounts. Both facts
-    # the chrome cannot read for itself — the session and the unread count —
-    # arrive the same way and through the same local component, because a
-    # route object cannot call a hook.
-    badge_sources = (
-        nav_badge_sources(
-            r["entry"]["id"] for r in (*absolute_routes, *app_children)
-        )
-        if shell_has_phone_chrome()
-        else []
-    )
-    chrome_component = app_route_present and (staff_prop or badge_sources)
-    if chrome_component:
-        lines.append('import type { ReactElement } from "react";')
-        if staff_prop:
-            lines.append('import { useAuthSessionState } from "@stapel/auth-react";')
-        for src in badge_sources:
-            lines.append(f'import {{ {src["hook"]} }} from "{src["package"]}";')
-        lines.append("")
-        lines.append("/**")
-        lines.append(" * GENERATED — the app chrome plus the facts the shell cannot read")
-        lines.append(" * for itself.")
-        if staff_prop:
-            lines.append(" *")
-            lines.append(" * `staff={false}` does not hide the admin section: the shell lists")
-            lines.append(" * it switched off with the reason beside it, because an entry that")
-            lines.append(" * vanishes teaches nobody the screen exists.")
-        if badge_sources:
-            lines.append(" *")
-            lines.append(" * `navBadges` is the runtime channel over the static nav manifest:")
-            lines.append(" * the manifest says which destinations exist, this says how many")
-            lines.append(" * things are waiting at one. Each count comes from the pair that")
-            lines.append(" * OWNS it — the shell fetches nothing, by the same rule that keeps")
-            lines.append(" * `resolveNav` pure.")
-        lines.append(" */")
-        lines.append("function AppChrome(): ReactElement {")
-        if staff_prop:
-            lines.append("  const { user } = useAuthSessionState();")
-        for src in badge_sources:
-            lines.append(f'  const {src["var"]} = {src["hook"]}();')
-        lines.append("  return (")
-        lines.append("    <AppShell")
-        lines.append("      nav={RESOLVED_NAV}")
-        if not self_theming:
-            lines.append('      mode="light"')
-        if staff_prop:
-            lines.append("      staff={user?.is_staff === true}")
-        if badge_sources:
-            lines.extend(_nav_badges_lines(badge_sources, "      "))
-        if slots_prop:
-            lines.append(f"      {slots_prop}")
-        lines.append("    />")
-        lines.append("  );")
-        lines.append("}")
     lines.append("")
-    lines.append("export const router = createBrowserRouter([")
+    lines.append("export const routes: RouteObject[] = [")
 
+    body: list[str] = ["  {", '    id: "stapel-shell",', f"    element: <{chrome[0]} />,",
+                       "    children: ["]
     if want_landing:
-        lines.append('  { path: "/", element: <LandingPage /> },')
+        body.append("      { index: true, element: <LandingPage /> },")
     elif app_route_present:
-        lines.append('  { path: "/", element: <Navigate to="/app" replace /> },')
+        body.append('      { index: true, element: <Navigate to="/app" replace /> },')
+    elif home is not None:
+        body.append(f"      {{ index: true, element: <{home[0]} /> }},")
 
     for r in absolute_routes:
         entry = r["entry"]
         comp = entry["component"]["export"]
         element = (
             _profile_settings_jsx(has_cdn)
-            if comp == "ProfileSettings"
+            if comp == "ProfileSettings" and not entry.get("_app")
             else elements[entry["id"]]
         )
-        # Per-route `requiresAuth` (shared-layer audit Q3): "/app" is gated as a
-        # whole, but an ABSOLUTE-path entry is a sibling of it, so its own flag
-        # is the only gate it has. auth.qr_confirm (`surface: "public"`,
-        # `requiresAuth: true` — a signed-in phone confirming a signed-out
-        # desktop) used to mount for anonymous visitors because the flag was
-        # emitted into the manifest and read by nobody.
-        # "/login" itself is never gated whatever it declares: ProtectedRoute
-        # redirects THERE, so gating it is an infinite redirect.
+        # Per-route `requiresAuth`: "/app" is gated as a whole, but an
+        # ABSOLUTE-path entry is a sibling of it, so its own flag is the only
+        # gate it has (auth.qr_confirm: `surface: "public"`, `requiresAuth:
+        # true`). "/login" itself is never gated: ProtectedRoute redirects
+        # THERE, so gating it is an infinite redirect.
         if entry.get("requiresAuth") and auth_wired and r["path"] != "/login":
             element = f"<ProtectedRoute>{element}</ProtectedRoute>"
-        lines.append(f'  {{ path: "{r["path"]}", element: {element} }},')
+        body.append(f'      {{ path: "{r["path"]}", element: {element} }},')
 
     if app_route_present:
-        lines.append("  {")
-        lines.append('    path: "/app",')
+        body.append("      {")
+        body.append('        path: "/app",')
         if auth_wired:
-            chrome = _wrap_providers(
-                "<AppChrome />" if chrome_component
-                else f"<AppShell nav={{RESOLVED_NAV}}{shell_props} />",
-                shell_providers,
-            )
-            lines.append("    element: (")
-            lines.append("      <ProtectedRoute>")
-            lines.append(f"        {chrome}")
-            lines.append("      </ProtectedRoute>")
-            lines.append("    ),")
-        else:
-            # No auth pair, no session, no staff fact — and the shell's own
-            # default (`staff` absent means false) is then the honest answer.
-            # A badge source can still put the chrome behind a component: a
-            # count is not a session.
-            element = _wrap_providers(
-                "<AppChrome />" if chrome_component
-                else f"<AppShell nav={{RESOLVED_NAV}}{shell_props} />",
-                shell_providers,
-            )
-            lines.append(f"    element: {element},")
+            body.append("        element: (")
+            body.append("          <ProtectedRoute>")
+            body.append("            <Outlet />")
+            body.append("          </ProtectedRoute>")
+            body.append("        ),")
         if app_children:
-            lines.append("    children: [")
+            body.append("        children: [")
             for c in app_children:
                 entry = c["entry"]
                 comp = entry["component"]["export"]
                 element = (
                     _profile_settings_jsx(has_cdn)
-                    if comp == "ProfileSettings"
+                    if comp == "ProfileSettings" and not entry.get("_app")
                     else elements[entry["id"]]
                 )
                 if admin_gated and _is_admin_entry(entry):
                     element = f"<AdminGate>{element}</AdminGate>"
-                lines.append(f'      {{ path: "{c["path"]}", element: {element} }},')
-            lines.append("    ],")
-        lines.append("  },")
-
+                body.append(f'          {{ path: "{c["path"]}", element: {element} }},')
+            body.append("        ],")
+        body.append("      },")
     if not_found:
         # Last, and a splat: an address no route above matches (an unknown
-        # "/app/..." child included) gets the product's page, not the router's
-        # developer error screen.
-        lines.append('  { path: "*", element: <NotFoundPage /> },')
+        # "/app/..." child included) gets the product's page, inside the shell.
+        body.append('      { path: "*", element: <NotFoundPage /> },')
+    body.append("    ],")
+    body.append("  },")
+    if not_found:
         # One pathless root carries the errorElement for every route below
         # it: a loader 404 or a render error shows the product's page too.
-        start = lines.index("export const router = createBrowserRouter([") + 1
-        body = ["    " + ln for ln in lines[start:]]
-        lines[start:] = [
+        body = [
             "  {",
             "    errorElement: <RouteErrorPage />,",
             "    children: [",
-            *body,
+            *("    " + ln for ln in body),
             "    ],",
             "  },",
         ]
-    lines.append("]);")
+    lines.extend(body)
+    lines.append("];")
+    lines.append("")
+    lines.append("export const router = createBrowserRouter(routes);")
     lines.append("")
     return "\n".join(lines)
 
@@ -1395,23 +1300,6 @@ def _shell_providers(pairs) -> list[tuple[str, str]]:
         if entry.get("shell_provider"):
             out.append((entry["package"], entry["shell_provider"]))
     return out
-
-
-def _wrap_providers(element: str, providers: list[tuple[str, str]]) -> str:
-    for _package, name in reversed(providers):
-        element = f"<{name}>{element}</{name}>"
-    return element
-
-
-def _slots_prop(embed_slots: dict[str, str] | None) -> str:
-    """``slots={{ "topbar.end": <TopbarEnd /> }}`` — slot ids are dotted, so
-    every key is quoted."""
-    if not embed_slots:
-        return ""
-    body = ", ".join(
-        f"{json.dumps(slot)}: <{name} />" for slot, name in embed_slots.items()
-    )
-    return f"slots={{{{ {body} }}}}"
 
 
 def _pascal(text: str) -> str:
@@ -1469,7 +1357,7 @@ def _jsx_props(props: dict | None) -> str:
 
 
 def render_embeds_generated_tsx(
-    filled: dict[str, list[dict]], paths: dict[str, str]
+    filled: dict[str, list[dict]], paths: dict[str, str], *, guest_variants: bool = False,
 ) -> tuple[str, list[str]]:
     """``frontend/src/embeds.generated.tsx`` — one component per filled slot
     (composition spec §4 step 6). Each embed is imported from
@@ -1486,7 +1374,14 @@ def render_embeds_generated_tsx(
     components: list[str] = []
     needs_navigate = False
 
+    variants: list[tuple[str, str, list[dict]]] = []
     for slot, embeds in filled.items():
+        variants.append((slot, slot_component_name(slot), embeds))
+        guest = [e for e in embeds if e.get("surface", "any") != "member"]
+        if guest_variants and guest:
+            variants.append((slot, slot_component_name(slot) + "Guest", guest))
+    seen_openers: set[str] = set()
+    for slot, component, embeds in variants:
         body: list[str] = []
         for embed in embeds:
             comp = embed["component"]
@@ -1505,6 +1400,15 @@ def render_embeds_generated_tsx(
                 else:
                     needs_navigate = True
                     opener = f'{_pascal(embed["id"])}Embed'
+                    if opener in seen_openers:
+                        element = f"<{opener} />"
+                        body.extend([
+                            f'      <span data-testid="embed-{embed["id"]}">',
+                            f"        {element}",
+                            "      </span>",
+                        ])
+                        continue
+                    seen_openers.add(opener)
                     openers.extend([
                         f"function {opener}(): ReactElement {{",
                         "  const navigate = useNavigate();",
@@ -1524,9 +1428,10 @@ def render_embeds_generated_tsx(
                 f"        {element}",
                 "      </span>",
             ])
+        label = "" if component == slot_component_name(slot) else " (what a guest may see)"
         components.extend([
-            f"/** The `{slot}` slot. */",
-            f"export function {slot_component_name(slot)}(): ReactElement {{",
+            f"/** The `{slot}` slot{label}. */",
+            f"export function {component}(): ReactElement {{",
             "  return (",
             "    <>",
             *body,
@@ -1552,37 +1457,36 @@ def render_embeds_generated_tsx(
     lines.append("")
     lines.extend(openers)
     lines.extend(components)
-    return "\n".join(lines), notes
+    return "\n".join(lines), list(dict.fromkeys(notes))
 
 
-# ``frontend/src/ProtectedRoute.tsx`` — plain project source (like APP_TSX,
-# a small template const, no per-project tokens needed). Gates "/app" behind
-# an authenticated session using ONLY already-published hooks:
-# `useActiveSessionReady` (@stapel/core's framework-level session ready-gate)
-# and `useAuthSessionState` (@stapel/auth-react — its `status` field is
-# hardened to the two-value "anonymous" | "authenticated" invariant,
-# `"authenticated"` is UNREACHABLE while `user` is null). No auth-react
-# change needed for this to be correct.
+# ``frontend/src/ProtectedRoute.tsx`` — plain project source. Gates "/app" on
+# `@stapel/core`'s `useActiveSessionStatus`, the three-state answer: a
+# two-state "authenticated" (auth-react's session `status`) counts a guest
+# session minted by an anonymous action as signed in, which let a guest into
+# the member area and bounced them away from sign-in.
 PROTECTED_ROUTE_TSX = """\
 import type { ReactElement, ReactNode } from "react";
-import { Navigate } from "react-router";
-import { useActiveSessionReady } from "@stapel/core";
-import { useAuthSessionState } from "@stapel/auth-react";
+import { Navigate, useLocation } from "react-router";
+import { useActiveSessionStatus } from "@stapel/core";
 
 /**
- * Gates "/app" behind an authenticated session (scripted-fullstack
- * navigation, P1):
- *  - not ready yet (session still restoring/probing) -> render nothing, no
- *    flash of a login redirect before the real answer is known.
- *  - ready, not authenticated -> redirect to "/login".
- *  - ready, authenticated -> render children.
+ * Gates the member area ("/app") on the session's three-state status:
+ *  - still restoring (or no session module) -> render nothing, no flash of
+ *    a sign-in redirect before the real answer is known;
+ *  - signed in -> the screens;
+ *  - anyone else -> sign-in, with the way back. A guest session minted by
+ *    an anonymous action (add to cart) is "anyone else": it holds no account.
  */
 export function ProtectedRoute({ children }: { children: ReactNode }): ReactElement | null {
-  const ready = useActiveSessionReady();
-  const { status } = useAuthSessionState();
+  const status = useActiveSessionStatus();
+  const location = useLocation();
 
-  if (!ready) return null;
-  if (status !== "authenticated") return <Navigate to="/login" replace />;
+  if (status === null || status === "initializing") return null;
+  if (status !== "authenticated") {
+    const next = encodeURIComponent(`${location.pathname}${location.search}`);
+    return <Navigate to={`/login?next=${next}`} replace />;
+  }
   return <>{children}</>;
 }
 """
@@ -1621,10 +1525,9 @@ import { STOREFRONT_I18N_KEYS } from "./i18n/keys.js";
 export function LandingPage(): ReactElement {
   const t = useT();
   return (
-    <main
+    <section
       style={{
         fontFamily: "system-ui, sans-serif",
-        minHeight: "100vh",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -1655,7 +1558,7 @@ export function LandingPage(): ReactElement {
       >
         {t(STOREFRONT_I18N_KEYS.landingCta)}
       </a>
-    </main>
+    </section>
   );
 }
 """
@@ -1752,10 +1655,9 @@ import { cssVar } from "@stapel/tokens";
  */
 export function LandingPage(): ReactElement {
   return (
-    <main
+    <section
       style={{
         fontFamily: "system-ui, sans-serif",
-        minHeight: "100vh",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
@@ -1787,7 +1689,7 @@ export function LandingPage(): ReactElement {
       >
         Get started
       </a>
-    </main>
+    </section>
   );
 }
 """
@@ -2295,7 +2197,7 @@ def public_nav_manifests(nav_pairs: list[dict], *, app_package: str) -> list[dic
     return manifests
 
 
-def build_public_route_plan(manifests: list[dict]) -> dict:
+def build_public_route_plan(manifests: list[dict], *, declared: set[str] | None = None) -> dict:
     """The public container's route tree, as pure data.
 
     Mirrors `resolveNav`'s own rules (orphan submenu entries are DROPPED, tops
@@ -2328,7 +2230,7 @@ def build_public_route_plan(manifests: list[dict]) -> dict:
     all_entries = [
         {**entry, "_package": m["package"]} for m in manifests for entry in m["entries"]
     ]
-    validate_nav_entries(all_entries)
+    validate_nav_entries(all_entries, declared=declared)
     tops = {e["id"]: e for e in all_entries if e["placement"]["level"] == "top"}
     children_by_parent: dict[str, list[dict]] = {}
     for e in all_entries:
@@ -3441,7 +3343,8 @@ def composite_gaps(entry_id: str, pairs: tuple) -> tuple:
 
 
 def public_mount_plan(
-    plan: dict, options: dict | None = None, *, pairs: tuple = ()
+    plan: dict, options: dict | None = None, *, pairs: tuple = (),
+    page_embeds: dict | None = None,
 ) -> dict:
     """How every route in *plan* is mounted — the single pass both
     ``render_public_routes_tsx`` and the file writer read, so the element a
@@ -3463,6 +3366,7 @@ def public_mount_plan(
     "pages": {relpath: content}, "needs_placeholder": bool}``.
     """
     options = options or {}
+    page_embeds = page_embeds or {}
     routes = [
         *plan["public"],
         *plan["member_absolute"],
@@ -3478,8 +3382,13 @@ def public_mount_plan(
     wrapper_imports: list[str] = []
     needs_placeholder = False
 
+    app_page = False
     for route in routes:
         entry = route["entry"]
+        if entry.get("_app"):
+            app_page = True
+            elements[entry["id"]] = f'<AppPage id={json.dumps(entry["id"])} />'
+            continue
         mount = NAV_ENTRY_MOUNTS.get(entry["id"])
         if mount is None:
             needs_placeholder = True
@@ -3514,12 +3423,13 @@ def public_mount_plan(
             local_imports.add(name)
             elements[entry["id"]] = f"<{name} />"
             continue
+        filled = page_embeds.get(entry["id"])
         if mount.get("route_params") or mount.get("adapter") or (
             mount.get("viewer") in pairs
-        ):
+        ) or filled:
             name = _wrapper_name(entry)
             pages[f"src/pages/{name}.tsx"] = render_nav_page_wrapper_tsx(
-                entry, mount, options, pairs=tuple(pairs)
+                entry, mount, options, pairs=tuple(pairs), page_embeds=filled,
             )
             line = f'import {{ {name} }} from "./pages/{name}.js";'
             if line not in wrapper_imports:
@@ -3535,6 +3445,8 @@ def public_mount_plan(
         imports.append(f'import {{ {name} }} from "./{name}.js";')
     if needs_placeholder:
         imports.append('import { NavPlaceholder } from "./NavPlaceholder.js";')
+    if app_page:
+        imports.append('import { AppPage } from "./AppPage.js";')
     for (package, subpath), exports in direct.items():
         imports.append(f'import {{ {", ".join(sorted(exports))} }} from "{package}/{subpath}";')
     imports.extend(wrapper_imports)
@@ -3544,18 +3456,21 @@ def public_mount_plan(
         "imports": imports,
         "pages": pages,
         "needs_placeholder": needs_placeholder,
+        "app_page": app_page,
     }
 
 
 def render_public_routes_tsx(
-    plan: dict, options: dict | None = None, *, pairs: tuple = ()
+    plan: dict, options: dict | None = None, *, pairs: tuple = (),
+    chrome: tuple[str, str] = ("StorefrontShell", "./StorefrontShell.js"),
+    home: tuple[str, str] = ("StorefrontHome", "./StorefrontHome.js"),
+    gated: bool = True,
+    not_found: bool = False,
+    page_embeds: dict | None = None,
 ) -> str:
-    """``src/routes.tsx`` — the public storefront's route tree (spec §6.1
-    item 5).
-
-    One layout route (`<StorefrontShell/>`, which is `<PublicShell/>` with the
-    nav its viewer may see) over three groups, and the grouping IS the access
-    rule:
+    """``src/routes.tsx`` — the storefront shape's route tree: ONE layout
+    route (id ``stapel-shell``, the chrome) over every route, and the
+    grouping under it IS the access rule:
 
       * public routes — siblings, reachable by anyone.
       * member routes with an absolute path (`/new`) — siblings too, but
@@ -3565,105 +3480,135 @@ def render_public_routes_tsx(
 
     The gate is a LAYOUT route with no path of its own, so it wraps without
     adding a segment. `matchMandate` inside it is what keeps "we could not
-    ask" out of "you may not" (see MemberGate.tsx).
+    ask" out of "you may not" (see MemberGate.tsx). Without accounts
+    (``gated=False``) there is no gate and no member route.
+
+    ``not_found`` adds the product's 404 inside the shell and one error
+    element over the whole tree. ``routes`` is exported beside ``router`` so
+    a test can mount the same tree in a memory router.
     """
-    mounts = public_mount_plan(plan, options, pairs=pairs)
+    mounts = public_mount_plan(plan, options, pairs=pairs, page_embeds=page_embeds)
     elements = mounts["elements"]
     # The staff gate needs a staff fact, and the only one the container has is
     # the auth session's `is_staff`. No auth pair, no gate — and the routes stay
     # member-gated rather than pretending to be checked.
-    admin_gated = "auth" in pairs and any(
+    admin_gated = gated and "auth" in pairs and any(
         r.get("gate") == "admin" for r in plan["member_absolute"]
     )
 
     lines: list[str] = [
         "/**",
-        " * GENERATED — react-router v7 route tree for the PUBLIC surface.",
-        " * react-router v7 ships v6-future behaviour as its own default, so",
-        " * there is no future-flags object to configure here.",
+        " * GENERATED — react-router v7 route tree: one layout route (the shell)",
+        " * over every route. react-router v7 ships v6-future behaviour as its own",
+        " * default, so there is no future-flags object to configure here.",
         " *",
         " * Do not hand-edit the tree: it is a projection of the installed",
-        " * pairs' nav manifests (src/nav.generated.ts) plus this container's",
-        " * own `account.root`. Add or drop a screen by changing the pair set",
-        " * and re-generating.",
+        " * pairs' nav manifests (src/nav.generated.ts), this container's own",
+        " * sections and the project's own pages (stapel.app-nav.json). Add a",
+        " * screen there and regenerate.",
         " */",
         'import { createBrowserRouter } from "react-router";',
-        'import { MemberGate } from "./MemberGate.js";',
-        'import { StorefrontShell } from "./StorefrontShell.js";',
-        'import { StorefrontHome } from "./StorefrontHome.js";',
+        'import type { RouteObject } from "react-router";',
     ]
+    if gated:
+        lines.append('import { MemberGate } from "./MemberGate.js";')
+    lines.append(f'import {{ {chrome[0]} }} from "{chrome[1]}";')
+    lines.append(f'import {{ {home[0]} }} from "{home[1]}";')
     if admin_gated:
         lines.append('import { AdminGate } from "./AdminGate.js";')
+    if not_found:
+        lines.append('import { NotFoundPage, RouteErrorPage } from "./NotFoundPage.js";')
     lines.extend(mounts["imports"])
     lines.append("")
-    lines.append("export const router = createBrowserRouter([")
-    lines.append("  {")
-    lines.append("    element: <StorefrontShell />,")
-    lines.append("    children: [")
-    lines.append("      { index: true, element: <StorefrontHome /> },")
+    lines.append("export const routes: RouteObject[] = [")
+    body: list[str] = []
+    body.append("  {")
+    body.append('    id: "stapel-shell",')
+    body.append(f"    element: <{chrome[0]} />,")
+    body.append("    children: [")
+    body.append(f"      {{ index: true, element: <{home[0]} /> }},")
     # A public-SURFACE route that still needs a session (auth.qr_confirm) is
     # drawn in the public menu and mounted INSIDE the gate: the two axes are
     # independent, and `requiresAuth` used to be emitted and read by nobody.
-    gated_public = [r for r in plan["public"] if r["requiresAuth"]]
+    gated_public = [r for r in plan["public"] if r["requiresAuth"]] if gated else []
     for route in plan["public"]:
-        if route["requiresAuth"]:
+        if route["requiresAuth"] and gated:
             continue
         element = elements[route["entry"]["id"]]
-        lines.append(f'      {{ path: "{route["path"]}", element: {element} }},')
-    lines.append("      {")
-    lines.append("        element: <MemberGate />,")
-    lines.append("        children: [")
-    for route in gated_public:
-        element = elements[route["entry"]["id"]]
-        lines.append(f'          {{ path: "{route["path"]}", element: {element} }},')
-    # The admin subtree gets a SECOND gate, nested inside the member one: the
-    # container knows there is a settled member, and the remaining question —
-    # does this member operate the product — is `user.is_staff`. It refuses by
-    # name; the entry stays in the menu, because a screen that vanishes teaches
-    # nobody it exists. Without auth-react installed there is no staff fact to
-    # read, so the routes stay member-gated and each pane refuses on its own.
-    admin_routes = [r for r in plan["member_absolute"] if r.get("gate") == "admin"]
-    plain_member = [r for r in plan["member_absolute"] if r.get("gate") != "admin"]
-    for route in plain_member:
-        element = elements[route["entry"]["id"]]
-        lines.append(f'          {{ path: "{route["path"]}", element: {element} }},')
-    if admin_routes and admin_gated:
-        lines.append("          {")
-        lines.append("            element: <AdminGate />,")
-        lines.append("            children: [")
-        for route in admin_routes:
+        body.append(f'      {{ path: "{route["path"]}", element: {element} }},')
+    if gated:
+        body.append("      {")
+        body.append("        element: <MemberGate />,")
+        body.append("        children: [")
+        for route in gated_public:
             element = elements[route["entry"]["id"]]
-            lines.append(
-                f'              {{ path: "{route["path"]}", element: {element} }},'
+            body.append(f'          {{ path: "{route["path"]}", element: {element} }},')
+        # The admin subtree gets a SECOND gate, nested inside the member one:
+        # the container knows there is a settled member, and the remaining
+        # question — does this member operate the product — is `user.is_staff`.
+        # It refuses by name; the entry stays in the menu, because a screen
+        # that vanishes teaches nobody it exists. Without auth-react installed
+        # there is no staff fact to read, so the routes stay member-gated and
+        # each pane refuses on its own.
+        admin_routes = [r for r in plan["member_absolute"] if r.get("gate") == "admin"]
+        plain_member = [r for r in plan["member_absolute"] if r.get("gate") != "admin"]
+        for route in plain_member:
+            element = elements[route["entry"]["id"]]
+            body.append(f'          {{ path: "{route["path"]}", element: {element} }},')
+        if admin_routes and admin_gated:
+            body.append("          {")
+            body.append("            element: <AdminGate />,")
+            body.append("            children: [")
+            for route in admin_routes:
+                element = elements[route["entry"]["id"]]
+                body.append(
+                    f'              {{ path: "{route["path"]}", element: {element} }},'
+                )
+            body.append("            ],")
+            body.append("          },")
+        else:
+            for route in admin_routes:
+                element = elements[route["entry"]["id"]]
+                body.append(f'          {{ path: "{route["path"]}", element: {element} }},')
+        account_entry = plan.get("account_entry")
+        if account_entry or plan["account_children"]:
+            body.append("          {")
+            account_path = (
+                account_entry["route"]["path"] if account_entry else "/account"
             )
-        lines.append("            ],")
-        lines.append("          },")
-    else:
-        for route in admin_routes:
-            element = elements[route["entry"]["id"]]
-            lines.append(f'          {{ path: "{route["path"]}", element: {element} }},')
-    account_entry = plan.get("account_entry")
-    if account_entry or plan["account_children"]:
-        lines.append("          {")
-        account_path = (
-            account_entry["route"]["path"] if account_entry else "/account"
-        )
-        lines.append(f'            path: "{account_path}",')
-        lines.append("            children: [")
-        if account_entry:
-            lines.append(
-                f'              {{ index: true, element: {elements[account_entry["id"]]} }},'
-            )
-        for route in plan["account_children"]:
-            element = elements[route["entry"]["id"]]
-            lines.append(f'              {{ path: "{route["path"]}", element: {element} }},')
-        lines.append("            ],")
-        lines.append("          },")
-    lines.append("        ],")
-    lines.append("      },")
-    lines.append("    ],")
-    lines.append("  },")
-    lines.append("]);")
+            body.append(f'            path: "{account_path}",')
+            body.append("            children: [")
+            if account_entry:
+                body.append(
+                    f'              {{ index: true, element: {elements[account_entry["id"]]} }},'
+                )
+            for route in plan["account_children"]:
+                element = elements[route["entry"]["id"]]
+                body.append(f'              {{ path: "{route["path"]}", element: {element} }},')
+            body.append("            ],")
+            body.append("          },")
+        body.append("        ],")
+        body.append("      },")
+    if not_found:
+        # Last, and a splat: an address no route above matches gets the
+        # product's page, inside the shell.
+        body.append('      { path: "*", element: <NotFoundPage /> },')
+    body.append("    ],")
+    body.append("  },")
+    if not_found:
+        # One pathless root carries the errorElement for every route below it.
+        body = [
+            "  {",
+            "    errorElement: <RouteErrorPage />,",
+            "    children: [",
+            *("    " + ln for ln in body),
+            "    ],",
+            "  },",
+        ]
+    lines.extend(body)
+    lines.append("];")
+    lines.append("")
+    lines.append("export const router = createBrowserRouter(routes);")
     lines.append("")
     return "\n".join(lines)
 
@@ -3702,121 +3647,50 @@ def _nav_badges_lines(sources: list[dict], indent: str) -> list[str]:
     return lines
 
 
-def render_storefront_shell_tsx(nav_ids=()) -> str:
-    """``src/StorefrontShell.tsx`` — the chrome, speaking the PINNED shell's
-    contract.
+def render_storefront_shell_tsx(
+    nav_ids=(),
+    *,
+    title: str = "",
+    filled: dict[str, list[dict]] | None = None,
+    sign_in_path: str | None = "/login",
+    has_accounts: bool = True,
+    phone_chrome: str = "dock",
+) -> str:
+    """``src/StorefrontShell.tsx`` — the split storefront's chrome: the same
+    ``<PublicShell/>`` chrome the monolith's storefront shape writes
+    (:func:`render_shell_chrome_tsx`), named for the file it has always been.
 
-    `mode` is not a choice a generator gets to make: from
-    `FRONTEND_SHELL_SELF_THEMING_FLOOR` the shell follows the document's live
-    `data-theme` through `SkinTheme` and the prop is optional, so the generated
-    container stops answering a question it cannot know. Below that floor the
-    published `PublicShellProps` REQUIRES `mode`, and a container that omitted
-    it would not typecheck — so the pin decides, and the emission moves in the
-    same commit the pin does.
-
-    Two more props move with the pin from
-    `FRONTEND_SHELL_PHONE_CHROME_FLOOR`: `phoneChrome="dock"` and `navBadges`.
+    `phoneChrome` is the compact carrier of the resolved plan: ``dock`` for
+    the island, ``drawer`` for the drawer. The props that move with the pin
+    (`mode`, `phoneChrome`, `navBadges`) follow `FRONTEND_SHELL_*_FLOOR`.
     """
-    from .create_project import (
-        shell_has_phone_chrome,
-        shell_has_theme_control,
-        shell_self_themes,
+    return render_shell_chrome_tsx(
+        shape="storefront", name="StorefrontShell", title=title, filled=filled or {},
+        sign_in_path=sign_in_path, has_accounts=has_accounts, auth_wired=has_accounts,
+        badge_ids=nav_ids, phone_chrome=phone_chrome,
     )
 
-    sources = nav_badge_sources(nav_ids) if shell_has_phone_chrome() else []
-    header = [
-        "/**",
-        " * GENERATED — the storefront's chrome.",
-        " *",
-        " * `<PublicShell/>` reads no session, exactly like `<AppShell/>`: the mandate",
-        " * is supplied by the container, and the container is also what decides WHICH",
-        " * nav tree the shell was handed. That decision is here, and it is one line",
-        " * with a reason:",
-        " *",
-        " *   a settled member  -> the member tree.",
-        " *   anyone else       -> the public tree.",
-        " *",
-        ' * "Anyone else" includes an unsettled mandate (`useMandatePrincipal()`',
-        " * answers `null` while the session bootstraps or when the answer could not be",
-        " * obtained), and showing the PUBLIC tree there is the safe direction: it is",
-        " * the smaller menu, so no door is drawn that would refuse the person who",
-        " * clicks it. The waiting and the outage themselves are rendered by",
-        " * `<MemberGate/>` on the routes that need a verdict — a menu is not the place",
-        " * to explain an outage.",
-        " *",
-        " * The slots (`brand`, `searchSlot`, `categorySlot`, `accountSlot`, `footer`)",
-        " * are deliberately unset: they are the wiring step's closed list (spec §6.2",
-        " * item 3), and every one of them is product knowledge — a logo, what the",
-        ' * header search field searches, which categories are "top". Left unset,',
-        " * `PublicShell` still renders its own sign-in CTA, so the entry point is",
-        " * never missing while this file waits to be filled in — and `brand`/`footer`",
-        " * fill THEMSELVES from core's site seam once a `<SiteProvider/>` is above",
-        " * this component, which `modules.tsx` emits when auth is installed.",
-    ]
-    if shell_has_phone_chrome():
-        header += [
-            " *",
-            ' * `phoneChrome="dock"` is the one chrome decision this generator DOES',
-            " * make. A storefront's phone traffic is the majority of it, and a",
-            " * hamburger is a menu a thumb has to go looking for: the dock puts the",
-            " * destinations on screen, permanently, where the thumb already is. The",
-            " * sticky single-row header keeps search and account reachable beside it.",
-            " * A product that wants the drawer back changes one prop here.",
-        ]
-    if sources:
-        header += [
-            " *",
-            " * `navBadges` is the runtime channel over the static nav manifest: the",
-            " * manifest says which destinations exist, this says how many things are",
-            " * waiting at one. The count comes from the pair that OWNS it — the shell",
-            " * fetches nothing.",
-        ]
-    if shell_has_theme_control():
-        header += [
-            " *",
-            " * The theme switch is the shell's own (`themeControl` defaults to ON),",
-            " * which is why this file pins no `mode`: a pinned mode is a switch that",
-            " * cannot switch anything.",
-        ]
-    header.append(" */")
 
-    imports = [
-        'import type { ReactElement } from "react";',
-        'import { useMandatePrincipal } from "@stapel/core";',
-        'import { PublicShell } from "@stapel/shell-react/default";',
-    ]
-    for src in sources:
-        imports.append(
-            f'import {{ {src["hook"]} }} from "{src["package"]}";'
-        )
-    imports.append(
-        'import { RESOLVED_NAV_MEMBER, RESOLVED_NAV_PUBLIC } from "./nav.generated.js";'
-    )
+HOME_TSX = '''\
+/**
+ * The home page inside the shell — written once by the scaffold, then yours.
+ * It renders content only: the shell around it already draws the header,
+ * the navigation and the sign-in entry.
+ */
+import type { ReactElement } from "react";
+import { Typography } from "antd";
 
-    body = [
-        "export function StorefrontShell(): ReactElement {",
-        "  const principal = useMandatePrincipal();",
-        '  const nav = principal === "member" ? RESOLVED_NAV_MEMBER : RESOLVED_NAV_PUBLIC;',
-    ]
-    for src in sources:
-        body.append(f'  const {src["var"]} = {src["hook"]}();')
-
-    props: list[str] = ["      nav={nav}"]
-    if not shell_self_themes():
-        props.append('      mode="light"')
-    if shell_has_phone_chrome():
-        props.append('      phoneChrome="dock"')
-    if sources:
-        props.extend(_nav_badges_lines(sources, "      "))
-
-    body.append("  return (")
-    body.append("    <PublicShell")
-    body.extend(props)
-    body.append("    />")
-    body.append("  );")
-    body.append("}")
-
-    return "\n".join([*header, *imports, "", *body]) + "\n"
+export function Home(): ReactElement {
+  return (
+    <section data-testid="page-home">
+      <Typography.Title level={1}>{{TITLE}}</Typography.Title>
+      <Typography.Paragraph>
+        This is the scaffolded home page. Replace this copy with your own.
+      </Typography.Paragraph>
+    </section>
+  );
+}
+'''
 
 
 STOREFRONT_HOME_TSX = '''\
@@ -3982,72 +3856,6 @@ createRoot(document.getElementById("root")!).render(
   </StrictMode>
 );
 '''
-
-
-def render_public_nav_generated_ts(manifests: list[dict]) -> str:
-    """``src/nav.generated.ts`` — the installed manifests, and the two
-    resolved trees.
-
-    Both trees come from the AUDIENCE-NAMED resolvers, never from
-    `resolveNav(…, {audience})`: `audience` is optional and its default does
-    not filter, so a public container that forgot the option would mount every
-    member screen and every one of them would answer 403. The default has to
-    stay permissive (the monolith scaffold's codegen bakes every route a
-    project could mount), so the fix is a call that cannot be made wrong —
-    `resolvePublicNav` / `resolveMemberNav`, with the audience in the name.
-    """
-    manifests_json = json.dumps(manifests, indent=2)
-    return f'''\
-/**
- * GENERATED — do not hand-edit. Nav-manifest data for this container's
- * installed pairs, plus this container's OWN `account.root` entry.
- *
- * `account.root` is here rather than in `stapel.nav.json` because an override
- * file cannot create an entry: `NavOverridesFile` carries `menuVisible` and
- * `order` per EXISTING id and nothing else. A container-owned
- * `PackageNavManifest` is the mechanism that exists, and it is also what makes
- * every `placement.parentId: "account.root"` entry resolve instead of being
- * dropped as an orphan. `stapel.nav.json` still tunes it, which is the part of
- * the override channel that was ever real.
- */
-import type {{ PackageNavManifest }} from "@stapel/core";
-import type {{ NavOverridesFile, ResolvedNavEntry }} from "@stapel/shell-react";
-import {{ resolveMemberNav, resolvePublicNav }} from "@stapel/shell-react";
-import stapelNavOverrides from "../stapel.nav.json";
-
-export const INSTALLED_NAV_MANIFESTS: readonly PackageNavManifest[] = {manifests_json} as const;
-
-const overrides = stapelNavOverrides as NavOverridesFile;
-
-/** What an anonymous visitor may be shown. */
-export const RESOLVED_NAV_PUBLIC: readonly ResolvedNavEntry[] = resolvePublicNav(
-  INSTALLED_NAV_MANIFESTS,
-  overrides
-);
-
-/** What a settled member may be shown — a superset of the public tree. */
-export const RESOLVED_NAV_MEMBER: readonly ResolvedNavEntry[] = resolveMemberNav(
-  INSTALLED_NAV_MANIFESTS,
-  overrides
-);
-'''
-
-
-def render_public_nav_overrides_json() -> str:
-    """``stapel.nav.json`` — the project's override channel, pre-seeded with
-    the container's own `account.root` so the one entry a reader is most
-    likely to want to retune is already visible in the file."""
-    return json.dumps(
-        {
-            "overrides": {
-                ACCOUNT_ROOT_ENTRY["id"]: {
-                    "menuVisible": True,
-                    "order": ACCOUNT_ROOT_ENTRY["order"],
-                }
-            }
-        },
-        indent=2,
-    ) + "\n"
 
 
 # Locales the pairs actually publish a catalogue for (`<pkg>/i18n/<locale>`).
@@ -4312,9 +4120,11 @@ PUBLIC_DEV_DEPS = {
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^4.3.0",
     "eslint": "^9.30.0",
+    "jsdom": "^26.1.0",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.35.0",
     "vite": "^6.0.0",
+    "vitest": "^3.2.7",
 }
 
 
@@ -4354,6 +4164,7 @@ def render_public_package_json(
             "build": "tsc --noEmit && vite build",
             "preview": "vite preview",
             "lint": "eslint .",
+            "test": "vitest run --passWithNoTests",
             "gen:tokens": (
                 "stapel-tokens --theme ./stapel.theme.json "
                 "--out ./src/stapel-tokens --targets core"
@@ -4406,6 +4217,7 @@ def render_public_vite_config_ts(targets: list[dict] | list[str]) -> str:
         rules.append(f'        "{key}": {{ {opts} }},')
     proxy = "\n".join(rules)
     return f'''\
+/// <reference types="vitest/config" />
 import {{ defineConfig, loadEnv }} from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -4426,6 +4238,10 @@ export default defineConfig(({{ mode }}) => {{
 
   return {{
     plugins: [react()],
+    test: {{
+      // One react-router instance for the app's modules and the shell's.
+      server: {{ deps: {{ inline: [/@stapel\\//, /react-router/] }} }},
+    }},
     server: {{
       host: true,
       port: 5173,
@@ -4507,3 +4323,670 @@ export default tseslint.config(
   }}
 );
 '''
+
+
+# ---------------------------------------------------------------------------
+# the shell: one layout over every route (navigation-templates spec §4.2, W0)
+# ---------------------------------------------------------------------------
+#
+# Both shapes (`composition.react.shell`) write the same set of files; only
+# their data differs: `src/nav.generated.ts` (manifests, every destination's
+# absolute address, the two resolved trees), the chrome component (one
+# `<PublicShell/>` or `<AppShell/>` that reads the session's three-state
+# status), `src/routes.tsx` (one layout route, id `stapel-shell`, over every
+# route), the own-pages seam (`src/app.pages.ts` written once, `src/AppPage.tsx`
+# generated) and four generated gates.
+
+
+def render_shell_nav_generated_ts(
+    manifests: list[dict], *, paths: dict[str, str], has_accounts: bool, guest_wall: bool,
+) -> str:
+    """``src/nav.generated.ts`` for the shell: the installed manifests (the
+    pairs', the container roots and the project's own pages), ``NAV_PATHS``
+    (every routed destination's absolute address, as the route tree mounts
+    it), and the resolved trees.
+
+    The trees are ANCHORED: each entry's ``linkPath`` is replaced by its
+    address from ``NAV_PATHS``. A manifest's relative path (``settings``) is
+    relative to wherever a host nests its routes, and a menu link renders
+    relative to the route that draws the chrome — which is now the root
+    layout, so an unanchored ``settings`` would link to ``/settings``.
+    """
+    from .composition.react.shell import strip_private
+
+    clean = [
+        {"package": m["package"], "version": m["version"],
+         "entries": [strip_private(e) for e in m["entries"]]}
+        for m in manifests
+    ]
+    manifests_json = json.dumps(clean, indent=2)
+    paths_json = json.dumps(dict(sorted(paths.items())), indent=2)
+    member = "resolveMemberNav" if has_accounts else "resolvePublicNav"
+    imports = sorted({member, "resolvePublicNav"})
+    guest_tree = "RESOLVED_NAV_MEMBER" if (guest_wall and has_accounts) else "RESOLVED_NAV_PUBLIC"
+    guest_note = (
+        "a guest sees the member destinations too (`guest.memberDestinations: wall`):\n"
+        " * opening one leads to sign-in with the way back, so nobody has to know a\n"
+        " * destination exists before they can find it"
+        if guest_wall and has_accounts else
+        "a guest sees the public destinations only"
+    )
+    return f'''\
+/**
+ * GENERATED — do not hand-edit (stapel.composition.json `navigation.resolved.generated`
+ * holds its hash). The nav data of this app: every installed pair's mirrored
+ * nav manifest, the container's own sections and the project's own pages
+ * (stapel.app-nav.json, project root). Add a screen of your own by adding an
+ * entry there and a binding in src/app.pages.ts, then regenerate.
+ */
+import type {{ PackageNavManifest }} from "@stapel/core";
+import type {{ NavOverridesFile, ResolvedNavEntry }} from "@stapel/shell-react";
+import {{ {", ".join(imports)} }} from "@stapel/shell-react";
+import stapelNavOverrides from "../stapel.nav.json";
+
+export const INSTALLED_NAV_MANIFESTS: readonly PackageNavManifest[] = {manifests_json} as const;
+
+/** Every routed destination's absolute address, as src/routes.tsx mounts it. */
+export const NAV_PATHS: Readonly<Record<string, string>> = {paths_json};
+
+const overrides = stapelNavOverrides as NavOverridesFile;
+
+function anchor(entries: readonly ResolvedNavEntry[]): readonly ResolvedNavEntry[] {{
+  return entries.map((entry) => ({{
+    ...entry,
+    linkPath: NAV_PATHS[entry.id] ?? entry.linkPath,
+    ...(entry.children !== undefined ? {{ children: anchor(entry.children) }} : {{}}),
+  }}));
+}}
+
+/** What an anonymous visitor may be shown. */
+export const RESOLVED_NAV_PUBLIC: readonly ResolvedNavEntry[] = anchor(
+  resolvePublicNav(INSTALLED_NAV_MANIFESTS, overrides)
+);
+
+/** What a signed-in member is shown. */
+export const RESOLVED_NAV_MEMBER: readonly ResolvedNavEntry[] = anchor(
+  {member}(INSTALLED_NAV_MANIFESTS, overrides)
+);
+
+/** What the shell shows a guest: {guest_note}. */
+export const RESOLVED_NAV_GUEST: readonly ResolvedNavEntry[] = {guest_tree};
+
+/** The member tree under its older name. */
+export const RESOLVED_NAV: readonly ResolvedNavEntry[] = RESOLVED_NAV_MEMBER;
+'''
+
+
+def render_shell_nav_overrides_json(overrides: dict, *, seed_account: bool) -> str:
+    """``stapel.nav.json``: the runtime override channel, carrying the
+    block's destination choices (hidden, order, pinned) so the shipped
+    resolver draws what the plan says."""
+    out: dict = {}
+    if seed_account:
+        out[ACCOUNT_ROOT_ENTRY["id"]] = {"menuVisible": True, "order": ACCOUNT_ROOT_ENTRY["order"]}
+    for entry_id, values in overrides.items():
+        out.setdefault(entry_id, {}).update(values)
+    return json.dumps({"overrides": out}, indent=2) + "\n"
+
+
+SHELL_BRAND_TSX = '''\
+function ShellBrand(): ReactElement {
+  // The host-resolved wordmark when a <SiteProvider/> answers, the product's
+  // title otherwise: the header never starts empty.
+  const site = useOptionalSite();
+  if (site?.brand != null) return <SiteBrand />;
+  return (
+    <Link to="/" data-testid="shell-brand" data-stapel-slot="brand">
+      {TITLE}
+    </Link>
+  );
+}
+'''
+
+SIGN_IN_ENTRY_TSX = '''\
+function SignInEntry(): ReactElement {
+  // A guest's account entry. "Guest" is the session's own answer: a session
+  // minted by an anonymous action (add to cart) is still a guest here.
+  const t = useT();
+  return (
+    <Link to={SIGN_IN_PATH} data-testid="public-shell-sign-in" data-stapel-slot="account">
+      <Button type="primary">{t(SHELL_I18N_KEYS.publicSignIn)}</Button>
+    </Link>
+  );
+}
+'''
+
+
+def render_shell_chrome_tsx(
+    *,
+    shape: str,
+    name: str,
+    title: str,
+    filled: dict[str, list[dict]],
+    sign_in_path: str | None,
+    has_accounts: bool,
+    auth_wired: bool,
+    badge_ids=(),
+    shell_providers: list[tuple[str, str]] = (),
+    phone_chrome: str = "dock",
+    legal_links: list[tuple[str, str]] = (),
+) -> str:
+    """The chrome component (``src/chrome.generated.tsx`` in a monolith,
+    ``src/StorefrontShell.tsx`` in a split storefront): ``<PublicShell/>``
+    for the ``storefront`` shape, ``<AppShell/>`` for ``app``.
+
+    It reads the session's three-state status, never a two-state
+    "authenticated": only a signed-in member gets the member tree and the
+    member slot contents; a guest (no session, or a session minted by an
+    anonymous action) gets the guest tree, the slot contents a guest may see
+    and the sign-in entry whenever the product has accounts. The brand is
+    never empty: the host's wordmark under a ``<SiteProvider/>``, the
+    product's title otherwise.
+    """
+    from .create_project import shell_has_phone_chrome, shell_self_themes
+
+    sources = nav_badge_sources(badge_ids) if shell_has_phone_chrome() else []
+    sign_in = has_accounts and sign_in_path is not None
+    guest_of = {slot: [e for e in embeds if e.get("surface", "any") != "member"]
+                for slot, embeds in filled.items()}
+    names: set[str] = set()
+
+    def slot_jsx(slot: str, member: bool, extra: str = "") -> str | None:
+        embeds = filled.get(slot, []) if member else guest_of.get(slot, [])
+        parts = []
+        if embeds:
+            comp = slot_component_name(slot) + ("" if member else "Guest")
+            names.add(comp)
+            parts.append(f"<{comp} />")
+        if extra:
+            parts.append(extra)
+        if not parts:
+            return None
+        single = len(parts) == 1 and parts[0].count("<") == 1
+        return parts[0] if single else "<>" + "".join(parts) + "</>"
+
+    lines = [
+        "/**",
+        f" * GENERATED — the app's chrome ({'PublicShell' if shape == 'storefront' else 'AppShell'},"
+        " stapel.composition.json `navigation.resolved`).",
+        " *",
+        " * One chrome over every route (src/routes.tsx mounts it as the layout",
+        " * route `stapel-shell`). It decides two things the shell cannot read for",
+        " * itself: who is looking (the session's three-state status — a guest",
+        " * session minted by an anonymous action is a guest here) and what each",
+        " * slot holds for them. Change the composition and regenerate rather than",
+        " * editing this file.",
+        " */",
+        'import type { ReactElement } from "react";',
+    ]
+    antd = (["Button"] if sign_in else []) + (["Space"] if legal_links else [])
+    if antd:
+        lines.append(f'import {{ {", ".join(antd)} }} from "antd";')
+    lines.append('import { Link } from "react-router";')
+    core = ["useOptionalSite"]
+    if has_accounts:
+        core.append("useActiveSessionStatus")
+    if sign_in or legal_links:
+        core.append("useT")
+    lines.append(f'import {{ {", ".join(sorted(core))} }} from "@stapel/core";')
+    if sign_in:
+        lines.append('import { SHELL_I18N_KEYS } from "@stapel/shell-react";')
+    chrome = "PublicShell" if shape == "storefront" else "AppShell"
+    shell_names = [chrome, "SiteBrand"]
+    if legal_links and shape == "storefront":
+        shell_names.append("SiteLegalFooter")
+    lines.append(f'import {{ {", ".join(shell_names)} }} from "@stapel/shell-react/default";')
+    if shape == "app" and auth_wired:
+        lines.append('import { useAuthSessionState } from "@stapel/auth-react";')
+    for src in sources:
+        lines.append(f'import {{ {src["hook"]} }} from "{src["package"]}";')
+    for package, provider in shell_providers:
+        lines.append(f'import {{ {provider} }} from "{package}";')
+    lines.append(
+        'import { RESOLVED_NAV_GUEST, RESOLVED_NAV_MEMBER } from "./nav.generated.js";'
+        if has_accounts else 'import { RESOLVED_NAV_GUEST } from "./nav.generated.js";')
+    embeds_import_at = len(lines)
+    lines.append("")
+    lines.append(f"const TITLE = {json.dumps(title)};")
+    if sign_in:
+        lines.append(f"const SIGN_IN_PATH = {json.dumps(sign_in_path)};")
+    lines.append("")
+    lines.extend(SHELL_BRAND_TSX.splitlines())
+    if sign_in:
+        lines.append("")
+        lines.extend(SIGN_IN_ENTRY_TSX.splitlines())
+    if legal_links:
+        lines.append("")
+        lines.append("/** The legal destinations every screen reaches (policy, data requests). */")
+        lines.append("const LEGAL_LINKS: readonly (readonly [string, string])[] = [")
+        for path, label in legal_links:
+            lines.append(f"  [{json.dumps(path)}, {json.dumps(label)}],")
+        lines.append("];")
+        lines.append("")
+        lines.append("function LegalLinks(): ReactElement {")
+        lines.append("  const t = useT();")
+        lines.append("  return (")
+        lines.append('    <Space wrap size="small" data-testid="shell-legal-links">')
+        lines.append("      {LEGAL_LINKS.map(([path, label]) => (")
+        lines.append("        <Link key={path} to={path}>")
+        lines.append("          {t(label)}")
+        lines.append("        </Link>")
+        lines.append("      ))}")
+        lines.append("    </Space>")
+        lines.append("  );")
+        lines.append("}")
+    lines.append("")
+
+    account_guest_extra = "<SignInEntry />" if sign_in else ""
+    lines.append(f"export function {name}(): ReactElement {{")
+    if has_accounts:
+        lines.append('  const member = useActiveSessionStatus() === "authenticated";')
+    else:
+        lines.append("  const member = false;")
+    if shape == "app" and auth_wired:
+        lines.append("  const { user } = useAuthSessionState();")
+    for src in sources:
+        lines.append(f'  const {src["var"]} = {src["hook"]}();')
+    nav_expr = "member ? RESOLVED_NAV_MEMBER : RESOLVED_NAV_GUEST" if has_accounts else "RESOLVED_NAV_GUEST"
+
+    props: list[str] = [f"      nav={{{nav_expr}}}"]
+    if not shell_self_themes():
+        props.append('      mode="light"')
+    if shape == "storefront":
+        props.append("      brand={<ShellBrand />}")
+        if shell_has_phone_chrome():
+            props.append(f'      phoneChrome="{phone_chrome}"')
+        member_account = slot_jsx("topbar.end", True) or "<></>"
+        guest_account = slot_jsx("topbar.end", False, account_guest_extra) or "<></>"
+        if has_accounts:
+            props.append(
+                f"      accountSlot={{member ? {member_account} : {guest_account}}}")
+        else:
+            props.append(f"      accountSlot={{{guest_account}}}")
+        for slot, prop in (("topbar.center", "searchSlot"), ("browsebar", "categorySlot"),
+                           ("footer", "footer")):
+            legal = ("<SiteLegalFooter />" "<LegalLinks />") if (
+                slot == "footer" and legal_links) else ""
+            member_jsx = slot_jsx(slot, True, legal)
+            guest_jsx = slot_jsx(slot, False, legal)
+            if member_jsx is None and guest_jsx is None:
+                continue
+            if has_accounts and member_jsx != guest_jsx:
+                props.append(
+                    f"      {prop}={{member ? {member_jsx or 'undefined'} : "
+                    f"{guest_jsx or 'undefined'}}}")
+            else:
+                props.append(f"      {prop}={{{guest_jsx or member_jsx}}}")
+    else:
+        props.append("      logo={<ShellBrand />}")
+        if auth_wired and shell_self_themes():
+            props.append("      staff={user?.is_staff === true}")
+        member_slots: list[str] = []
+        guest_slots: list[str] = []
+        foot = ("sidenav.foot", "sheet.foot") if legal_links else ()
+        member_slot_ids = list(dict.fromkeys([*filled, *foot]))
+        for slot in member_slot_ids:
+            jsx = slot_jsx(slot, True, "<LegalLinks />" if slot in foot else "")
+            if jsx:
+                member_slots.append(f"{json.dumps(slot)}: {jsx}")
+        guest_slot_ids = list(dict.fromkeys([*filled, "topbar.end", *foot]))
+        for slot in guest_slot_ids:
+            extra = account_guest_extra if slot == "topbar.end" else ""
+            if slot in foot:
+                extra = "<LegalLinks />"
+            jsx = slot_jsx(slot, False, extra)
+            if jsx:
+                guest_slots.append(f"{json.dumps(slot)}: {jsx}")
+        member_obj = "{ " + ", ".join(member_slots) + " }" if member_slots else "{}"
+        guest_obj = "{ " + ", ".join(guest_slots) + " }" if guest_slots else "{}"
+        if has_accounts and member_obj != guest_obj:
+            props.append(f"      slots={{member ? {member_obj} : {guest_obj}}}")
+        elif guest_slots or member_slots:
+            props.append(f"      slots={{{guest_obj if guest_slots else member_obj}}}")
+    if sources:
+        props.extend(_nav_badges_lines(sources, "      "))
+
+    body = [f"    <{chrome}", *props, "    />"]
+    if shell_providers and shape == "app":
+        lines.append("  const chrome = (")
+        lines.extend(body)
+        lines.append("  );")
+        wrapped = "chrome"
+        opened = "{chrome}"
+        for _package, provider in reversed(shell_providers):
+            opened = f"<{provider}>{opened}</{provider}>"
+        lines.append("  // The member area's shared state (the active workspace) sits above")
+        lines.append("  // the chrome and every member screen; a guest has none to share.")
+        lines.append(f"  return member ? {opened} : {wrapped};")
+    else:
+        lines.append("  return (")
+        lines.extend(body)
+        lines.append("  );")
+    lines.append("}")
+    lines.append("")
+    if names:
+        lines.insert(
+            embeds_import_at,
+            f'import {{ {", ".join(sorted(names))} }} from "./embeds.generated.js";')
+    return "\n".join(lines)
+
+
+APP_PAGES_TS = '''\
+/**
+ * The project's own pages — written once by the scaffold, then yours.
+ *
+ * Each screen you add is TWO lines in two files:
+ *   1. an entry in stapel.app-nav.json (project root): its id (`app.<screen>`),
+ *      label key, icon, path, where it sits (top or under a parent such as
+ *      `account.root`), who sees it (`surface`), and `via` when it is reached
+ *      from another screen rather than from the menu;
+ *   2. a binding here: the id -> the page component.
+ * Then run `stapel-nav-regenerate .` at the project root: the page is mounted
+ * inside the shell and placed in the navigation. A page renders its content
+ * only — no own header, navigation or full-viewport frame.
+ */
+import type { ComponentType } from "react";
+
+export const APP_PAGES: Readonly<Record<string, ComponentType>> = {
+  // "app.cart": CartPage,
+};
+'''
+
+APP_PAGE_TSX = '''\
+/**
+ * GENERATED — mounts one of the project's own pages (src/app.pages.ts) inside
+ * the shell, or names the missing binding instead of rendering nothing.
+ */
+import type { ReactElement } from "react";
+import { APP_PAGES } from "./app.pages.js";
+import { NavPlaceholder } from "./NavPlaceholder.js";
+
+export function AppPage({ id }: { readonly id: string }): ReactElement {
+  const Page = APP_PAGES[id];
+  if (Page === undefined) {
+    return (
+      <NavPlaceholder
+        entryId={id}
+        component="APP_PAGES entry"
+        pkg="src/app.pages.ts"
+        missing={["a binding in src/app.pages.ts"]}
+      />
+    );
+  }
+  return <Page />;
+}
+'''
+
+APP_NAV_JSON = """\
+{
+  "version": 1,
+  "entries": []
+}
+"""
+
+
+def render_shell_nav_test_ts() -> str:
+    """G2 — the nav gate, both directions: every destination the menus offer
+    is a mounted route, AND every mounted route is reached from the shell
+    (`navigation.resolved.reach`) or declared a deliberate deep page."""
+    return """\
+// @vitest-environment jsdom
+/**
+ * GENERATED — the nav gate (G2), both directions:
+ *  1. every destination the menus offer is a mounted route;
+ *  2. every mounted route is reached from the shell — a menu destination, an
+ *     embed that opens it, a `via` screen, the home or the sign-in route — or
+ *     is a deliberate deep page (an address with a parameter, or hidden on
+ *     purpose). `navigation.resolved.reach` in stapel.composition.json says how.
+ * A route added to src/routes.tsx by hand is reached by nothing and fails (2):
+ * add the page through stapel.app-nav.json + src/app.pages.ts instead.
+ */
+import { describe, expect, it } from "vitest";
+import type { RouteObject } from "react-router";
+import type { ResolvedNavEntry } from "@stapel/shell-react";
+import composition from "../../stapel.composition.json";
+import { NAV_PATHS, RESOLVED_NAV_GUEST, RESOLVED_NAV_MEMBER } from "../nav.generated.js";
+import { router } from "../routes.js";
+
+const reach: Record<string, string> = composition.navigation.resolved.reach;
+
+function join(prefix: string, path: string): string {
+  if (path.startsWith("/")) return path;
+  const base = prefix.replace(/\\/$/, "");
+  return path === "" ? base || "/" : `${base}/${path}`;
+}
+
+function mountedPaths(routes: readonly RouteObject[], prefix = ""): Set<string> {
+  const out = new Set<string>();
+  for (const route of routes) {
+    const here = route.path === undefined ? prefix : join(prefix, route.path);
+    if (route.index === true) out.add(prefix || "/");
+    else if (route.path !== undefined && route.element !== undefined) out.add(here || "/");
+    for (const child of mountedPaths(route.children ?? [], here)) out.add(child);
+  }
+  return out;
+}
+
+function linked(entries: readonly ResolvedNavEntry[]): string[] {
+  return entries.flatMap((entry) => [entry.linkPath, ...linked(entry.children ?? [])]);
+}
+
+describe("nav gate", () => {
+  it("mounts a route for every menu destination", () => {
+    const mounted = mountedPaths(router.routes);
+    const offered = [...linked(RESOLVED_NAV_MEMBER), ...linked(RESOLVED_NAV_GUEST)];
+    expect(offered.filter((path) => !mounted.has(path))).toEqual([]);
+  });
+
+  it("reaches every mounted route from the shell or declares it a deep page", () => {
+    const mounted = [...mountedPaths(router.routes)].filter((path) => !path.endsWith("*"));
+    expect(mounted.filter((path) => reach[path] === undefined)).toEqual([]);
+  });
+
+  it("finds every menu reason in the menus it names", () => {
+    const offered = new Set([...linked(RESOLVED_NAV_MEMBER), ...linked(RESOLVED_NAV_GUEST)]);
+    const menu = Object.entries(reach).filter(([, why]) => why.startsWith("menu:"));
+    expect(
+      menu.filter(([path, why]) => NAV_PATHS[why.slice(5)] !== path || !offered.has(path))
+    ).toEqual([]);
+  });
+});
+"""
+
+
+def render_shell_test_tsx(*, has_modules: bool, sign_in_path: str | None, shell_testid: str) -> str:
+    """G1 (every leaf route under the shell layout) and the anonymous home
+    check (the shell and, when the product has accounts, a sign-in entry)."""
+    modules_import = (
+        '    const { ModulesProvider } = await import("../modules.js");\n' if has_modules else "")
+    app_open = "      <ModulesProvider>\n        " if has_modules else "      "
+    app_close = "\n      </ModulesProvider>" if has_modules else ""
+    sign_in_check = (
+        f'    expect(container.querySelector(\'a[href="{sign_in_path}"]\')).not.toBeNull();\n'
+        if sign_in_path else "")
+    return f"""\
+// @vitest-environment jsdom
+/**
+ * GENERATED — the shell gates.
+ *  G1: every route renders inside the shell layout route (`stapel-shell`),
+ *      except the full-screen routes `navigation.resolved.bare` lists.
+ *  An anonymous visitor at `/` sees the shell{" and a sign-in entry" if sign_in_path else ""}.
+ */
+import {{ act }} from "react";
+import {{ createRoot }} from "react-dom/client";
+import {{ afterEach, describe, expect, it, vi }} from "vitest";
+import type {{ RouteObject }} from "react-router";
+import composition from "../../stapel.composition.json";
+import {{ router }} from "../routes.js";
+
+const bare: readonly string[] = composition.navigation.resolved.bare;
+
+function outsideShell(routes: readonly RouteObject[], inShell: boolean, out: string[]): string[] {{
+  for (const route of routes) {{
+    const here = inShell || route.id === "stapel-shell";
+    const leaf = (route.children ?? []).length === 0;
+    if (leaf && (route.path !== undefined || route.index === true) && !here) {{
+      out.push(route.path ?? "(index)");
+    }}
+    outsideShell(route.children ?? [], here, out);
+  }}
+  return out;
+}}
+
+describe("shell layout", () => {{
+  afterEach(() => {{
+    vi.unstubAllGlobals();
+  }});
+
+  it("mounts every route inside the shell layout route", () => {{
+    expect(outsideShell(router.routes, false, []).filter((path) => !bare.includes(path))).toEqual([]);
+  }});
+
+  it("renders the shell{" and a sign-in entry" if sign_in_path else ""} for an anonymous visitor at /", async () => {{
+    (globalThis as {{ IS_REACT_ACT_ENVIRONMENT?: boolean }}).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.stubGlobal(
+      "matchMedia",
+      (query: string) => ({{
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: () => undefined,
+        removeListener: () => undefined,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        dispatchEvent: () => false,
+      }})
+    );
+    class Observer {{
+      observe(): void {{}}
+      unobserve(): void {{}}
+      disconnect(): void {{}}
+      takeRecords(): [] {{
+        return [];
+      }}
+    }}
+    vi.stubGlobal("ResizeObserver", Observer);
+    vi.stubGlobal("IntersectionObserver", Observer);
+    vi.stubGlobal("scrollTo", () => undefined);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("{{}}", {{ status: 401, headers: {{ "Content-Type": "application/json" }} }}))
+    );
+    const {{ createMemoryRouter, RouterProvider }} = await import("react-router");
+    const {{ routes }} = await import("../routes.js");
+{modules_import}    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => {{
+      root.render(
+{app_open}<RouterProvider router={{createMemoryRouter(routes, {{ initialEntries: ["/"] }})}} />{app_close}
+      );
+    }});
+    await act(async () => {{
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }});
+    expect(container.querySelector('[data-testid="{shell_testid}"]')).not.toBeNull();
+{sign_in_check}    await act(async () => {{
+      root.unmount();
+    }});
+    container.remove();
+  }});
+}});
+"""
+
+
+SHELL_LINT_TEST_TS = """\
+/**
+ * GENERATED — the shell lint: a page renders inside the shell layout, never
+ * around it.
+ *  - Only src/routes.tsx builds a router and only src/main.tsx mounts one: a
+ *    second router (createBrowserRouter, <Routes>, <BrowserRouter>) is a tree
+ *    the shell is not the layout of.
+ *  - A page module draws content only: no full-viewport frame
+ *    (`minHeight: "100vh"`), no own <header> or <nav> landmark — the shell
+ *    owns the header and the navigation on every route.
+ * What it cannot see: a page mounted correctly but linked from nowhere — the
+ * nav gate (nav.test.ts) is that check.
+ */
+import { describe, expect, it } from "vitest";
+
+const sources = import.meta.glob("../**/*.tsx", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
+const OWN = new Set(["../routes.tsx", "../main.tsx"]);
+const ROUTER = /createBrowserRouter|createMemoryRouter|createHashRouter|<BrowserRouter\\b|<HashRouter\\b|<Routes\\b|<RouterProvider\\b/;
+const FRAME = /min-?[hH]eight:\\s*["']?100vh|<header\\b|<nav\\b/;
+
+function isTest(file: string): boolean {
+  return file.startsWith("./") || file.includes("/__tests__/");
+}
+
+describe("shell lint", () => {
+  it("builds and mounts the router only where the scaffold does", () => {
+    const offenders = Object.entries(sources)
+      .filter(([file]) => !OWN.has(file) && !isTest(file))
+      .filter(([, text]) => ROUTER.test(text))
+      .map(([file]) => file);
+    expect(offenders).toEqual([]);
+  });
+
+  it("keeps every page inside the shell's frame", () => {
+    const offenders = Object.entries(sources)
+      .filter(([file]) => !isTest(file) && !OWN.has(file))
+      .filter(([, text]) => FRAME.test(text))
+      .map(([file]) => file);
+    expect(offenders).toEqual([]);
+  });
+});
+"""
+
+
+def render_generated_hash_test_ts(generated: list[str], *, frontend_prefix: str) -> str:
+    """G4 — the generated files equal the hashes the scaffold recorded."""
+    del generated
+    return f"""\
+/**
+ * GENERATED — G4: the generated nav files are exactly what the scaffold
+ * wrote (stapel.composition.json `navigation.resolved.generated`, SHA-256).
+ * A hand edit fails here: change the composition (stapel.composition.json,
+ * stapel.app-nav.json) and run `stapel-nav-regenerate` instead.
+ */
+import {{ describe, expect, it }} from "vitest";
+import composition from "../../stapel.composition.json";
+
+const files = import.meta.glob(["../**/*.ts", "../**/*.tsx"], {{
+  query: "?raw",
+  import: "default",
+  eager: true,
+}}) as Record<string, string>;
+
+const recorded: Record<string, string> = composition.navigation.resolved.generated;
+const PREFIX = {json.dumps(frontend_prefix)};
+
+async function sha256(text: string): Promise<string> {{
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}}
+
+describe("generated files", () => {{
+  it("are byte-identical to what the scaffold recorded", async () => {{
+    const drift: string[] = [];
+    for (const [path, hash] of Object.entries(recorded)) {{
+      const text = files[`../${{path.slice(PREFIX.length).replace(/^src\\//, "")}}`];
+      if (text === undefined || (await sha256(text)) !== hash) drift.push(path);
+    }}
+    expect(drift).toEqual([]);
+  }});
+}});
+"""
+
+
+def render_app_nav_json(entries=()) -> str:
+    """``stapel.app-nav.json`` (project root): the project's own pages, in the
+    neutral entry shape (`id` app.<screen>, `labelKey`, `icon` from the
+    neutral vocabulary, `path`, `level`, `parentId`, `menuVisibleDefault`,
+    `surface`, `order`, `action`, `via`)."""
+    return json.dumps({"version": 1, "entries": list(entries)}, indent=2) + "\n"
