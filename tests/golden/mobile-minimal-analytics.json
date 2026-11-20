@@ -34,7 +34,7 @@
  "mobile/shared/src/androidMain/kotlin/golden/AndroidApp.kt": "25a8d47e09513ef4bcb646b0f4786d481648c9af482219dafe06bd80b3bd0836",
  "mobile/shared/src/androidMain/kotlin/golden/AppProviders.android.kt": "6f6912a8797b6ff813100a40826cc8b924a5f897c6cac96c273d8ced275df853",
  "mobile/shared/src/commonMain/kotlin/golden/App.kt": "f5b0091566a62db63bc7ebdb2000a47ca095b6589b96f2aa449a91787e36404b",
- "mobile/shared/src/commonMain/kotlin/golden/AppAnalytics.kt": "a0ff8e0cbe7225502bf7f77b937c5c424b4e0a5ac4c010a7d9326893f62645f2",
+ "mobile/shared/src/commonMain/kotlin/golden/AppAnalytics.kt": "ddd83b3d773bdc9ce31478513c28b5ac24113b1907c69807eb79375c6a338b6c",
  "mobile/shared/src/commonMain/kotlin/golden/AppProviders.kt": "362e2390718792e46c8aea937645c6ebbe1fdb2c4497eb38e00f1bd295a2e858",
  "mobile/shared/src/commonTest/kotlin/golden/NavGateTest.kt": "78f08d54999c2da5fd2973a57bb6f07c42802fbc29a13fddba5261aba246ea0c",
  "mobile/shared/src/commonTest/kotlin/golden/ProvidersGateTest.kt": "5f3aec178b53e2fa5faff39d36ed577507034fe9eba930a2ea8dee1ef17223b5",

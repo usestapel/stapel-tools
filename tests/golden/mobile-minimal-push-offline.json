@@ -38,7 +38,7 @@
  "mobile/shared/src/androidMain/kotlin/golden/AppProviders.android.kt": "723802e770ffeeff14395ea9d8ce8eac7e2b31a7a59773e834782c6796455d0d",
  "mobile/shared/src/androidMain/kotlin/golden/DataDirectory.android.kt": "c53485828f8c07958281477cbbfef91c166ba458d7821e4c728437c48cc190db",
  "mobile/shared/src/commonMain/kotlin/golden/App.kt": "a401f3c3db66c26acecf0f1eb9b5513a3fe692e1a96094fddf4ec89580beb375",
- "mobile/shared/src/commonMain/kotlin/golden/AppAnalytics.kt": "a0ff8e0cbe7225502bf7f77b937c5c424b4e0a5ac4c010a7d9326893f62645f2",
+ "mobile/shared/src/commonMain/kotlin/golden/AppAnalytics.kt": "ddd83b3d773bdc9ce31478513c28b5ac24113b1907c69807eb79375c6a338b6c",
  "mobile/shared/src/commonMain/kotlin/golden/AppProviders.kt": "362e2390718792e46c8aea937645c6ebbe1fdb2c4497eb38e00f1bd295a2e858",
  "mobile/shared/src/commonMain/kotlin/golden/AppPush.kt": "9c4db00abb3310dee63fdc13e97f29b5968070c3f118ce91959f50462d19fbca",
  "mobile/shared/src/commonMain/kotlin/golden/DataDirectory.kt": "01582cb6161e3844ace9299c58f55777b3f06cb83dac628b961fa999eb2ae5bc",

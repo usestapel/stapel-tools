@@ -39,7 +39,15 @@ import stapel.ui.StapelText
  * @param target `android` | `ios` | `desktop`: the batch source of the first-party sink.
  */
 fun appAnalyticsModules(target: String): List<Module> = listOf(
-    analyticsModule(AnalyticsOptions(consentDefault = ConsentDefault.{{CONSENT_DEFAULT}}, registry = {{REGISTRY}})),
+    // The storage namespace names the app: on desktop it is a directory in the user's data folder,
+    // shared by every app that keeps the library default.
+    analyticsModule(
+        AnalyticsOptions(
+            consentDefault = ConsentDefault.{{CONSENT_DEFAULT}},
+            registry = {{REGISTRY}},
+            storageNamespace = "stapel-analytics-{{APP_ID}}",
+        ),
+    ),
     module { contribute<AnalyticsSink>("analytics.log") { LogSink(get()) } },
 {{COLLECTOR_LINE}})
 

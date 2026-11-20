@@ -1040,9 +1040,13 @@ val generateAppSecrets = tasks.register("generateAppSecrets") {
     if (secretsFile.exists()) inputs.file(secretsFile)
     outputs.dir(out)
     doLast {
-        val props = java.util.Properties()
-        if (secretsFile.exists()) secretsFile.inputStream().use { props.load(it) }
-        val key = envKey.orNull?.takeIf { it.isNotBlank() } ?: props.getProperty("appmetrica.apiKey")?.takeIf { it.isNotBlank() }
+        val fromFile = if (secretsFile.exists()) {
+            secretsFile.readLines().map { it.trim() }.firstOrNull { it.startsWith("appmetrica.apiKey=") }
+                ?.substringAfter("=")?.trim()
+        } else {
+            null
+        }
+        val key: String? = envKey.orNull?.takeIf { it.isNotBlank() } ?: fromFile?.takeIf { it.isNotBlank() }
         require(key == null || key.matches(Regex("[A-Za-z0-9-]+"))) { "AppMetrica API key: letters, digits and '-' only" }
         val f = out.get().asFile.resolve("{{PKG_PATH}}/generated/AppSecrets.kt")
         f.parentFile.mkdirs()

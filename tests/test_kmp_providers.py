@@ -114,8 +114,10 @@ class TestAnalytics:
         plan = _plan(analytics="")
         assert plan.composition["analytics"] == {"sinks": ["firebase"], "consent": "opt-in"}
         analytics = _text(plan, "mobile/shared/src/commonMain/kotlin/acme/AppAnalytics.kt")
-        assert ("analyticsModule(AnalyticsOptions(consentDefault = ConsentDefault.OptIn, "
-                "registry = AuthEvents.registry))") in analytics
+        assert "consentDefault = ConsentDefault.OptIn,\n" in analytics
+        assert "registry = AuthEvents.registry,\n" in analytics
+        # desktop keeps the hub's queue and consent in a per-user directory named by the namespace
+        assert 'storageNamespace = "stapel-analytics-example.acme",\n' in analytics
         assert "import stapel.auth.api.AuthEvents\n" in analytics
         assert 'contribute<AnalyticsSink>("analytics.log") { LogSink(get()) }' in analytics
         shared = _text(plan, SHARED)
