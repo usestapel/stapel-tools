@@ -2347,6 +2347,7 @@ def _create_monolith(project_dir: Path, ctx: dict, stapel_apps: list[str], broke
 def _mobile_request(
     project_type: str, slug: str, *, mobile_offline: bool, mobile_id: str | None,
     mobile_name: str | None, mobile_shell: str | None, mobile_maven_repo: str | None,
+    mobile_avatar_upload: bool = False,
 ):
     """The KMP PlatformRequest of this invocation: CLI values, plus the backend
     facts the mobile app needs (dev port, the project's own module and its mount)."""
@@ -2369,6 +2370,7 @@ def _mobile_request(
             ("offline", bool(mobile_offline)), ("app_id", mobile_id), ("app_name", mobile_name),
             ("repo", repo), ("dev_port", dev_port), ("custom", custom),
             ("serve_well_known", project_type == "monolith"),
+            ("avatar_upload", bool(mobile_avatar_upload)),
         ),
     )
 
@@ -2502,7 +2504,7 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
     from ._auth_model import render_base_posture
     from ._auth_model import resolve as resolve_auth_model
     from ._module_config import inject_unbilled_workspaces
-    from ._wiring import asgi_py, render_wiring
+    from ._wiring import asgi_py, render_wiring, seed_commands
 
     module_config = inject_unbilled_workspaces(module_config, feature_modules)
     if auth_comp is None and "auth" in feature_modules:
@@ -2532,6 +2534,11 @@ def _create_minimal(project_dir: Path, ctx: dict, feature_modules: list[str] | N
         "STAPEL_WIRING": render_wiring(feature_modules, flavor="minimal"),
         "JWT_CREATE_USERS_FROM_TOKEN": "False" if is_token_issuer else "True",
         "IDENTITY_ROLE": "token ISSUER" if is_token_issuer else "token CONSUMER",
+        # Reference-data seeds (the language catalogue, currencies) a monolith's
+        # bootstrap.sh runs; here they follow `migrate` in the README and `make run`.
+        "SEED_README": "".join(f"{cmd}\n" for cmd in seed_commands(feature_modules)),
+        "SEED_MAKE": "".join(f"{cmd.replace('python ', '$(PYTHON) ', 1)} && "
+                             for cmd in seed_commands(feature_modules)),
     }
 
     def r(s):
@@ -3168,6 +3175,7 @@ def create_project(
     mobile_name: str | None = None,
     mobile_shell: str | None = None,
     mobile_maven_repo: str | None = None,
+    mobile_avatar_upload: bool = False,
     navigation: dict | None = None,
     strict: bool = False,
 ):
@@ -3274,11 +3282,23 @@ def create_project(
             ("--mobile-offline", mobile_offline), ("--mobile-id", mobile_id),
             ("--mobile-name", mobile_name), ("--mobile-shell", mobile_shell),
             ("--mobile-maven-repo", mobile_maven_repo),
+            ("--mobile-avatar-upload", mobile_avatar_upload),
         ) if value
     ]
     if mobile is None and mobile_flags:
         print(f"Error: {', '.join(mobile_flags)} need --mobile kmp", file=sys.stderr)
         sys.exit(1)
+    if mobile_avatar_upload:
+        from .composition.kmp.registry import KMP_AVATAR_UPLOAD_MODULE
+
+        if "profiles" not in _expand_with_requires([m for m in modules if m != "core"]):
+            print("Error: --mobile-avatar-upload is the profiles brick's avatar change; "
+                  "select profiles", file=sys.stderr)
+            sys.exit(1)
+        if KMP_AVATAR_UPLOAD_MODULE not in modules:
+            modules = [*modules, KMP_AVATAR_UPLOAD_MODULE]
+            print(f"--mobile-avatar-upload: added {KMP_AVATAR_UPLOAD_MODULE} to the modules "
+                  "(the avatar upload's backend)")
 
     if theme is not None:
         if project_type != "monolith" and mobile is None:
@@ -3390,6 +3410,7 @@ def create_project(
                 project_type, slug, mobile_offline=mobile_offline, mobile_id=mobile_id,
                 mobile_name=mobile_name, mobile_shell=mobile_shell,
                 mobile_maven_repo=mobile_maven_repo,
+                mobile_avatar_upload=mobile_avatar_upload,
             )
             _mobile_composition(
                 {"slug": slug, "title": title, "url": url.rstrip("/")}, project_type,
@@ -3888,6 +3909,11 @@ def main():
              "mavenLocal (local) or a staging repository directory. Required while the "
              "train is unreleased; written to mobile/gradle.properties (stapel.repo).",
     )
+    mobile_group.add_argument(
+        "--mobile-avatar-upload", action="store_true",
+        help="The profiles brick's avatar change: adds cdn (its uploader's backend) to the "
+             "modules. The app still passes its picker: ProfilesBrick(picker = ...).",
+    )
     add_nav_arguments(parser)
     args = parser.parse_args()
     from .composition.model import CompositionError
@@ -4033,6 +4059,7 @@ def main():
         mobile_name=args.mobile_name,
         mobile_shell=args.mobile_shell,
         mobile_maven_repo=args.mobile_maven_repo,
+        mobile_avatar_upload=args.mobile_avatar_upload,
         navigation=navigation or None,
         strict=strict,
     )

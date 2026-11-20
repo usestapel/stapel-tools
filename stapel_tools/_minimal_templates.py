@@ -400,7 +400,7 @@ on TLS/HSTS/CSP hardening and the placeholder-secret guard when
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt -r requirements-dev.txt
 python manage.py migrate
-python manage.py runserver
+{{SEED_README}}python manage.py runserver
 ```
 
 `requirements-dev.txt` is only needed for `make controls` (lint + test); a
@@ -462,7 +462,7 @@ disk-doctor:
 \tstapel-disk doctor
 
 run:
-\t$(PYTHON) manage.py migrate && $(PYTHON) manage.py runserver
+\t$(PYTHON) manage.py migrate && {{SEED_MAKE}}$(PYTHON) manage.py runserver
 
 # --- Release seam (stapel docs/release-management.md, R-1) ------------------
 # Both targets need stapel-tools on PATH (pip install stapel-tools).

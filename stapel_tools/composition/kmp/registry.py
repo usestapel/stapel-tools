@@ -54,6 +54,18 @@ class KmpBinding:
 MOBILE_AUTH_KINDS: tuple[str, ...] = ("phone", "email", "password")
 
 
+#: brick -> (bricks it cannot be installed without, why). The KMP install rules stapel-kmp's
+#: descriptors state in prose: ``ProfilesBrick`` owns no session ("install it with a sign-in
+#: owner"), so an app with profiles and no auth brick would show its member screens to nobody.
+KMP_INSTALL_REQUIRES: dict[str, tuple[tuple[str, ...], str]] = {
+    "profiles": (("auth",), "ProfilesBrick owns no session; the auth brick is its sign-in owner"),
+}
+
+#: The backend module a brick's avatar upload talks to (``ProfilesBrick``'s default uploader is
+#: stapel-cdn's; the picker is the app's to pass).
+KMP_AVATAR_UPLOAD_MODULE = "cdn"
+
+
 @lru_cache(maxsize=1)
 def kmp_registry() -> dict:
     return json.loads(vendor.read_bytes("kmp-registry.json"))

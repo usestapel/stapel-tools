@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/usestapel/stapel-kmp",
-  "commit": "5a9b3e7c51c942b8fd5a0ed28161ab87cc10796c",
+  "commit": "7756fb8008cf2d93254ef0ce2db7d455c3e89cfd",
   "gradle": {
     "version": "9.7.0",
     "wrapperJarSha256": "7a9ce74cff467ca1bf60a4fcd9f05185acceda4d0f382434d393e17864262c5d",

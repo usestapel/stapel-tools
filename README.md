@@ -91,8 +91,16 @@ cd shop/mobile && make check        # every proof gate the machine can run
   and printed. Sign-in kinds the mobile client cannot complete yet (oauth,
   magic, sso, passkey, qr) are left out and named; a selection with none it
   can complete is refused.
+  Install rules: `profiles` needs `auth` with a sign-in model (`ProfilesBrick`
+  owns no session) — refused otherwise; it is emitted as `ProfilesBrick()`
+  with no picker.
 - `--mobile-offline` — the durable cache (`stapel-cache-room`) and its one
   `offline(...)` line.
+- `--mobile-avatar-upload` — the profiles avatar change: adds `cdn` (its
+  uploader's backend) to the modules; the app passes its picker,
+  `ProfilesBrick(picker = …)`. Reference-data seeds (`sync_languages` for
+  profiles) run in a monolith's `bootstrap.sh` and after `migrate` in a
+  minimal project's README and `make run`.
 - `--mobile-id`, `--mobile-name`, `--mobile-shell AdaptiveTabs|Stack` —
   application/bundle id (default from `--url` and the name), display name,
   shell template.

@@ -360,22 +360,28 @@ elif not os.environ.get("STAPEL_KMP_MAVEN_REPO"):
 @pytest.mark.slow
 @pytest.mark.skipif(_TOOLCHAIN_REASON is not None, reason=_TOOLCHAIN_REASON or "")
 def test_generated_app_passes_every_gate_and_signs_in(tmp_path):
-    """Scaffold minimal+auth with --mobile kmp, bring the SAME backend up on a
-    free local port, run mobile/scripts/mobile-check.sh with the walk. STRICT:
-    a gate this machine cannot run fails the test instead of passing it."""
+    """Scaffold minimal+auth+profiles (avatar upload: cdn) with --mobile kmp,
+    bring the SAME backend up on a free local port, run
+    mobile/scripts/mobile-check.sh with the walk. STRICT: a gate this machine
+    cannot run fails the test instead of passing it."""
     import socket
 
     repo = os.environ["STAPEL_KMP_MAVEN_REPO"]
     t0 = time.monotonic()
     project = TestCli()._run(
-        tmp_path, "--modules", "auth", "--auth-model", "public",
+        tmp_path, "--modules", "auth", "profiles", "--auth-model", "public",
         "--auth-kinds", "phone,email,password", "--posture", "prototype",
-        "--mobile", "kmp", "--mobile-maven-repo", repo, name="ksbproof")
+        "--mobile", "kmp", "--mobile-maven-repo", repo, "--mobile-avatar-upload",
+        name="ksbproof")
+    app = (project / "mobile/shared/src/commonMain/kotlin/ksbproof/App.kt").read_text()
+    assert "bricks(AuthBrick(), ProfilesBrick())" in app
     venv = project / ".venv"
     subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
     subprocess.run([str(venv / "bin/pip"), "install", "-q", "-r", "requirements.txt"],
                    cwd=project, check=True)
     subprocess.run([str(venv / "bin/python"), "manage.py", "migrate", "--noinput"],
+                   cwd=project, check=True, capture_output=True)
+    subprocess.run([str(venv / "bin/python"), "manage.py", "sync_languages"],
                    cwd=project, check=True, capture_output=True)
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -394,3 +400,83 @@ def test_generated_app_passes_every_gate_and_signs_in(tmp_path):
     print(f"scaffold -> all gates: {time.monotonic() - t0:.0f} s\n{result.stdout}")
     assert result.returncode == 0, result.stdout[-4000:] + result.stderr[-2000:]
     assert "NOT RUN" not in result.stdout
+
+
+# --------------------------------------------------------------------------- the profiles pair
+
+
+class TestProfilesBrick:
+    APP = "mobile/shared/src/commonMain/kotlin/acme/App.kt"
+
+    def test_the_registry_block_is_the_brick_ui_and_its_six_entries(self):
+        doc = json.loads((ROOT / "stapel_tools" / "data" / "composition-registry.json").read_text())
+        kmp = doc["bricks"]["profiles"]["platforms"]["kmp"]
+        assert kmp["ui"] == "stapel-profiles-ui"
+        assert kmp["entries"] == ["profiles.settings", "profiles.language", "profiles.notifications",
+                                  "profiles.contacts", "profiles.connections", "profiles.public"]
+        assert kmp["embeds"] == []
+
+    def test_installed_with_auth_as_a_bare_descriptor_without_a_picker(self):
+        plan = _plan(modules=("auth", "profiles"))
+        app = plan.files[self.APP]
+        assert "import stapel.profiles.ui.di.ProfilesBrick\n" in app
+        assert "bricks(AuthBrick(), ProfilesBrick())" in app
+        assert "picker" not in app
+        assert plan.composition["installed"] == ["auth", "profiles"]
+        assert plan.composition["avatarUpload"] == {"uploader": None, "picker": None}
+        assert any("ProfilesBrick(picker = …)" in n for n in plan.notes)
+
+    @pytest.mark.parametrize("modules,auth", [
+        (("profiles",), None),
+        (("auth", "profiles"), "none"),
+    ])
+    def test_profiles_without_auth_is_refused(self, modules, auth):
+        kw = {"auth": _auth(model="none", kinds=None)} if auth == "none" else {}
+        comp, request = _comp(modules=modules, **kw)
+        with pytest.raises(CompositionError, match="profiles cannot be installed without auth"):
+            emitter_for("kmp").validate(comp, request)
+
+    def test_avatar_upload_names_cdn_as_its_uploader(self):
+        plan = _plan(modules=("auth", "profiles", "cdn"),
+                     request=_request(avatar_upload=True))
+        assert plan.composition["avatarUpload"] == {"uploader": "cdn", "picker": None}
+        assert "bricks(AuthBrick(), ProfilesBrick())" in plan.files[self.APP]
+
+    def test_avatar_upload_without_cdn_is_refused_by_the_emitter(self):
+        comp, request = _comp(modules=("auth", "profiles"), request=_request(avatar_upload=True))
+        with pytest.raises(CompositionError, match="needs stapel-cdn"):
+            emitter_for("kmp").validate(comp, request)
+
+
+class TestProfilesCli:
+    def _run(self, tmp_path, *flags):
+        return TestCli()._run(tmp_path, *flags)
+
+    def test_avatar_upload_adds_cdn_and_the_languages_seed_follows_migrate(self, tmp_path, capsys):
+        project = self._run(tmp_path, "--modules", "auth", "profiles", "--auth-model", "public",
+                            "--auth-kinds", "phone,email,password", "--posture", "prototype",
+                            "--mobile", "kmp", "--mobile-maven-repo", "local",
+                            "--mobile-avatar-upload")
+        assert "added cdn to the modules" in capsys.readouterr().out
+        assert "stapel-cdn" in (project / "requirements.txt").read_text()
+        composition = json.loads((project / "mobile/stapel.composition.json").read_text())
+        assert "cdn" in composition["modules"]
+        assert composition["avatarUpload"] == {"uploader": "cdn", "picker": None}
+        assert ("python manage.py migrate\npython manage.py sync_languages\n"
+                in (project / "README.md").read_text())
+        assert ("$(PYTHON) manage.py migrate && $(PYTHON) manage.py sync_languages && "
+                "$(PYTHON) manage.py runserver" in (project / "Makefile").read_text())
+
+    def test_avatar_upload_without_profiles_is_refused(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
+            self._run(tmp_path, "--modules", "auth", "--mobile", "kmp",
+                      "--mobile-maven-repo", "local", "--mobile-avatar-upload")
+        assert "select profiles" in capsys.readouterr().err
+        assert not (tmp_path / "mob").exists()
+
+    def test_profiles_without_auth_is_refused_before_anything_is_written(self, tmp_path, capsys):
+        with pytest.raises(SystemExit):
+            self._run(tmp_path, "--modules", "profiles", "--auth-model", "none",
+                      "--mobile", "kmp", "--mobile-maven-repo", "local")
+        assert "profiles cannot be installed without auth" in capsys.readouterr().err
+        assert not (tmp_path / "mob").exists()

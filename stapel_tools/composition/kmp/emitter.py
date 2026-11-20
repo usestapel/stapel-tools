@@ -217,6 +217,21 @@ class KmpEmitter:
                     + "). Add one of phone,email,password to --auth-kinds, or drop --mobile.")
         installed = tuple(k for k in comp.modules if k in kmp_bindings()
                           and (k != "auth" or self._auth_installed(comp)))
+        from .registry import KMP_AVATAR_UPLOAD_MODULE, KMP_INSTALL_REQUIRES
+
+        for key in installed:
+            needs, why = KMP_INSTALL_REQUIRES.get(key, ((), ""))
+            absent = [n for n in needs if n not in installed]
+            if absent:
+                raise CompositionError(
+                    f"--mobile kmp: {key} cannot be installed without {', '.join(absent)} ({why}). "
+                    f"Select {', '.join(absent)} with a sign-in model (not --no-auth / "
+                    "--auth-model none), or drop --mobile.")
+        if request.option("avatar_upload") and (
+                "profiles" not in installed or KMP_AVATAR_UPLOAD_MODULE not in comp.modules):
+            raise CompositionError(
+                "--mobile-avatar-upload: the avatar upload is the profiles brick's and needs "
+                f"stapel-{KMP_AVATAR_UPLOAD_MODULE} on the backend; select profiles")
         missing = unreleased_artifacts(installed, offline=bool(request.option("offline")))
         if missing and request.option("repo", "central") == "central":
             raise CompositionError(
@@ -325,6 +340,18 @@ class KmpEmitter:
         custom = list(request.option("custom", ()) or ())
         custom_names = [c[0] for c in custom]
 
+        avatar: Optional[dict] = None
+        if "profiles" in installed:
+            from .registry import KMP_AVATAR_UPLOAD_MODULE
+
+            uploader = KMP_AVATAR_UPLOAD_MODULE if KMP_AVATAR_UPLOAD_MODULE in comp.modules else None
+            avatar = {"uploader": uploader, "picker": None}
+            notes.append(
+                "mobile: profiles avatar change is not drawn until the app passes its picker: "
+                "ProfilesBrick(picker = …)"
+                + ("" if uploader else f"; it also needs stapel-{KMP_AVATAR_UPLOAD_MODULE} on the "
+                   "backend (--mobile-avatar-upload)"))
+
         composition = {
             "platform": "kmp",
             "shell": {"template": shell, "slots": slots, "overrides": {}, "dropped": dropped},
@@ -339,6 +366,7 @@ class KmpEmitter:
             "signIn": sign_in,
             "signInMethods": sign_in_methods,
             "routes": routes,
+            **({"avatarUpload": avatar} if avatar is not None else {}),
             "app": {"id": app_id, "name": title, "scheme": scheme, "package": pkg,
                     "iosProduct": product},
             "stapelKmp": {"train": reg["train"], "group": reg["group"],
