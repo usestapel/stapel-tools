@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.85.2] — 2026-11-20
 
 - Registry pin: stapel-auth 0.54.0 (tokens carry their session as `sid`;
   `user.session_expired`; migration 0030).
