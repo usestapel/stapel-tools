@@ -211,7 +211,15 @@ _REPLAY_PROBE = textwrap.dedent('''
     def gated(request):
         return Response({"id": 1, "name": "x", "count": 1})
 
-    urlpatterns = [path("c/<int:pk>", card), path("c/mine", mine), path("g", gated)]
+    @api_view(["GET"])
+    @permission_classes([AllowAny])
+    def token(request):
+        # Open at DRF; the body accepts a session or a single-purpose header.
+        if request.user.is_authenticated or request.headers.get("X-Probe-Token"):
+            return Response({"id": 1, "name": "t", "count": 1})
+        return Response({"detail": "no"}, status=401)
+
+    urlpatterns = [path("c/<int:pk>", card), path("c/mine", mine), path("g", gated), path("t", token)]
 
     obj = {"type": "object", "required": ["id", "name", "count"], "properties": {
         "id": {"type": "integer"}, "name": {"type": "string"}, "count": {"type": "integer"}}}
@@ -220,7 +228,9 @@ _REPLAY_PROBE = textwrap.dedent('''
         "/c/{pk}": {"get": {"security": [{"jwt": []}, {}], "responses": ok}},
         "/c/mine": {"get": {"security": [{"jwt": []}], "responses": {**ok, "401": {}}}},
         "/g": {"get": {"security": [{"jwt": []}, {}], "responses": ok}},
-    }}
+        "/t": {"get": {"security": [{"jwt": []}, {"tok": []}], "responses": {**ok, "401": {}}}},
+    }, "components": {"securitySchemes": {
+        "tok": {"type": "apiKey", "in": "header", "name": "X-Probe-Token"}}}}
 
     from django.contrib.auth.models import User
     from stapel_tools.contract_gates import AuthStateReplay
@@ -239,6 +249,11 @@ _REPLAY_PROBE = textwrap.dedent('''
             original = me.get(url)
         result[name] = {"status": original.status_code, "replayed": replay.replayed,
                         "findings": [str(f) for f in replay.findings]}
+    replay = AuthStateReplay({"doc": schema}, {"anonymous": APIClient, "member": member})
+    with replay.watching("GET", "/t"):
+        original = APIClient().get("/t", HTTP_X_PROBE_TOKEN="t0k")
+    result["token"] = {"status": original.status_code, "replayed": replay.replayed,
+                       "findings": [str(f) for f in replay.findings]}
     print(json.dumps(result))
 ''')
 
@@ -260,6 +275,9 @@ def test_replay_finds_what_a_caller_without_a_session_is_answered():
     ]
     # A request to a DIFFERENT operation is not replayed: the gate saw no subject.
     assert result["other"]["replayed"] == 0
+    # A credential an apiKey scheme names is dropped from the replay like a
+    # cookie: the anonymous caller holds nothing and gets the declared 401.
+    assert result["token"] == {"status": 200, "replayed": 2, "findings": []}
 
 
 def test_an_undiscriminated_union_is_an_alternation_and_a_discriminated_one_is_not():

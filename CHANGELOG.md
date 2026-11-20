@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.86.1] — 2026-11-20
+
+- **`AuthStateReplay` drops every credential the document names.** Besides
+  `Authorization`, `Cookie` and `X-API-KEY`, a replay now strips each header
+  an `apiKey` security scheme of the first document carries (a single-purpose
+  token, a service key under another name). The anonymous replay of an
+  operation that accepts such a token used to keep it and be served, and the
+  gate reported "served without a session" against a correct schema.
+
 ## [0.86.0] — 2026-11-20
 
 - **Release gates no longer burn tags.** The registry-pin gate blocks on

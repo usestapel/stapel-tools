@@ -318,6 +318,18 @@ class WireFinding:
 _AUTH_HEADERS = ("HTTP_AUTHORIZATION", "HTTP_COOKIE", "HTTP_X_API_KEY")
 
 
+def _credential_headers(schema: dict) -> set:
+    """WSGI keys of every credential the document names: the fixed set plus
+    each ``apiKey`` scheme carried in a header (a single-purpose token, a
+    service key under another name). A replayed caller holds none of them."""
+    keys = set(_AUTH_HEADERS)
+    schemes = ((schema.get("components") or {}).get("securitySchemes") or {}).values()
+    for scheme in schemes:
+        if scheme.get("type") == "apiKey" and scheme.get("in") == "header" and scheme.get("name"):
+            keys.add("HTTP_" + str(scheme["name"]).upper().replace("-", "_"))
+    return keys
+
+
 @dataclass
 class AuthStateReplay:
     """Replays a recipe's requests to one operation as other caller states.
@@ -340,7 +352,9 @@ class AuthStateReplay:
 
     Each matching request is replayed right after the original returns, so
     the replay sees the recipe's settings overrides and database state at
-    that moment. Request headers that carry a credential are dropped.
+    that moment. Request headers that carry a credential are dropped:
+    ``Authorization``, ``Cookie``, ``X-API-KEY`` and every header an
+    ``apiKey`` security scheme of the first document names.
     Refusals with a status the operation does not declare are collected in
     ``undeclared_refusals``, not ``findings``: what a client decodes is the
     2xx body; an undeclared 4xx reaches it as an error either way.
@@ -399,6 +413,7 @@ class AuthStateReplay:
         original = APIClient.generic
         replay = self
         busy = []
+        credential_headers = _credential_headers(self._primary())
 
         def generic(client, verb, url, data="", content_type="application/octet-stream", secure=False, **extra):
             response = original(client, verb, url, data, content_type, secure, **extra)
@@ -409,7 +424,7 @@ class AuthStateReplay:
                 or operation_template(replay._primary(), verb, bare) != path
             ):
                 return response
-            clean = {k: v for k, v in extra.items() if k not in _AUTH_HEADERS}
+            clean = {k: v for k, v in extra.items() if k not in credential_headers}
             busy.append(True)
             try:
                 for state, make_client in replay.states.items():
