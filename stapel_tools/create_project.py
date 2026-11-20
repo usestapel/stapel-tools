@@ -3588,7 +3588,10 @@ def create_project(
         print("  cd", project_dir)
         print("  python -m venv .venv && source .venv/bin/activate")
         print("  pip install -r requirements.txt")
-        print("  python manage.py migrate && python manage.py runserver")
+        from ._wiring import seed_commands
+
+        print("  " + " && ".join(["python manage.py migrate", *seed_commands(feature_only),
+                                  "python manage.py runserver"]))
     else:
         print("  cd", project_dir)
         print("  # .env already created with generated secrets (SECRET_KEY, "
