@@ -261,11 +261,12 @@ def render_beat_schedule(libs: list[str], *, flavor: str = "monolith") -> str:
 # reads what beat will run. Without celery installed (this project does not
 # install it) a helper that builds crontab entries refuses: schedule the same
 # task callables from cron or a systemd timer instead.
+CELERY_BEAT_SCHEDULE = globals().get("CELERY_BEAT_SCHEDULE") or {{}}
 try:
 {imports}
 
     CELERY_BEAT_SCHEDULE = {{
-        **(globals().get("CELERY_BEAT_SCHEDULE") or {{}}),
+        **CELERY_BEAT_SCHEDULE,
 {spreads}
     }}
 except ImportError:
