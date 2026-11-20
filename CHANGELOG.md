@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+- Registry pin: stapel-auth 0.54.0 (tokens carry their session as `sid`;
+  `user.session_expired`; migration 0030).
+
 ## [0.85.1] — 2026-11-20
 
 - Registry pins: stapel-notifications 0.31.0, stapel-agent 0.40.0,

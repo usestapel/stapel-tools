@@ -86,9 +86,10 @@ STAPEL_LIBS = {
         # 0.52.0: docs/schema.v2.json (contract profile 2), nine declared
         # success bodies. 0.53.0: celery became the optional extra
         # `stapel-auth[celery]` (see "celery_extra"), check W015 for a channel
-        # whose login axis is off and registration axis on.
-        "pin": "0.53.0",
-        "ahead_of_pypi": False,  # PyPI 0.53.0 @ 2026-11-19
+        # whose login axis is off and registration axis on. 0.54.0: tokens
+        # carry their session (sid), user.session_expired, migration 0030.
+        "pin": "0.54.0",
+        "ahead_of_pypi": False,  # PyPI 0.54.0 @ 2026-11-20
         # The extra a project whose requirements declare celery installs: the
         # library's background tasks run there (stapel_auth.W014 otherwise).
         "celery_extra": "celery",
