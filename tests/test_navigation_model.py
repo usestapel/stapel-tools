@@ -482,3 +482,18 @@ def test_an_unbound_own_search_control_is_e09_under_strict_and_empty_otherwise()
         bad = _comp(["shop"], navigation={"slots": {"cart": "app.cart_box"}},
                     bound=["app.cart_box"])
         plan_react_shell(bad, react_entries(bad.modules))
+
+
+def test_an_absolute_child_path_under_the_account_is_its_address():
+    """`/account/orders` under account.root used to resolve to
+    `/account//account/orders` while routes.tsx mounted `/account/orders`."""
+    entry = {"id": "app.orders", "labelKey": "app.nav.orders", "icon": "apps",
+             "path": "/account/orders", "level": "submenu", "parentId": "account.root",
+             "surface": "member"}
+    comp = _comp(["shop"], app_nav=[entry], bound=["app.orders"],
+                 app_labels={"en": {"app.nav.orders": "Orders"}})
+    shell = plan_react_shell(comp, react_entries(comp.modules))
+    assert shell.paths["app.orders"] == "/account/orders"
+    relative = _comp(["shop"], app_nav=[{**entry, "path": "orders"}], bound=["app.orders"])
+    assert plan_react_shell(relative, react_entries(relative.modules)).paths[
+        "app.orders"] == "/account/orders"

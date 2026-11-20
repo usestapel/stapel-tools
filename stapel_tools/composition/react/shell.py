@@ -355,7 +355,10 @@ def _storefront_paths(plan: dict) -> dict[str, str]:
     if account:
         paths[account["id"]] = base
     for r in plan["account_children"]:
-        paths[r["entry"]["id"]] = f'{base.rstrip("/")}/{r["path"]}'
+        # An absolute child path is already the address (react-router mounts
+        # it as written under its parent).
+        paths[r["entry"]["id"]] = r["path"] if r["path"].startswith("/") else (
+            f'{base.rstrip("/")}/{r["path"]}')
     return paths
 
 
