@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.84.0] — 2026-11-20
+
+- **`stapel_tools.contract_gates`**, the two contract gates a brick's test
+  suite calls on itself: `invalid_examples(schema)` validates every example in
+  an emitted OpenAPI document against the schema it illustrates (OpenAPI 3.0
+  `nullable` read as a null branch; returns the findings and the count checked
+  so a caller can assert the walk saw its subject), and
+  `dead_action_declarations()` lists every `@action(permission_classes=…)`
+  (authenticators, throttles) whose classes the mounted view never runs — a
+  viewset mounted with `as_view({...})` ignores them. `viewset_routes()` is the
+  roster both walk.
+- Registry pin: stapel-core 0.99.0 (declared error params, `param_types` in
+  `errors.json`; a key reworded by a package that does not own it fails the
+  emission). `emit_errors` passes `param_types` through unchanged.
+
 ## [0.83.0] — 2026-11-20
 
 - **`--mobile kmp`: the KMP emitter.** One scaffold invocation also writes

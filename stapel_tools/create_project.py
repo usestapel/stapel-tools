@@ -66,9 +66,11 @@ STAPEL_LIBS = {
         # the newest release). 0.98.0: the client-IP seam in
         # stapel_core.security (additive, old paths kept). 0.98.1: a shut
         # registration door under public_space is presets.W001, not E001 —
-        # what lets --auth-kinds close the kinds it leaves out.
-        "pin": "0.98.1",
-        "ahead_of_pypi": False,  # PyPI 0.98.1 @ 2026-11-19
+        # what lets --auth-kinds close the kinds it leaves out. 0.99.0:
+        # declared error params (errors.json param_types) and the reworded-key
+        # stale gate at generate_error_keys.
+        "pin": "0.99.0",
+        "ahead_of_pypi": False,  # PyPI 0.99.0 @ 2026-11-20
     },
     "auth": {
         "repo": "https://github.com/usestapel/stapel-auth.git",

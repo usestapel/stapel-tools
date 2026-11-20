@@ -130,7 +130,7 @@ def test_emit_errors_writes_valid_registry(tmp_path):
     # not carry it, and this tool has to read both.
     for entry in errors:
         assert {"code", "status", "params", "remediation", "en"} <= set(entry)
-        assert set(entry) <= {"code", "status", "params", "remediation", "en", "owner"}
+        assert set(entry) <= {"code", "status", "params", "remediation", "en", "owner", "param_types"}
         assert isinstance(entry["code"], str)
         assert isinstance(entry["status"], int)
         assert isinstance(entry["params"], list)
