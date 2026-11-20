@@ -131,6 +131,9 @@ STAPEL_LIBS = {
         # reads (SOCIAL_GRAPH_FUNCTION); a lower pin answers 503 on /feed.
         "pin": "0.23.0",
         "ahead_of_pypi": False,  # PyPI 0.23.0 @ 2026-11-05 (scripts/check_pypi_pins.py)
+        # The language catalogue (names + flags) a fresh app's settings screen
+        # offers; empty until this runs (idempotent: fills only empty fields).
+        "seed": ["python manage.py sync_languages"],
     },
     "translate": {
         "repo": "https://github.com/usestapel/stapel-translate.git",

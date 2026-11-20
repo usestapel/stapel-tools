@@ -403,6 +403,13 @@ def test_bootstrap_seeds_currencies_and_a_starter_catalog(tmp_path):
     assert json.loads((svc / "fixtures" / "catalog" / "features.json").read_text()) == []
 
 
+def test_bootstrap_fills_the_language_catalogue_when_profiles_is_selected(tmp_path):
+    proj = _create(tmp_path, "lg", "monolith", ["profiles"])
+    boot = (proj / "svc-lg" / "bootstrap.sh").read_text()
+    assert 'optional "seed-sync-languages" python manage.py sync_languages' in boot
+    assert boot.index("seed-sync-languages") < boot.rindex("bootstrap_done")
+
+
 # A step runner that runs every step, and a `python` that models the two
 # commands that touch the category table: the project's `run_seeds` (its own
 # categories, from PROJECT_CATEGORIES) and `load_catalog --seed-if-empty`
